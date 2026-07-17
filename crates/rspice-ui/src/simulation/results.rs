@@ -85,6 +85,12 @@ pub enum SimulationResult {
 
     /// Sensitivity analysis results
     Sensitivity {
+        /// Canonical output expression evaluated by the analysis.
+        output: String,
+        /// Whether the analysis used an AC small-signal basis.
+        ac_mode: bool,
+        /// Resolved AC frequency in hertz. `None` for DC sensitivity.
+        frequency_hz: Option<f64>,
         /// Parameter sensitivities
         sensitivities: HashMap<String, f64>,
         /// Normalized sensitivities (% change in output / % change in param)

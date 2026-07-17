@@ -53,6 +53,7 @@ impl SimulationResult {
             SimulationResult::Sensitivity {
                 sensitivities,
                 normalized,
+                ..
             } => sensitivities
                 .get(key)
                 .copied()
@@ -135,6 +136,7 @@ impl SimulationResult {
             SimulationResult::Sensitivity {
                 sensitivities,
                 normalized,
+                ..
             } => {
                 let mut out = sensitivities.clone();
                 for (name, value) in normalized {

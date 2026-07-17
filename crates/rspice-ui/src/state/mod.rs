@@ -23,14 +23,15 @@ pub use property_types::{
 pub use schematic::*;
 pub use simulation::{
     AcBodeMetrics, AcBodeSummary, AnalysisResult, AnalysisResultFamilyMetadata,
-    AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType, CrossProbeMapping,
-    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DisplayWaveformCache, ExecutionTarget,
-    MonteCarloVariableMetadata, NoiseContributorRow, NoiseSummary, OperatingPointValue,
-    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-    SavedOutputMaterializationStatus, SavedOutputReceipt, SharedWaveformValues,
-    SimulationExecutionIdentity, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
-    SimulationRunProvenance, SimulationState, WaveformData, ac_bode_summary_for_run,
-    ac_bode_summary_for_selection, ac_bode_summary_for_source_instance,
+    AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
+    ComplexResultValue, CrossProbeMapping, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult,
+    DisplayWaveformCache, ExecutionTarget, MonteCarloVariableMetadata, NoiseContributorRow,
+    NoiseSummary, OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, SavedOutputMaterializationStatus, SavedOutputReceipt,
+    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SimulationExecutionIdentity,
+    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
+    SimulationState, WaveformData, ac_bode_summary_for_run, ac_bode_summary_for_selection,
+    ac_bode_summary_for_source_instance,
 };
 pub use symbol::{
     PinFinding, PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_TERMINAL_GRID,

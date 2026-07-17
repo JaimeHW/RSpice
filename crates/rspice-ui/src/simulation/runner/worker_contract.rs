@@ -180,6 +180,41 @@ mod tests {
     }
 
     #[test]
+    fn sensitivity_worker_result_round_trips_output_basis_and_exact_values() {
+        let source = SimulationResult::Sensitivity {
+            output: "V(out)".to_owned(),
+            ac_mode: true,
+            frequency_hz: Some(10_000.0),
+            sensitivities: HashMap::from([("length".to_owned(), -1.0), ("width".to_owned(), 2.0)]),
+            normalized: HashMap::from([("length".to_owned(), -0.25), ("width".to_owned(), 0.5)]),
+        };
+        let worker = WorkerSimulationResult::try_from(source).expect("worker conversion");
+        assert_eq!(worker.estimated_numeric_payload_bytes(), 40);
+        let encoded = serde_json::to_vec(&worker).expect("worker result serializes");
+        let decoded: WorkerSimulationResult =
+            serde_json::from_slice(&encoded).expect("worker result deserializes");
+        let restored = SimulationResult::from(decoded);
+
+        let SimulationResult::Sensitivity {
+            output,
+            ac_mode,
+            frequency_hz,
+            sensitivities,
+            normalized,
+        } = restored
+        else {
+            panic!("sensitivity result")
+        };
+        assert_eq!(output, "V(out)");
+        assert!(ac_mode);
+        assert_eq!(frequency_hz, Some(10_000.0));
+        assert_eq!(sensitivities["length"], -1.0);
+        assert_eq!(sensitivities["width"], 2.0);
+        assert_eq!(normalized["length"], -0.25);
+        assert_eq!(normalized["width"], 0.5);
+    }
+
+    #[test]
     fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
         let result = WorkerSimulationResult::MonteCarlo {
             seed: 0xfedc_ba98_7654_3210,
@@ -4039,6 +4074,9 @@ pub(crate) enum WorkerSimulationResult {
         gain: f64,
     },
     Sensitivity {
+        output: String,
+        ac_mode: bool,
+        frequency_hz: Option<f64>,
         sensitivities: HashMap<String, f64>,
         normalized: HashMap<String, f64>,
     },
@@ -4155,9 +4193,12 @@ impl WorkerSimulationResult {
                 f64_payload_bytes(1),
             ]),
             WorkerSimulationResult::Sensitivity {
+                frequency_hz,
                 sensitivities,
                 normalized,
+                ..
             } => sum_payload_bytes([
+                f64_payload_bytes(usize::from(frequency_hz.is_some())),
                 f64_payload_bytes(sensitivities.len()),
                 f64_payload_bytes(normalized.len()),
             ]),
@@ -4768,9 +4809,15 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 Ok(Self::PoleZero { poles, zeros, gain })
             }
             SimulationResult::Sensitivity {
+                output,
+                ac_mode,
+                frequency_hz,
                 sensitivities,
                 normalized,
             } => Ok(Self::Sensitivity {
+                output,
+                ac_mode,
+                frequency_hz,
                 sensitivities,
                 normalized,
             }),
@@ -4927,9 +4974,15 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 Self::PoleZero { poles, zeros, gain }
             }
             WorkerSimulationResult::Sensitivity {
+                output,
+                ac_mode,
+                frequency_hz,
                 sensitivities,
                 normalized,
             } => Self::Sensitivity {
+                output,
+                ac_mode,
+                frequency_hz,
                 sensitivities,
                 normalized,
             },

@@ -9,6 +9,27 @@ pub(crate) fn action_export_csv_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
+    let export_format = state
+        .ui
+        .preferences
+        .result_presentation_policy()
+        .engineering_export();
+    if let Some(typed) = prepare_active_typed_result_csv(state) {
+        match export_format {
+            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &typed),
+            EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
+                crate::common::app::ConsoleMessage::warning(
+                    "Touchstone export is not compatible with the active scalar result; select CSV export."
+                        .to_owned(),
+                ),
+            ),
+            EngineeringExportFormat::Hdf5EngineeringDataset => {
+                unreachable!("unsupported export preferences resolve to CSV")
+            }
+        }
+        return;
+    }
+
     let prepared = match prepare_waveform_dataset(state) {
         Ok(prepared) => prepared,
         Err(message) => {
@@ -21,12 +42,7 @@ pub(crate) fn action_export_csv_with_io(
         state.push_user_message(crate::common::app::ConsoleMessage::warning(warning.clone()));
     }
 
-    match state
-        .ui
-        .preferences
-        .result_presentation_policy()
-        .engineering_export()
-    {
+    match export_format {
         EngineeringExportFormat::Csv => export_csv(state, io, &prepared.dataset),
         EngineeringExportFormat::TouchstoneWhereCompatible => {
             export_touchstone(state, io, &prepared.dataset)
@@ -34,6 +50,130 @@ pub(crate) fn action_export_csv_with_io(
         EngineeringExportFormat::Hdf5EngineeringDataset => {
             unreachable!("unsupported export preferences resolve to CSV")
         }
+    }
+}
+
+struct PreparedTypedResultCsv {
+    default_name: &'static str,
+    contents: String,
+    detail: String,
+}
+
+fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
+    let analysis = state.simulation.active_analysis()?;
+    let payload = analysis.result_payload.as_ref()?;
+    if !analysis.success || payload.validate_for(analysis.analysis_type).is_err() {
+        return None;
+    }
+
+    use crate::state::{AnalysisResultPayload, SensitivityResultMode};
+    match payload {
+        AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
+            let mut contents =
+                String::from("record,index,real_rad_per_s,imaginary_rad_per_s,value\n");
+            contents.push_str(&format!("gain,,,,{gain:.17e}\n"));
+            for (kind, roots) in [("pole", poles), ("zero", zeros)] {
+                for (index, root) in roots.iter().enumerate() {
+                    contents.push_str(&format!(
+                        "{kind},{index},{:.17e},{:.17e},\n",
+                        root.real, root.imaginary
+                    ));
+                }
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "pole-zero.csv",
+                contents,
+                detail: format!("{} poles, {} zeros, exact gain", poles.len(), zeros.len()),
+            })
+        }
+        AnalysisResultPayload::Sensitivity {
+            output,
+            result_mode,
+            rows,
+        } => {
+            let (mode, frequency) = match result_mode {
+                SensitivityResultMode::Dc => ("dc", String::new()),
+                SensitivityResultMode::Ac { frequency_hz } => {
+                    ("ac", format!("{frequency_hz:.17e}"))
+                }
+            };
+            let escaped_output = csv_text(output);
+            let mut contents = String::from(
+                "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz\n",
+            );
+            for row in rows {
+                contents.push_str(&format!(
+                    "{},{:.17e},{:.17e},{escaped_output},{mode},{frequency}\n",
+                    csv_text(&row.parameter),
+                    row.raw,
+                    row.normalized,
+                ));
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "sensitivity.csv",
+                contents,
+                detail: format!("{} exact sensitivity rows", rows.len()),
+            })
+        }
+        AnalysisResultPayload::ScalarMeasurements { values } => {
+            let mut contents = String::from("name,value\n");
+            for (name, value) in values {
+                contents.push_str(&format!("{},{value:.17e}\n", csv_text(name)));
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "scalar-results.csv",
+                contents,
+                detail: format!("{} exact scalar values", values.len()),
+            })
+        }
+    }
+}
+
+fn csv_text(value: &str) -> String {
+    if value
+        .chars()
+        .any(|character| matches!(character, ',' | '"' | '\r' | '\n'))
+    {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+fn export_typed_result_csv(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    prepared: &PreparedTypedResultCsv,
+) {
+    match io.show_save_dialog(SaveDialogConfig {
+        title: "Export Result CSV",
+        default_name: prepared.default_name,
+        filter_name: "CSV Files",
+        filter_extensions: &["csv"],
+    }) {
+        Ok(Some(mut path)) => {
+            crate::common::file_actions::ensure_file_extension(&mut path, "csv");
+            let export = io.observe_destination(&path).and_then(|destination| {
+                io.write_text_file_observed(&destination, &prepared.contents)
+            });
+            match export {
+                Ok(()) => state.push_user_message(crate::common::app::ConsoleMessage::info(
+                    crate::common::export_workflow::export_completion_message(
+                        "CSV",
+                        &path,
+                        Some(prepared.detail.clone()),
+                        io,
+                    ),
+                )),
+                Err(error) => state.push_user_message(crate::common::app::ConsoleMessage::error(
+                    format!("CSV export failed: {error}"),
+                )),
+            }
+        }
+        Ok(None) => {}
+        Err(error) => state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
+            "CSV export failed: {error}"
+        ))),
     }
 }
 
@@ -536,7 +676,10 @@ mod tests {
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
 
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+    use crate::state::{
+        AnalysisResult, AnalysisResultPayload, AnalysisType, ComplexResultValue,
+        SensitivityResultMode, SensitivityResultRow, SimulationRun, WaveformData,
+    };
 
     #[derive(Debug)]
     struct MockExportWorkflowIo {
@@ -619,6 +762,81 @@ mod tests {
             .expect("a user-facing log line is emitted")
             .message
             .clone()
+    }
+
+    fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        state
+    }
+
+    #[test]
+    fn csv_export_publishes_exact_pole_zero_evidence_without_pseudo_waveforms() {
+        let analysis = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+            AnalysisResultPayload::PoleZero {
+                poles: vec![ComplexResultValue {
+                    real: -1.0,
+                    imaginary: 2.0,
+                }],
+                zeros: vec![ComplexResultValue {
+                    real: -3.0,
+                    imaginary: 0.0,
+                }],
+                gain: 4.25,
+            },
+        );
+        let mut state = state_with_typed_result(analysis);
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert!(io.datasets.borrow().is_empty());
+        assert_eq!(io.dialog_titles.borrow().as_slice(), &["Export Result CSV"]);
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("pole-zero.csv"));
+        assert_eq!(
+            files[0].1,
+            concat!(
+                "record,index,real_rad_per_s,imaginary_rad_per_s,value\n",
+                "gain,,,,4.25000000000000000e0\n",
+                "pole,0,-1.00000000000000000e0,2.00000000000000000e0,\n",
+                "zero,0,-3.00000000000000000e0,0.00000000000000000e0,\n",
+            )
+        );
+    }
+
+    #[test]
+    fn csv_export_publishes_canonical_sensitivity_rows_and_basis() {
+        let analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
+            .with_result_payload(AnalysisResultPayload::Sensitivity {
+                output: "V(out), differential".to_owned(),
+                result_mode: SensitivityResultMode::Ac {
+                    frequency_hz: 10_000.0,
+                },
+                rows: vec![SensitivityResultRow {
+                    parameter: "width".to_owned(),
+                    raw: 2.0,
+                    normalized: 0.5,
+                }],
+            });
+        let mut state = state_with_typed_result(analysis);
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        let files = io.text_files.borrow();
+        assert_eq!(files[0].0, PathBuf::from("sensitivity.csv"));
+        assert_eq!(
+            files[0].1,
+            concat!(
+                "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz\n",
+                "width,2.00000000000000000e0,5.00000000000000000e-1,\"V(out), differential\",ac,1.00000000000000000e4\n",
+            )
+        );
     }
 
     #[test]

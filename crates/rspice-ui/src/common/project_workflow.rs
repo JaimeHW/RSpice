@@ -1407,7 +1407,6 @@ mod tests {
             ActiveViewer::BodePlot,
             ActiveViewer::Nyquist,
             ActiveViewer::Fft,
-            ActiveViewer::PoleZero,
         ] {
             assert!(
                 state.viewer_is_available(viewer),
@@ -1418,6 +1417,10 @@ mod tests {
     }
 
     fn assert_specialized_viewer_caches_cleared(state: &AppState) {
+        assert!(
+            state.analysis.pole_zero_state.is_empty(),
+            "legacy pole-zero presentation cache should be cleared"
+        );
         for viewer in [
             ActiveViewer::SmithChart,
             ActiveViewer::EyeDiagram,

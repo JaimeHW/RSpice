@@ -62,6 +62,9 @@ impl EngineBridge {
         ensure_not_aborted(abort)?;
         if parameters.is_empty() {
             return Ok(SimulationResult::Sensitivity {
+                output: config.output_var.trim().to_owned(),
+                ac_mode: config.ac_mode,
+                frequency_hz: ac_frequency,
                 sensitivities: HashMap::new(),
                 normalized: HashMap::new(),
             });
@@ -151,6 +154,9 @@ impl EngineBridge {
 
         ensure_not_aborted(abort)?;
         Ok(SimulationResult::Sensitivity {
+            output: config.output_var.trim().to_owned(),
+            ac_mode: config.ac_mode,
+            frequency_hz: ac_frequency,
             sensitivities,
             normalized,
         })

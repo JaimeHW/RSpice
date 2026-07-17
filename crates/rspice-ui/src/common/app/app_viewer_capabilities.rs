@@ -136,6 +136,47 @@ mod tests {
     }
 
     #[test]
+    fn pole_zero_capability_uses_only_the_active_retained_payload() {
+        let mut state = AppState::default();
+        let mut stale = PoleZeroData::new("stale cache");
+        stale.add_real_pole(-99.0);
+        state.analysis.pole_zero_state.load_data(stale);
+
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::PoleZero,
+            "PZ without retained evidence",
+        ));
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        assert!(
+            !state.viewer_is_available(ActiveViewer::PoleZero),
+            "an unbound viewer cache must never enable the pole-zero viewer"
+        );
+
+        state.simulation.runs[0].analyses[0] = crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::PoleZero,
+            "Retained PZ",
+        )
+        .with_result_payload(crate::state::AnalysisResultPayload::PoleZero {
+            poles: vec![crate::state::ComplexResultValue {
+                real: -1.0,
+                imaginary: 2.0,
+            }],
+            zeros: Vec::new(),
+            gain: 3.5,
+        });
+        state.analysis.pole_zero_state.clear();
+
+        assert!(
+            state.viewer_is_available(ActiveViewer::PoleZero),
+            "retained root evidence must enable the viewer without a mutable cache"
+        );
+    }
+
+    #[test]
     fn clearing_design_execution_context_clears_stale_drc_results() {
         let mut state = AppState::default();
         seed_blocking_drc_result(&mut state);
@@ -337,10 +378,22 @@ impl AppState {
                 }
             }
             ActiveViewer::PoleZero => {
-                if self.analysis.pole_zero_state.is_empty() {
-                    ViewerCapability::unavailable("Requires pole-zero root data")
+                let retained = self.simulation.active_analysis().is_some_and(|analysis| {
+                    analysis.success
+                        && analysis.analysis_type == crate::state::AnalysisType::PoleZero
+                        && analysis.result_payload.as_ref().is_some_and(|payload| {
+                            matches!(
+                                payload,
+                                crate::state::AnalysisResultPayload::PoleZero { .. }
+                            ) && payload.validate_for(analysis.analysis_type).is_ok()
+                        })
+                });
+                if retained {
+                    ViewerCapability::available("Pole-zero result retained by the active analysis")
                 } else {
-                    ViewerCapability::available("Pole-zero root data loaded")
+                    ViewerCapability::unavailable(
+                        "Requires a retained pole-zero payload in the active analysis",
+                    )
                 }
             }
         }

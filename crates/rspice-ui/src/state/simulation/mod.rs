@@ -29,9 +29,10 @@ pub use ac_bode::{
     ac_bode_summary_for_source_instance,
 };
 pub use analysis_result::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, DcOpResult, MonteCarloVariableMetadata, NoiseContributorRow,
-    NoiseSummary, OperatingPointValue,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
+    AnalysisResultSourceDomain, ComplexResultValue, DcOpResult, MonteCarloVariableMetadata,
+    NoiseContributorRow, NoiseSummary, OperatingPointValue, SensitivityResultMode,
+    SensitivityResultRow,
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;

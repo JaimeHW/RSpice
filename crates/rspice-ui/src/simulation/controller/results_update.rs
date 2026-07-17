@@ -126,8 +126,8 @@ impl SimulationController {
             }
 
             SimulationResult::PoleZero { poles, zeros, gain } => {
-                self.populate_pole_zero_view(state, poles, zeros, *gain);
-                // Pole-Zero: Display in console (and optionally s-plane plot)
+                // The immutable retained result is the sole plot authority.
+                // Console output is a secondary execution log only.
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Pole-Zero Analysis: DC gain = {:.4}",
                     gain
@@ -175,6 +175,7 @@ impl SimulationController {
             SimulationResult::Sensitivity {
                 sensitivities,
                 normalized,
+                ..
             } => {
                 // Sensitivity: Display in console as table
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
@@ -304,30 +305,10 @@ impl SimulationController {
 
             SimulationResult::MeasurementsOnly { .. } => {
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(
-                    "Analysis complete (no waveform data)".to_string(),
+                    "Analysis complete (scalar result evidence retained)".to_string(),
                 ));
             }
         }
-    }
-
-    fn populate_pole_zero_view(
-        &self,
-        state: &mut AppState,
-        poles: &[(f64, f64)],
-        zeros: &[(f64, f64)],
-        gain: f64,
-    ) {
-        let mut data = crate::analysis::pole_zero::data::PoleZeroData::new("Pole-Zero");
-        data.gain = gain;
-        for &(re, im) in poles {
-            data.roots
-                .push(crate::analysis::pole_zero::data::ComplexRoot::pole(re, im));
-        }
-        for &(re, im) in zeros {
-            data.roots
-                .push(crate::analysis::pole_zero::data::ComplexRoot::zero(re, im));
-        }
-        state.analysis.pole_zero_state.load_data(data);
     }
 
     fn populate_monte_carlo_histograms(

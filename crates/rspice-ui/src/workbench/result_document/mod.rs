@@ -15,6 +15,7 @@ mod noise_contrib;
 mod nyquist;
 mod op_inspector;
 mod pz;
+mod sensitivity;
 mod smith;
 mod specs;
 
@@ -67,6 +68,8 @@ pub enum ResultViewer {
     Op,
     /// Ranked band-integrated noise contributors.
     NoiseContrib,
+    /// Ranked signed parameter-sensitivity contributions.
+    Contribution,
     /// Measurements × runs matrix against spec bounds.
     Specs,
     /// Legacy Nyquist surface (pre-redesign chrome).
@@ -88,6 +91,7 @@ impl ResultViewer {
             ResultViewer::Hist => "HIST",
             ResultViewer::Op => "OP",
             ResultViewer::NoiseContrib => "NOISE",
+            ResultViewer::Contribution => "SENS",
             ResultViewer::Specs => "SPECS",
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
@@ -105,6 +109,7 @@ impl ResultViewer {
             ResultViewer::Hist => "mc",
             ResultViewer::Op => "op info",
             ResultViewer::NoiseContrib => "noise contributors",
+            ResultViewer::Contribution => "sensitivity contributions",
             ResultViewer::Specs => "specs matrix",
             ResultViewer::Nyquist => "nyquist",
             ResultViewer::Smith => "smith",
@@ -112,7 +117,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 8] = [
+    const PRIMARY: [ResultViewer; 9] = [
         ResultViewer::Waves,
         ResultViewer::Bode,
         ResultViewer::Fft,
@@ -120,6 +125,7 @@ impl ResultViewer {
         ResultViewer::Hist,
         ResultViewer::Op,
         ResultViewer::NoiseContrib,
+        ResultViewer::Contribution,
         ResultViewer::Specs,
     ];
     const LEGACY: [ResultViewer; 3] = [
@@ -838,6 +844,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
         ResultViewer::Hist => hist::show(ui, &mut app.state),
         ResultViewer::Op => op_inspector::show(ui, &mut app.state),
         ResultViewer::NoiseContrib => noise_contrib::show(ui, &mut app.state),
+        ResultViewer::Contribution => sensitivity::show(ui, &mut app.state),
         ResultViewer::Specs => specs::show(ui, &mut app.state),
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
@@ -1047,7 +1054,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
 fn compact_result_actions(ui: &mut Ui, state: &mut AppState) {
     ui.menu_button("Actions…", |ui| {
         ui.set_min_width(230.0);
-        if ui.button("Export waveform data (CSV)…").clicked() {
+        if ui.button("Export result data (CSV)…").clicked() {
             state.ui.export_csv_requested = true;
             ui.close();
         }
@@ -1382,6 +1389,17 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 ViewerAvailability::unavailable("Requires a noise analysis with contributor data")
             }
         }
+        ResultViewer::Contribution => {
+            if sensitivity::active_payload_is_valid(state) {
+                ViewerAvailability::available(
+                    "Retained sensitivity contributions are available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires the active analysis to contain a valid retained sensitivity payload",
+                )
+            }
+        }
         ResultViewer::Specs => {
             let has_measurements = state.simulation.runs.iter().any(|run| {
                 run.analyses
@@ -1561,6 +1579,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Hist => hist::right_panel(ui, state),
         ResultViewer::Op => op_inspector::right_panel(ui, state),
         ResultViewer::NoiseContrib => noise_contrib::right_panel(ui, state),
+        ResultViewer::Contribution => sensitivity::right_panel(ui, state),
         ResultViewer::Specs => specs::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
@@ -1580,7 +1599,10 @@ pub fn status_summary(state: &AppState) -> String {
 #[cfg(test)]
 mod availability_tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+    use crate::state::{
+        AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
+        SensitivityResultRow, SimulationRun, WaveformData,
+    };
 
     fn state_with_analysis(analysis: AnalysisResult) -> AppState {
         let mut state = AppState::default();
@@ -1608,6 +1630,30 @@ mod availability_tests {
         assert!(!viewer_availability(&state, ResultViewer::Bode).available);
         assert!(!viewer_availability(&state, ResultViewer::Hist).available);
         assert!(!viewer_availability(&state, ResultViewer::NoiseContrib).available);
+        assert!(!viewer_availability(&state, ResultViewer::Contribution).available);
+    }
+
+    #[test]
+    fn contribution_viewer_requires_the_active_valid_sensitivity_payload() {
+        let payload = AnalysisResultPayload::Sensitivity {
+            output: "V(out)".to_owned(),
+            result_mode: SensitivityResultMode::Dc,
+            rows: vec![SensitivityResultRow {
+                parameter: "r1".to_owned(),
+                raw: 0.25,
+                normalized: 0.5,
+            }],
+        };
+        let state = state_with_analysis(
+            AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
+                .with_result_payload(payload.clone()),
+        );
+        assert!(viewer_availability(&state, ResultViewer::Contribution).available);
+
+        let mut wrong = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+        wrong.result_payload = Some(payload);
+        let wrong_analysis = state_with_analysis(wrong);
+        assert!(!viewer_availability(&wrong_analysis, ResultViewer::Contribution).available);
     }
 
     #[test]

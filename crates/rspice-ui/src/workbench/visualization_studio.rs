@@ -35,7 +35,10 @@ use crate::results::visualization_document::{
     RowAlignmentPolicy, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
     compare_source_datasets,
 };
-use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+use crate::state::{
+    AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
+    SensitivityResultRow, SimulationRun,
+};
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -72,12 +75,13 @@ const EXACT_DATA_CARD_PADDING: f32 = 12.0;
 const EXACT_DATA_TABLE_HEIGHT: f32 = 102.0;
 const EXACT_DATA_DOCK_HEIGHT: f32 =
     EXACT_DATA_CARD_PADDING * 2.0 + PANEL_HEADING_HEIGHT + EXACT_DATA_TABLE_HEIGHT;
-const NATIVE_VIEWERS: [ResultViewer; 8] = [
+const NATIVE_VIEWERS: [ResultViewer; 9] = [
     ResultViewer::Waves,
     ResultViewer::Bode,
     ResultViewer::Fft,
     ResultViewer::Eye,
     ResultViewer::Hist,
+    ResultViewer::Contribution,
     ResultViewer::Specs,
     ResultViewer::Smith,
     ResultViewer::PoleZero,
@@ -1582,6 +1586,20 @@ fn visualization_configuration_status(state: &AppState) -> Result<(), String> {
                 pane.id
             ));
         }
+        if pane.viewer == ResultViewer::PoleZero && retained_pole_zero_payload(analysis).is_none() {
+            return Err(format!(
+                "Pane {:02} has no valid retained pole-zero payload",
+                pane.id
+            ));
+        }
+        if pane.viewer == ResultViewer::Contribution
+            && retained_sensitivity_payload(analysis).is_none()
+        {
+            return Err(format!(
+                "Pane {:02} has no valid retained sensitivity payload",
+                pane.id
+            ));
+        }
     }
     for annotation in &studio.annotations {
         if !state.simulation.runs.iter().any(|run| {
@@ -3083,9 +3101,10 @@ fn resolved_viewer_availability_for_binding(
         ResultViewer::Specs => {
             !analysis.measurements.is_empty() || !state.workspace.specs.is_empty()
         }
+        ResultViewer::PoleZero => retained_pole_zero_payload(analysis).is_some(),
+        ResultViewer::Contribution => retained_sensitivity_payload(analysis).is_some(),
         ResultViewer::Hist
         | ResultViewer::Smith
-        | ResultViewer::PoleZero
         | ResultViewer::Op
         | ResultViewer::NoiseContrib
         | ResultViewer::Nyquist => {
@@ -3114,6 +3133,7 @@ fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
         "viewer-histogram" => Some(ResultViewer::Hist),
         "eye-viewer" => Some(ResultViewer::Eye),
         "viewer-pz" => Some(ResultViewer::PoleZero),
+        "viewer-contribution" => Some(ResultViewer::Contribution),
         _ => None,
     }
 }
@@ -3128,6 +3148,7 @@ fn viewer_document_id(viewer: ResultViewer) -> &'static str {
         ResultViewer::Op | ResultViewer::Specs => "viewer-table",
         ResultViewer::Smith => "viewer-smith",
         ResultViewer::PoleZero => "viewer-pz",
+        ResultViewer::Contribution => "viewer-contribution",
     }
 }
 
@@ -3695,6 +3716,12 @@ fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
     let Some(analysis) = run.analyses.get(analysis_index) else {
         return Vec::new();
     };
+    if let Some((poles, zeros, gain)) = retained_pole_zero_payload(analysis) {
+        return exact_pole_zero_rows(run, analysis, poles, zeros, gain);
+    }
+    if let Some((output, result_mode, rows)) = retained_sensitivity_payload(analysis) {
+        return exact_sensitivity_rows(run, analysis, output, result_mode, rows);
+    }
     let Some(waveform) = analysis.waveforms.iter().find(|waveform| waveform.visible) else {
         return Vec::new();
     };
@@ -3732,6 +3759,109 @@ fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
             origin: waveform.name.clone(),
         })
         .collect()
+}
+
+fn retained_pole_zero_payload(
+    analysis: &AnalysisResult,
+) -> Option<(
+    &[crate::state::ComplexResultValue],
+    &[crate::state::ComplexResultValue],
+    f64,
+)> {
+    if !analysis.success || analysis.analysis_type != AnalysisType::PoleZero {
+        return None;
+    }
+    let payload = analysis.result_payload.as_ref()?;
+    if payload.validate_for(analysis.analysis_type).is_err() {
+        return None;
+    }
+    match payload {
+        AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
+            Some((poles.as_slice(), zeros.as_slice(), *gain))
+        }
+        AnalysisResultPayload::Sensitivity { .. }
+        | AnalysisResultPayload::ScalarMeasurements { .. } => None,
+    }
+}
+
+fn retained_sensitivity_payload(
+    analysis: &AnalysisResult,
+) -> Option<(&str, SensitivityResultMode, &[SensitivityResultRow])> {
+    if !analysis.success || analysis.analysis_type != AnalysisType::Sensitivity {
+        return None;
+    }
+    let payload = analysis.result_payload.as_ref()?;
+    if payload.validate_for(analysis.analysis_type).is_err() {
+        return None;
+    }
+    match payload {
+        AnalysisResultPayload::Sensitivity {
+            output,
+            result_mode,
+            rows,
+        } => Some((output.as_str(), *result_mode, rows.as_slice())),
+        AnalysisResultPayload::PoleZero { .. }
+        | AnalysisResultPayload::ScalarMeasurements { .. } => None,
+    }
+}
+
+fn exact_sensitivity_rows(
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    output: &str,
+    result_mode: SensitivityResultMode,
+    rows: &[SensitivityResultRow],
+) -> Vec<ExactSourceRow> {
+    let basis = match result_mode {
+        SensitivityResultMode::Dc => "dc".to_owned(),
+        SensitivityResultMode::Ac { frequency_hz } => {
+            format!("ac@{frequency_hz:.17e}Hz")
+        }
+    };
+    let mut exact = Vec::with_capacity(rows.len() * 2);
+    for (index, row) in rows.iter().enumerate() {
+        for (quantity, value) in [("raw", row.raw), ("normalized", row.normalized)] {
+            exact.push(ExactSourceRow {
+                binding: short_dataset(run.dataset_id),
+                stable_row: format!("{}:sensitivity[{index}].{quantity}", analysis.id),
+                coordinate: format!("parameter={};basis={basis}", row.parameter),
+                value: format!("{value:.17e}"),
+                origin: output.to_owned(),
+            });
+        }
+    }
+    exact
+}
+
+fn exact_pole_zero_rows(
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    poles: &[crate::state::ComplexResultValue],
+    zeros: &[crate::state::ComplexResultValue],
+    gain: f64,
+) -> Vec<ExactSourceRow> {
+    let mut rows = Vec::with_capacity(1 + (poles.len() + zeros.len()) * 2);
+    rows.push(ExactSourceRow {
+        binding: short_dataset(run.dataset_id),
+        stable_row: format!("{}:gain", analysis.id),
+        coordinate: "scalar".to_owned(),
+        value: format!("{gain:.17e}"),
+        origin: "DC transfer gain".to_owned(),
+    });
+    for (kind, roots) in [("pole", poles), ("zero", zeros)] {
+        for (index, root) in roots.iter().enumerate() {
+            for (component, value) in [("real", root.real), ("imaginary", root.imaginary)] {
+                rows.push(ExactSourceRow {
+                    binding: short_dataset(run.dataset_id),
+                    stable_row: format!("{}:{kind}[{index}].{component}", analysis.id),
+                    coordinate: format!("{kind}[{index}].{component}"),
+                    value: format!("{value:.17e}"),
+                    origin: format!("ordered {kind} root"),
+                });
+            }
+        }
+    }
+    rows
 }
 
 fn short_dataset(id: DatasetId) -> String {
@@ -6803,6 +6933,138 @@ mod integrity_scan_tests {
                 .unwrap_err()
                 .contains("unavailable dataset")
         );
+    }
+
+    fn append_retained_pole_zero_run(app: &mut RSpiceApp) -> (DatasetId, u64) {
+        let analysis_sequence = 29;
+        let analysis = AnalysisResult::new(analysis_sequence, AnalysisType::PoleZero, "PZ 29")
+            .with_result_payload(AnalysisResultPayload::PoleZero {
+                poles: vec![
+                    crate::state::ComplexResultValue {
+                        real: -10.0,
+                        imaginary: 20.0,
+                    },
+                    crate::state::ComplexResultValue {
+                        real: -10.0,
+                        imaginary: -20.0,
+                    },
+                ],
+                zeros: vec![crate::state::ComplexResultValue {
+                    real: -3.0,
+                    imaginary: 0.0,
+                }],
+                gain: 4.25,
+            });
+        let mut run = SimulationRun::new(2);
+        run.add_analysis(analysis);
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs.push(run);
+        (dataset_id, analysis_sequence)
+    }
+
+    fn append_retained_sensitivity_run(app: &mut RSpiceApp) -> (DatasetId, u64) {
+        let analysis_sequence = 31;
+        let analysis = AnalysisResult::new(analysis_sequence, AnalysisType::Sensitivity, "SENS 31")
+            .with_result_payload(AnalysisResultPayload::Sensitivity {
+                output: "V(out)".to_owned(),
+                result_mode: SensitivityResultMode::Ac {
+                    frequency_hz: 2.5e6,
+                },
+                rows: vec![
+                    SensitivityResultRow {
+                        parameter: "c1".to_owned(),
+                        raw: -1.25e3,
+                        normalized: -0.75,
+                    },
+                    SensitivityResultRow {
+                        parameter: "r1".to_owned(),
+                        raw: 4.5e-3,
+                        normalized: 0.25,
+                    },
+                ],
+            });
+        let mut run = SimulationRun::new(3);
+        run.add_analysis(analysis);
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs.push(run);
+        (dataset_id, analysis_sequence)
+    }
+
+    #[test]
+    fn historical_sensitivity_binding_uses_its_retained_payload() {
+        let mut app = app_with_exact_source();
+        let (dataset_id, analysis_sequence) = append_retained_sensitivity_run(&mut app);
+        assert_eq!(app.state.simulation.active_run_idx, Some(0));
+
+        let definition =
+            viewer_document("viewer-contribution").expect("registered contribution viewer");
+        assert_eq!(
+            resolved_viewer_availability_for_binding(
+                &app.state,
+                definition,
+                Some(dataset_id),
+                Some(analysis_sequence),
+            ),
+            Ok(ResultViewer::Contribution)
+        );
+    }
+
+    #[test]
+    fn sensitivity_exact_data_rows_preserve_parameter_values_output_and_basis() {
+        let mut app = app_with_exact_source();
+        append_retained_sensitivity_run(&mut app);
+        assert!(app.state.simulation.select_run(1));
+
+        let rows = exact_source_rows(&app.state);
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0].stable_row, "31:sensitivity[0].raw");
+        assert_eq!(rows[0].value, format!("{:.17e}", -1.25e3));
+        assert_eq!(rows[0].origin, "V(out)");
+        assert!(rows[0].coordinate.contains("parameter=c1"));
+        assert!(rows[0].coordinate.contains("ac@2.50000000000000000e6Hz"));
+        assert_eq!(rows[1].stable_row, "31:sensitivity[0].normalized");
+        assert_eq!(rows[1].value, format!("{:.17e}", -0.75));
+        assert_eq!(rows[2].stable_row, "31:sensitivity[1].raw");
+        assert_eq!(rows[3].stable_row, "31:sensitivity[1].normalized");
+    }
+
+    #[test]
+    fn historical_pole_zero_binding_uses_its_retained_payload_without_derived_state() {
+        let mut app = app_with_exact_source();
+        let (dataset_id, analysis_sequence) = append_retained_pole_zero_run(&mut app);
+        assert_eq!(app.state.simulation.active_run_idx, Some(0));
+        assert!(app.state.analysis.pole_zero_state.is_empty());
+
+        let definition = viewer_document("viewer-pz").expect("registered PZ viewer");
+        assert_eq!(
+            resolved_viewer_availability_for_binding(
+                &app.state,
+                definition,
+                Some(dataset_id),
+                Some(analysis_sequence),
+            ),
+            Ok(ResultViewer::PoleZero)
+        );
+    }
+
+    #[test]
+    fn pole_zero_exact_data_rows_preserve_root_order_components_and_gain() {
+        let mut app = app_with_exact_source();
+        let (_, _) = append_retained_pole_zero_run(&mut app);
+        assert!(app.state.simulation.select_run(1));
+
+        let rows = exact_source_rows(&app.state);
+        assert_eq!(rows.len(), 7);
+        assert_eq!(rows[0].stable_row, "29:gain");
+        assert_eq!(rows[0].value, format!("{:.17e}", 4.25));
+        assert_eq!(rows[1].stable_row, "29:pole[0].real");
+        assert_eq!(rows[1].value, format!("{:.17e}", -10.0));
+        assert_eq!(rows[2].stable_row, "29:pole[0].imaginary");
+        assert_eq!(rows[2].value, format!("{:.17e}", 20.0));
+        assert_eq!(rows[3].stable_row, "29:pole[1].real");
+        assert_eq!(rows[4].stable_row, "29:pole[1].imaginary");
+        assert_eq!(rows[5].stable_row, "29:zero[0].real");
+        assert_eq!(rows[6].stable_row, "29:zero[0].imaginary");
     }
 
     #[test]
