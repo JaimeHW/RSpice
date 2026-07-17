@@ -35,6 +35,7 @@ mod session;
 pub mod shortcuts;
 mod specialist_tool_browser;
 mod surfaces;
+pub(crate) mod visualization_family;
 pub(crate) mod visualization_studio;
 
 pub use crate::quantity::{

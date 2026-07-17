@@ -63,7 +63,7 @@ pub enum EntityRef {
     LinkGroup(LinkGroupId),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ValueType {
     Real,
@@ -736,11 +736,21 @@ fn rows_have_exact_coordinates(
         })
 }
 
-fn compare_datasets(
+pub(crate) fn compare_source_datasets(
     baseline: &SourceDataset,
     candidate: &SourceDataset,
     request: &ComparisonRequest,
 ) -> Result<ComparisonReceipt, VisualizationError> {
+    if request.baseline != baseline.binding || request.candidate != candidate.binding {
+        return Err(VisualizationError::InvalidValue {
+            field: "comparison.binding",
+            message: "request bindings must exactly match the immutable source datasets".to_owned(),
+        });
+    }
+    if request.signal_keys.is_empty() {
+        return Err(VisualizationError::EmptyComparison);
+    }
+    request.policy.tolerance.validate()?;
     let baseline_coordinates = coordinate_indices(baseline);
     let candidate_coordinates = coordinate_indices(candidate);
     if baseline_coordinates.len() != candidate_coordinates.len()
@@ -856,14 +866,16 @@ fn compare_datasets(
     } else {
         ComparisonDisposition::Passed
     };
-    Ok(ComparisonReceipt {
+    let receipt = ComparisonReceipt {
         baseline: baseline.binding,
         candidate: candidate.binding,
         policy: request.policy,
         rows_compared: row_pairs.len(),
         signals: signal_receipts,
         disposition,
-    })
+    };
+    receipt.validate_structure()?;
+    Ok(receipt)
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueryCoordinate {
@@ -990,6 +1002,650 @@ pub enum PanePlacement {
     },
 }
 
+/// Stable, explicitly typed reference to an immutable result dimension.
+///
+/// The value type is persisted with the policy so a source-schema change is a
+/// validation error rather than an implicit reinterpretation of a saved plot.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FamilyDimension {
+    pub key: String,
+    pub value_type: ValueType,
+}
+
+impl FamilyDimension {
+    pub fn new(key: impl Into<String>, value_type: ValueType) -> Result<Self, VisualizationError> {
+        let dimension = Self {
+            key: key.into(),
+            value_type,
+        };
+        dimension.validate()?;
+        Ok(dimension)
+    }
+
+    fn validate(&self) -> Result<(), VisualizationError> {
+        validate_key("family.dimension.key", &self.key)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FamilyXOrdering {
+    /// Preserve the exact immutable source ordering.
+    #[default]
+    Source,
+    Ascending,
+    Descending,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FamilyXDimension {
+    pub dimension: FamilyDimension,
+    #[serde(default)]
+    pub ordering: FamilyXOrdering,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+pub enum FamilyAggregationMethod {
+    None,
+    Mean,
+    Median,
+    Minimum,
+    Maximum,
+    RootMeanSquare,
+    Envelope,
+    Percentile { percentile_basis_points: u16 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FamilyAggregationPolicy {
+    pub method: FamilyAggregationMethod,
+    /// Family dimensions eliminated by the aggregation.
+    pub over_dimensions: Vec<FamilyDimension>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FamilyComparisonOperator {
+    Equal,
+    NotEqual,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    Contains,
+    StartsWith,
+    EndsWith,
+}
+
+/// Typed, serializable filter predicate. The AST is authoritative; `source`
+/// on [`FamilyFilterExpression`] is retained for exact UI round-tripping and
+/// review receipts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+pub enum FamilyPredicate {
+    Constant {
+        value: bool,
+    },
+    Compare {
+        dimension: FamilyDimension,
+        operator: FamilyComparisonOperator,
+        value: TypedValue,
+    },
+    In {
+        dimension: FamilyDimension,
+        values: Vec<TypedValue>,
+    },
+    Between {
+        dimension: FamilyDimension,
+        lower: TypedValue,
+        upper: TypedValue,
+        include_lower: bool,
+        include_upper: bool,
+    },
+    All {
+        predicates: Vec<FamilyPredicate>,
+    },
+    Any {
+        predicates: Vec<FamilyPredicate>,
+    },
+    Not {
+        predicate: Box<FamilyPredicate>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FamilyFilterExpression {
+    /// User-authored expression preserved exactly for display and audit.
+    pub source: String,
+    /// Parsed, typed predicate used for evaluation.
+    pub predicate: FamilyPredicate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MissingPointPolicy {
+    PreserveAsNotRun,
+    ExcludeWithOmissionRecord,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccessibleColorPalette {
+    OkabeItoCategorical,
+    TolBrightCategorical,
+    CividisSequential,
+    ViridisSequential,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FacetDirection {
+    Rows,
+    Columns,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FacetAxisSharing {
+    Shared,
+    IndependentVertical,
+    Independent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FacetOverflowPolicy {
+    Reject,
+    Paginate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FamilyFacetLayout {
+    pub axis_sharing: FacetAxisSharing,
+    pub overflow: FacetOverflowPolicy,
+    pub maximum_panels: u16,
+}
+
+/// One deterministic mapping from a declared family dimension to a visual
+/// channel. Color palettes are restricted to accessibility-reviewed choices,
+/// and policy validation requires a redundant non-color cue for every color
+/// mapping.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "channel")]
+pub enum FamilyEncodingMap {
+    Color {
+        dimension: FamilyDimension,
+        palette: AccessibleColorPalette,
+    },
+    Dash {
+        dimension: FamilyDimension,
+    },
+    Marker {
+        dimension: FamilyDimension,
+    },
+    Thickness {
+        dimension: FamilyDimension,
+        minimum_points: f32,
+        maximum_points: f32,
+    },
+    Facet {
+        dimension: FamilyDimension,
+        direction: FacetDirection,
+    },
+    Label {
+        dimension: FamilyDimension,
+        prefix: Option<String>,
+    },
+}
+
+impl FamilyEncodingMap {
+    #[must_use]
+    pub const fn dimension(&self) -> &FamilyDimension {
+        match self {
+            Self::Color { dimension, .. }
+            | Self::Dash { dimension }
+            | Self::Marker { dimension }
+            | Self::Thickness { dimension, .. }
+            | Self::Facet { dimension, .. }
+            | Self::Label { dimension, .. } => dimension,
+        }
+    }
+}
+
+/// Complete, immutable-data-aware presentation policy for one pane's result
+/// family. Policies are optional on panes; once present, every referenced
+/// dimension must resolve with the declared type in every bound source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FamilyPresentationPolicy {
+    pub x_dimension: FamilyXDimension,
+    pub family_dimensions: Vec<FamilyDimension>,
+    pub facet_layout: Option<FamilyFacetLayout>,
+    pub aggregation: FamilyAggregationPolicy,
+    pub filter: Option<FamilyFilterExpression>,
+    pub missing_points: MissingPointPolicy,
+    pub encodings: Vec<FamilyEncodingMap>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum FamilyEncodingSlot {
+    Color,
+    Dash,
+    Marker,
+    Thickness,
+    Facet(FacetDirection),
+    Label,
+}
+
+impl FamilyPresentationPolicy {
+    /// Validates policy structure independently of a document. Document
+    /// transactions additionally resolve every dimension against immutable
+    /// pane sources before committing.
+    pub fn validate(&self) -> Result<(), VisualizationError> {
+        self.x_dimension.dimension.validate()?;
+        if !matches!(
+            self.x_dimension.dimension.value_type,
+            ValueType::Real | ValueType::Integer
+        ) {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.x-dimension",
+                message: "the X dimension must be real or integer valued".to_owned(),
+            });
+        }
+        if self.family_dimensions.is_empty() || self.family_dimensions.len() > 32 {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.dimensions",
+                message: "a family policy requires between 1 and 32 dimensions".to_owned(),
+            });
+        }
+        let mut dimension_keys = HashSet::with_capacity(self.family_dimensions.len());
+        for dimension in &self.family_dimensions {
+            dimension.validate()?;
+            if dimension.key == self.x_dimension.dimension.key {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.dimensions",
+                    message: "the X dimension cannot also be a family dimension".to_owned(),
+                });
+            }
+            if !dimension_keys.insert(dimension.key.as_str()) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.dimensions",
+                    message: "family dimension keys must be unique".to_owned(),
+                });
+            }
+        }
+
+        let aggregated = self.validate_aggregation()?;
+        if let Some(filter) = &self.filter {
+            self.validate_filter(filter)?;
+        }
+        self.validate_encodings(&aggregated)
+    }
+
+    fn validate_aggregation(&self) -> Result<HashSet<&str>, VisualizationError> {
+        let is_none = self.aggregation.method == FamilyAggregationMethod::None;
+        if is_none != self.aggregation.over_dimensions.is_empty() {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.aggregation.dimensions",
+                message: "None aggregation must have no dimensions and all other methods require at least one"
+                    .to_owned(),
+            });
+        }
+        if let FamilyAggregationMethod::Percentile {
+            percentile_basis_points,
+        } = self.aggregation.method
+            && !(1..10_000).contains(&percentile_basis_points)
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.aggregation.percentile",
+                message: "percentile must be strictly between 0 and 100 percent".to_owned(),
+            });
+        }
+        let mut aggregated = HashSet::with_capacity(self.aggregation.over_dimensions.len());
+        for dimension in &self.aggregation.over_dimensions {
+            self.require_declared_family_dimension(dimension, "family.aggregation.dimensions")?;
+            if !aggregated.insert(dimension.key.as_str()) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.aggregation.dimensions",
+                    message: "aggregation dimensions must be unique".to_owned(),
+                });
+            }
+        }
+        Ok(aggregated)
+    }
+
+    fn validate_filter(&self, filter: &FamilyFilterExpression) -> Result<(), VisualizationError> {
+        if filter.source.trim().is_empty()
+            || filter.source.chars().any(char::is_control)
+            || filter.source.len() > 4096
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.filter.source",
+                message: "filter source must be non-blank, contain no control characters, and be at most 4096 bytes"
+                    .to_owned(),
+            });
+        }
+        let mut nodes = 0_u16;
+        self.validate_predicate(&filter.predicate, 0, &mut nodes)
+    }
+
+    fn validate_predicate(
+        &self,
+        predicate: &FamilyPredicate,
+        depth: u8,
+        nodes: &mut u16,
+    ) -> Result<(), VisualizationError> {
+        if depth >= 32 {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.filter.predicate",
+                message: "filter predicate nesting cannot exceed 32 levels".to_owned(),
+            });
+        }
+        *nodes = nodes
+            .checked_add(1)
+            .ok_or_else(|| VisualizationError::InvalidValue {
+                field: "family.filter.predicate",
+                message: "filter predicate is too large".to_owned(),
+            })?;
+        if *nodes > 1024 {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.filter.predicate",
+                message: "filter predicate cannot exceed 1024 nodes".to_owned(),
+            });
+        }
+        match predicate {
+            FamilyPredicate::Constant { .. } => Ok(()),
+            FamilyPredicate::Compare {
+                dimension,
+                operator,
+                value,
+            } => {
+                self.require_declared_dimension(dimension, "family.filter.dimension")?;
+                validate_filter_value(dimension, value)?;
+                match operator {
+                    FamilyComparisonOperator::Equal | FamilyComparisonOperator::NotEqual => Ok(()),
+                    FamilyComparisonOperator::LessThan
+                    | FamilyComparisonOperator::LessThanOrEqual
+                    | FamilyComparisonOperator::GreaterThan
+                    | FamilyComparisonOperator::GreaterThanOrEqual
+                        if matches!(dimension.value_type, ValueType::Real | ValueType::Integer) =>
+                    {
+                        Ok(())
+                    }
+                    FamilyComparisonOperator::Contains
+                    | FamilyComparisonOperator::StartsWith
+                    | FamilyComparisonOperator::EndsWith
+                        if dimension.value_type == ValueType::Text =>
+                    {
+                        Ok(())
+                    }
+                    _ => Err(VisualizationError::InvalidValue {
+                        field: "family.filter.operator",
+                        message: "comparison operator is incompatible with the dimension type"
+                            .to_owned(),
+                    }),
+                }
+            }
+            FamilyPredicate::In { dimension, values } => {
+                self.require_declared_dimension(dimension, "family.filter.dimension")?;
+                if values.is_empty() || values.len() > 256 {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "family.filter.values",
+                        message: "set membership requires between 1 and 256 values".to_owned(),
+                    });
+                }
+                for (index, value) in values.iter().enumerate() {
+                    validate_filter_value(dimension, value)?;
+                    if values[..index].iter().any(|prior| prior.exact_eq(value)) {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "family.filter.values",
+                            message: "set membership values must be exact and unique".to_owned(),
+                        });
+                    }
+                }
+                Ok(())
+            }
+            FamilyPredicate::Between {
+                dimension,
+                lower,
+                upper,
+                include_lower,
+                include_upper,
+            } => {
+                self.require_declared_dimension(dimension, "family.filter.dimension")?;
+                validate_filter_value(dimension, lower)?;
+                validate_filter_value(dimension, upper)?;
+                let ordering = match (lower, upper) {
+                    (TypedValue::Real(lower), TypedValue::Real(upper)) => lower.partial_cmp(upper),
+                    (TypedValue::Integer(lower), TypedValue::Integer(upper)) => {
+                        Some(lower.cmp(upper))
+                    }
+                    _ => None,
+                };
+                match ordering {
+                    Some(std::cmp::Ordering::Less) => Ok(()),
+                    Some(std::cmp::Ordering::Equal) if *include_lower && *include_upper => Ok(()),
+                    _ => Err(VisualizationError::InvalidValue {
+                        field: "family.filter.range",
+                        message: "range bounds must be numeric, ordered, and non-empty".to_owned(),
+                    }),
+                }
+            }
+            FamilyPredicate::All { predicates } | FamilyPredicate::Any { predicates } => {
+                if predicates.is_empty() || predicates.len() > 64 {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "family.filter.predicate",
+                        message: "logical groups require between 1 and 64 predicates".to_owned(),
+                    });
+                }
+                for child in predicates {
+                    self.validate_predicate(child, depth + 1, nodes)?;
+                }
+                Ok(())
+            }
+            FamilyPredicate::Not { predicate } => {
+                self.validate_predicate(predicate, depth + 1, nodes)
+            }
+        }
+    }
+
+    fn validate_encodings(&self, aggregated: &HashSet<&str>) -> Result<(), VisualizationError> {
+        if self.encodings.len() > 16 {
+            return Err(VisualizationError::InvalidValue {
+                field: "family.encodings",
+                message: "a family policy supports at most 16 encoding maps".to_owned(),
+            });
+        }
+        let mut slots = HashSet::with_capacity(self.encodings.len());
+        for encoding in &self.encodings {
+            let dimension = encoding.dimension();
+            self.require_declared_family_dimension(dimension, "family.encoding.dimension")?;
+            if aggregated.contains(dimension.key.as_str()) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.encoding.dimension",
+                    message: "an aggregated dimension cannot also drive a visual encoding"
+                        .to_owned(),
+                });
+            }
+            let slot = match encoding {
+                FamilyEncodingMap::Color { .. } => FamilyEncodingSlot::Color,
+                FamilyEncodingMap::Dash { .. } => FamilyEncodingSlot::Dash,
+                FamilyEncodingMap::Marker { .. } => FamilyEncodingSlot::Marker,
+                FamilyEncodingMap::Thickness {
+                    minimum_points,
+                    maximum_points,
+                    ..
+                } => {
+                    if !matches!(dimension.value_type, ValueType::Real | ValueType::Integer)
+                        || !minimum_points.is_finite()
+                        || !maximum_points.is_finite()
+                        || !(0.5..=12.0).contains(minimum_points)
+                        || !(0.5..=12.0).contains(maximum_points)
+                        || minimum_points >= maximum_points
+                    {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "family.encoding.thickness",
+                            message: "thickness requires a numeric dimension and finite increasing widths from 0.5 to 12 points"
+                                .to_owned(),
+                        });
+                    }
+                    FamilyEncodingSlot::Thickness
+                }
+                FamilyEncodingMap::Facet { direction, .. } => FamilyEncodingSlot::Facet(*direction),
+                FamilyEncodingMap::Label { prefix, .. } => {
+                    if prefix.as_ref().is_some_and(|prefix| {
+                        prefix.trim().is_empty()
+                            || prefix.chars().any(char::is_control)
+                            || prefix.len() > 64
+                    }) {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "family.encoding.label-prefix",
+                            message:
+                                "label prefix must be absent or non-blank and at most 64 bytes"
+                                    .to_owned(),
+                        });
+                    }
+                    FamilyEncodingSlot::Label
+                }
+            };
+            if !slots.insert(slot) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.encodings",
+                    message: "each visual channel may be mapped at most once".to_owned(),
+                });
+            }
+        }
+
+        let facet_count = self
+            .encodings
+            .iter()
+            .filter(|encoding| matches!(encoding, FamilyEncodingMap::Facet { .. }))
+            .count();
+        match (facet_count, self.facet_layout) {
+            (0, None) => {}
+            (0, Some(_)) => {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.facet-layout",
+                    message: "facet layout requires a facet encoding".to_owned(),
+                });
+            }
+            (_, None) => {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.facet-layout",
+                    message: "facet encodings require an explicit facet layout".to_owned(),
+                });
+            }
+            (_, Some(layout)) if !(1..=256).contains(&layout.maximum_panels) => {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.facet-layout.maximum-panels",
+                    message: "maximum facet panels must be between 1 and 256".to_owned(),
+                });
+            }
+            _ => {}
+        }
+
+        for dimension in &self.family_dimensions {
+            if aggregated.contains(dimension.key.as_str()) {
+                continue;
+            }
+            if !self
+                .encodings
+                .iter()
+                .any(|encoding| encoding.dimension() == dimension)
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.encodings",
+                    message: format!(
+                        "retained family dimension '{}' requires a visual encoding",
+                        dimension.key
+                    ),
+                });
+            }
+        }
+
+        for color_dimension in self.encodings.iter().filter_map(|encoding| match encoding {
+            FamilyEncodingMap::Color { dimension, .. } => Some(dimension),
+            _ => None,
+        }) {
+            let has_redundant_cue = self.encodings.iter().any(|encoding| {
+                encoding.dimension() == color_dimension
+                    && matches!(
+                        encoding,
+                        FamilyEncodingMap::Dash { .. }
+                            | FamilyEncodingMap::Marker { .. }
+                            | FamilyEncodingMap::Facet { .. }
+                            | FamilyEncodingMap::Label { .. }
+                    )
+            });
+            if !has_redundant_cue {
+                return Err(VisualizationError::InvalidValue {
+                    field: "family.encodings.accessibility",
+                    message: format!(
+                        "color mapping for '{}' requires a redundant dash, marker, facet, or label cue",
+                        color_dimension.key
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn require_declared_dimension(
+        &self,
+        dimension: &FamilyDimension,
+        field: &'static str,
+    ) -> Result<(), VisualizationError> {
+        if dimension == &self.x_dimension.dimension || self.family_dimensions.contains(dimension) {
+            Ok(())
+        } else {
+            Err(VisualizationError::InvalidValue {
+                field,
+                message: format!(
+                    "dimension '{}' is not declared with the same value type",
+                    dimension.key
+                ),
+            })
+        }
+    }
+
+    fn require_declared_family_dimension(
+        &self,
+        dimension: &FamilyDimension,
+        field: &'static str,
+    ) -> Result<(), VisualizationError> {
+        if self.family_dimensions.contains(dimension) {
+            Ok(())
+        } else {
+            Err(VisualizationError::InvalidValue {
+                field,
+                message: format!(
+                    "dimension '{}' is not a declared family dimension with the same value type",
+                    dimension.key
+                ),
+            })
+        }
+    }
+}
+
+fn validate_filter_value(
+    dimension: &FamilyDimension,
+    value: &TypedValue,
+) -> Result<(), VisualizationError> {
+    value.validate("family.filter.value")?;
+    if value.value_type() != dimension.value_type {
+        return Err(VisualizationError::InvalidValue {
+            field: "family.filter.value",
+            message: format!(
+                "filter value type {:?} does not match dimension '{}' type {:?}",
+                value.value_type(),
+                dimension.key,
+                dimension.value_type
+            ),
+        });
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AxisOrientation {
@@ -1054,6 +1710,8 @@ pub struct Pane {
     pub placement: PanePlacement,
     #[serde(default)]
     pub order: u32,
+    #[serde(default)]
+    pub family_policy: Option<FamilyPresentationPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1237,6 +1895,10 @@ pub enum DocumentEdit {
         viewer_id: String,
         binding: Option<PaneDataBinding>,
     },
+    SetPaneFamilyPresentation {
+        pane_id: PaneId,
+        policy: Option<FamilyPresentationPolicy>,
+    },
     PlacePane {
         pane_id: PaneId,
         page_id: PageId,
@@ -1346,6 +2008,60 @@ pub struct ComparisonPolicy {
     pub row_alignment: RowAlignmentPolicy,
     pub tolerance: NumericTolerance,
     pub require_identical_units: bool,
+    #[serde(default)]
+    pub execution: ComparisonExecutionContract,
+}
+
+/// Fully declared numerical behavior for the currently implemented exact
+/// comparison engine. New algorithms must add explicit variants rather than
+/// silently changing alignment or interpolation semantics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComparisonExecutionContract {
+    #[serde(default)]
+    pub alignment: ComparisonAlignmentMethod,
+    #[serde(default)]
+    pub interpolation: ComparisonInterpolationPolicy,
+    #[serde(default)]
+    pub resampling: ComparisonResamplingPolicy,
+    #[serde(default)]
+    pub extrapolation: ComparisonExtrapolationPolicy,
+    #[serde(default)]
+    pub precision: ComparisonPrecisionPolicy,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComparisonAlignmentMethod {
+    #[default]
+    ExactCoordinateRows,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComparisonInterpolationPolicy {
+    #[default]
+    NoneExactOnly,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComparisonResamplingPolicy {
+    #[default]
+    NoneRetainSourceGrid,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComparisonExtrapolationPolicy {
+    #[default]
+    Forbid,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComparisonPrecisionPolicy {
+    #[default]
+    SourceF64NoRounding,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1380,6 +2096,56 @@ pub struct ComparisonReceipt {
     pub rows_compared: usize,
     pub signals: Vec<SignalComparison>,
     pub disposition: ComparisonDisposition,
+}
+
+impl ComparisonReceipt {
+    pub(crate) fn validate_structure(&self) -> Result<(), VisualizationError> {
+        self.policy.tolerance.validate()?;
+        if self.baseline.dataset_id == self.candidate.dataset_id {
+            return Err(VisualizationError::InvalidValue {
+                field: "comparison-receipt.datasets",
+                message: "baseline and candidate must be distinct immutable datasets".to_owned(),
+            });
+        }
+        if self.rows_compared == 0 || self.signals.is_empty() {
+            return Err(VisualizationError::InvalidValue {
+                field: "comparison-receipt",
+                message: "a receipt must contain at least one compared row and signal".to_owned(),
+            });
+        }
+        let mut signal_keys = HashSet::new();
+        for signal in &self.signals {
+            validate_key("comparison-receipt.signal-key", &signal.signal_key)?;
+            if !signal_keys.insert(signal.signal_key.as_str()) {
+                return Err(VisualizationError::DuplicateKey(signal.signal_key.clone()));
+            }
+            if signal.compared_rows != self.rows_compared
+                || signal.failed_rows > signal.compared_rows
+                || !signal.maximum_absolute_error.is_finite()
+                || signal.maximum_absolute_error < 0.0
+                || !signal.maximum_relative_error.is_finite()
+                || signal.maximum_relative_error < 0.0
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "comparison-receipt.signal",
+                    message: "signal row counts and maximum errors must agree with the receipt"
+                        .to_owned(),
+                });
+            }
+        }
+        let expected = if self.signals.iter().any(|signal| signal.failed_rows > 0) {
+            ComparisonDisposition::Failed
+        } else {
+            ComparisonDisposition::Passed
+        };
+        if self.disposition != expected {
+            return Err(VisualizationError::InvalidValue {
+                field: "comparison-receipt.disposition",
+                message: "disposition does not agree with signal outcomes".to_owned(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1746,7 +2512,11 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             comparisons: wire.comparisons,
         };
         match document.schema_version {
-            1 => document.migrate_v1_to_v2(),
+            1 => {
+                document.migrate_v1_to_v2();
+                document.migrate_v2_to_v3();
+            }
+            2 => document.migrate_v2_to_v3(),
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -1760,7 +2530,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
-    pub const SCHEMA_VERSION: u16 = 2;
+    pub const SCHEMA_VERSION: u16 = 3;
 
     pub fn new(
         title: impl Into<String>,
@@ -1800,6 +2570,7 @@ impl VisualizationDocument {
                 binding: None,
                 placement: PanePlacement::Primary,
                 order: 0,
+                family_policy: None,
             }],
             axes: Vec::new(),
             traces: Vec::new(),
@@ -1985,7 +2756,7 @@ impl VisualizationDocument {
         request.policy.tolerance.validate()?;
         let baseline = self.dataset_for_binding(request.baseline)?;
         let candidate = self.dataset_for_binding(request.candidate)?;
-        compare_datasets(baseline, candidate, request)
+        compare_source_datasets(baseline, candidate, request)
     }
 
     fn dataset_for_binding(
@@ -2039,6 +2810,15 @@ impl VisualizationDocument {
                 .entry(pane.page_id)
                 .and_modify(|order| *order = order.saturating_add(1));
         }
+        self.schema_version = 2;
+    }
+
+    fn migrate_v2_to_v3(&mut self) {
+        // Schema 2 had no family policy. Ignore any forward field smuggled into
+        // an older envelope so migration has one deterministic interpretation.
+        for pane in &mut self.panes {
+            pane.family_policy = None;
+        }
         self.schema_version = Self::SCHEMA_VERSION;
     }
 
@@ -2071,6 +2851,70 @@ impl VisualizationDocument {
         }
         if let Some(binding) = binding {
             self.dataset_for_binding(binding.dataset)?;
+        }
+        Ok(())
+    }
+
+    fn validate_pane_family_policy(
+        &self,
+        pane_id: PaneId,
+        policy: &FamilyPresentationPolicy,
+    ) -> Result<(), VisualizationError> {
+        policy.validate()?;
+        let pane = self
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
+        let mut bindings = Vec::<DatasetBinding>::new();
+        if let Some(binding) = pane.binding.map(|binding| binding.dataset) {
+            bindings.push(binding);
+        }
+        for binding in self
+            .traces
+            .iter()
+            .filter(|trace| trace.pane_id == pane_id)
+            .map(|trace| trace.binding)
+        {
+            if !bindings.contains(&binding) {
+                bindings.push(binding);
+            }
+        }
+        if bindings.is_empty() {
+            return Err(VisualizationError::InvalidValue {
+                field: "pane.family-policy",
+                message: "a family policy requires at least one immutable pane or trace source"
+                    .to_owned(),
+            });
+        }
+        for binding in bindings {
+            let dataset = self.dataset_for_binding(binding)?;
+            for dimension in std::iter::once(&policy.x_dimension.dimension)
+                .chain(policy.family_dimensions.iter())
+            {
+                let column = dataset
+                    .columns
+                    .iter()
+                    .find(|column| column.key == dimension.key)
+                    .ok_or_else(|| VisualizationError::InvalidValue {
+                        field: "pane.family-policy.dimension",
+                        message: format!(
+                            "source dataset {} has no declared dimension '{}'",
+                            binding.dataset_id, dimension.key
+                        ),
+                    })?;
+                if column.role != ColumnRole::Coordinate
+                    || column.value_type != dimension.value_type
+                {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "pane.family-policy.dimension",
+                        message: format!(
+                            "source dimension '{}' must be a {:?} coordinate, received {:?} {:?}",
+                            dimension.key, dimension.value_type, column.value_type, column.role
+                        ),
+                    });
+                }
+            }
         }
         Ok(())
     }
@@ -2156,6 +3000,7 @@ impl VisualizationDocument {
             binding: pane.binding,
             placement: pane.placement,
             order,
+            family_policy: None,
         });
         Ok(id)
     }
@@ -2335,6 +3180,15 @@ impl VisualizationDocument {
                 let pane = self.pane_mut(pane_id)?;
                 pane.viewer_id = viewer_id;
                 pane.binding = binding;
+                Ok(())
+            }
+            DocumentEdit::SetPaneFamilyPresentation { pane_id, policy } => {
+                if let Some(policy) = &policy {
+                    self.validate_pane_family_policy(pane_id, policy)?;
+                } else {
+                    self.require_pane(pane_id)?;
+                }
+                self.pane_mut(pane_id)?.family_policy = policy;
                 Ok(())
             }
             DocumentEdit::PlacePane {
@@ -2797,26 +3651,7 @@ impl VisualizationDocument {
     ) -> Result<(), VisualizationError> {
         self.dataset_for_binding(receipt.baseline)?;
         self.dataset_for_binding(receipt.candidate)?;
-        receipt.policy.tolerance.validate()?;
-        if receipt.signals.is_empty() || receipt.rows_compared == 0 {
-            return Err(VisualizationError::InvalidValue {
-                field: "comparison-receipt",
-                message: "a receipt must contain at least one compared row and signal".to_owned(),
-            });
-        }
-        let failed = receipt.signals.iter().any(|signal| signal.failed_rows > 0);
-        let expected = if failed {
-            ComparisonDisposition::Failed
-        } else {
-            ComparisonDisposition::Passed
-        };
-        if receipt.disposition != expected {
-            return Err(VisualizationError::InvalidValue {
-                field: "comparison-receipt.disposition",
-                message: "disposition does not agree with signal outcomes".to_owned(),
-            });
-        }
-        Ok(())
+        receipt.validate_structure()
     }
 
     fn validate(&self) -> Result<(), VisualizationError> {
@@ -2858,6 +3693,9 @@ impl VisualizationDocument {
             validate_label("pane.title", &pane.title)?;
             self.require_page(pane.page_id)?;
             self.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
+            if let Some(policy) = &pane.family_policy {
+                self.validate_pane_family_policy(pane.id, policy)?;
+            }
             ensure_identity(&mut identities, EntityRef::Pane(pane.id))?;
         }
         for page in &self.pages {
@@ -3022,6 +3860,153 @@ mod tests {
             VisualizationDocument::new("Transient review", vec![dataset(source, 0.0)]).unwrap(),
             source,
         )
+    }
+
+    fn family_dataset(binding: DatasetBinding) -> SourceDataset {
+        SourceDataset::new(
+            binding,
+            vec![
+                SourceColumn::new(
+                    "time",
+                    "Time",
+                    ValueType::Real,
+                    ColumnRole::Coordinate,
+                    Some("s".to_owned()),
+                )
+                .unwrap(),
+                SourceColumn::new(
+                    "process",
+                    "Process",
+                    ValueType::Text,
+                    ColumnRole::Coordinate,
+                    None,
+                )
+                .unwrap(),
+                SourceColumn::new(
+                    "temperature",
+                    "Temperature",
+                    ValueType::Real,
+                    ColumnRole::Coordinate,
+                    Some("degC".to_owned()),
+                )
+                .unwrap(),
+                SourceColumn::new(
+                    "sample",
+                    "Sample",
+                    ValueType::Integer,
+                    ColumnRole::Coordinate,
+                    None,
+                )
+                .unwrap(),
+                SourceColumn::new(
+                    "v(out)",
+                    "V(out)",
+                    ValueType::Real,
+                    ColumnRole::Signal,
+                    Some("V".to_owned()),
+                )
+                .unwrap(),
+            ],
+            vec![
+                SourceRow::new(vec![
+                    TypedValue::Real(0.0),
+                    TypedValue::Text("TT".to_owned()),
+                    TypedValue::Real(27.0),
+                    TypedValue::Integer(1),
+                    TypedValue::Real(0.0),
+                ]),
+                SourceRow::new(vec![
+                    TypedValue::Real(1.0),
+                    TypedValue::Text("TT".to_owned()),
+                    TypedValue::Real(27.0),
+                    TypedValue::Integer(1),
+                    TypedValue::Real(1.0),
+                ]),
+                SourceRow::new(vec![
+                    TypedValue::Real(0.0),
+                    TypedValue::Text("SS".to_owned()),
+                    TypedValue::Real(125.0),
+                    TypedValue::Integer(2),
+                    TypedValue::Real(-0.1),
+                ]),
+                SourceRow::new(vec![
+                    TypedValue::Real(1.0),
+                    TypedValue::Text("SS".to_owned()),
+                    TypedValue::Real(125.0),
+                    TypedValue::Integer(2),
+                    TypedValue::Real(0.9),
+                ]),
+            ],
+        )
+        .unwrap()
+    }
+
+    fn dimension(key: &str, value_type: ValueType) -> FamilyDimension {
+        FamilyDimension::new(key, value_type).unwrap()
+    }
+
+    fn family_policy() -> FamilyPresentationPolicy {
+        let process = dimension("process", ValueType::Text);
+        let temperature = dimension("temperature", ValueType::Real);
+        let sample = dimension("sample", ValueType::Integer);
+        FamilyPresentationPolicy {
+            x_dimension: FamilyXDimension {
+                dimension: dimension("time", ValueType::Real),
+                ordering: FamilyXOrdering::Ascending,
+            },
+            family_dimensions: vec![process.clone(), temperature.clone(), sample.clone()],
+            facet_layout: Some(FamilyFacetLayout {
+                axis_sharing: FacetAxisSharing::Shared,
+                overflow: FacetOverflowPolicy::Paginate,
+                maximum_panels: 12,
+            }),
+            aggregation: FamilyAggregationPolicy {
+                method: FamilyAggregationMethod::Mean,
+                over_dimensions: vec![sample],
+            },
+            filter: Some(FamilyFilterExpression {
+                source: "process in {TT,SS} and temperature >= 27".to_owned(),
+                predicate: FamilyPredicate::All {
+                    predicates: vec![
+                        FamilyPredicate::In {
+                            dimension: process.clone(),
+                            values: vec![
+                                TypedValue::Text("TT".to_owned()),
+                                TypedValue::Text("SS".to_owned()),
+                            ],
+                        },
+                        FamilyPredicate::Compare {
+                            dimension: temperature.clone(),
+                            operator: FamilyComparisonOperator::GreaterThanOrEqual,
+                            value: TypedValue::Real(27.0),
+                        },
+                    ],
+                },
+            }),
+            missing_points: MissingPointPolicy::PreserveAsNotRun,
+            encodings: vec![
+                FamilyEncodingMap::Color {
+                    dimension: process.clone(),
+                    palette: AccessibleColorPalette::OkabeItoCategorical,
+                },
+                FamilyEncodingMap::Label {
+                    dimension: process.clone(),
+                    prefix: Some("P=".to_owned()),
+                },
+                FamilyEncodingMap::Dash {
+                    dimension: temperature.clone(),
+                },
+                FamilyEncodingMap::Thickness {
+                    dimension: temperature,
+                    minimum_points: 1.0,
+                    maximum_points: 3.0,
+                },
+                FamilyEncodingMap::Facet {
+                    dimension: process,
+                    direction: FacetDirection::Rows,
+                },
+            ],
+        }
     }
 
     #[test]
@@ -3380,6 +4365,7 @@ mod tests {
                 row_alignment: RowAlignmentPolicy::RequireIdentical,
                 tolerance: NumericTolerance::new(absolute, 0.0).unwrap(),
                 require_identical_units: true,
+                execution: ComparisonExecutionContract::default(),
             },
         };
         assert_eq!(
@@ -3390,6 +4376,49 @@ mod tests {
         assert_eq!(failed.disposition, ComparisonDisposition::Failed);
         assert_eq!(failed.rows_compared, 3);
         assert_eq!(failed.signals[0].failed_rows, 3);
+    }
+
+    #[test]
+    fn comparison_rejects_mismatched_bindings_and_inconsistent_receipts() {
+        let baseline = binding(31);
+        let candidate = binding(32);
+        let baseline_data = dataset(baseline, 0.0);
+        let candidate_data = dataset(candidate, 0.0);
+        let policy = ComparisonPolicy {
+            row_alignment: RowAlignmentPolicy::RequireIdentical,
+            tolerance: NumericTolerance::new(0.0, 0.0).unwrap(),
+            require_identical_units: true,
+            execution: ComparisonExecutionContract::default(),
+        };
+        let request = ComparisonRequest {
+            baseline: binding(33),
+            candidate,
+            signal_keys: vec!["v(out)".to_owned()],
+            policy,
+        };
+        assert!(matches!(
+            compare_source_datasets(&baseline_data, &candidate_data, &request),
+            Err(VisualizationError::InvalidValue {
+                field: "comparison.binding",
+                ..
+            })
+        ));
+
+        let malformed = ComparisonReceipt {
+            baseline,
+            candidate,
+            policy,
+            rows_compared: 3,
+            signals: vec![SignalComparison {
+                signal_key: "v(out)".to_owned(),
+                compared_rows: 2,
+                failed_rows: 3,
+                maximum_absolute_error: f64::NAN,
+                maximum_relative_error: 0.0,
+            }],
+            disposition: ComparisonDisposition::Failed,
+        };
+        assert!(malformed.validate_structure().is_err());
     }
 
     #[test]
@@ -3419,6 +4448,7 @@ mod tests {
                     row_alignment: RowAlignmentPolicy::ExactIntersection,
                     tolerance: NumericTolerance::new(0.0, 0.0).unwrap(),
                     require_identical_units: true,
+                    execution: ComparisonExecutionContract::default(),
                 },
             })
             .unwrap();
@@ -3700,6 +4730,173 @@ mod tests {
         );
         assert_eq!(panes[0].placement, PanePlacement::Primary);
         assert!(matches!(panes[1].placement, PanePlacement::Below { .. }));
+    }
+
+    #[test]
+    fn pane_family_policy_roundtrips_typed_dimensions_and_accessible_encodings() {
+        let source = binding(41);
+        let mut document =
+            VisualizationDocument::new("PVT family", vec![family_dataset(source)]).unwrap();
+        let pane_id = document.panes()[0].id;
+        let policy = family_policy();
+        policy.validate().unwrap();
+
+        let receipt = document
+            .transact(
+                document.revision(),
+                vec![
+                    DocumentEdit::SetPaneSource {
+                        pane_id,
+                        viewer_id: "viewer-waveform".to_owned(),
+                        binding: Some(PaneDataBinding {
+                            analysis_id: AnalysisInstanceId::new(),
+                            dataset: source,
+                        }),
+                    },
+                    DocumentEdit::SetPaneFamilyPresentation {
+                        pane_id,
+                        policy: Some(policy.clone()),
+                    },
+                ],
+            )
+            .unwrap();
+
+        assert_eq!(receipt.edit_count, 2);
+        assert_eq!(document.panes()[0].family_policy.as_ref(), Some(&policy));
+        let serialized = serde_json::to_string_pretty(&document).unwrap();
+        let restored: VisualizationDocument = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(restored, document);
+        assert!(serialized.contains("okabe-ito-categorical"));
+        assert!(serialized.contains("preserve-as-not-run"));
+    }
+
+    #[test]
+    fn inaccessible_or_source_incompatible_family_policy_rolls_back_every_edit() {
+        let source = binding(42);
+        let mut document =
+            VisualizationDocument::new("PVT family", vec![family_dataset(source)]).unwrap();
+        let pane_id = document.panes()[0].id;
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::SetPaneSource {
+                    pane_id,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id: AnalysisInstanceId::new(),
+                        dataset: source,
+                    }),
+                }],
+            )
+            .unwrap();
+
+        let mut inaccessible = family_policy();
+        inaccessible.encodings.retain(|encoding| {
+            !matches!(
+                encoding,
+                FamilyEncodingMap::Label { .. } | FamilyEncodingMap::Facet { .. }
+            )
+        });
+        inaccessible.facet_layout = None;
+        let before = document.clone();
+        assert!(matches!(
+            document.transact(
+                document.revision(),
+                vec![
+                    DocumentEdit::Rename {
+                        entity: EntityRef::Pane(pane_id),
+                        value: "Must roll back".to_owned(),
+                    },
+                    DocumentEdit::SetPaneFamilyPresentation {
+                        pane_id,
+                        policy: Some(inaccessible),
+                    },
+                ],
+            ),
+            Err(VisualizationError::InvalidValue {
+                field: "family.encodings.accessibility",
+                ..
+            })
+        ));
+        assert_eq!(document, before);
+
+        let mut incompatible = family_policy();
+        incompatible.x_dimension.dimension = dimension("frequency", ValueType::Real);
+        assert!(matches!(
+            document.transact(
+                document.revision(),
+                vec![DocumentEdit::SetPaneFamilyPresentation {
+                    pane_id,
+                    policy: Some(incompatible),
+                }],
+            ),
+            Err(VisualizationError::InvalidValue {
+                field: "pane.family-policy.dimension",
+                ..
+            })
+        ));
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn typed_family_filter_rejects_type_drift_before_commit() {
+        let mut policy = family_policy();
+        policy.filter = Some(FamilyFilterExpression {
+            source: "temperature >= hot".to_owned(),
+            predicate: FamilyPredicate::Compare {
+                dimension: dimension("temperature", ValueType::Real),
+                operator: FamilyComparisonOperator::GreaterThanOrEqual,
+                value: TypedValue::Text("hot".to_owned()),
+            },
+        });
+        assert!(matches!(
+            policy.validate(),
+            Err(VisualizationError::InvalidValue {
+                field: "family.filter.value",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn schema_v2_documents_migrate_to_an_unconfigured_family_policy_deterministically() {
+        let source = binding(43);
+        let mut document =
+            VisualizationDocument::new("PVT family", vec![family_dataset(source)]).unwrap();
+        let pane_id = document.panes()[0].id;
+        document
+            .transact(
+                document.revision(),
+                vec![
+                    DocumentEdit::SetPaneSource {
+                        pane_id,
+                        viewer_id: "viewer-waveform".to_owned(),
+                        binding: Some(PaneDataBinding {
+                            analysis_id: AnalysisInstanceId::new(),
+                            dataset: source,
+                        }),
+                    },
+                    DocumentEdit::SetPaneFamilyPresentation {
+                        pane_id,
+                        policy: Some(family_policy()),
+                    },
+                ],
+            )
+            .unwrap();
+        let mut legacy = serde_json::to_value(&document).unwrap();
+        legacy["schema_version"] = serde_json::json!(2);
+
+        let migrated: VisualizationDocument = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            migrated.schema_version,
+            VisualizationDocument::SCHEMA_VERSION
+        );
+        assert!(
+            migrated
+                .panes()
+                .iter()
+                .all(|pane| pane.family_policy.is_none())
+        );
     }
 
     #[test]

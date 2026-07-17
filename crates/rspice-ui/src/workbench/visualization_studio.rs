@@ -16,11 +16,26 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::calculator;
 use crate::common::{AppState, RSpiceApp, app::ConsoleMessage};
-use crate::product::DatasetId;
+use crate::product::{DatasetBinding, DatasetId};
+use crate::results::plot_export_preset::{
+    ColorProfile, DeterministicNamingTemplate, ExportBackground, ExportPageSize,
+    FontEmbeddingPolicy, FontPolicy, MetadataProvenancePolicy, PageGeometry, PageMargins,
+    PageOrientation, PdfAConformance, PlotExportFormat, PlotExportPresetDefinition,
+    PlotExportPresetScope, RasterResampling, VectorHandling, VectorRasterPolicy,
+};
 use crate::results::viewer_catalog::{
     VIEWER_DOCUMENTS, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
     ViewerGroup, viewer_compatibility, viewer_document,
 };
+use crate::results::visualization_document::{
+    AccessibleColorPalette, ColumnRole, ComparisonExecutionContract, ComparisonPolicy,
+    ComparisonReceipt, ComparisonRequest, FamilyAggregationMethod, FamilyAggregationPolicy,
+    FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap, FamilyPresentationPolicy,
+    FamilyXDimension, FamilyXOrdering, MissingPointPolicy, NumericTolerance, PageUpdatePolicy,
+    RowAlignmentPolicy, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
+    compare_source_datasets,
+};
+use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -29,7 +44,11 @@ use crate::ui::{
 
 use super::{
     ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference, SurfaceId,
-    SurfaceRoute, design_system::WorkbenchIcon, result_document, state::Workspace,
+    SurfaceRoute,
+    design_system::WorkbenchIcon,
+    result_document,
+    state::Workspace,
+    visualization_family::{FamilyManifest, FamilyValueKind, SourceSampleSelection},
 };
 
 const SUMMARY: &str = "Compose waveform, tabular, statistical, RF, eye, field, and report-page views with family slicing, exact axes, annotations, measurements, and large-data policies.";
@@ -87,6 +106,12 @@ fn viewer_column_rects(rect: Rect, library_width: f32, inspector_width: f32) -> 
 
 fn visible_available_width(available: f32, cursor_left: f32, clip_right: f32) -> f32 {
     available.min((clip_right - cursor_left).max(1.0)).max(1.0)
+}
+
+fn compact_dock_geometry(viewport_width: f32) -> (f32, f32) {
+    let window_width = (viewport_width - 18.0).clamp(180.0, 520.0);
+    let body_max_width = (window_width - 24.0).max(156.0);
+    (window_width, body_max_width)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -234,6 +259,8 @@ enum VisualizationDock {
     FamilySlice,
     FamilyEncoding,
     FamilyFilter,
+    Comparison,
+    ExportPreset,
     Export,
 }
 
@@ -260,6 +287,13 @@ pub struct VisualizationAnnotation {
     pub analysis_sequence: u64,
     pub x: f64,
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisualizationReportPagePolicy {
+    pub template: String,
+    pub update_policy: PageUpdatePolicy,
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -395,6 +429,12 @@ pub struct VisualizationStudioState {
     #[serde(default)]
     pub pane_cursor_positions: BTreeMap<u64, (Option<f64>, Option<f64>)>,
     #[serde(default)]
+    pub family_policies: BTreeMap<u64, FamilyPresentationPolicy>,
+    #[serde(default)]
+    pub report_page_policies: BTreeMap<String, VisualizationReportPagePolicy>,
+    #[serde(default)]
+    pub comparison_receipts: Vec<ComparisonReceipt>,
+    #[serde(default)]
     pub autoscale: VisualizationAutoscale,
     #[serde(default)]
     pub complex_projection: ComplexProjection,
@@ -429,6 +469,10 @@ pub struct VisualizationStudioState {
     #[serde(skip)]
     draft_page: String,
     #[serde(skip)]
+    draft_report_template: String,
+    #[serde(skip)]
+    draft_report_freeze: bool,
+    #[serde(skip)]
     draft_link_pane: Option<u64>,
     #[serde(skip)]
     draft_x_link: u64,
@@ -443,8 +487,6 @@ pub struct VisualizationStudioState {
     #[serde(skip)]
     draft_trace_visibility: Vec<(String, bool)>,
     #[serde(skip)]
-    draft_overlay_ids: Vec<DatasetId>,
-    #[serde(skip)]
     draft_significant_digits: Option<u8>,
     #[serde(skip)]
     draft_phase_continuous: Option<bool>,
@@ -452,6 +494,28 @@ pub struct VisualizationStudioState {
     applied_link_pane: Option<u64>,
     #[serde(skip)]
     family_query: String,
+    #[serde(skip)]
+    draft_family_x_dimension: String,
+    #[serde(skip)]
+    draft_family_dimension: String,
+    #[serde(skip)]
+    draft_family_color_dimension: String,
+    #[serde(skip)]
+    draft_family_dash_dimension: String,
+    #[serde(skip)]
+    draft_family_marker_dimension: String,
+    #[serde(skip)]
+    draft_family_exclude_missing: bool,
+    #[serde(skip)]
+    draft_comparison_dataset: Option<DatasetId>,
+    #[serde(skip)]
+    draft_comparison_absolute_tolerance: f64,
+    #[serde(skip)]
+    draft_comparison_relative_tolerance: f64,
+    #[serde(skip)]
+    draft_export_preset_name: String,
+    #[serde(skip)]
+    draft_export_preset_scope: Option<PlotExportPresetScope>,
     #[serde(skip)]
     operation_state: OperationState,
     #[serde(skip)]
@@ -484,6 +548,9 @@ impl Default for VisualizationStudioState {
             linked_cursor_positions: BTreeMap::new(),
             pane_x_ranges: BTreeMap::new(),
             pane_cursor_positions: BTreeMap::new(),
+            family_policies: BTreeMap::new(),
+            report_page_policies: BTreeMap::new(),
+            comparison_receipts: Vec::new(),
             autoscale: VisualizationAutoscale::default(),
             complex_projection: ComplexProjection::default(),
             display_lod: DisplayLodPolicy::default(),
@@ -501,6 +568,8 @@ impl Default for VisualizationStudioState {
             draft_measurement: String::new(),
             draft_page_pane: None,
             draft_page: String::new(),
+            draft_report_template: "Release verification 4.2".to_owned(),
+            draft_report_freeze: false,
             draft_link_pane: None,
             draft_x_link: 0,
             draft_cursor_group: 0,
@@ -508,11 +577,21 @@ impl Default for VisualizationStudioState {
             draft_trace_dataset: None,
             draft_trace_analysis: None,
             draft_trace_visibility: Vec::new(),
-            draft_overlay_ids: Vec::new(),
             draft_significant_digits: None,
             draft_phase_continuous: None,
             applied_link_pane: None,
             family_query: String::new(),
+            draft_family_x_dimension: String::new(),
+            draft_family_dimension: String::new(),
+            draft_family_color_dimension: String::new(),
+            draft_family_dash_dimension: String::new(),
+            draft_family_marker_dimension: String::new(),
+            draft_family_exclude_missing: false,
+            draft_comparison_dataset: None,
+            draft_comparison_absolute_tolerance: 0.0,
+            draft_comparison_relative_tolerance: 0.0,
+            draft_export_preset_name: "Publication vector · A4".to_owned(),
+            draft_export_preset_scope: Some(PlotExportPresetScope::Project),
             operation_state: OperationState::NotStarted,
             operation_dataset_id: None,
             operation_analysis_sequence: None,
@@ -546,6 +625,14 @@ const fn default_tile_memory_mib() -> u32 {
 const fn default_significant_digits() -> u8 {
     7
 }
+
+const REPORT_PAGE_TEMPLATES: [&str; 3] = [
+    "Release verification 4.2",
+    "Design review",
+    "Model qualification",
+];
+const MAX_REPORT_PAGE_TITLE_BYTES: usize = 120;
+const MAX_COMPARISON_RECEIPTS: usize = 512;
 
 impl VisualizationStudioState {
     fn allocate_identity(&mut self) -> Option<u64> {
@@ -615,6 +702,35 @@ impl VisualizationStudioState {
             if pane.page.trim().is_empty() {
                 return Err(format!("Pane {} must belong to a named page", pane.id));
             }
+        }
+        for (pane_id, policy) in &self.family_policies {
+            if !self.panes.iter().any(|pane| pane.id == *pane_id) {
+                return Err(format!(
+                    "Family presentation policy references missing pane {pane_id}"
+                ));
+            }
+            policy.validate().map_err(|error| error.to_string())?;
+        }
+        for (page, policy) in &self.report_page_policies {
+            if page.trim().is_empty()
+                || page != page.trim()
+                || page.len() > MAX_REPORT_PAGE_TITLE_BYTES
+                || page.chars().any(char::is_control)
+                || policy.revision == 0
+                || !REPORT_PAGE_TEMPLATES.contains(&policy.template.as_str())
+            {
+                return Err("Report page policies require a named page, supported template, and non-zero revision".to_owned());
+            }
+        }
+        if self.comparison_receipts.len() > MAX_COMPARISON_RECEIPTS {
+            return Err(format!(
+                "Visualization comparison history exceeds the supported limit of {MAX_COMPARISON_RECEIPTS} receipts"
+            ));
+        }
+        for receipt in &self.comparison_receipts {
+            receipt
+                .validate_structure()
+                .map_err(|error| error.to_string())?;
         }
         for annotation in &self.annotations {
             if annotation.id == 0 || !identities.insert(annotation.id) || !annotation.x.is_finite()
@@ -727,6 +843,22 @@ impl VisualizationStudioState {
                 && a.is_none_or(f64::is_finite)
                 && b.is_none_or(f64::is_finite)
         });
+        self.family_policies
+            .retain(|pane_id, policy| pane_ids.contains(pane_id) && policy.validate().is_ok());
+        self.report_page_policies.retain(|page, policy| {
+            !page.trim().is_empty()
+                && page == page.trim()
+                && page.len() <= MAX_REPORT_PAGE_TITLE_BYTES
+                && !page.chars().any(char::is_control)
+                && policy.revision != 0
+                && REPORT_PAGE_TEMPLATES.contains(&policy.template.as_str())
+        });
+        self.comparison_receipts
+            .retain(|receipt| receipt.validate_structure().is_ok());
+        if self.comparison_receipts.len() > MAX_COMPARISON_RECEIPTS {
+            self.comparison_receipts
+                .drain(..self.comparison_receipts.len() - MAX_COMPARISON_RECEIPTS);
+        }
     }
 }
 
@@ -813,9 +945,29 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
             .active_analysis()
             .map(|analysis| (run.dataset_id, analysis.id, analysis.waveforms.clone()))
     });
-    let overlay_ids = app.state.simulation.overlay_dataset_ids.clone();
     let phase_continuous = app.state.ui.results.phase_continuous;
     let active_viewer = app.state.ui.results.viewer;
+    let family_manifest = app
+        .state
+        .simulation
+        .active_analysis()
+        .and_then(|analysis| FamilyManifest::from_analysis(analysis).ok().flatten());
+    let active_family_policy = active_pane.as_ref().and_then(|pane| {
+        app.state
+            .workbench
+            .visualization_studio
+            .family_policies
+            .get(&pane.id)
+            .cloned()
+    });
+    let comparison_dataset = active_binding.and_then(|(active, _)| {
+        app.state
+            .simulation
+            .runs
+            .iter()
+            .find(|run| run.dataset_id != active)
+            .map(|run| run.dataset_id)
+    });
     let studio = &mut app.state.workbench.visualization_studio;
     match dock {
         VisualizationDock::AddPane => {
@@ -866,19 +1018,148 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
         VisualizationDock::PageEditor => {
             studio.draft_page_pane = active_pane.as_ref().map(|pane| pane.id);
             studio.draft_page = active_pane.map_or_else(String::new, |pane| pane.page);
+            if let Some(policy) = studio.report_page_policies.get(&studio.draft_page) {
+                studio.draft_report_template = policy.template.clone();
+                studio.draft_report_freeze =
+                    policy.update_policy == PageUpdatePolicy::FreezeFigureRevision;
+            } else {
+                studio.draft_report_template = REPORT_PAGE_TEMPLATES[0].to_owned();
+                studio.draft_report_freeze = false;
+            }
         }
         VisualizationDock::Measurement => {}
-        VisualizationDock::FamilySlice | VisualizationDock::FamilyFilter => {
-            studio.draft_overlay_ids = overlay_ids;
+        VisualizationDock::FamilySlice => {
+            initialize_family_draft(
+                studio,
+                family_manifest.as_ref(),
+                active_family_policy.as_ref(),
+            );
+            if active_family_policy.is_none() {
+                studio.family_query = studio.family_query.replacen(" and ", " · ", 1);
+            }
+        }
+        VisualizationDock::FamilyFilter => {
+            initialize_family_draft(
+                studio,
+                family_manifest.as_ref(),
+                active_family_policy.as_ref(),
+            );
         }
         VisualizationDock::FamilyEncoding => {
-            studio.draft_phase_continuous = Some(phase_continuous);
+            initialize_family_draft(
+                studio,
+                family_manifest.as_ref(),
+                active_family_policy.as_ref(),
+            );
+        }
+        VisualizationDock::Comparison => {
+            studio.draft_comparison_dataset = comparison_dataset;
+            studio.draft_comparison_absolute_tolerance = 0.0;
+            studio.draft_comparison_relative_tolerance = 0.0;
+        }
+        VisualizationDock::ExportPreset => {
+            if studio.draft_export_preset_name.trim().is_empty() {
+                studio.draft_export_preset_name = "Publication vector · A4".to_owned();
+            }
+            studio
+                .draft_export_preset_scope
+                .get_or_insert(PlotExportPresetScope::Project);
         }
         VisualizationDock::CursorManager
         | VisualizationDock::Annotation
         | VisualizationDock::Export => {}
     }
     studio.dock = Some(dock);
+}
+
+fn initialize_family_draft(
+    studio: &mut VisualizationStudioState,
+    manifest: Option<&FamilyManifest>,
+    policy: Option<&FamilyPresentationPolicy>,
+) {
+    let Some(manifest) = manifest else {
+        studio.draft_family_x_dimension.clear();
+        studio.draft_family_dimension.clear();
+        studio.draft_family_color_dimension.clear();
+        studio.draft_family_dash_dimension.clear();
+        studio.draft_family_marker_dimension.clear();
+        studio.family_query.clear();
+        return;
+    };
+
+    let preferred_x = manifest
+        .dimensions
+        .iter()
+        .find(|dimension| {
+            dimension.kind == FamilyValueKind::Number
+                && !matches!(dimension.id.as_str(), "temperature" | "sample")
+        })
+        .or_else(|| {
+            manifest.dimensions.iter().find(|dimension| {
+                matches!(
+                    dimension.kind,
+                    FamilyValueKind::Number | FamilyValueKind::Integer
+                ) && dimension.id != "temperature"
+            })
+        })
+        .map(|dimension| dimension.id.clone())
+        .unwrap_or_else(|| "sample".to_owned());
+    studio.draft_family_x_dimension = policy
+        .map(|policy| policy.x_dimension.dimension.key.clone())
+        .unwrap_or(preferred_x);
+
+    let preferred_family = manifest
+        .dimension("process")
+        .or_else(|| {
+            manifest.dimensions.iter().find(|dimension| {
+                dimension.id != studio.draft_family_x_dimension
+                    && !matches!(dimension.id.as_str(), "sample" | "status")
+            })
+        })
+        .or_else(|| manifest.dimension("sample"))
+        .map(|dimension| dimension.id.clone())
+        .unwrap_or_default();
+    studio.draft_family_dimension = policy
+        .and_then(|policy| policy.family_dimensions.first())
+        .map(|dimension| dimension.key.clone())
+        .unwrap_or(preferred_family);
+
+    let encoding_dimension = |predicate: fn(&FamilyEncodingMap) -> bool| {
+        policy.and_then(|policy| {
+            policy
+                .encodings
+                .iter()
+                .find(|encoding| predicate(encoding))
+                .map(|encoding| encoding.dimension().key.clone())
+        })
+    };
+    studio.draft_family_color_dimension =
+        encoding_dimension(|encoding| matches!(encoding, FamilyEncodingMap::Color { .. }))
+            .unwrap_or_else(|| studio.draft_family_dimension.clone());
+    studio.draft_family_dash_dimension =
+        encoding_dimension(|encoding| matches!(encoding, FamilyEncodingMap::Dash { .. }))
+            .or_else(|| {
+                manifest
+                    .dimension("temperature")
+                    .map(|dimension| dimension.id.clone())
+            })
+            .unwrap_or_default();
+    studio.draft_family_marker_dimension =
+        encoding_dimension(|encoding| matches!(encoding, FamilyEncodingMap::Marker { .. }))
+            .unwrap_or_else(|| studio.draft_family_color_dimension.clone());
+    studio.draft_family_exclude_missing = policy.is_some_and(|policy| {
+        policy.missing_points == MissingPointPolicy::ExcludeWithOmissionRecord
+    });
+    studio.family_query = policy
+        .and_then(|policy| policy.filter.as_ref())
+        .map(|filter| filter.source.clone())
+        .unwrap_or_else(|| {
+            if manifest.dimension("temperature").is_some() {
+                "temperature in {27,125} and status != not-run".to_owned()
+            } else {
+                "status != not-run".to_owned()
+            }
+        });
 }
 
 pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2273,6 +2554,12 @@ fn export_section(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.add_space(10.0);
         ui.horizontal_wrapped(|ui| {
             dock_action(ui, app, "Edit report pages…", VisualizationDock::PageEditor);
+            dock_action(
+                ui,
+                app,
+                "Save plot export preset…",
+                VisualizationDock::ExportPreset,
+            );
             if Button::new("Export exact data…")
                 .accent()
                 .show(ui)
@@ -3051,12 +3338,18 @@ fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
         analysis_ids: &analysis_ids,
         external_capabilities: &[],
     };
+    let family_selection = active_family_sample_selection(app);
     let availability = active_binding_error(app).map_or_else(
         || {
             definition
                 .ok_or_else(|| "Viewer identity is not registered".to_owned())
                 .and_then(|definition| {
                     resolved_viewer_availability(&app.state, definition, capabilities)
+                })
+                .and_then(|viewer| {
+                    family_selection
+                        .as_ref()
+                        .map_or_else(|error| Err(error.clone()), |_| Ok(viewer))
                 })
         },
         Err,
@@ -3116,7 +3409,11 @@ fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
                     ViewerTool::Zoom => crate::ui::plot::InteractionMode::Zoom,
                 };
                 crate::ui::plot::set_interaction_mode(ui.ctx(), interaction);
-                result_document::show_embedded(ui, app);
+                result_document::show_embedded_with_sample_selection(
+                    ui,
+                    app,
+                    family_selection.as_ref().ok().cloned().flatten(),
+                );
                 capture_active_link_state(app);
                 paint_visualization_markers(ui, app);
                 crate::ui::plot::set_interaction_mode(
@@ -3631,7 +3928,22 @@ fn viewer_inspector(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
             result_entity_table(ui, &entities);
 
             separator(ui, t.color.border);
-            panel_heading(ui, "Comparison receipt", "none");
+            let latest_comparison = app
+                .state
+                .workbench
+                .visualization_studio
+                .comparison_receipts
+                .last()
+                .cloned();
+            panel_heading(
+                ui,
+                "Comparison receipt",
+                if latest_comparison.is_some() {
+                    "current"
+                } else {
+                    "none"
+                },
+            );
             ui.label(
                 RichText::new(
                     "Select explicit dataset alignment, units, interpolation, resampling, extrapolation, and precision before comparing immutable sources.",
@@ -3639,10 +3951,44 @@ fn viewer_inspector(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(t.color.text_faint),
             );
-            empty_note(
-                ui,
-                "No comparison receipt has been created for the selected immutable datasets.",
-            );
+            if let Some(receipt) = latest_comparison {
+                property_row(
+                    ui,
+                    "Datasets",
+                    &format!(
+                        "{} → {}",
+                        short_dataset(receipt.baseline.dataset_id),
+                        short_dataset(receipt.candidate.dataset_id)
+                    ),
+                );
+                property_row(ui, "Rows", &receipt.rows_compared.to_string());
+                property_row(ui, "Alignment", "Exact coordinate rows");
+                property_row(ui, "Units", "Identical units required");
+                property_row(ui, "Interpolation", "None · exact only");
+                property_row(ui, "Resampling", "None · source grid retained");
+                property_row(ui, "Extrapolation", "Forbidden");
+                property_row(ui, "Precision", "Source f64 · no rounding");
+                property_row(
+                    ui,
+                    "Disposition",
+                    match receipt.disposition {
+                        crate::results::visualization_document::ComparisonDisposition::Passed => {
+                            "passed"
+                        }
+                        crate::results::visualization_document::ComparisonDisposition::Failed => {
+                            "failed"
+                        }
+                    },
+                );
+            } else {
+                empty_note(
+                    ui,
+                    "No comparison receipt has been created for the selected immutable datasets.",
+                );
+            }
+            if Button::new("Plan explicit comparison").show(ui).clicked() {
+                open_dock(app, VisualizationDock::Comparison);
+            }
 
             separator(ui, t.color.border);
             let operation = app.state.workbench.visualization_studio.operation_state;
@@ -4068,16 +4414,16 @@ fn show_dock_if_open(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
     let mut window_open = true;
     let mut close_requested = false;
     let viewport_width = ui.ctx().content_rect().width();
-    let dock_width = if compact {
-        (viewport_width - 18.0).clamp(180.0, 520.0)
+    let (dock_width, compact_body_max_width) = if compact {
+        compact_dock_geometry(viewport_width)
     } else {
-        460.0
+        (460.0, 0.0)
     };
     egui::Window::new(dock.title())
         .id(Id::new(("visualization.dock", dock as u8)))
         .open(&mut window_open)
         .collapsible(false)
-        .resizable(true)
+        .resizable(!compact)
         .default_width(dock_width)
         .min_width(if compact {
             dock_width.min(240.0)
@@ -4086,7 +4432,16 @@ fn show_dock_if_open(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
         })
         .max_width(if compact { dock_width } else { 620.0 })
         .show(ui.ctx(), |ui| {
-            ui.set_max_width(if compact { 520.0 } else { 620.0 });
+            if compact {
+                // The window frame consumes part of `dock_width`. Advertising
+                // the desktop 520 px body width here allowed long labels to
+                // widen the window beyond a phone viewport and clipped both
+                // content and the title-bar close control.
+                ui.set_max_width(compact_body_max_width);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            } else {
+                ui.set_max_width(620.0);
+            }
             close_requested = dock_body(ui, app, dock);
         });
     if !window_open || close_requested {
@@ -4109,6 +4464,8 @@ impl VisualizationDock {
             Self::FamilySlice => "Family slicing and pivot",
             Self::FamilyEncoding => "Family visual encoding",
             Self::FamilyFilter => "Advanced family filter",
+            Self::Comparison => "Plan explicit comparison",
+            Self::ExportPreset => "Save plot export preset",
             Self::Export => "Export visualization document",
         }
     }
@@ -4128,6 +4485,8 @@ fn dock_body(ui: &mut Ui, app: &mut RSpiceApp, dock: VisualizationDock) -> bool 
         VisualizationDock::FamilySlice => family_slice_dock(ui, app),
         VisualizationDock::FamilyEncoding => family_encoding_dock(ui, app),
         VisualizationDock::FamilyFilter => family_filter_dock(ui, app),
+        VisualizationDock::Comparison => comparison_dock(ui, app),
+        VisualizationDock::ExportPreset => export_preset_dock(ui, app),
         VisualizationDock::Export => export_dock(ui, app),
     }
 }
@@ -4760,7 +5119,7 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     dock_intro(
         ui,
         "REPORTING · DOCUMENT COMPOSITION",
-        "Assign the active pane to a versioned worksheet or report page.",
+        "Compose versioned pages from linked plots and immutable result evidence.",
     );
     let Some(pane_id) = app.state.workbench.visualization_studio.active_pane else {
         empty_note(ui, "Select a pane before editing its page.");
@@ -4779,8 +5138,41 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         app.state.workbench.visualization_studio.draft_page_pane = Some(pane_id);
         app.state.workbench.visualization_studio.draft_page = page;
     }
+    ui.label("Template");
+    egui::ComboBox::from_id_salt("report.page.template")
+        .selected_text(
+            app.state
+                .workbench
+                .visualization_studio
+                .draft_report_template
+                .clone(),
+        )
+        .show_ui(ui, |ui| {
+            for template in REPORT_PAGE_TEMPLATES {
+                ui.selectable_value(
+                    &mut app
+                        .state
+                        .workbench
+                        .visualization_studio
+                        .draft_report_template,
+                    template.to_owned(),
+                    template,
+                );
+            }
+        });
     ui.label("Page");
     ui.text_edit_singleline(&mut app.state.workbench.visualization_studio.draft_page);
+    ui.label("Update policy");
+    ui.radio_value(
+        &mut app.state.workbench.visualization_studio.draft_report_freeze,
+        false,
+        "Refresh linked figures automatically",
+    );
+    ui.radio_value(
+        &mut app.state.workbench.visualization_studio.draft_report_freeze,
+        true,
+        "Freeze selected figure revision",
+    );
     let page = app
         .state
         .workbench
@@ -4788,9 +5180,19 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         .draft_page
         .trim()
         .to_owned();
-    let valid = !page.is_empty();
+    let template = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_report_template
+        .clone();
+    let freeze = app.state.workbench.visualization_studio.draft_report_freeze;
+    let valid = !page.is_empty()
+        && page.len() <= MAX_REPORT_PAGE_TITLE_BYTES
+        && !page.chars().any(char::is_control)
+        && REPORT_PAGE_TEMPLATES.contains(&template.as_str());
     let apply = ui
-        .add_enabled(valid, egui::Button::new("Save report page"))
+        .add_enabled(valid, egui::Button::new("Save report document"))
         .clicked();
     if apply {
         let result = app.state.workbench.visualization_studio.transact(|studio| {
@@ -4800,6 +5202,29 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
                 .find(|pane| pane.id == pane_id)
                 .ok_or_else(|| "The selected visualization pane no longer exists".to_owned())?;
             pane.page = page;
+            let policy_revision = studio
+                .report_page_policies
+                .get(&pane.page)
+                .map(|policy| {
+                    policy
+                        .revision
+                        .checked_add(1)
+                        .ok_or_else(|| "Report page revision space is exhausted".to_owned())
+                })
+                .transpose()?
+                .unwrap_or(1);
+            studio.report_page_policies.insert(
+                pane.page.clone(),
+                VisualizationReportPagePolicy {
+                    template,
+                    update_policy: if freeze {
+                        PageUpdatePolicy::FreezeFigureRevision
+                    } else {
+                        PageUpdatePolicy::RefreshLinkedFigures
+                    },
+                    revision: policy_revision,
+                },
+            );
             Ok(())
         });
         report_visualization_commit(app, result);
@@ -4981,19 +5406,380 @@ fn annotation_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     add
 }
 
+fn comparison_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
+    dock_intro(
+        ui,
+        "RESULTS · IMMUTABLE COMPARISON",
+        "Create an executable receipt only after every numerical policy is explicit.",
+    );
+    let active_dataset = app.state.simulation.active_run().map(|run| run.dataset_id);
+    ui.label("Comparison dataset");
+    let selected_label = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_comparison_dataset
+        .and_then(|dataset| {
+            app.state
+                .simulation
+                .runs
+                .iter()
+                .find(|run| run.dataset_id == dataset)
+                .map(|run| run.label.clone())
+        })
+        .unwrap_or_else(|| "Select immutable dataset".to_owned());
+    egui::ComboBox::from_id_salt("visualization.comparison.dataset")
+        .selected_text(selected_label)
+        .show_ui(ui, |ui| {
+            for run in &app.state.simulation.runs {
+                if Some(run.dataset_id) == active_dataset {
+                    continue;
+                }
+                ui.selectable_value(
+                    &mut app
+                        .state
+                        .workbench
+                        .visualization_studio
+                        .draft_comparison_dataset,
+                    Some(run.dataset_id),
+                    format!("{} · {}", run.label, short_dataset(run.dataset_id)),
+                );
+            }
+        });
+    for (label, value) in [
+        ("Alignment", "Exact coordinate rows"),
+        ("Units", "Require identical units"),
+        ("Interpolation", "None · exact only"),
+        ("Resampling", "None · retain source grids"),
+        ("Extrapolation", "Forbidden"),
+        ("Precision", "Source f64 · no rounding"),
+    ] {
+        property_row(ui, label, value);
+    }
+    ui.horizontal(|ui| {
+        ui.label("Absolute tolerance");
+        ui.add(
+            egui::DragValue::new(
+                &mut app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .draft_comparison_absolute_tolerance,
+            )
+            .speed(1.0e-6)
+            .range(0.0..=f64::MAX),
+        );
+    });
+    ui.horizontal(|ui| {
+        ui.label("Relative tolerance");
+        ui.add(
+            egui::DragValue::new(
+                &mut app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .draft_comparison_relative_tolerance,
+            )
+            .speed(1.0e-6)
+            .range(0.0..=f64::MAX),
+        );
+    });
+    let studio = &app.state.workbench.visualization_studio;
+    let valid = active_dataset.is_some()
+        && studio.draft_comparison_dataset.is_some()
+        && studio.draft_comparison_absolute_tolerance.is_finite()
+        && studio.draft_comparison_absolute_tolerance >= 0.0
+        && studio.draft_comparison_relative_tolerance.is_finite()
+        && studio.draft_comparison_relative_tolerance >= 0.0;
+    let create = Button::new("Create comparison receipt")
+        .accent()
+        .enabled(valid)
+        .show(ui)
+        .clicked();
+    if !create {
+        return false;
+    }
+    match execute_comparison_draft(app) {
+        Ok(receipt) => {
+            let rows = receipt.rows_compared;
+            let disposition = receipt.disposition;
+            let result = app
+                .state
+                .workbench
+                .visualization_studio
+                .transact(move |studio| {
+                    studio.comparison_receipts.push(receipt);
+                    Ok(())
+                });
+            if report_visualization_commit(app, result) {
+                app.state.push_user_message(ConsoleMessage::info(format!(
+                    "Recorded exact comparison receipt for {rows} row(s): {disposition:?}."
+                )));
+                return true;
+            }
+            false
+        }
+        Err(error) => {
+            app.state.push_user_message(ConsoleMessage::error(error));
+            false
+        }
+    }
+}
+
+fn matching_comparison_analysis<'a>(
+    active: &AnalysisResult,
+    run: &'a SimulationRun,
+) -> Option<&'a AnalysisResult> {
+    if let Some(source_id) = active
+        .provenance
+        .as_ref()
+        .map(|provenance| provenance.source_instance_id())
+    {
+        return run
+            .find_analysis_by_source_instance(source_id)
+            .filter(|analysis| analysis.analysis_type == active.analysis_type);
+    }
+    let mut exact = run.analyses.iter().filter(|analysis| {
+        analysis.provenance.is_none()
+            && analysis.analysis_type == active.analysis_type
+            && analysis.label == active.label
+    });
+    let candidate = exact.next()?;
+    exact.next().is_none().then_some(candidate)
+}
+
+fn comparison_axis_unit(analysis_type: AnalysisType) -> &'static str {
+    match analysis_type {
+        AnalysisType::Ac | AnalysisType::Noise | AnalysisType::Pnoise => "Hz",
+        AnalysisType::Transient | AnalysisType::Soa => "s",
+        AnalysisType::DcSweep => "V",
+        _ => "",
+    }
+}
+
+fn comparison_source_dataset(
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    signal_names: &[String],
+) -> Result<SourceDataset, String> {
+    let reference = signal_names
+        .first()
+        .and_then(|name| {
+            analysis
+                .waveforms
+                .iter()
+                .find(|waveform| waveform.name == *name)
+        })
+        .ok_or_else(|| "No common waveform axis is available for comparison.".to_owned())?;
+    let waveforms = signal_names
+        .iter()
+        .map(|name| {
+            analysis
+                .waveforms
+                .iter()
+                .find(|waveform| waveform.name == *name)
+                .ok_or_else(|| format!("Waveform '{name}' is unavailable."))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    for waveform in &waveforms {
+        if waveform.x.len() != reference.x.len()
+            || waveform.y.len() != reference.x.len()
+            || !waveform
+                .x
+                .iter()
+                .zip(reference.x.iter())
+                .all(|(left, right)| left.to_bits() == right.to_bits())
+        {
+            return Err(format!(
+                "Waveform '{}' does not share the exact comparison coordinate axis.",
+                waveform.name
+            ));
+        }
+    }
+    let x_unit = comparison_axis_unit(analysis.analysis_type);
+    let mut columns = vec![
+        SourceColumn::new(
+            "x",
+            "X coordinate",
+            ValueType::Real,
+            ColumnRole::Coordinate,
+            (!x_unit.is_empty()).then_some(x_unit.to_owned()),
+        )
+        .map_err(|error| error.to_string())?,
+    ];
+    for (index, waveform) in waveforms.iter().enumerate() {
+        columns.push(
+            SourceColumn::new(
+                format!("signal:{index}"),
+                waveform.name.clone(),
+                ValueType::Real,
+                ColumnRole::Signal,
+                // WaveformData does not yet retain a trustworthy per-signal unit.
+                // Leaving the unit unknown is exact; claiming volts would silently
+                // mislabel currents, powers, and dimensionless solver outputs.
+                None,
+            )
+            .map_err(|error| error.to_string())?,
+        );
+    }
+    let rows = reference
+        .x
+        .iter()
+        .enumerate()
+        .map(|(row, x)| {
+            let mut values = vec![TypedValue::Real(*x)];
+            values.extend(
+                waveforms
+                    .iter()
+                    .map(|waveform| TypedValue::Real(waveform.y[row])),
+            );
+            SourceRow::new(values)
+        })
+        .collect();
+    SourceDataset::new(
+        DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
+        columns,
+        rows,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn execute_comparison_draft(app: &RSpiceApp) -> Result<ComparisonReceipt, String> {
+    let active_run = app
+        .state
+        .simulation
+        .active_run()
+        .ok_or_else(|| "No candidate dataset is selected.".to_owned())?;
+    let active_analysis = app
+        .state
+        .simulation
+        .active_analysis()
+        .ok_or_else(|| "No candidate analysis is selected.".to_owned())?;
+    let baseline_id = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_comparison_dataset
+        .ok_or_else(|| "Select an immutable comparison dataset.".to_owned())?;
+    let baseline_run = app
+        .state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == baseline_id)
+        .ok_or_else(|| "The comparison dataset is no longer retained.".to_owned())?;
+    let baseline_analysis = matching_comparison_analysis(active_analysis, baseline_run)
+        .ok_or_else(|| "The comparison dataset has no unambiguous matching analysis.".to_owned())?;
+    let reference_axis = active_analysis
+        .waveforms
+        .first()
+        .map(|waveform| waveform.x.as_slice())
+        .ok_or_else(|| "The candidate analysis has no waveform quantities.".to_owned())?;
+    let same_axis = |candidate: &[f64]| {
+        candidate.len() == reference_axis.len()
+            && candidate
+                .iter()
+                .zip(reference_axis)
+                .all(|(left, right)| left.to_bits() == right.to_bits())
+    };
+    let mut signal_names = active_analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| {
+            same_axis(&waveform.x)
+                && baseline_analysis
+                    .waveforms
+                    .iter()
+                    .any(|candidate| candidate.name == waveform.name && same_axis(&candidate.x))
+        })
+        .map(|waveform| waveform.name.clone())
+        .collect::<Vec<_>>();
+    signal_names.sort();
+    signal_names.dedup();
+    if signal_names.is_empty() {
+        return Err("The selected analyses have no common waveform quantities.".to_owned());
+    }
+    let baseline = comparison_source_dataset(baseline_run, baseline_analysis, &signal_names)?;
+    let candidate = comparison_source_dataset(active_run, active_analysis, &signal_names)?;
+    let signal_keys = (0..signal_names.len())
+        .map(|index| format!("signal:{index}"))
+        .collect();
+    let tolerance = NumericTolerance::new(
+        app.state
+            .workbench
+            .visualization_studio
+            .draft_comparison_absolute_tolerance,
+        app.state
+            .workbench
+            .visualization_studio
+            .draft_comparison_relative_tolerance,
+    )
+    .map_err(|error| error.to_string())?;
+    let request = ComparisonRequest {
+        baseline: baseline.binding(),
+        candidate: candidate.binding(),
+        signal_keys,
+        policy: ComparisonPolicy {
+            row_alignment: RowAlignmentPolicy::RequireIdentical,
+            tolerance,
+            require_identical_units: true,
+            execution: ComparisonExecutionContract::default(),
+        },
+    };
+    compare_source_datasets(&baseline, &candidate, &request).map_err(|error| error.to_string())
+}
+
 fn family_slice_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     dock_intro(
         ui,
         "RESULTS · N-DIMENSIONAL DATA",
-        "Choose retained dataset families to overlay using stable dataset identities.",
+        "Choose typed dimensions from the active immutable result family.",
     );
-    family_overlay_controls(ui, app, "Overlay family");
+    let manifest = active_family_manifest(app);
+    let valid = match manifest.as_ref() {
+        Ok(manifest) => {
+            family_dimension_combo(
+                ui,
+                "family.slice.x",
+                "X dimension",
+                &mut app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .draft_family_x_dimension,
+                manifest,
+                true,
+                false,
+            );
+            family_dimension_combo(
+                ui,
+                "family.slice.family",
+                "Family dimension",
+                &mut app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .draft_family_dimension,
+                manifest,
+                false,
+                false,
+            );
+            ui.label("Filter");
+            ui.text_edit_singleline(&mut app.state.workbench.visualization_studio.family_query);
+            family_preview(ui, app, manifest).is_ok()
+        }
+        Err(error) => {
+            empty_note(ui, error);
+            false
+        }
+    };
     let apply = Button::new("Apply slice and pivot")
         .accent()
+        .enabled(valid)
         .show(ui)
         .clicked();
     if apply {
-        apply_family_overlay_draft(app);
+        apply_family_policy_draft(app);
     }
     apply
 }
@@ -5004,39 +5790,62 @@ fn family_encoding_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         "RESULTS · ACCESSIBLE TRACE FAMILIES",
         "Configure redundant visual encoding supported by the retained renderer.",
     );
-    let current_phase_continuous = app.state.ui.results.phase_continuous;
-    let phase_continuous = app
-        .state
-        .workbench
-        .visualization_studio
-        .draft_phase_continuous
-        .get_or_insert(current_phase_continuous);
-    ui.checkbox(phase_continuous, "Unwrap phase traces continuously");
-    property_row(ui, "Label placement", "Inside plot · compact");
-    property_row(
-        ui,
-        "Run encoding",
-        "active run full weight · retained overlays reduced weight",
-    );
-    property_row(
-        ui,
-        "Signal encoding",
-        "stable trace color · marker and label redundancy",
-    );
-    let apply = Button::new("Apply visual encoding")
+    let manifest = active_family_manifest(app);
+    let valid = match manifest.as_ref() {
+        Ok(manifest) => {
+            family_dimension_combo(
+                ui,
+                "family.encoding.color",
+                "Color",
+                &mut app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .draft_family_color_dimension,
+                manifest,
+                false,
+                false,
+            );
+            family_dimension_combo(
+                ui,
+                "family.encoding.dash",
+                "Dash",
+                &mut app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .draft_family_dash_dimension,
+                manifest,
+                false,
+                true,
+            );
+            family_dimension_combo(
+                ui,
+                "family.encoding.marker",
+                "Marker",
+                &mut app
+                    .state
+                    .workbench
+                    .visualization_studio
+                    .draft_family_marker_dimension,
+                manifest,
+                false,
+                true,
+            );
+            family_preview(ui, app, manifest).is_ok()
+        }
+        Err(error) => {
+            empty_note(ui, error);
+            false
+        }
+    };
+    let apply = Button::new("Apply encoding")
         .accent()
+        .enabled(valid)
         .show(ui)
         .clicked();
     if apply {
-        if let Some(phase_continuous) = app
-            .state
-            .workbench
-            .visualization_studio
-            .draft_phase_continuous
-        {
-            app.state.ui.results.phase_continuous = phase_continuous;
-        }
-        commit_visualization_revision(app);
+        apply_family_policy_draft(app);
     }
     apply
 }
@@ -5045,94 +5854,568 @@ fn family_filter_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     dock_intro(
         ui,
         "RESULTS · DATA QUERY",
-        "Filter retained runs by exact label or stable dataset identity, then select overlay membership.",
+        "Filter exact typed family points without changing immutable solver output.",
     );
+    ui.label("Expression");
     ui.text_edit_singleline(&mut app.state.workbench.visualization_studio.family_query);
-    family_overlay_controls(ui, app, "Include");
-    let apply = Button::new("Apply filter").accent().show(ui).clicked();
+    ui.label("Missing points");
+    ui.radio_value(
+        &mut app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_family_exclude_missing,
+        false,
+        "Preserve as not-run",
+    );
+    ui.radio_value(
+        &mut app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_family_exclude_missing,
+        true,
+        "Exclude with omission record",
+    );
+    let manifest = active_family_manifest(app);
+    let valid = match manifest.as_ref() {
+        Ok(manifest) => family_preview(ui, app, manifest).is_ok(),
+        Err(error) => {
+            empty_note(ui, error);
+            false
+        }
+    };
+    let apply = Button::new("Apply filter")
+        .accent()
+        .enabled(valid)
+        .show(ui)
+        .clicked();
     if apply {
-        apply_family_overlay_draft(app);
+        apply_family_policy_draft(app);
     }
     apply
 }
 
-fn family_overlay_controls(ui: &mut Ui, app: &mut RSpiceApp, label: &str) {
-    let query = app
-        .state
-        .workbench
-        .visualization_studio
-        .family_query
-        .trim()
-        .to_ascii_lowercase();
-    let active = app.state.simulation.active_run().map(|run| run.dataset_id);
-    let rows: Vec<_> = app
+fn active_family_manifest(app: &RSpiceApp) -> Result<FamilyManifest, String> {
+    let analysis = app
         .state
         .simulation
-        .runs
-        .iter()
-        .filter(|run| {
-            query.is_empty()
-                || run.label.to_ascii_lowercase().contains(&query)
-                || run
-                    .dataset_id
-                    .to_string()
-                    .to_ascii_lowercase()
-                    .contains(&query)
-        })
-        .map(|run| {
-            (
-                run.dataset_id,
-                run.label.clone(),
-                app.state
-                    .workbench
-                    .visualization_studio
-                    .draft_overlay_ids
-                    .contains(&run.dataset_id),
-            )
-        })
-        .collect();
-    let mut toggles = Vec::new();
-    for (dataset, run_label, overlaid) in rows {
-        let mut selected = Some(dataset) == active || overlaid;
-        let response = ui.add_enabled_ui(Some(dataset) != active, |ui| {
-            ui.checkbox(
-                &mut selected,
-                format!("{label}: {run_label} · {}", short_dataset(dataset)),
-            )
-        });
-        if response.inner.changed() {
-            toggles.push(dataset);
+        .active_analysis()
+        .ok_or_else(|| "Select an analysis with retained family data.".to_owned())?;
+    FamilyManifest::from_analysis(analysis)?
+        .ok_or_else(|| "The active analysis has no retained family manifest.".to_owned())
+}
+
+fn active_family_sample_selection(
+    app: &RSpiceApp,
+) -> Result<Option<SourceSampleSelection>, String> {
+    let studio = &app.state.workbench.visualization_studio;
+    let Some(pane) = studio.active_pane() else {
+        return Ok(None);
+    };
+    let Some(policy) = studio.family_policies.get(&pane.id) else {
+        return Ok(None);
+    };
+    if pane.viewer != ResultViewer::Waves {
+        return Err(
+            "This family policy requires the waveform renderer; choose Waveform before applying it."
+                .to_owned(),
+        );
+    }
+    let run = app
+        .state
+        .simulation
+        .active_run()
+        .ok_or_else(|| "The pane's immutable dataset is unavailable.".to_owned())?;
+    let analysis = app
+        .state
+        .simulation
+        .active_analysis()
+        .ok_or_else(|| "The pane's bound analysis is unavailable.".to_owned())?;
+    if run.dataset_id != pane.dataset_id || analysis.id != pane.analysis_sequence {
+        return Err(
+            "The active renderer binding does not match the family policy pane.".to_owned(),
+        );
+    }
+    let manifest = FamilyManifest::from_analysis(analysis)?
+        .ok_or_else(|| "The pane's source no longer contains family metadata.".to_owned())?;
+    let query = policy
+        .filter
+        .as_ref()
+        .map_or("", |filter| filter.source.as_str());
+    let indices = manifest.matching_source_indices(query)?;
+    for waveform in &analysis.waveforms {
+        manifest.compatible_waveform_len(waveform.x.len())?;
+        if waveform.x.len() != waveform.y.len() {
+            return Err(format!(
+                "Waveform '{}' has mismatched X and Y sample counts.",
+                waveform.name
+            ));
         }
     }
-    for dataset in toggles {
-        let overlays = &mut app.state.workbench.visualization_studio.draft_overlay_ids;
-        if let Some(index) = overlays.iter().position(|candidate| *candidate == dataset) {
-            overlays.remove(index);
+    SourceSampleSelection::new(run.dataset_id, analysis.id, indices).map(Some)
+}
+
+fn family_dimension_combo(
+    ui: &mut Ui,
+    id: &'static str,
+    label: &str,
+    selected: &mut String,
+    manifest: &FamilyManifest,
+    numeric_only: bool,
+    allow_none: bool,
+) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let selected_text = if selected.is_empty() {
+            "none".to_owned()
         } else {
-            overlays.push(dataset);
+            selected.clone()
+        };
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(selected_text)
+            .show_ui(ui, |ui| {
+                if allow_none {
+                    ui.selectable_value(selected, String::new(), "none");
+                }
+                for dimension in &manifest.dimensions {
+                    if dimension.id == "status"
+                        || (numeric_only
+                            && !matches!(
+                                dimension.kind,
+                                FamilyValueKind::Number | FamilyValueKind::Integer
+                            ))
+                    {
+                        continue;
+                    }
+                    let display = dimension.unit.as_ref().map_or_else(
+                        || dimension.label.clone(),
+                        |unit| format!("{} ({unit})", dimension.label),
+                    );
+                    ui.selectable_value(selected, dimension.id.clone(), display);
+                }
+            });
+    });
+}
+
+fn family_preview(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    manifest: &FamilyManifest,
+) -> Result<Vec<usize>, String> {
+    let query = &app.state.workbench.visualization_studio.family_query;
+    let indices = match manifest.matching_source_indices(query) {
+        Ok(indices) => indices,
+        Err(error) => {
+            empty_note(ui, &error);
+            return Err(error);
         }
+    };
+    let trace_count = app
+        .state
+        .simulation
+        .active_analysis()
+        .map_or(0, |analysis| analysis.waveforms.len());
+    let selected_samples = trace_count.saturating_mul(indices.len());
+    let omission = if manifest.omitted_points == 0 {
+        String::new()
+    } else {
+        format!(
+            " · {} unavailable point(s) recorded",
+            manifest.omitted_points
+        )
+    };
+    ui.label(format!(
+        "{} of {} retained points · {trace_count} traces · {selected_samples} selected samples{omission}",
+        indices.len(),
+        manifest.points.len()
+    ));
+    Ok(indices)
+}
+
+fn document_family_dimension(
+    manifest: &FamilyManifest,
+    id: &str,
+) -> Result<DocumentFamilyDimension, String> {
+    let dimension = manifest
+        .dimension(id)
+        .ok_or_else(|| format!("Unknown family dimension '{id}'."))?;
+    DocumentFamilyDimension::new(
+        dimension.id.clone(),
+        match dimension.kind {
+            FamilyValueKind::Number => ValueType::Real,
+            FamilyValueKind::Integer => ValueType::Integer,
+            FamilyValueKind::Text | FamilyValueKind::Status => ValueType::Text,
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn build_family_policy_draft(
+    app: &RSpiceApp,
+    manifest: &FamilyManifest,
+) -> Result<FamilyPresentationPolicy, String> {
+    let studio = &app.state.workbench.visualization_studio;
+    let x_dimension = document_family_dimension(manifest, &studio.draft_family_x_dimension)?;
+    let mut family_dimension_ids = vec![studio.draft_family_dimension.clone()];
+    for dimension in [
+        &studio.draft_family_color_dimension,
+        &studio.draft_family_dash_dimension,
+        &studio.draft_family_marker_dimension,
+    ] {
+        if !dimension.is_empty()
+            && *dimension != x_dimension.key
+            && !family_dimension_ids.contains(dimension)
+        {
+            family_dimension_ids.push(dimension.clone());
+        }
+    }
+    if studio.family_query.contains("status")
+        && x_dimension.key != "status"
+        && !family_dimension_ids.iter().any(|id| id == "status")
+    {
+        family_dimension_ids.push("status".to_owned());
+    }
+    family_dimension_ids.retain(|id| !id.is_empty() && *id != x_dimension.key);
+    let family_dimensions = family_dimension_ids
+        .iter()
+        .map(|id| document_family_dimension(manifest, id))
+        .collect::<Result<Vec<_>, _>>()?;
+    if family_dimensions.is_empty() {
+        return Err("Select at least one family dimension distinct from X.".to_owned());
+    }
+
+    let mut encodings = Vec::new();
+    if !studio.draft_family_color_dimension.is_empty() {
+        encodings.push(FamilyEncodingMap::Color {
+            dimension: document_family_dimension(manifest, &studio.draft_family_color_dimension)?,
+            palette: AccessibleColorPalette::OkabeItoCategorical,
+        });
+    }
+    if !studio.draft_family_dash_dimension.is_empty() {
+        encodings.push(FamilyEncodingMap::Dash {
+            dimension: document_family_dimension(manifest, &studio.draft_family_dash_dimension)?,
+        });
+    }
+    if !studio.draft_family_marker_dimension.is_empty() {
+        encodings.push(FamilyEncodingMap::Marker {
+            dimension: document_family_dimension(manifest, &studio.draft_family_marker_dimension)?,
+        });
+    }
+    let encoded: HashSet<_> = encodings
+        .iter()
+        .map(|encoding| encoding.dimension().key.as_str())
+        .collect();
+    let unencoded: Vec<_> = family_dimensions
+        .iter()
+        .filter(|dimension| !encoded.contains(dimension.key.as_str()))
+        .cloned()
+        .collect();
+    if unencoded.len() > 1 {
+        return Err(format!(
+            "Dimensions {} require explicit visual encodings.",
+            unencoded
+                .iter()
+                .map(|dimension| dimension.key.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(dimension) = unencoded.into_iter().next() {
+        encodings.push(FamilyEncodingMap::Label {
+            dimension,
+            prefix: None,
+        });
+    }
+    let color_dimensions: Vec<_> = encodings
+        .iter()
+        .filter_map(|encoding| match encoding {
+            FamilyEncodingMap::Color { dimension, .. } => Some(dimension.clone()),
+            _ => None,
+        })
+        .collect();
+    for color_dimension in color_dimensions {
+        if !encodings.iter().any(|encoding| {
+            encoding.dimension() == &color_dimension
+                && matches!(
+                    encoding,
+                    FamilyEncodingMap::Dash { .. }
+                        | FamilyEncodingMap::Marker { .. }
+                        | FamilyEncodingMap::Label { .. }
+                )
+        }) {
+            if encodings
+                .iter()
+                .any(|encoding| matches!(encoding, FamilyEncodingMap::Label { .. }))
+            {
+                return Err(format!(
+                    "Color dimension '{}' requires a matching dash or marker cue.",
+                    color_dimension.key
+                ));
+            }
+            encodings.push(FamilyEncodingMap::Label {
+                dimension: color_dimension,
+                prefix: None,
+            });
+        }
+    }
+
+    let policy = FamilyPresentationPolicy {
+        x_dimension: FamilyXDimension {
+            dimension: x_dimension,
+            ordering: FamilyXOrdering::Source,
+        },
+        family_dimensions,
+        facet_layout: None,
+        aggregation: FamilyAggregationPolicy {
+            method: FamilyAggregationMethod::None,
+            over_dimensions: Vec::new(),
+        },
+        filter: manifest.compile_filter(&studio.family_query)?,
+        missing_points: if studio.draft_family_exclude_missing {
+            MissingPointPolicy::ExcludeWithOmissionRecord
+        } else {
+            MissingPointPolicy::PreserveAsNotRun
+        },
+        encodings,
+    };
+    policy.validate().map_err(|error| error.to_string())?;
+    Ok(policy)
+}
+
+fn apply_family_policy_draft(app: &mut RSpiceApp) {
+    let result = (|| {
+        let manifest = active_family_manifest(app)?;
+        let indices = manifest
+            .matching_source_indices(&app.state.workbench.visualization_studio.family_query)?;
+        let analysis = app
+            .state
+            .simulation
+            .active_analysis()
+            .ok_or_else(|| "No active analysis is selected.".to_owned())?;
+        for waveform in &analysis.waveforms {
+            manifest.compatible_waveform_len(waveform.x.len())?;
+            if waveform.x.len() != waveform.y.len() {
+                return Err(format!(
+                    "Waveform '{}' has mismatched X and Y sample counts.",
+                    waveform.name
+                ));
+            }
+        }
+        let policy = build_family_policy_draft(app, &manifest)?;
+        let pane_id = app
+            .state
+            .workbench
+            .visualization_studio
+            .active_pane
+            .ok_or_else(|| "No visualization pane is selected.".to_owned())?;
+        if app
+            .state
+            .workbench
+            .visualization_studio
+            .active_pane()
+            .is_none_or(|pane| pane.viewer != ResultViewer::Waves)
+        {
+            return Err(
+                "Choose the Waveform viewer before applying a sample-level family policy."
+                    .to_owned(),
+            );
+        }
+        app.state
+            .workbench
+            .visualization_studio
+            .transact(move |studio| {
+                studio.family_policies.insert(pane_id, policy);
+                Ok(())
+            })?;
+        Ok::<_, String>(indices.len())
+    })();
+    match result {
+        Ok(count) => app.state.push_user_message(ConsoleMessage::info(format!(
+            "Applied exact family presentation to {count} retained point(s)."
+        ))),
+        Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
     }
 }
 
-fn apply_family_overlay_draft(app: &mut RSpiceApp) {
-    let desired = app
+fn export_preset_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
+    dock_intro(
+        ui,
+        "RESULTS · PUBLICATION PROFILE",
+        "Store page, font, color, vector, raster, metadata, and naming defaults without changing the plot document.",
+    );
+    ui.label("Name");
+    ui.text_edit_singleline(
+        &mut app
+            .state
+            .workbench
+            .visualization_studio
+            .draft_export_preset_name,
+    );
+    property_row(ui, "Formats", "PDF/A + SVG + 2× PNG");
+    ui.label("Scope");
+    let scope = app
         .state
         .workbench
         .visualization_studio
-        .draft_overlay_ids
-        .clone();
-    let existing = app.state.simulation.overlay_dataset_ids.clone();
-    for dataset in existing {
-        if !desired.contains(&dataset) {
-            app.state.simulation.toggle_dataset_overlay(dataset);
+        .draft_export_preset_scope
+        .get_or_insert(PlotExportPresetScope::Project);
+    ui.radio_value(scope, PlotExportPresetScope::Project, "Project team");
+    ui.radio_value(scope, PlotExportPresetScope::Personal, "Personal");
+    ui.add_enabled_ui(false, |ui| {
+        ui.radio_value(
+            scope,
+            PlotExportPresetScope::Organization,
+            "Organization template",
+        )
+    })
+    .response
+    .on_hover_text("Connect an organization authority before saving organization templates.");
+    ui.weak("Organization templates are unavailable while no organization authority is connected.");
+
+    let selected_scope = *scope;
+    let name = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_export_preset_name
+        .trim();
+    let duplicate_name = match selected_scope {
+        PlotExportPresetScope::Project => app
+            .state
+            .workspace
+            .plot_export_presets
+            .active_presets()
+            .into_iter()
+            .any(|preset| preset.definition.name.eq_ignore_ascii_case(name)),
+        PlotExportPresetScope::Personal => app
+            .state
+            .ui
+            .preferences
+            .personal_plot_export_presets()
+            .is_some_and(|catalog| {
+                catalog
+                    .active_presets()
+                    .into_iter()
+                    .any(|preset| preset.definition.name.eq_ignore_ascii_case(name))
+            }),
+        PlotExportPresetScope::Organization => false,
+    };
+    if duplicate_name {
+        ui.weak("A preset with this name already exists in the selected scope.");
+    }
+    let valid = !name.is_empty()
+        && name.len() <= 96
+        && !name.chars().any(char::is_control)
+        && selected_scope != PlotExportPresetScope::Organization
+        && !duplicate_name;
+    let save = Button::new("Save export preset")
+        .accent()
+        .enabled(valid)
+        .show(ui)
+        .clicked();
+    if !save {
+        return false;
+    }
+
+    let scope = app
+        .state
+        .workbench
+        .visualization_studio
+        .draft_export_preset_scope
+        .unwrap_or(PlotExportPresetScope::Project);
+    let definition = PlotExportPresetDefinition {
+        name: name.to_owned(),
+        formats: vec![
+            PlotExportFormat::PdfA {
+                conformance: PdfAConformance::PdfA2b,
+            },
+            PlotExportFormat::Svg,
+            PlotExportFormat::RasterPng { scale_percent: 200 },
+        ],
+        page: PageGeometry {
+            size: ExportPageSize::A4,
+            orientation: PageOrientation::Portrait,
+            margins: PageMargins {
+                top_micrometers: 12_000,
+                right_micrometers: 12_000,
+                bottom_micrometers: 12_000,
+                left_micrometers: 12_000,
+            },
+        },
+        fonts: FontPolicy {
+            primary_family: "Inter".to_owned(),
+            fallback_families: vec!["DejaVu Sans".to_owned()],
+            embedding: FontEmbeddingPolicy::EmbedSubset,
+        },
+        color_profile: ColorProfile::Srgb,
+        background: ExportBackground::White,
+        rendering: VectorRasterPolicy {
+            vector_handling: VectorHandling::PreserveNative,
+            raster_dpi: 300,
+            raster_resampling: RasterResampling::Lanczos,
+            antialias: true,
+        },
+        metadata: MetadataProvenancePolicy {
+            include_document_metadata: true,
+            include_dataset_manifest: true,
+            include_source_digests: true,
+            include_revision_receipts: true,
+            include_export_timestamp: true,
+        },
+        naming_template: match DeterministicNamingTemplate::new(
+            "{document}-{page}-{revision}-{format}",
+        ) {
+            Ok(template) => template,
+            Err(error) => {
+                app.state
+                    .push_user_message(ConsoleMessage::error(error.to_string()));
+                return false;
+            }
+        },
+        scope,
+    };
+    let timestamp = crate::common::time_compat::unix_epoch().as_millis();
+    let timestamp = u64::try_from(timestamp).unwrap_or(u64::MAX);
+    let result = match scope {
+        PlotExportPresetScope::Project => {
+            let catalog = &mut app.state.workspace.plot_export_presets;
+            catalog
+                .create_owned(
+                    catalog.revision(),
+                    PlotExportPresetScope::Project,
+                    definition,
+                    timestamp,
+                )
+                .map_err(|error| error.to_string())
+        }
+        PlotExportPresetScope::Personal => app
+            .state
+            .ui
+            .preferences
+            .create_personal_plot_export_preset(definition, timestamp)
+            .map_err(|error| error.to_string()),
+        PlotExportPresetScope::Organization => {
+            Err("organization export presets require a connected organization authority".to_owned())
+        }
+    };
+    match result {
+        Ok(receipt) => {
+            if scope == PlotExportPresetScope::Project {
+                app.state.workspace.project_metadata_dirty = true;
+            }
+            app.state.push_user_message(ConsoleMessage::info(format!(
+                "Saved {scope:?} plot export preset revision {} (receipt {}).",
+                receipt.committed_preset_revision.get(),
+                receipt.receipt_id
+            )));
+            true
+        }
+        Err(error) => {
+            app.state.push_user_message(ConsoleMessage::error(error));
+            false
         }
     }
-    for dataset in desired {
-        if !app.state.simulation.is_dataset_overlaid(dataset) {
-            app.state.simulation.toggle_dataset_overlay(dataset);
-        }
-    }
-    commit_visualization_revision(app);
 }
 
 fn export_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
@@ -5428,6 +6711,59 @@ mod integrity_scan_tests {
     }
 
     #[test]
+    fn explicit_comparison_executes_exact_contract_without_mutating_sources() {
+        let mut app = app_with_exact_source();
+        let mut baseline = SimulationRun::new(2);
+        baseline.add_analysis(
+            AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 0.5, 1.0],
+                    vec![-1.20, 2.45, 3.95],
+                    "#00aaff",
+                ),
+                WaveformData::new("I(R1)", vec![10.0, 20.0], vec![0.125, -0.25], "#ffaa00"),
+            ]),
+        );
+        let baseline_id = baseline.dataset_id;
+        app.state.simulation.runs.push(baseline);
+        app.state
+            .workbench
+            .visualization_studio
+            .draft_comparison_dataset = Some(baseline_id);
+        app.state
+            .workbench
+            .visualization_studio
+            .draft_comparison_absolute_tolerance = 0.1;
+        let candidate_digest = app
+            .state
+            .simulation
+            .active_run()
+            .unwrap()
+            .dataset_content_digest();
+
+        let receipt = execute_comparison_draft(&app).expect("exact comparison must execute");
+
+        assert_eq!(receipt.rows_compared, 3);
+        assert_eq!(
+            receipt.policy.execution,
+            ComparisonExecutionContract::default()
+        );
+        assert_eq!(
+            receipt.disposition,
+            crate::results::visualization_document::ComparisonDisposition::Passed
+        );
+        assert_eq!(
+            app.state
+                .simulation
+                .active_run()
+                .unwrap()
+                .dataset_content_digest(),
+            candidate_digest
+        );
+    }
+
+    #[test]
     fn configuration_status_fails_closed_when_a_retained_binding_disappears() {
         let mut app = app_with_exact_source();
         reconcile_document(&mut app);
@@ -5666,5 +7002,14 @@ mod integrity_scan_tests {
         assert_eq!(library.width(), 158.0);
         assert_eq!(inspector.width(), 196.0);
         assert_eq!(stage.width(), 544.0);
+    }
+
+    #[test]
+    fn compact_dialog_body_stays_inside_phone_and_tablet_frames() {
+        assert_eq!(compact_dock_geometry(390.0), (372.0, 348.0));
+        assert_eq!(compact_dock_geometry(800.0), (520.0, 496.0));
+        let (window, body) = compact_dock_geometry(180.0);
+        assert!(window <= 180.0);
+        assert!(body < window);
     }
 }

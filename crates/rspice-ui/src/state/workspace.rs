@@ -1837,6 +1837,8 @@ pub enum SimulationConfigurationError {
     InvalidNetlistDocumentProjection { message: String },
     #[error("project-owned Code source registry is invalid: {message}")]
     InvalidProjectSourceRegistry { message: String },
+    #[error("project plot export preset catalog has invalid ownership: {message}")]
+    InvalidPlotExportPresetOwnership { message: String },
     #[error("simulation_plan_payloads contains duplicate owner {plan_id}")]
     DuplicatePlanPayload { plan_id: SimulationPlanId },
     #[error("simulation_plan_payloads[{plan_id}].design_variables[{index}] is invalid: {message}")]
@@ -2575,6 +2577,11 @@ pub struct ProjectWorkspace {
     /// into one record after execution-context migration.
     #[serde(default)]
     pub simulation_plan_payloads: Vec<SimulationPlanPayloadRecord>,
+    /// Project-owned, versioned publication profiles for result plots.
+    /// Personal profiles are owned by serialized user preferences; an
+    /// organization profile requires a connected organization authority.
+    #[serde(default)]
+    pub plot_export_presets: crate::results::plot_export_preset::PlotExportPresetCatalog,
     /// Manually edited netlist source. When set, simulations run this
     /// deck instead of regenerating from the schematic (text-first mode);
     /// `None` means the netlist view shows the generated artifact.
@@ -2632,6 +2639,8 @@ impl Default for ProjectWorkspace {
             schematic_buffers,
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),
+            plot_export_presets:
+                crate::results::plot_export_preset::PlotExportPresetCatalog::default(),
             netlist_source: None,
             netlist_document: None,
             netlist_descriptor: None,
@@ -2649,6 +2658,15 @@ impl ProjectWorkspace {
     /// runtime editor state. Cross-document targets are validated by project
     /// I/O once the library tree and simulation plan are available.
     pub fn validate_simulation_configuration(&self) -> Result<(), SimulationConfigurationError> {
+        self.plot_export_presets
+            .validate_ownership_scope(
+                crate::results::plot_export_preset::PlotExportPresetScope::Project,
+            )
+            .map_err(
+                |error| SimulationConfigurationError::InvalidPlotExportPresetOwnership {
+                    message: error.to_string(),
+                },
+            )?;
         self.project_sources.validate().map_err(|error| {
             SimulationConfigurationError::InvalidProjectSourceRegistry {
                 message: error.to_string(),

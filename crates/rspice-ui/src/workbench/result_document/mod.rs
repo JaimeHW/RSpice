@@ -42,6 +42,7 @@ use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, docbar};
+use crate::workbench::visualization_family::SourceSampleSelection;
 
 pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
 pub type WaveformSeriesResult = Result<WaveformSeries, String>;
@@ -206,6 +207,9 @@ pub struct ResultsState {
     pub derived: DerivedSeries,
     /// Fingerprint-keyed strip-model cache for the waves viewer.
     models: waves::ModelsCache,
+    /// Presentation-only exact family rows selected by Visualization Studio.
+    /// Source datasets are never modified by this projection.
+    pub(crate) sample_selection: Option<SourceSampleSelection>,
     /// Strips hidden via the strip-close action.
     pub hidden_strips: HashSet<usize>,
     /// Strip currently maximized via the strip action, if any.
@@ -299,6 +303,22 @@ impl ResultsState {
 
     pub fn toggle_linked_cursors(&mut self) {
         self.linked_cursors = !self.linked_cursors;
+    }
+
+    fn set_sample_selection(&mut self, selection: Option<SourceSampleSelection>) {
+        let current = self
+            .sample_selection
+            .as_ref()
+            .map(SourceSampleSelection::fingerprint);
+        let next = selection.as_ref().map(SourceSampleSelection::fingerprint);
+        if current != next {
+            self.models = waves::ModelsCache::default();
+            self.expr_cache.clear();
+            self.cache = DecimationCache::default();
+            self.derived = DerivedSeries::default();
+            self.clear_cursors();
+        }
+        self.sample_selection = selection;
     }
 
     /// Clear result UI state that is tied to the active project/design data.
@@ -692,6 +712,7 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     crate::ui::plot::set_interaction_mode(ui.ctx(), crate::ui::plot::InteractionMode::All);
+    app.state.ui.results.set_sample_selection(None);
     prepare_viewer_state(app);
     show_docbar(ui, &mut app.state);
     show_viewer_well(ui, app);
@@ -713,7 +734,12 @@ pub(crate) fn viewer_unavailability_reason(
 /// its document toolbar, library, exact-data dock, and entity inspector, so
 /// embedding the same retained renderer must not duplicate the quick-view
 /// docbar or create a second result document.
-pub(crate) fn show_embedded(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(crate) fn show_embedded_with_sample_selection(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    selection: Option<SourceSampleSelection>,
+) {
+    app.state.ui.results.set_sample_selection(selection);
     prepare_viewer_state(app);
     show_viewer_well(ui, app);
 }

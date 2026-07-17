@@ -22,6 +22,7 @@ use crate::ui::plot::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
+use crate::workbench::visualization_family::SourceSampleSelection;
 use crate::workbench::{
     ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
 };
@@ -119,6 +120,7 @@ fn models_fingerprint(
     simulation: &SimulationState,
     phase_continuous: bool,
     complex_display: ComplexNumberDisplay,
+    selection: Option<&SourceSampleSelection>,
     t: &Tokens,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -126,6 +128,9 @@ fn models_fingerprint(
     simulation.data_version.hash(&mut h);
     phase_continuous.hash(&mut h);
     complex_display.hash(&mut h);
+    selection
+        .map(SourceSampleSelection::fingerprint)
+        .hash(&mut h);
     for color in &t.color.traces {
         color.to_array().hash(&mut h);
     }
@@ -157,7 +162,13 @@ pub(super) fn cached_models(
     complex_display: ComplexNumberDisplay,
     t: &Tokens,
 ) -> Arc<Vec<StripModel>> {
-    let fp = models_fingerprint(simulation, results.phase_continuous, complex_display, t);
+    let fp = models_fingerprint(
+        simulation,
+        results.phase_continuous,
+        complex_display,
+        results.sample_selection.as_ref(),
+        t,
+    );
     if let Some((cached_fp, models)) = &results.models.0
         && *cached_fp == fp
     {
@@ -169,6 +180,7 @@ pub(super) fn cached_models(
         t,
         results.phase_continuous,
         complex_display,
+        results.sample_selection.as_ref(),
     ));
     results.models.0 = Some((fp, Arc::clone(&models)));
     models
@@ -280,6 +292,35 @@ impl StripModel {
     }
 }
 
+fn selected_series_pair(
+    x: &SharedWaveformValues,
+    y: &SharedWaveformValues,
+    selection: Option<&SourceSampleSelection>,
+) -> Option<(SharedWaveformValues, SharedWaveformValues)> {
+    let Some(selection) = selection else {
+        return Some((Arc::clone(x), Arc::clone(y)));
+    };
+    if x.len() != y.len()
+        || selection
+            .source_indices
+            .last()
+            .is_some_and(|index| *index >= x.len())
+    {
+        return None;
+    }
+    let selected_x = selection
+        .source_indices
+        .iter()
+        .map(|index| x[*index])
+        .collect();
+    let selected_y = selection
+        .source_indices
+        .iter()
+        .map(|index| y[*index])
+        .collect();
+    Some((Arc::new(selected_x), Arc::new(selected_y)))
+}
+
 /// Build strip models for every plottable analysis of the active run.
 /// `phase_continuous` swaps phase traces to their unwrapped series.
 pub(super) fn build_models(
@@ -288,6 +329,7 @@ pub(super) fn build_models(
     tokens: &Tokens,
     phase_continuous: bool,
     complex_display: ComplexNumberDisplay,
+    selection: Option<&SourceSampleSelection>,
 ) -> Vec<StripModel> {
     let display_runs = simulation.display_runs();
     let Some((&run, overlay_runs)) = display_runs.split_first() else {
@@ -315,24 +357,46 @@ pub(super) fn build_models(
         };
 
         let mut traces = Vec::new();
+        let sample_selection = selection.filter(|selection| {
+            selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
+        });
+        let selection_key = sample_selection
+            .map(SourceSampleSelection::fingerprint)
+            .unwrap_or_default()
+            .rotate_left(17);
         for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
+            let Some((source_x, source_y)) =
+                selected_series_pair(&waveform.x, &waveform.y, sample_selection)
+            else {
+                continue;
+            };
             let color = waveform_color(waveform, waveform_index, tokens);
             let is_phase = waveform.name.starts_with("phase(");
             let is_mag = waveform.name.starts_with('|');
             if displays_cartesian_complex {
                 if let Some(complex) = &waveform.complex {
+                    let Some((_, source_real)) =
+                        selected_series_pair(&waveform.x, &complex.real, sample_selection)
+                    else {
+                        continue;
+                    };
+                    let Some((_, source_imaginary)) =
+                        selected_series_pair(&waveform.x, &complex.imag, sample_selection)
+                    else {
+                        continue;
+                    };
                     for (kind, name, color, y) in [
                         (
                             TraceKind::Real,
                             format!("re({})", complex.source_name),
                             color,
-                            Arc::clone(&complex.real),
+                            source_real,
                         ),
                         (
                             TraceKind::Imaginary,
                             format!("im({})", complex.source_name),
                             tokens.color.traces[(waveform_index + 1) % tokens.color.traces.len()],
-                            Arc::clone(&complex.imag),
+                            source_imaginary,
                         ),
                     ] {
                         traces.push(StripTrace {
@@ -340,7 +404,7 @@ pub(super) fn build_models(
                             source_waveform_name: waveform.name.clone(),
                             name,
                             color,
-                            x: Arc::clone(&waveform.x),
+                            x: Arc::clone(&source_x),
                             y,
                             kind,
                             visible: waveform.visible,
@@ -372,26 +436,26 @@ pub(super) fn build_models(
             };
             let y = match kind {
                 TraceKind::MagnitudeDb => derived.db(
-                    (analysis_index as u64) << 32 | waveform_index as u64,
-                    &waveform.y,
+                    ((analysis_index as u64) << 32 | waveform_index as u64) ^ selection_key,
+                    &source_y,
                 ),
                 // Continuous phase display: cached unwrapped copy of the
                 // wrapped samples, same key convention as `db`.
                 TraceKind::PhaseDeg | TraceKind::PhaseRad => displayed_phase_series(
                     derived,
-                    (analysis_index as u64) << 32 | waveform_index as u64,
-                    &waveform.y,
+                    ((analysis_index as u64) << 32 | waveform_index as u64) ^ selection_key,
+                    &source_y,
                     phase_continuous,
                     kind == TraceKind::PhaseRad,
                 ),
-                _ => Arc::clone(&waveform.y),
+                _ => source_y,
             };
             traces.push(StripTrace {
                 waveform_index,
                 source_waveform_name: waveform.name.clone(),
                 name: waveform.name.clone(),
                 color,
-                x: Arc::clone(&waveform.x),
+                x: source_x,
                 y,
                 kind,
                 visible: waveform.visible,
@@ -932,13 +996,22 @@ fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index: usize) {
                 state.ui.results.expr_editor = None;
                 return;
             }
-            let (series, extremes) = evaluate_expression(&state.simulation, analysis_index, &text);
+            let sample_selection = state.ui.results.sample_selection.clone();
+            let (series, extremes) = evaluate_expression(
+                &state.simulation,
+                analysis_index,
+                &text,
+                sample_selection.as_ref(),
+            );
             match series {
                 Ok(series) => {
                     state.ui.results.expr_cache.insert(
                         (analysis_index, text.clone()),
                         ExprSeries {
-                            version: state.simulation.data_version,
+                            version: expression_version(
+                                state.simulation.data_version,
+                                sample_selection.as_ref(),
+                            ),
                             series: Ok(series),
                             y_extremes: extremes,
                         },
@@ -974,13 +1047,17 @@ fn evaluate_expression(
     simulation: &SimulationState,
     analysis_index: usize,
     text: &str,
+    selection: Option<&SourceSampleSelection>,
 ) -> ExpressionEvaluation {
-    let Some(analysis) = simulation
-        .active_run()
-        .and_then(|run| run.analyses.get(analysis_index))
-    else {
+    let Some(run) = simulation.active_run() else {
         return (Err("analysis no longer exists".to_owned()), None);
     };
+    let Some(analysis) = run.analyses.get(analysis_index) else {
+        return (Err("analysis no longer exists".to_owned()), None);
+    };
+    let selection = selection.filter(|selection| {
+        selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
+    });
 
     let ctx = calculator::WaveformsContext::new(&analysis.waveforms);
     let expr = match calculator::parser::try_parse(text) {
@@ -989,6 +1066,37 @@ fn evaluate_expression(
     };
     match calculator::evaluator::evaluate(&expr, &ctx) {
         Ok(calculator::CalcValue::Waveform(x, y)) if !x.is_empty() => {
+            let (x, y) =
+                match selection {
+                    None => (x, y),
+                    Some(selection)
+                        if x.len() == y.len()
+                            && selection
+                                .source_indices
+                                .last()
+                                .is_none_or(|index| *index < x.len()) =>
+                    {
+                        (
+                            selection
+                                .source_indices
+                                .iter()
+                                .map(|index| x[*index])
+                                .collect(),
+                            selection
+                                .source_indices
+                                .iter()
+                                .map(|index| y[*index])
+                                .collect(),
+                        )
+                    }
+                    Some(_) => {
+                        return (
+                        Err("expression sample count does not match the retained family manifest"
+                            .to_owned()),
+                        None,
+                    );
+                    }
+                };
             let extremes = super::finite_extremes(&y);
             (Ok((x.into(), y.into())), extremes)
         }
@@ -996,10 +1104,10 @@ fn evaluate_expression(
             (Err("expression produced no samples".to_owned()), None)
         }
         Ok(calculator::CalcValue::Scalar(value)) => {
-            let span = analysis
-                .waveforms
-                .first()
-                .and_then(|w| (w.x.len() >= 2).then(|| (w.x[0], w.x[w.x.len() - 1])));
+            let span = analysis.waveforms.first().and_then(|waveform| {
+                let (x, _) = selected_series_pair(&waveform.x, &waveform.y, selection)?;
+                (x.len() >= 2).then(|| (x[0], x[x.len() - 1]))
+            });
             match span {
                 Some((x0, x1)) => (
                     Ok((vec![x0, x1].into(), vec![value, value].into())),
@@ -1010,6 +1118,14 @@ fn evaluate_expression(
         }
         Err(error) => (Err(error.to_string()), None),
     }
+}
+
+fn expression_version(data_version: u64, selection: Option<&SourceSampleSelection>) -> u64 {
+    data_version
+        ^ selection
+            .map(SourceSampleSelection::fingerprint)
+            .unwrap_or_default()
+            .rotate_left(23)
 }
 
 /// One expression trace resolved for plotting.
@@ -1040,7 +1156,8 @@ fn resolve_strip_exprs(
         return Vec::new();
     }
 
-    let version = state.simulation.data_version;
+    let sample_selection = state.ui.results.sample_selection.clone();
+    let version = expression_version(state.simulation.data_version, sample_selection.as_ref());
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let key = (model.analysis_index, expr.text.clone());
@@ -1051,8 +1168,12 @@ fn resolve_strip_exprs(
             .get(&key)
             .is_some_and(|s| s.version == version);
         if !fresh {
-            let (series, extremes) =
-                evaluate_expression(&state.simulation, model.analysis_index, &expr.text);
+            let (series, extremes) = evaluate_expression(
+                &state.simulation,
+                model.analysis_index,
+                &expr.text,
+                sample_selection.as_ref(),
+            );
             if let Err(error) = &series {
                 state.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
                     "expression `{}`: {}",
@@ -1139,12 +1260,14 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
+    let sample_selection = state.ui.results.sample_selection.clone();
     let models = build_models(
         &state.simulation,
         &mut state.ui.results.derived,
         &Tokens::default(),
         state.ui.results.phase_continuous,
         presentation.complex_number_display(),
+        sample_selection.as_ref(),
     );
     let model = state
         .ui
@@ -1741,12 +1864,47 @@ mod tests {
             &Tokens::default(),
             false,
             ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
         );
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].y_unit, "V^2/Hz");
         assert!(matches!(models[0].traces[0].kind, TraceKind::Value));
         assert_eq!(models[0].traces[0].y.as_slice(), &[1.0e-18, 2.0e-18]);
+    }
+
+    #[test]
+    fn family_selection_projects_exact_source_rows_without_mutating_the_run() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(41, AnalysisType::Corner, "PVT").with_waveforms(vec![
+                WaveformData::new(
+                    "V(out)",
+                    vec![1.0, 2.0, 3.0, 4.0],
+                    vec![10.0, 20.0, 30.0, 40.0],
+                    "#fff",
+                ),
+            ]),
+        );
+        let run = simulation.active_run().expect("active run");
+        let selection = SourceSampleSelection::new(run.dataset_id, 41, vec![1, 3])
+            .expect("ordered exact selection");
+        let mut derived = DerivedSeries::default();
+
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            Some(&selection),
+        );
+
+        assert_eq!(models[0].traces[0].x.as_slice(), &[2.0, 4.0]);
+        assert_eq!(models[0].traces[0].y.as_slice(), &[20.0, 40.0]);
+        let original = &simulation.active_run().unwrap().analyses[0].waveforms[0];
+        assert_eq!(original.x.as_slice(), &[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(original.y.as_slice(), &[10.0, 20.0, 30.0, 40.0]);
     }
 
     fn ac_result(
@@ -1803,6 +1961,7 @@ mod tests {
             &Tokens::default(),
             false,
             ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
         );
 
         assert_eq!(models.len(), 2);
@@ -1833,6 +1992,7 @@ mod tests {
             &Tokens::default(),
             false,
             ComplexNumberDisplay::RealImaginary,
+            None,
         );
         assert_eq!(cartesian[0].signal_trace_count, 2);
         assert_eq!(cartesian[0].y_unit, "");
@@ -1847,6 +2007,7 @@ mod tests {
             &Tokens::default(),
             false,
             ComplexNumberDisplay::MagnitudePhaseRadians,
+            None,
         );
         assert!(matches!(radians[0].traces[0].kind, TraceKind::MagnitudeDb));
         assert_eq!(radians[0].traces[0].y.as_slice(), &[0.0, 20.0]);
