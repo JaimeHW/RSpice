@@ -565,6 +565,15 @@ fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic
         ParseError::OutputSymbolValidation(_) => {
             unreachable!("aggregate output-symbol errors are expanded before scalar mapping")
         }
+        ParseError::StartupDirectiveConflict(error) => Diagnostic::error(format!(
+            "{}\nFirst startup mode: {} at {} · conflicting mode: {} at {}",
+            error,
+            error.first_kind.as_spice_directive(),
+            error.first,
+            error.conflicting_kind.as_spice_directive(),
+            error.conflicting,
+        ))
+        .with_line(error.conflicting.line.checked_sub(1)),
         ParseError::DeviceInitialCondition(error) => {
             let origin = device_initial_condition_diagnostic_origin(&error);
             Diagnostic::error(error.to_string()).with_line(origin.line.checked_sub(1))
@@ -791,6 +800,27 @@ mod tests {
         assert!(diagnostics[0].message.contains("node `missing`"));
         assert!(diagnostics[1].message.contains("device `Rbogus`"));
         assert_eq!(diagnostics[1].message.matches("device `Rbogus`").count(), 2);
+    }
+
+    #[test]
+    fn startup_conflict_diagnostic_points_at_conflicting_card_and_preserves_first_origin() {
+        let diagnostic =
+            parse_error_diagnostic(rspice_core::netlist::ParseError::StartupDirectiveConflict(
+                Box::new(rspice_core::netlist::StartupDirectiveConflictError {
+                    first_kind: rspice_core::netlist::StartupDirectiveKind::Ic,
+                    first: rspice_core::netlist::NetlistSourceLocation::in_file("deck.cir", 7),
+                    conflicting_kind: rspice_core::netlist::StartupDirectiveKind::NodeSet,
+                    conflicting: rspice_core::netlist::NetlistSourceLocation::in_file(
+                        "included.cir",
+                        11,
+                    ),
+                }),
+            ));
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostic.line, Some(10));
+        assert!(diagnostic.message.contains(".IC at deck.cir:7"));
+        assert!(diagnostic.message.contains(".NODESET at included.cir:11"));
     }
 
     #[test]
