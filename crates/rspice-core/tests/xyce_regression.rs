@@ -36,6 +36,29 @@ fn get_xyce_tests_dir() -> PathBuf {
         .expect("tests/xyce must exist")
 }
 
+fn copy_fixture_tree(source: &Path, target: &Path) {
+    let metadata = fs::symlink_metadata(source).expect("inspect fixture source");
+    assert!(
+        !metadata.file_type().is_symlink(),
+        "fixture source must not contain symlinks: {}",
+        source.display()
+    );
+    if metadata.is_dir() {
+        fs::create_dir_all(target).expect("create fixture directory");
+        for entry in fs::read_dir(source).expect("read fixture directory") {
+            let entry = entry.expect("inspect fixture directory entry");
+            copy_fixture_tree(&entry.path(), &target.join(entry.file_name()));
+        }
+    } else {
+        assert!(
+            metadata.is_file(),
+            "fixture source must be a regular file: {}",
+            source.display()
+        );
+        fs::copy(source, target).expect("copy fixture file");
+    }
+}
+
 fn all_circuit_paths(root: &Path) -> BTreeSet<String> {
     fn visit(root: &Path, dir: &Path, paths: &mut BTreeSet<String>) {
         let Ok(entries) = fs::read_dir(dir) else {
@@ -4472,6 +4495,178 @@ fn test_xyce_abm_generated_gold_transient_wrappers_run_natively() {
         assert!(result.mismatches.is_empty());
         assert_eq!(result.contract, "abm_generated_gold_transient_wrapper");
     }
+}
+
+#[test]
+fn test_xyce_measure_cont_tran_removed_wrappers_run_natively() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/MEASURE_CONT/DerivTestTran.cir",
+        "Netlists/MEASURE_CONT/FindWhenTestTran.cir",
+        "Netlists/MEASURE_CONT/TrigTargTestTran.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed Release-7.10 wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should execute its exact native continuous-measurement oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(result.contract, "measure_cont_tran_removed_wrapper");
+    }
+}
+
+#[test]
+fn test_xyce_measure_cont_tran_provenance_mutations_fail_closed() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
+    const OWNER: &str = "Netlists/MEASURE_CONT/DerivTestTran.cir";
+    let corpus = get_xyce_tests_dir();
+    let make_fixture = |label: &str| {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-measure-cont-tran-{label}-{}-{}",
+            std::process::id(),
+            FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        copy_fixture_tree(
+            &corpus.join("Netlists/MEASURE_CONT"),
+            &root.join("Netlists/MEASURE_CONT"),
+        );
+        copy_fixture_tree(
+            &corpus.join("OutputData/MEASURE_CONT"),
+            &root.join("OutputData/MEASURE_CONT"),
+        );
+        fs::copy(
+            corpus.join("RSPICE-HARNESS-MANIFEST.tsv"),
+            root.join("RSPICE-HARNESS-MANIFEST.tsv"),
+        )
+        .expect("copy canonical harness manifest");
+        root
+    };
+    let assert_fails = |root: &Path, label: &str| {
+        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+        let result = runner.run_test(root.join(OWNER));
+        assert!(
+            !result.passed && !result.expected_unsupported,
+            "{label} must fail the exact MEASURE_CONT transient oracle, got {result:?}"
+        );
+        assert_eq!(result.contract, "measure_cont_tran_removed_wrapper");
+    };
+
+    let root = make_fixture("canonical-lf");
+    let path = root.join(OWNER);
+    let source = fs::read_to_string(&path).expect("read MEASURE_CONT LF fixture source");
+    fs::write(&path, source.replace("\r\n", "\n")).expect("write canonical-LF MEASURE_CONT source");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let result = runner.run_test(&path);
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "canonical LF must preserve MEASURE_CONT provenance, got {result:?}"
+    );
+    assert_eq!(result.contract, "measure_cont_tran_removed_wrapper");
+    fs::remove_dir_all(&root).expect("remove canonical-LF MEASURE_CONT fixture");
+
+    for (label, relative) in [
+        ("source", OWNER),
+        ("GS artifact", "Netlists/MEASURE_CONT/DerivTestTranGSfile"),
+        (
+            "mt0 artifact",
+            "OutputData/MEASURE_CONT/DerivTestTran.cir.mt0",
+        ),
+        (
+            "PRN artifact",
+            "OutputData/MEASURE_CONT/DerivTestTran.cir.prn",
+        ),
+    ] {
+        let root = make_fixture(&label.replace(' ', "-"));
+        let path = root.join(relative);
+        let mut bytes = fs::read(&path).expect("read MEASURE_CONT mutation target");
+        bytes.push(b' ');
+        fs::write(&path, bytes).expect("write MEASURE_CONT byte mutation");
+        assert_fails(&root, label);
+        fs::remove_dir_all(&root).expect("remove MEASURE_CONT byte-mutation fixture");
+    }
+
+    let root = make_fixture("manifest-missing");
+    let manifest_path = root.join("RSPICE-HARNESS-MANIFEST.tsv");
+    let manifest = fs::read_to_string(&manifest_path).expect("read harness manifest");
+    let manifest = manifest
+        .lines()
+        .filter(|line| !line.starts_with(OWNER))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&manifest_path, format!("{manifest}\n"))
+        .expect("remove MEASURE_CONT owner from manifest");
+    assert_fails(&root, "missing manifest owner");
+    fs::remove_dir_all(&root).expect("remove missing-manifest MEASURE_CONT fixture");
+
+    let root = make_fixture("manifest-duplicate");
+    let manifest_path = root.join("RSPICE-HARNESS-MANIFEST.tsv");
+    let mut manifest = fs::read_to_string(&manifest_path).expect("read harness manifest");
+    manifest.push_str(&format!("{OWNER}\trequires_upstream_wrapper\n"));
+    fs::write(&manifest_path, manifest).expect("duplicate MEASURE_CONT manifest owner");
+    assert_fails(&root, "duplicate manifest owner");
+    fs::remove_dir_all(&root).expect("remove duplicate-manifest MEASURE_CONT fixture");
+
+    for (label, replacement) in [
+        (
+            "manifest-trailing-space",
+            format!("{OWNER}\trequires_upstream_wrapper "),
+        ),
+        (
+            "manifest-backslash",
+            format!("{}\trequires_upstream_wrapper", OWNER.replace('/', "\\")),
+        ),
+    ] {
+        let root = make_fixture(label);
+        let manifest_path = root.join("RSPICE-HARNESS-MANIFEST.tsv");
+        let manifest = fs::read_to_string(&manifest_path).expect("read harness manifest");
+        let canonical = format!("{OWNER}\trequires_upstream_wrapper");
+        assert!(manifest.contains(&canonical));
+        fs::write(&manifest_path, manifest.replace(&canonical, &replacement))
+            .expect("write noncanonical MEASURE_CONT manifest spelling");
+        assert_fails(&root, label);
+        fs::remove_dir_all(&root).expect("remove noncanonical-manifest MEASURE_CONT fixture");
+    }
+
+    let root = make_fixture("family-extra");
+    fs::write(
+        root.join("Netlists/MEASURE_CONT/unexpected.txt"),
+        "unexpected\n",
+    )
+    .expect("write unexpected MEASURE_CONT family member");
+    assert_fails(&root, "family census mutation");
+    fs::remove_dir_all(&root).expect("remove family-census MEASURE_CONT fixture");
+
+    let root = make_fixture("non-regular");
+    let artifact = root.join("Netlists/MEASURE_CONT/DerivTestTranGSfile");
+    let target = root.join("external-DerivTestTranGSfile");
+    fs::copy(&artifact, &target).expect("copy external GS symlink target");
+    fs::remove_file(&artifact).expect("remove regular GS artifact");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &artifact)
+        .expect("create non-regular MEASURE_CONT GS artifact");
+    #[cfg(windows)]
+    {
+        if let Err(error) = std::os::windows::fs::symlink_file(&target, &artifact) {
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(1314)
+            {
+                fs::create_dir(&artifact)
+                    .expect("create non-regular MEASURE_CONT GS artifact fallback");
+            } else {
+                panic!("create non-regular MEASURE_CONT GS artifact: {error}");
+            }
+        }
+    }
+    assert_fails(&root, "symlink/non-regular artifact");
+    fs::remove_dir_all(&root).expect("remove non-regular MEASURE_CONT fixture");
 }
 
 #[test]
