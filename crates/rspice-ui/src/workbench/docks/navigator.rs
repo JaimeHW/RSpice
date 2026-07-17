@@ -18,6 +18,9 @@ const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 const SIGNAL_ROW_HEIGHT: f32 = 30.0;
 const TOUCH_TARGET_HEIGHT: f32 = 44.0;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
+// Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
+// run-set values remain visually contained beside the analysis-stack divider.
+const NAV_PROPERTY_PADDING_X: f32 = 10.0;
 const EMPTY_HINT_PADDING_X: i8 = 12;
 const EMPTY_HINT_PADDING_Y: i8 = 20;
 // The mock's 49 px is a minimum. Its three grid rows resolve to 63 px at the
@@ -478,13 +481,14 @@ fn capability_policy_banner(ui: &mut Ui) {
 fn nav_property(ui: &mut Ui, label: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.add_space(12.0);
+        ui.add_space(NAV_PROPERTY_PADDING_X);
         ui.label(
             egui::RichText::new(label)
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(t.color.text_dim),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_space(NAV_PROPERTY_PADDING_X);
             ui.label(
                 egui::RichText::new(value)
                     .font(theme::mono(tokens::FS_0, FontWeight::Medium))
@@ -2253,12 +2257,12 @@ mod tests {
     use super::{
         CAPABILITY_BANNER_GAP, CAPABILITY_BANNER_ICON_SIZE, CAPABILITY_BANNER_MARGIN,
         EMPTY_HINT_PADDING_X, EMPTY_HINT_PADDING_Y, EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP,
-        FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NETLIST_OUTLINE_ICON_GAP,
-        NETLIST_OUTLINE_PADDING_X, NETLIST_OUTLINE_ROW_HEIGHT, NETLIST_OUTLINE_TOUCH_ROW_HEIGHT,
-        NetlistNavigatorProjection, NetlistNavigatorRowKind, PANEL_SEARCH_MARGIN_X,
-        SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail, flow_row_geometry,
-        panel_search_field_width, responsive_result_control_height, verification_coverage,
-        verification_flow_label, verification_navigator_requires_scroll,
+        FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_PADDING_X,
+        NETLIST_OUTLINE_ICON_GAP, NETLIST_OUTLINE_PADDING_X, NETLIST_OUTLINE_ROW_HEIGHT,
+        NETLIST_OUTLINE_TOUCH_ROW_HEIGHT, NetlistNavigatorProjection, NetlistNavigatorRowKind,
+        PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
+        flow_row_geometry, panel_search_field_width, responsive_result_control_height,
+        verification_coverage, verification_flow_label, verification_navigator_requires_scroll,
     };
     use crate::common::RSpiceApp;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -2286,6 +2290,7 @@ mod tests {
     fn navigator_search_and_empty_hint_match_mockup_spacing() {
         assert_eq!(PANEL_SEARCH_MARGIN_X, 8.0);
         assert_eq!(panel_search_field_width(260.0), 244.0);
+        assert_eq!(NAV_PROPERTY_PADDING_X, 10.0);
         assert_eq!(EMPTY_HINT_PADDING_X, 12);
         assert_eq!(EMPTY_HINT_PADDING_Y, 20);
     }

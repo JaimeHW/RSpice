@@ -17,6 +17,10 @@ use crate::common::RSpiceApp;
 use super::state::Workspace;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    if app.state.workbench.current_route().surface_id() == super::SurfaceId::VisualizationStudio {
+        super::visualization_studio::show(ui, app);
+        return;
+    }
     match app.state.workbench.workspace {
         Workspace::Project => project::show(ui, app),
         Workspace::Design => design::show(ui, app),

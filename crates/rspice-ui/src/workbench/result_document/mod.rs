@@ -691,6 +691,34 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
 
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    crate::ui::plot::set_interaction_mode(ui.ctx(), crate::ui::plot::InteractionMode::All);
+    prepare_viewer_state(app);
+    show_docbar(ui, &mut app.state);
+    show_viewer_well(ui, app);
+}
+
+pub(crate) fn viewer_is_available(state: &AppState, viewer: ResultViewer) -> bool {
+    viewer_availability(state, viewer).available
+}
+
+pub(crate) fn viewer_unavailability_reason(
+    state: &AppState,
+    viewer: ResultViewer,
+) -> Option<&'static str> {
+    let availability = viewer_availability(state, viewer);
+    (!availability.available).then_some(availability.reason)
+}
+
+/// Render only the canonical result viewer well. Visualization Studio owns
+/// its document toolbar, library, exact-data dock, and entity inspector, so
+/// embedding the same retained renderer must not duplicate the quick-view
+/// docbar or create a second result document.
+pub(crate) fn show_embedded(ui: &mut Ui, app: &mut RSpiceApp) {
+    prepare_viewer_state(app);
+    show_viewer_well(ui, app);
+}
+
+fn prepare_viewer_state(app: &mut RSpiceApp) {
     let data_version = app.state.simulation.data_version;
     let results = &mut app.state.ui.results;
     if results.seen_version != data_version {
@@ -704,9 +732,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     results.derived.ensure_version(data_version);
 
     reconcile_active_viewer(&mut app.state);
+}
 
-    show_docbar(ui, &mut app.state);
-
+fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     // The document well backdrop; viewers paint on top. The rect doubles
     // as the crop window for viewer PNG export.

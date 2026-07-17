@@ -33,7 +33,7 @@ pub enum SampleInterpolation {
 
 /// Cache of decimated envelopes. Owned by the results workspace state;
 /// cleared wholesale when the data version changes.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct DecimationCache {
     map: HashMap<CacheKey, Entry>,
     /// Data version the cache contents belong to.
@@ -42,6 +42,9 @@ pub struct DecimationCache {
     /// keeps entries the current frame touched instead of nuking the hot
     /// working set.
     tick: u64,
+    /// Hard resident-memory budget for reconstructable display envelopes.
+    byte_capacity: usize,
+    resident_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +64,19 @@ struct CacheKey {
 
 /// Entry-count bound; old views evict once it's exceeded.
 const CACHE_CAP: usize = 256;
+const DEFAULT_BYTE_CAPACITY: usize = 512 * 1024 * 1024;
+
+impl Default for DecimationCache {
+    fn default() -> Self {
+        Self {
+            map: HashMap::new(),
+            version: 0,
+            tick: 0,
+            byte_capacity: DEFAULT_BYTE_CAPACITY,
+            resident_bytes: 0,
+        }
+    }
+}
 
 impl DecimationCache {
     /// Drop everything if `version` differs from the cached one (new run /
@@ -68,9 +84,48 @@ impl DecimationCache {
     pub fn ensure_version(&mut self, version: u64) {
         if self.version != version {
             self.map.clear();
+            self.resident_bytes = 0;
             self.version = version;
         }
         self.tick = self.tick.wrapping_add(1);
+    }
+
+    /// Configure the hard resident cache budget. Existing least-recently-used
+    /// entries are evicted immediately when the budget shrinks.
+    pub fn set_memory_budget_mib(&mut self, mebibytes: u32) {
+        self.byte_capacity = (mebibytes.clamp(64, 16_384) as usize).saturating_mul(1024 * 1024);
+        self.evict_to_fit(0);
+    }
+
+    #[must_use]
+    pub fn memory_budget_mib(&self) -> usize {
+        self.byte_capacity / (1024 * 1024)
+    }
+
+    #[must_use]
+    pub const fn resident_bytes(&self) -> usize {
+        self.resident_bytes
+    }
+
+    fn evict_to_fit(&mut self, incoming_bytes: usize) {
+        while (!self.map.is_empty())
+            && (self.map.len() >= CACHE_CAP
+                || self.resident_bytes.saturating_add(incoming_bytes) > self.byte_capacity)
+        {
+            let Some(oldest) = self
+                .map
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            if let Some(removed) = self.map.remove(&oldest) {
+                self.resident_bytes = self
+                    .resident_bytes
+                    .saturating_sub(removed.envelope.len() * size_of::<[f64; 2]>());
+            }
+        }
     }
 
     /// Fetch or compute a bounded display series for one trace at the given
@@ -99,27 +154,24 @@ impl DecimationCache {
             hit.last_used = self.tick;
             return Arc::clone(&hit.envelope);
         }
-        // Resize/zoom mint new keys; evict stale views, keep this frame's.
-        if self.map.len() > CACHE_CAP {
-            let tick = self.tick;
-            self.map.retain(|_, entry| entry.last_used == tick);
-            if self.map.len() > CACHE_CAP {
-                self.map.clear();
-            }
-        }
         let envelope: Arc<[[f64; 2]]> = match mode {
             DisplayDecimation::EnvelopeExtrema => decimate_minmax(x, y, x0, x1, x_scale, columns),
             DisplayDecimation::Uniform => decimate_uniform(x, y, x0, x1, columns),
             DisplayDecimation::FullResolution => unreachable!("full resolution bypasses cache"),
         }
         .into();
-        self.map.insert(
-            key,
-            Entry {
-                envelope: Arc::clone(&envelope),
-                last_used: self.tick,
-            },
-        );
+        let bytes = envelope.len() * size_of::<[f64; 2]>();
+        if bytes <= self.byte_capacity {
+            self.evict_to_fit(bytes);
+            self.map.insert(
+                key,
+                Entry {
+                    envelope: Arc::clone(&envelope),
+                    last_used: self.tick,
+                },
+            );
+            self.resident_bytes = self.resident_bytes.saturating_add(bytes);
+        }
         envelope
     }
 }

@@ -112,6 +112,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui canonical specialist workspace discovery manager",
             evidence_boundary: "Search, profile filtering, personal favorites and pins, device-local recents, canonical metadata inspection, and route availability disclosure are executable. Discoverability never implies that the selected engineering surface, engine, connector, entitlement, platform, or sign-off path is available.",
         },
+        SurfaceId::VisualizationStudio => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui persistent Visualization Studio result-document executor",
+            evidence_boundary: "Versioned pane composition, native waveform/Bode/spectrum/Smith/table/histogram/eye/pole-zero viewers, exact source-row inspection, cursor/marker/annotation entities, retained-run overlays, display LOD policy, and CSV/Touchstone/PNG export are executable. Catalog viewers without a compatible native renderer or qualified external producer remain explicitly unavailable and never receive fabricated fallback data.",
+        },
         SurfaceId::FeatureAvailability => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui capability and platform matrix manager",
             evidence_boundary: "Read-only disclosure executor present; bundled design fixtures are not product readiness evidence.",
@@ -161,6 +165,7 @@ mod tests {
                 SurfaceId::Verify,
                 SurfaceId::Models,
                 SurfaceId::Netlist,
+                SurfaceId::VisualizationStudio,
                 SurfaceId::Preferences,
                 SurfaceId::AccountOrganization,
                 SurfaceId::JobsManager,

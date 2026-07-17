@@ -3143,7 +3143,7 @@ fn design_variables_card(
     height: f32,
     border: SetupCardBorder,
 ) -> bool {
-    setup_table_card(ui, height, border, |ui| {
+    setup_table_card(ui, "design-variables", height, border, |ui| {
         let add = setup_card_header(ui, "Design variables", "Add design variable");
         setup_table_row(
             ui,
@@ -3188,7 +3188,7 @@ fn outputs_specifications_card(
     height: f32,
     border: SetupCardBorder,
 ) -> bool {
-    setup_table_card(ui, height, border, |ui| {
+    setup_table_card(ui, "outputs-specifications", height, border, |ui| {
         let add = setup_card_header(ui, "Outputs & specifications", "Add saved output");
         setup_table_row(
             ui,
@@ -3262,6 +3262,7 @@ fn outputs_specifications_card(
 
 fn setup_table_card(
     ui: &mut Ui,
+    card_id: &'static str,
     height: f32,
     border: SetupCardBorder,
     body: impl FnOnce(&mut Ui) -> bool,
@@ -3276,7 +3277,10 @@ fn setup_table_card(
         // A fixed-width nested ScrollArea both hid the trailing column and
         // allowed sibling cards to alias egui scroll state; proportional rows
         // already provide the intended responsive behavior without state.
-        body(ui)
+        // Keep every stateful descendant in a stable card-local namespace as
+        // well. This prevents sibling setup cards from ever sharing widget or
+        // scroll state if either card gains another interactive child later.
+        ui.push_id(("simulation-setup-card", card_id), body).inner
     });
     let rect = response.response.rect;
     match border {
@@ -4056,6 +4060,60 @@ mod tests {
                     .all(|pair| pair[0].right() == pair[1].left())
             );
         }
+    }
+
+    #[test]
+    fn sibling_setup_cards_render_without_egui_id_clashes() {
+        fn collect_text(shape: &egui::epaint::Shape, rendered: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    rendered.push_str(&text.galley.job.text);
+                    rendered.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect_text(shape, rendered);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(420.0, 320.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    design_variables_card(ui, &[], 92.0, SetupCardBorder::All);
+                    outputs_specifications_card(
+                        ui,
+                        &[],
+                        &[],
+                        &[],
+                        None,
+                        92.0,
+                        SetupCardBorder::All,
+                    );
+                });
+            },
+        );
+        let mut rendered = String::new();
+        for clipped in &output.shapes {
+            collect_text(&clipped.shape, &mut rendered);
+        }
+
+        assert!(rendered.contains("Design variables"));
+        assert!(rendered.contains("Outputs & specifications"));
+        assert!(
+            !rendered.contains("First use of")
+                && !rendered.contains("Second use of")
+                && !rendered.contains("Double use of"),
+            "egui rendered an ID-clash diagnostic:\n{rendered}"
+        );
     }
 
     #[test]

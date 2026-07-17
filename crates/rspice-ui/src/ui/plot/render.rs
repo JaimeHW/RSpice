@@ -12,6 +12,34 @@ use super::cursor::CursorPair;
 use super::decimate::{DecimationCache, DisplayDecimation};
 use super::spec::{PlotSpec, YSide};
 
+/// Interaction contract selected by the owning result surface.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InteractionMode {
+    /// Standard Results behavior: pan, box zoom, wheel zoom, and fit.
+    #[default]
+    All,
+    /// Preserve pointer selection/readout without changing the view.
+    Select,
+    /// Primary drag pans; wheel zoom remains available.
+    Pan,
+    /// Primary drag draws a zoom box; wheel zoom remains available.
+    Zoom,
+}
+
+const INTERACTION_MODE_ID: &str = "rspice.plot.interaction-mode";
+
+/// Set the plot interaction mode for subsequently rendered plots this frame.
+pub fn set_interaction_mode(ctx: &egui::Context, mode: InteractionMode) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(INTERACTION_MODE_ID), mode));
+}
+
+fn interaction_mode(ctx: &egui::Context) -> InteractionMode {
+    ctx.data(|data| {
+        data.get_temp(egui::Id::new(INTERACTION_MODE_ID))
+            .unwrap_or_default()
+    })
+}
+
 /// A view-range change requested by a navigation gesture this frame.
 /// The caller owns the view state; the engine only reports what the
 /// gesture means in data space against the ranges it was handed.
@@ -688,6 +716,7 @@ fn handle_navigation(
     t: &Tokens,
 ) {
     let c = t.color;
+    let interaction = interaction_mode(ui.ctx());
 
     // Fraction coordinates: fx in 0..1 left→right, fy in 0..1 bottom→top.
     let fx_of = |px: f32| ((px - plot_rect.left()) / plot_rect.width()) as f64;
@@ -701,7 +730,7 @@ fn handle_navigation(
     };
 
     // Double-click restores the automatic fit.
-    if out.response.double_clicked() {
+    if interaction != InteractionMode::Select && out.response.double_clicked() {
         out.view.reset = true;
         return;
     }
@@ -712,8 +741,10 @@ fn handle_navigation(
 
     // Zoom box: Shift+primary drag or right drag. The anchor survives
     // across frames in egui memory; the box zooms both axes on release.
-    let box_drag_started = (out.response.drag_started_by(egui::PointerButton::Primary) && shift)
-        || out.response.drag_started_by(egui::PointerButton::Secondary);
+    let box_drag_started = (out.response.drag_started_by(egui::PointerButton::Primary)
+        && (shift || interaction == InteractionMode::Zoom))
+        || (interaction != InteractionMode::Select
+            && out.response.drag_started_by(egui::PointerButton::Secondary));
     if box_drag_started
         && let Some(pos) = out.response.interact_pointer_pos()
         && plot_rect.contains(pos)
@@ -760,7 +791,10 @@ fn handle_navigation(
     }
 
     // Drag pan (primary, unmodified): the content follows the pointer.
-    if out.response.dragged_by(egui::PointerButton::Primary) && !shift {
+    if out.response.dragged_by(egui::PointerButton::Primary)
+        && !shift
+        && matches!(interaction, InteractionMode::All | InteractionMode::Pan)
+    {
         let delta = out.response.drag_delta();
         if delta != egui::Vec2::ZERO {
             let dfx = -f64::from(delta.x) / f64::from(plot_rect.width());
@@ -781,7 +815,8 @@ fn handle_navigation(
     }
 
     // Wheel zoom about the cursor: X by default, Y with Ctrl held.
-    if let Some(pointer) = out.response.hover_pos()
+    if interaction != InteractionMode::Select
+        && let Some(pointer) = out.response.hover_pos()
         && plot_rect.contains(pointer)
     {
         let scroll = ui.input(|i| i.smooth_scroll_delta.y);

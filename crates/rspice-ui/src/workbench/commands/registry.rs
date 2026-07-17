@@ -452,9 +452,14 @@ impl Command {
             | Self::CheckAndSave => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
-            Self::ClearResults | Self::WaveformCalculator | Self::ResultViewer(_) => {
-                ShortcutContext::ResultsWorkspace
-            }
+            Self::ClearResults
+            | Self::WaveformCalculator
+            | Self::ResultViewer(_)
+            | Self::AddVisualizationPane
+            | Self::VisualizationTraceManager
+            | Self::VisualizationCursorManager
+            | Self::VisualizationDocumentProperties
+            | Self::ExportVisualizationDocument => ShortcutContext::ResultsWorkspace,
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolCircleTool

@@ -183,9 +183,10 @@ macro_rules! define_surface_catalog {
                 self.metadata().deep_link
             }
 
-            /// Map a canonical primary surface to the existing workbench
-            /// workspace. Specialist/supporting surfaces intentionally return
-            /// `None` until the application router owns them.
+            /// Map a canonical primary surface to its workbench selector.
+            /// Specialist and supporting surfaces return `None`; use
+            /// [`Self::owner_workspace`] for the render-owner projection of a
+            /// persistent non-primary document.
             #[must_use]
             pub const fn workspace(self) -> Option<Workspace> {
                 match self {
@@ -197,6 +198,19 @@ macro_rules! define_surface_catalog {
                     Self::Models => Some(Workspace::Models),
                     Self::Netlist => Some(Workspace::Netlist),
                     _ => None,
+                }
+            }
+
+            /// Workspace that owns the persistent document rendered for this
+            /// route. This is deliberately separate from [`Self::workspace`]:
+            /// a specialist route keeps its canonical `?surface=` identity
+            /// while borrowing the owning workspace's chrome, dock snapshot,
+            /// shortcuts, and document context.
+            #[must_use]
+            pub const fn owner_workspace(self) -> Option<Workspace> {
+                match self {
+                    Self::VisualizationStudio => Some(Workspace::Results),
+                    _ => self.workspace(),
                 }
             }
 
@@ -471,6 +485,25 @@ mod tests {
             Err(NonPrimarySurface {
                 surface_id: SurfaceId::ReleaseCockpit,
             })
+        );
+    }
+
+    #[test]
+    fn visualization_studio_keeps_specialist_identity_with_results_ownership() {
+        assert_eq!(SurfaceId::VisualizationStudio.workspace(), None);
+        assert_eq!(
+            SurfaceId::VisualizationStudio.owner_workspace(),
+            Some(Workspace::Results)
+        );
+        assert_eq!(
+            Workspace::try_from(SurfaceId::VisualizationStudio),
+            Err(NonPrimarySurface {
+                surface_id: SurfaceId::VisualizationStudio,
+            })
+        );
+        assert_eq!(
+            SurfaceId::VisualizationStudio.deep_link(),
+            "?surface=visualization-studio"
         );
     }
 }

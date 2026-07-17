@@ -1431,6 +1431,11 @@ pub struct WorkbenchState {
     /// The owned engineering documents remain in their canonical surfaces.
     #[serde(default)]
     pub specialist_tool_browser: SpecialistToolBrowserState,
+    /// Persistent presentation document for Visualization Studio. It stores
+    /// stable viewer composition and annotation identities only; immutable
+    /// result samples remain owned by the result datasets.
+    #[serde(default)]
+    pub visualization_studio: super::visualization_studio::VisualizationStudioState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -1520,6 +1525,7 @@ impl Default for WorkbenchState {
             preflight: PreflightDialogState::default(),
             jobs_manager: JobsManagerState::default(),
             specialist_tool_browser: SpecialistToolBrowserState::default(),
+            visualization_studio: super::visualization_studio::VisualizationStudioState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             capability_matrix: CapabilityMatrixState::default(),
@@ -1589,7 +1595,7 @@ impl WorkbenchState {
         let transition = self.navigation.navigate(route, source);
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
-        if let Some(workspace) = route.surface_id().workspace() {
+        if let Some(workspace) = route.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.navigation_schema_version = NAVIGATION_SCHEMA_VERSION;
@@ -1610,7 +1616,7 @@ impl WorkbenchState {
         self.navigation.replace(route, source);
         self.reconcile_capability_matrix_route(previous, route);
         self.reconcile_specialist_tool_browser_route(previous, route);
-        if let Some(workspace) = route.surface_id().workspace() {
+        if let Some(workspace) = route.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.navigation_schema_version = NAVIGATION_SCHEMA_VERSION;
@@ -1652,7 +1658,7 @@ impl WorkbenchState {
                     SurfaceRoute::surface(SurfaceId::from_workspace(self.workspace)),
                     RouteTransitionSource::Restore,
                 );
-            } else if let Some(workspace) = current.surface_id().workspace() {
+            } else if let Some(workspace) = current.surface_id().owner_workspace() {
                 self.workspace = workspace;
             }
         }
@@ -1666,6 +1672,110 @@ impl WorkbenchState {
             );
         }
         self.specialist_tool_browser.normalize();
+        self.normalize_visualization_studio();
+    }
+
+    /// Repair presentation-only Visualization Studio state restored from a
+    /// prior or malformed session. Stable pane order is preserved; duplicate
+    /// or zero identities are reassigned instead of silently dropping a
+    /// configured viewer or annotation.
+    fn normalize_visualization_studio(&mut self) {
+        let studio = &mut self.visualization_studio;
+        studio.zoom = if studio.zoom.is_finite() {
+            studio.zoom.clamp(0.25, 8.0)
+        } else {
+            1.0
+        };
+        studio.revision = studio.revision.max(1);
+        studio.tile_memory_mib = studio.tile_memory_mib.clamp(64, 16_384);
+        studio.significant_digits = studio.significant_digits.clamp(3, 17);
+
+        if crate::results::viewer_catalog::viewer_document(&studio.selected_viewer_document)
+            .is_none()
+        {
+            studio.selected_viewer_document = "viewer-waveform".to_owned();
+        }
+
+        let greatest_restored_identity = studio
+            .panes
+            .iter()
+            .map(|pane| pane.id)
+            .chain(studio.annotations.iter().map(|annotation| annotation.id))
+            .chain(studio.markers.iter().map(|marker| marker.id))
+            .max()
+            .unwrap_or_default();
+        let mut next_identity = studio
+            .next_identity
+            .max(greatest_restored_identity.saturating_add(1))
+            .max(1);
+        let mut used = HashSet::new();
+
+        studio.panes.retain_mut(|pane| {
+            let canonical_document_id = result_viewer_document_id(pane.viewer);
+            if pane.viewer_document_id != canonical_document_id {
+                pane.viewer_document_id = canonical_document_id.to_owned();
+            }
+            if pane.id != 0 && used.insert(pane.id) {
+                return true;
+            }
+            let Some(replacement) = allocate_restored_identity(&used, &mut next_identity) else {
+                return false;
+            };
+            pane.id = replacement;
+            used.insert(replacement);
+            true
+        });
+
+        studio.annotations.retain_mut(|annotation| {
+            if !annotation.x.is_finite() {
+                return false;
+            }
+            if annotation.id != 0 && used.insert(annotation.id) {
+                return true;
+            }
+            let Some(replacement) = allocate_restored_identity(&used, &mut next_identity) else {
+                return false;
+            };
+            annotation.id = replacement;
+            used.insert(replacement);
+            true
+        });
+
+        studio.markers.retain_mut(|marker| {
+            if !marker.x.is_finite() || !marker.y.is_finite() {
+                return false;
+            }
+            if marker.id != 0 && used.insert(marker.id) {
+                return true;
+            }
+            let Some(replacement) = allocate_restored_identity(&used, &mut next_identity) else {
+                return false;
+            };
+            marker.id = replacement;
+            marker.label = format!("M{replacement}");
+            used.insert(replacement);
+            true
+        });
+
+        if studio
+            .active_pane
+            .is_none_or(|id| !studio.panes.iter().any(|pane| pane.id == id))
+        {
+            studio.active_pane = studio.panes.first().map(|pane| pane.id);
+        }
+        if let Some(active) = studio.active_pane
+            && let Some(pane) = studio.panes.iter().find(|pane| pane.id == active)
+        {
+            studio.selected_viewer_document = pane.viewer_document_id.clone();
+        }
+        studio.next_identity = used
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or_default()
+            .saturating_add(1)
+            .max(next_identity)
+            .max(1);
     }
 
     pub fn record_route_diagnostic(&mut self, diagnostic: impl Into<String>) {
@@ -1707,7 +1817,7 @@ impl WorkbenchState {
         let transition = self.navigation.go_back(source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
-        if let Some(workspace) = transition.current.surface_id().workspace() {
+        if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.close_drawer();
@@ -1733,7 +1843,7 @@ impl WorkbenchState {
         let transition = self.navigation.go_back_steps(count, source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
-        if let Some(workspace) = transition.current.surface_id().workspace() {
+        if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.close_drawer();
@@ -1763,7 +1873,7 @@ impl WorkbenchState {
         let transition = self.navigation.go_forward_steps(count, source)?;
         self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
-        if let Some(workspace) = transition.current.surface_id().workspace() {
+        if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.close_drawer();
@@ -1945,8 +2055,8 @@ impl WorkbenchState {
     }
 
     fn reconcile_workspace_layout(&mut self, previous: SurfaceRoute, current: SurfaceRoute) {
-        let previous_workspace = previous.surface_id().workspace();
-        let current_workspace = current.surface_id().workspace();
+        let previous_workspace = previous.surface_id().owner_workspace();
+        let current_workspace = current.surface_id().owner_workspace();
         if previous_workspace == current_workspace {
             return;
         }
@@ -2031,6 +2141,28 @@ impl WorkbenchState {
     }
 }
 
+fn allocate_restored_identity(used: &HashSet<u64>, next_identity: &mut u64) -> Option<u64> {
+    while *next_identity == 0 || used.contains(next_identity) {
+        *next_identity = next_identity.checked_add(1)?;
+    }
+    let allocated = *next_identity;
+    *next_identity = next_identity.saturating_add(1);
+    Some(allocated)
+}
+
+const fn result_viewer_document_id(viewer: super::ResultViewer) -> &'static str {
+    match viewer {
+        super::ResultViewer::Waves => "viewer-waveform",
+        super::ResultViewer::Bode | super::ResultViewer::Nyquist => "viewer-bode",
+        super::ResultViewer::Fft | super::ResultViewer::NoiseContrib => "viewer-spectrum",
+        super::ResultViewer::Eye => "eye-viewer",
+        super::ResultViewer::Hist => "viewer-histogram",
+        super::ResultViewer::Op | super::ResultViewer::Specs => "viewer-table",
+        super::ResultViewer::Smith => "viewer-smith",
+        super::ResultViewer::PoleZero => "viewer-pz",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2039,6 +2171,144 @@ mod tests {
     #[test]
     fn canonical_workspace_order_is_stable() {
         assert_eq!(Workspace::ALL.len(), 7);
+    }
+
+    #[test]
+    fn visualization_studio_presentation_round_trips_with_the_workbench() {
+        let mut state = WorkbenchState::default();
+        state.visualization_studio.section =
+            super::super::visualization_studio::VisualizationSection::Axes;
+        state.visualization_studio.tool = super::super::visualization_studio::ViewerTool::Pan;
+        state.visualization_studio.zoom = 2.5;
+        state.visualization_studio.selected_viewer_document = "viewer-bode".to_owned();
+
+        let encoded = serde_json::to_string(&state).expect("workbench serializes");
+        let restored: WorkbenchState =
+            serde_json::from_str(&encoded).expect("visualization document restores");
+
+        assert_eq!(
+            restored.visualization_studio.section,
+            super::super::visualization_studio::VisualizationSection::Axes
+        );
+        assert_eq!(
+            restored.visualization_studio.tool,
+            super::super::visualization_studio::ViewerTool::Pan
+        );
+        assert_eq!(restored.visualization_studio.zoom, 2.5);
+        assert_eq!(
+            restored.visualization_studio.selected_viewer_document,
+            "viewer-bode"
+        );
+    }
+
+    #[test]
+    fn legacy_workbench_defaults_the_visualization_document() {
+        let mut encoded = serde_json::to_value(WorkbenchState::default()).unwrap();
+        encoded
+            .as_object_mut()
+            .expect("workbench is an object")
+            .remove("visualization_studio");
+
+        let restored: WorkbenchState = serde_json::from_value(encoded).unwrap();
+        assert_eq!(restored.visualization_studio.zoom, 1.0);
+        assert_eq!(
+            restored.visualization_studio.selected_viewer_document,
+            "viewer-waveform"
+        );
+        assert!(restored.visualization_studio.panes.is_empty());
+    }
+
+    #[test]
+    fn restored_visualization_document_repairs_bounds_and_identities() {
+        use super::super::visualization_studio::{VisualizationAnnotation, VisualizationPane};
+        use crate::product::DatasetId;
+
+        let mut state = WorkbenchState::default();
+        let dataset_id = DatasetId::new();
+        state.visualization_studio.zoom = 99.0;
+        state.visualization_studio.selected_viewer_document = "removed-viewer".to_owned();
+        state.visualization_studio.next_identity = 0;
+        state.visualization_studio.revision = 0;
+        state.visualization_studio.active_pane = Some(42);
+        state.visualization_studio.panes = vec![
+            VisualizationPane {
+                id: 42,
+                viewer: super::super::ResultViewer::Waves,
+                viewer_document_id: "removed-viewer".to_owned(),
+                dataset_id,
+                analysis_sequence: 1,
+                x_link: None,
+                cursor_group: None,
+                page: "Page 1".to_owned(),
+            },
+            VisualizationPane {
+                id: 42,
+                viewer: super::super::ResultViewer::Bode,
+                viewer_document_id: "viewer-bode".to_owned(),
+                dataset_id,
+                analysis_sequence: 1,
+                x_link: None,
+                cursor_group: None,
+                page: "Page 1".to_owned(),
+            },
+        ];
+        state.visualization_studio.annotations = vec![VisualizationAnnotation {
+            id: 42,
+            dataset_id,
+            analysis_sequence: 1,
+            x: 0.0,
+            text: "threshold".to_owned(),
+        }];
+
+        state.normalize_visualization_studio();
+
+        assert_eq!(state.visualization_studio.zoom, 8.0);
+        assert_eq!(state.visualization_studio.revision, 1);
+        assert_eq!(
+            state.visualization_studio.selected_viewer_document,
+            "viewer-waveform"
+        );
+        assert_eq!(state.visualization_studio.panes.len(), 2);
+        assert_eq!(state.visualization_studio.panes[0].id, 42);
+        assert_eq!(
+            state.visualization_studio.panes[0].viewer_document_id,
+            "viewer-waveform"
+        );
+        let identities = state
+            .visualization_studio
+            .panes
+            .iter()
+            .map(|pane| pane.id)
+            .chain(
+                state
+                    .visualization_studio
+                    .annotations
+                    .iter()
+                    .map(|annotation| annotation.id),
+            )
+            .collect::<HashSet<_>>();
+        assert_eq!(identities.len(), 3);
+        assert_eq!(state.visualization_studio.active_pane, Some(42));
+        assert!(
+            state.visualization_studio.next_identity > identities.iter().copied().max().unwrap()
+        );
+    }
+
+    #[test]
+    fn visualization_studio_is_a_persistent_surface_not_an_application_modal() {
+        let mut state = WorkbenchState::default();
+        state.navigation.replace(
+            SurfaceRoute::surface(SurfaceId::VisualizationStudio),
+            RouteTransitionSource::Restore,
+        );
+        state.workspace = Workspace::Results;
+
+        assert_eq!(
+            state.current_route().surface_id(),
+            SurfaceId::VisualizationStudio
+        );
+        assert_eq!(state.workspace, Workspace::Results);
+        assert!(!state.application_modal_open());
     }
 
     #[test]

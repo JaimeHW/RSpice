@@ -122,6 +122,12 @@ pub enum Command {
     AccountOrganization,
     License,
     SpecialistToolBrowser,
+    VisualizationStudio,
+    AddVisualizationPane,
+    VisualizationTraceManager,
+    VisualizationCursorManager,
+    VisualizationDocumentProperties,
+    ExportVisualizationDocument,
     FeatureAvailability,
     InteroperabilityMatrix,
     About,
@@ -425,6 +431,32 @@ impl Command {
                 "Specialist tool browser…",
                 "Navigate",
             ),
+            Self::VisualizationStudio => spec(
+                "visualization-studio",
+                "Open Visualization Studio",
+                "Navigate",
+            ),
+            Self::AddVisualizationPane => spec(
+                "visualization-add-pane",
+                "Add visualization pane",
+                "Results",
+            ),
+            Self::VisualizationTraceManager => {
+                spec("visualization-trace-manager", "Trace manager", "Results")
+            }
+            Self::VisualizationCursorManager => {
+                spec("visualization-cursor-manager", "Cursor manager", "Results")
+            }
+            Self::VisualizationDocumentProperties => spec(
+                "visualization-document-properties",
+                "Document properties",
+                "Results",
+            ),
+            Self::ExportVisualizationDocument => spec(
+                "visualization-export-document",
+                "Export document",
+                "Results",
+            ),
             Self::FeatureAvailability => spec(
                 "feature-availability",
                 "Product capability and platform matrix…",
@@ -583,6 +615,21 @@ impl Command {
             }
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
+            }
+            Self::VisualizationStudio => state.project_lifecycle.project_open,
+            Self::AddVisualizationPane
+            | Self::VisualizationTraceManager
+            | Self::VisualizationCursorManager
+            | Self::ExportVisualizationDocument => {
+                state.workbench.current_route().surface_id()
+                    == super::SurfaceId::VisualizationStudio
+                    && state.project_lifecycle.project_open
+                    && state.simulation.has_results()
+            }
+            Self::VisualizationDocumentProperties => {
+                state.workbench.current_route().surface_id()
+                    == super::SurfaceId::VisualizationStudio
+                    && state.project_lifecycle.project_open
             }
             Self::ExportWaveformsCsv => state.simulation.has_results(),
             Self::VerificationPage(page) if !page.is_operational() => false,
@@ -1099,6 +1146,20 @@ impl Command {
             Self::AccountOrganization => super::account_organization::open(app),
             Self::License => app.open_license_dialog(),
             Self::SpecialistToolBrowser => super::specialist_tool_browser::open(app),
+            Self::VisualizationStudio => super::visualization_studio::open(app),
+            Self::AddVisualizationPane => super::visualization_studio::open_add_pane(app),
+            Self::VisualizationTraceManager => {
+                super::visualization_studio::open_trace_manager(app);
+            }
+            Self::VisualizationCursorManager => {
+                super::visualization_studio::open_cursor_manager(app);
+            }
+            Self::VisualizationDocumentProperties => {
+                super::visualization_studio::open_document_properties(app);
+            }
+            Self::ExportVisualizationDocument => {
+                super::visualization_studio::export_document(app);
+            }
             Self::FeatureAvailability => {
                 let route = super::SurfaceRoute::surface(super::SurfaceId::FeatureAvailability);
                 if let Err(error) = app
@@ -1392,6 +1453,12 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AccountOrganization,
     Command::License,
     Command::SpecialistToolBrowser,
+    Command::VisualizationStudio,
+    Command::AddVisualizationPane,
+    Command::VisualizationTraceManager,
+    Command::VisualizationCursorManager,
+    Command::VisualizationDocumentProperties,
+    Command::ExportVisualizationDocument,
     Command::FeatureAvailability,
     Command::InteroperabilityMatrix,
     Command::About,

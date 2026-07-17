@@ -74,6 +74,10 @@ pub mod ui;
 /// application chrome, responsive composition, and top-level navigation.
 pub mod workbench;
 
+/// Versioned visualization documents, immutable dataset bindings, exact-data
+/// queries, viewer compatibility, and progressive result operations.
+pub mod results;
+
 /// Canonical commercial product model, typed identities, command outcomes,
 /// and fail-closed object lifecycles. This layer is UI-framework independent.
 pub mod product;
