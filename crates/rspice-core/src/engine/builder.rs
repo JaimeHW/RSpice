@@ -3154,6 +3154,7 @@ impl Engine {
 
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
+        self.ensure_valid_configuration()?;
         let mut startup_validated;
         let netlist = if netlist.startup_directives.is_empty() {
             netlist

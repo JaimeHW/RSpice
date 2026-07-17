@@ -4,6 +4,9 @@ use thiserror::Error;
 /// Simulation errors
 #[derive(Debug, Error)]
 pub enum SimulationError {
+    #[error("Invalid simulation configuration: {0}")]
+    Configuration(#[from] super::SimulationConfigError),
+
     #[error("Circuit error: {0}")]
     Circuit(String),
 

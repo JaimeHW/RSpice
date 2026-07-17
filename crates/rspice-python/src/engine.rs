@@ -24,7 +24,9 @@ use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, FreqVariation, PoleZeroAnalysisType, PoleZeroTransferType,
     StepCommand, StepSweep, StepTarget,
 };
-use rspice_core::{AbortSignal, Engine, SimulationConfigOverrides, resolve_simulation_config};
+use rspice_core::{
+    AbortSignal, Engine, SimulationConfig, SimulationConfigOverrides, resolve_simulation_config,
+};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -1251,15 +1253,14 @@ impl PyEngine {
     ///     >>> engine = Engine(SimulationConfig(tolerance=1e-12))
     #[new]
     #[pyo3(signature = (config=None))]
-    pub fn new(config: Option<PySimulationConfig>) -> Self {
-        let inner = match config {
-            Some(cfg) => Engine::new(cfg.inner),
-            None => Engine::default(),
-        };
-        Self {
+    pub fn new(config: Option<PySimulationConfig>) -> PyResult<Self> {
+        let config = config.map_or_else(SimulationConfig::default, |cfg| cfg.inner);
+        let inner =
+            Engine::try_new(config).map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
             inner,
             active_runs: ActiveRuns::default(),
-        }
+        })
     }
 
     /// Cancel every simulation currently running through this Engine.

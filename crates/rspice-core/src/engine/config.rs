@@ -38,6 +38,16 @@ pub enum SimulationConfigError {
         /// Configured maximum timestep.
         max_timestep: Value,
     },
+    /// GMIN continuation was configured to move away from its target.
+    #[error(
+        "convergence_config.gmin_initial ({gmin_initial}) must be greater than or equal to convergence_config.gmin_target ({gmin_target})"
+    )]
+    InvalidGminRange {
+        /// Starting conductance used by GMIN stepping.
+        gmin_initial: Value,
+        /// Final conductance target.
+        gmin_target: Value,
+    },
     /// The explicitly requested first transient step exceeds the hard maximum.
     #[error(
         "transient_initial_timestep ({initial_timestep}) must be less than or equal to max_timestep ({max_timestep})"
@@ -370,6 +380,12 @@ impl ConvergenceConfig {
     pub fn validate(&self) -> Result<(), SimulationConfigError> {
         validate_positive("convergence_config.gmin_initial", self.gmin_initial)?;
         validate_positive("convergence_config.gmin_target", self.gmin_target)?;
+        if self.gmin_initial < self.gmin_target {
+            return Err(SimulationConfigError::InvalidGminRange {
+                gmin_initial: self.gmin_initial,
+                gmin_target: self.gmin_target,
+            });
+        }
         validate_positive(
             "convergence_config.junction_gmin_target",
             self.junction_gmin_target,

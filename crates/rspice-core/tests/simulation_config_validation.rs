@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use rspice_core::{Engine, SimulationConfig, SimulationConfigError};
+use rspice_core::{Engine, Netlist, SimulationConfig, SimulationConfigError, SimulationError};
 
 #[test]
 fn default_configuration_is_valid() {
@@ -77,6 +77,17 @@ fn nested_convergence_and_bypass_settings_are_validated() {
             ..
         })
     ));
+
+    let mut reversed_gmin = SimulationConfig::default();
+    reversed_gmin.convergence_config.gmin_initial = 1.0e-15;
+    reversed_gmin.convergence_config.gmin_target = 1.0e-12;
+    assert_eq!(
+        reversed_gmin.validate(),
+        Err(SimulationConfigError::InvalidGminRange {
+            gmin_initial: 1.0e-15,
+            gmin_target: 1.0e-12,
+        })
+    );
 }
 
 #[test]
@@ -126,4 +137,31 @@ fn digital_delay_selector_is_closed_over_documented_values() {
         invalid.validate(),
         Err(SimulationConfigError::InvalidDigitalDelayType(4))
     );
+}
+
+#[test]
+fn compatibility_constructor_cannot_execute_invalid_configuration() {
+    let engine = Engine::new(SimulationConfig {
+        max_iterations: 0,
+        ..SimulationConfig::default()
+    });
+    assert!(matches!(
+        engine.configuration_error(),
+        Some(SimulationConfigError::InvalidCount {
+            field: "max_iterations",
+            value: 0,
+        })
+    ));
+
+    let netlist = Netlist::parse("invalid config guard\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n")
+        .expect("fixture parses");
+    assert!(matches!(
+        engine.run_dc_op(&netlist),
+        Err(SimulationError::Configuration(
+            SimulationConfigError::InvalidCount {
+                field: "max_iterations",
+                value: 0,
+            }
+        ))
+    ));
 }

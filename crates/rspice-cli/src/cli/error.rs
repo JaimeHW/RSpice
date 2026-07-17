@@ -224,9 +224,44 @@ impl From<rspice_core::error::ParseError> for CliError {
 
 impl From<rspice_core::SimulationError> for CliError {
     fn from(err: rspice_core::SimulationError) -> Self {
-        CliError::SimulationError {
-            message: err.to_string(),
-            analysis: None,
+        match err {
+            rspice_core::SimulationError::Configuration(error) => error.into(),
+            other => CliError::SimulationError {
+                message: other.to_string(),
+                analysis: None,
+            },
         }
+    }
+}
+
+impl From<rspice_core::SimulationConfigError> for CliError {
+    fn from(err: rspice_core::SimulationConfigError) -> Self {
+        CliError::ConfigError {
+            message: err.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn engine_configuration_errors_use_configuration_exit_code() {
+        let error = CliError::from(rspice_core::SimulationConfigError::InvalidCount {
+            field: "max_iterations",
+            value: 0,
+        });
+
+        assert_eq!(error.exit_code(), ExitCode::ConfigError);
+        assert!(error.to_string().contains("max_iterations"));
+
+        let wrapped = CliError::from(rspice_core::SimulationError::Configuration(
+            rspice_core::SimulationConfigError::InvalidCount {
+                field: "max_iterations",
+                value: 0,
+            },
+        ));
+        assert_eq!(wrapped.exit_code(), ExitCode::ConfigError);
     }
 }

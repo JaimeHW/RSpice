@@ -558,6 +558,7 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
     use rspice_core::engine::SimulationError as CoreSimulationError;
 
     let (kind, iterations) = match &err {
+        CoreSimulationError::Configuration(_) => ("configuration", None),
         CoreSimulationError::Circuit(_) => ("circuit", None),
         CoreSimulationError::Solver(_) => ("solver", None),
         CoreSimulationError::Netlist(_) => ("netlist", None),

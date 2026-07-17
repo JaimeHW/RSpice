@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 /// Main simulation engine
 pub struct Engine {
     pub(crate) config: SimulationConfig,
+    config_error: Option<SimulationConfigError>,
 }
 
 impl Engine {
@@ -35,7 +36,11 @@ impl Engine {
 
     /// Create a new engine with the given configuration
     pub fn new(config: SimulationConfig) -> Self {
-        Self { config }
+        let config_error = config.validate().err();
+        Self {
+            config,
+            config_error,
+        }
     }
 
     /// Create an engine only when its complete configuration is valid.
@@ -46,7 +51,26 @@ impl Engine {
     /// configurations internally.
     pub fn try_new(config: SimulationConfig) -> Result<Self, SimulationConfigError> {
         config.validate()?;
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            config_error: None,
+        })
+    }
+
+    /// Return the construction-time configuration error, if any.
+    ///
+    /// This lets compatibility callers that use [`Self::new`] preflight an
+    /// engine without starting simulation work. Every circuit-building run
+    /// also enforces the same check.
+    pub fn configuration_error(&self) -> Option<&SimulationConfigError> {
+        self.config_error.as_ref()
+    }
+
+    pub(crate) fn ensure_valid_configuration(&self) -> Result<(), SimulationError> {
+        match &self.config_error {
+            Some(error) => Err(error.clone().into()),
+            None => Ok(()),
+        }
     }
 
     /// Get a reference to the simulation configuration

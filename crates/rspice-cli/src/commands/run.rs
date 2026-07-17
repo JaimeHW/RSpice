@@ -903,7 +903,7 @@ fn run_deck(
     }
 
     let sim_config = build_sim_config(args, config, netlist);
-    let engine = Engine::new(sim_config);
+    let engine = Engine::try_new(sim_config)?;
     let ctx = RunContext::new(&engine, netlist, args, config, verbose, quiet, run_label)?;
 
     let base_name = args
