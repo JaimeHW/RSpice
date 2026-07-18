@@ -1041,6 +1041,9 @@ impl Engine {
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
         let is_strictly_linear_transient = !circuit.has_nonlinear_devices()
             || circuit.has_only_memoryless_linear_xspice_nonlinearity();
+        let uses_inductor_correction = !circuit.inductors.is_empty()
+            || !circuit.coupled_inductor_pairs.is_empty()
+            || !circuit.multi_winding_transformers.is_empty();
         // ngspice's flat transient Newton: when junction devices replace
         // their own iterate voltages (legacy GP pnjlim in update), the full
         // node step is the algorithm; per-iteration node-delta clamps walk
@@ -2325,40 +2328,35 @@ impl Engine {
 
                 // Solve and check convergence
                 let newton_solve_start = crate::time_compat::Instant::now();
-                let uses_inductor_correction = !circuit.inductors.is_empty()
-                    || !circuit.coupled_inductor_pairs.is_empty()
-                    || !circuit.multi_winding_transformers.is_empty();
-                let mut solve_rhs = if uses_inductor_correction {
-                    matrix.correction_rhs(&rhs, &new_solution)
+                let solve_result = if uses_inductor_correction {
+                    matrix
+                        .correction_rhs(&rhs, &new_solution)
+                        .and_then(|mut correction_rhs| {
+                            circuit.stabilize_inductor_transient_correction_rhs(
+                                &mut correction_rhs,
+                                &new_solution,
+                                dt,
+                                &coeff,
+                            );
+                            let correction = if prefer_dense_solver {
+                                matrix.solve_dense(&correction_rhs)
+                            } else {
+                                matrix.solve(&correction_rhs)
+                            }?;
+                            Ok(correction
+                                .into_iter()
+                                .zip(&new_solution)
+                                .map(|(correction, iterate)| correction + iterate)
+                                .collect())
+                        })
+                } else if prefer_dense_solver {
+                    // Keep the ordinary transient hot path allocation-free:
+                    // correction RHS ownership is needed only for inductive
+                    // rows, while direct solves can borrow the stamped RHS.
+                    matrix.solve_dense(&rhs)
                 } else {
-                    Ok(rhs.clone())
+                    matrix.solve(&rhs)
                 };
-                if let Ok(correction_rhs) = solve_rhs.as_mut()
-                    && uses_inductor_correction
-                {
-                    circuit.stabilize_inductor_transient_correction_rhs(
-                        correction_rhs,
-                        &new_solution,
-                        dt,
-                        &coeff,
-                    );
-                }
-                let solve_result = solve_rhs.and_then(|solve_rhs| {
-                    let solved = if prefer_dense_solver {
-                        matrix.solve_dense(&solve_rhs)
-                    } else {
-                        matrix.solve(&solve_rhs)
-                    }?;
-                    if uses_inductor_correction {
-                        Ok(solved
-                            .into_iter()
-                            .zip(&new_solution)
-                            .map(|(correction, iterate)| correction + iterate)
-                            .collect())
-                    } else {
-                        Ok(solved)
-                    }
-                });
                 let newton_solve_elapsed = newton_solve_start.elapsed();
                 total_solve_nanos += newton_solve_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_SOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
