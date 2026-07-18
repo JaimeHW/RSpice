@@ -168,7 +168,12 @@ impl Engine {
                 }
             }
             SourceSpec::Sin { delay, .. } => {
-                Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+                // Xyce 7.10 SinData inherits SourceData's no-op breakpoint
+                // implementation.  Its delay remains part of the waveform,
+                // but it is not registered with StepErrorControl.
+                if dialect != crate::engine::SpiceDialect::Xyce {
+                    Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+                }
             }
             SourceSpec::Pwl {
                 points,
@@ -285,6 +290,13 @@ impl Engine {
                 }
             }
             SourceSpec::Exp { td1, td2, .. } => {
+                // Xyce 7.10 ExpData inherits SourceData's no-op breakpoint
+                // implementation.  Preserve ngspice/native edge scheduling,
+                // but do not introduce timestep boundaries that Xyce itself
+                // does not request when running in its compatibility dialect.
+                if dialect == crate::engine::SpiceDialect::Xyce {
+                    return;
+                }
                 // Match the waveform runtime: omitted or zero delays
                 // resolve to tstep-based defaults (ngspice vsrcload.c).
                 let step_default = tstep_hint.max(1e-18);
@@ -301,10 +313,18 @@ impl Engine {
                 Self::add_breakpoint_if_in_range(breakpoints, td1, tstop);
                 Self::add_breakpoint_if_in_range(breakpoints, td2, tstop);
             }
-            // SFFM/AM are exactly 0 until TD and generally discontinuous
-            // there (ngspice vsrcload.c), so the switch-on instant must be
-            // a timestep boundary.
-            SourceSpec::Sffm { delay, .. } | SourceSpec::Am { delay, .. } => {
+            // SFFM is exactly 0 until TD and generally discontinuous there
+            // (ngspice vsrcload.c), so native/ngspice operation schedules the
+            // switch-on instant. Xyce 7.10 SFFMData inherits SourceData's
+            // no-op breakpoint implementation.
+            SourceSpec::Sffm { delay, .. } => {
+                if dialect != crate::engine::SpiceDialect::Xyce {
+                    Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+                }
+            }
+            // AM is an ngspice/RSpice extension rather than a Xyce 7.10
+            // SourceData family, so retain its established edge scheduling.
+            SourceSpec::Am { delay, .. } => {
                 Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
             }
         }
@@ -621,26 +641,91 @@ mod tests {
     }
 
     #[test]
-    fn sin_sources_schedule_delay_breakpoints() {
-        let mut breakpoints = BreakpointManager::new();
-        let spec = crate::netlist::SourceSpec::Sin {
-            offset: 0.0,
-            amplitude: 1.0,
-            frequency: 1.0e6,
-            delay: 10.0e-9,
-            damping: 0.0,
-            phase: 0.0,
+    fn smooth_delayed_source_breakpoints_follow_dialect_policy() {
+        let specs = [
+            crate::netlist::SourceSpec::Sin {
+                offset: 0.0,
+                amplitude: 1.0,
+                frequency: 1.0e6,
+                delay: 10.0e-9,
+                damping: 0.0,
+                phase: 0.0,
+            },
+            crate::netlist::SourceSpec::Sffm {
+                offset: 0.0,
+                amplitude: 1.0,
+                carrier_freq: 1.0e6,
+                modulation_index: 0.5,
+                signal_freq: 100.0e3,
+                delay: 10.0e-9,
+                phase_modulation: 0.0,
+                phase_carrier: 0.0,
+            },
+        ];
+
+        for spec in &specs {
+            for dialect in [
+                crate::engine::SpiceDialect::BestAvailable,
+                crate::engine::SpiceDialect::Ngspice,
+            ] {
+                let mut breakpoints = BreakpointManager::new();
+                Engine::add_source_spec_breakpoints(
+                    &mut breakpoints,
+                    spec,
+                    100.0e-9,
+                    1.0e-9,
+                    dialect,
+                );
+                assert_delays_close(breakpoints.times(), &[10.0e-9]);
+            }
+
+            let mut xyce_breakpoints = BreakpointManager::new();
+            Engine::add_source_spec_breakpoints(
+                &mut xyce_breakpoints,
+                spec,
+                100.0e-9,
+                1.0e-9,
+                crate::engine::SpiceDialect::Xyce,
+            );
+            assert!(xyce_breakpoints.times().is_empty());
+        }
+    }
+
+    #[test]
+    fn exponential_source_breakpoints_follow_dialect_policy() {
+        let spec = crate::netlist::SourceSpec::Exp {
+            v1: 0.0,
+            v2: 10.0,
+            td1: 3.0e-3,
+            tau1: 10.0e-3,
+            td2: 200.0e-3,
+            tau2: 10.0e-3,
         };
 
+        let mut xyce_breakpoints = BreakpointManager::new();
         Engine::add_source_spec_breakpoints(
-            &mut breakpoints,
+            &mut xyce_breakpoints,
             &spec,
-            100.0e-9,
-            1.0e-9,
-            crate::engine::SpiceDialect::BestAvailable,
+            300.0e-3,
+            100.0e-6,
+            crate::engine::SpiceDialect::Xyce,
         );
+        assert!(xyce_breakpoints.times().is_empty());
 
-        assert_delays_close(breakpoints.times(), &[10.0e-9]);
+        for dialect in [
+            crate::engine::SpiceDialect::BestAvailable,
+            crate::engine::SpiceDialect::Ngspice,
+        ] {
+            let mut breakpoints = BreakpointManager::new();
+            Engine::add_source_spec_breakpoints(
+                &mut breakpoints,
+                &spec,
+                300.0e-3,
+                100.0e-6,
+                dialect,
+            );
+            assert_delays_close(breakpoints.times(), &[3.0e-3, 200.0e-3]);
+        }
     }
 
     #[test]

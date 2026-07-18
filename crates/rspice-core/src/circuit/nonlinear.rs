@@ -16,7 +16,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     ekv3s: Ekv3Mosfets,
     vdmoses: Vdmoses,
     jfets: Vec<crate::device::Jfet>,
-    xyce_team_memristors: Vec<XyceTeamMemristorBinding>,
+    xyce_memristors: Vec<XyceMemristorBinding>,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
     generic_switches: Vec<crate::device::GenericSwitch>,
@@ -144,7 +144,7 @@ impl CircuitData {
             || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
-            || !self.xyce_team_memristors.is_empty()
+            || !self.xyce_memristors.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || !self.generic_switches.is_empty()
@@ -225,12 +225,11 @@ impl CircuitData {
         }
     }
 
-    /// Select whether a rank-deficient TEAM state equation may receive its
-    /// deterministic operating-point gauge. This never replaces an active
-    /// physical state equation and is disabled for real transient steps,
-    /// where the private Q(x) companion supplies the dynamic row.
-    pub(crate) fn set_xyce_team_operating_point_mode(&mut self, operating_point: bool) {
-        self.xyce_team_operating_point_mode = operating_point;
+    /// Select the family-specific operating-point state equation. This is
+    /// disabled for real transient steps, where the private Q(x) companion
+    /// supplies the dynamic row.
+    pub(crate) fn set_xyce_memristor_operating_point_mode(&mut self, operating_point: bool) {
+        self.xyce_memristor_operating_point_mode = operating_point;
     }
 
     pub(crate) fn reset_b3soi_operating_point_history(&mut self) {
@@ -337,7 +336,7 @@ impl CircuitData {
             || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
-            || !self.xyce_team_memristors.is_empty()
+            || !self.xyce_memristors.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self
@@ -386,7 +385,7 @@ impl CircuitData {
             || !self.ekv26s.is_empty()
             || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
-            || !self.xyce_team_memristors.is_empty()
+            || !self.xyce_memristors.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self
@@ -505,7 +504,7 @@ impl CircuitData {
             ekv3s: self.ekv3s.clone(),
             vdmoses: self.vdmoses.clone(),
             jfets: self.jfets.clone(),
-            xyce_team_memristors: self.xyce_team_memristors.clone(),
+            xyce_memristors: self.xyce_memristors.clone(),
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
             generic_switches: self.generic_switches.clone(),
@@ -541,7 +540,7 @@ impl CircuitData {
         self.ekv3s = snapshot.ekv3s;
         self.vdmoses = snapshot.vdmoses;
         self.jfets = snapshot.jfets;
-        self.xyce_team_memristors = snapshot.xyce_team_memristors;
+        self.xyce_memristors = snapshot.xyce_memristors;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
         self.generic_switches = snapshot.generic_switches;
@@ -730,7 +729,7 @@ impl CircuitData {
         for jfet in &self.jfets {
             jfet.stamp_direct(matrix, rhs, voltages);
         }
-        self.stamp_xyce_team_memristors(matrix, rhs, voltages)?;
+        self.stamp_xyce_memristors(matrix, rhs, voltages)?;
         let mut stamper = StaticMatrixStamper { matrix, rhs };
         // B3SOIDD devices use the generic stamper path (1-indexed -> 0-indexed
         // handled by StaticMatrixStamper). Their DC conductance/current stamp is
@@ -781,7 +780,7 @@ impl CircuitData {
         Ok(())
     }
 
-    fn stamp_xyce_team_memristors(
+    fn stamp_xyce_memristors(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -790,7 +789,7 @@ impl CircuitData {
         #[inline]
         fn value_at(solution: &[Value], node: NodeId) -> Result<Value, String> {
             solution_node_voltage(solution, node)
-                .ok_or_else(|| format!("TEAM memristor node {node} is outside the solution vector"))
+                .ok_or_else(|| format!("Xyce memristor node {node} is outside the solution vector"))
         }
 
         #[inline]
@@ -812,14 +811,20 @@ impl CircuitData {
             rhs[row - 1] += equivalent_rhs;
         }
 
-        for binding in &self.xyce_team_memristors {
+        for binding in &self.xyce_memristors {
             let v_pos = value_at(solution, binding.node_pos)?;
             let v_neg = value_at(solution, binding.node_neg)?;
             let x = value_at(solution, binding.node_x)?;
             let cache = binding
                 .device
-                .evaluate(v_pos, v_neg, x)
-                .map_err(|error| format!("TEAM memristor '{}': {error}", binding.name))?;
+                .evaluate(v_pos, v_neg, x, self.xyce_memristor_operating_point_mode)
+                .map_err(|error| {
+                    format!(
+                        "{} memristor '{}': {error}",
+                        binding.device.family_name(),
+                        binding.name
+                    )
+                })?;
             let variables = [v_pos, v_neg, x];
             let nodes = [binding.node_pos, binding.node_neg, binding.node_x];
 
@@ -839,19 +844,8 @@ impl CircuitData {
                 stamp_row(matrix, rhs, nodes[row_index], &columns, equivalent_rhs);
             }
 
-            let mut row_jacobian = cache.jacobian[2];
-            let mut state_residual = cache.residual[2];
-            if self.xyce_team_operating_point_mode
-                && state_residual == 0.0
-                && row_jacobian.iter().all(|derivative| *derivative == 0.0)
-            {
-                // Within the threshold deadband, F_x is identically zero and
-                // a DC operating point does not determine x. Select x=0 as a
-                // gauge only for that rank-deficient row. Transient stamping
-                // disables this mode so dQ/dt remains the governing equation.
-                row_jacobian = [0.0, 0.0, 1.0];
-                state_residual = x;
-            }
+            let row_jacobian = cache.jacobian[2];
+            let state_residual = cache.residual[2];
             let equivalent_rhs = row_jacobian
                 .iter()
                 .zip(variables)
@@ -879,6 +873,49 @@ impl CircuitData {
         for switch in &mut self.generic_switches {
             switch.stamp_time_dependent(time, &mut stamper);
         }
+    }
+
+    /// Commit generic-switch store vectors after a transient timepoint is
+    /// accepted. Trial Newton stamps intentionally remain rollback-free and
+    /// continue to observe the previous accepted hysteresis state.
+    pub(crate) fn accept_generic_switch_transient_step(&mut self) {
+        for switch in &mut self.generic_switches {
+            switch.accept_transient_step();
+        }
+    }
+
+    /// Seed generic-switch accepted store history from the operating point,
+    /// mirroring Xyce's constant-history initialization before transient time
+    /// integration begins.
+    pub(crate) fn initialize_generic_switch_transient_history(&mut self) {
+        for switch in &mut self.generic_switches {
+            switch.initialize_transient_history();
+        }
+    }
+
+    /// Capture generic-switch last/current/next store vectors and accepted
+    /// conductance in stable circuit insertion order.
+    pub(crate) fn generic_switch_transient_store_snapshots(&self) -> Vec<[Value; 4]> {
+        self.generic_switches
+            .iter()
+            .map(crate::device::GenericSwitch::transient_store_snapshot)
+            .collect()
+    }
+
+    /// Restore generic-switch transient stores after checkpoint shape and
+    /// numeric validation has completed.
+    pub(crate) fn restore_generic_switch_transient_store_snapshots(
+        &mut self,
+        snapshots: &[[Value; 4]],
+    ) {
+        debug_assert_eq!(self.generic_switches.len(), snapshots.len());
+        for (switch, &snapshot) in self.generic_switches.iter_mut().zip(snapshots) {
+            switch.restore_transient_store_snapshot(snapshot);
+        }
+    }
+
+    pub(crate) fn generic_switch_count(&self) -> usize {
+        self.generic_switches.len()
     }
 
     /// Stamp behavioral sources with the given analysis time.

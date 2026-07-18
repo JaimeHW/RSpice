@@ -5,6 +5,17 @@
 use super::*;
 
 impl Engine {
+    /// Whether ngspice's device-local CKTterr charge walks own transient
+    /// timestep control for this integration front.
+    ///
+    /// Xyce accepted-solution LTE is deliberately exclusive: OneStep/Gear12
+    /// returns only the weighted solution-correction norm, not a second
+    /// compact-device charge norm.
+    #[inline]
+    pub(super) fn uses_ngspice_charge_truncation(lte_estimator: &LteEstimator) -> bool {
+        !lte_estimator.uses_accepted_solution_reference()
+    }
+
     #[inline]
     pub(super) fn ngspice_vbic_truncation_factor(method: IntegrationMethod, order: u8) -> Value {
         match order.max(1) {
@@ -2040,6 +2051,24 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::Netlist;
+    use crate::netlist::TransientLteReference;
+
+    #[test]
+    fn accepted_solution_lte_excludes_ngspice_device_charge_truncation() {
+        let xyce = LteEstimator::with_tolerances_and_reference(
+            1.0e-3,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        let native = LteEstimator::with_tolerances_and_reference(
+            1.0e-3,
+            1.0e-6,
+            TransientLteReference::PredictorLocal,
+        );
+
+        assert!(!Engine::uses_ngspice_charge_truncation(&xyce));
+        assert!(Engine::uses_ngspice_charge_truncation(&native));
+    }
 
     fn build_truncation_circuit(deck: &str) -> crate::circuit::Circuit {
         let netlist = Netlist::parse(deck).expect("deck parses");

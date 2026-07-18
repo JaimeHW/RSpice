@@ -213,15 +213,23 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn transient_newton_iteration_budget(
-        transient_max_iterations: usize,
-        startup_recovery: bool,
-    ) -> usize {
-        // ngspice's NIiter() raises any smaller iteration limit to 100
-        // (niiter.c) for every Newton solve, transient timepoints included.
-        let standard_budget = transient_max_iterations
-            .max(1)
-            .max(NGSPICE_NIITER_MIN_ITERATIONS);
+    pub(super) fn transient_newton_iteration_budget(&self, startup_recovery: bool) -> usize {
+        let standard_budget = match self.config.spice_dialect {
+            // Xyce's NOX transient parameter set owns an independent MAXSTEP
+            // budget whose 7.10 default is 20.
+            SpiceDialect::Xyce => self
+                .config
+                .transient_nonlinear_max_iterations
+                .unwrap_or(20)
+                .max(1),
+            // ngspice's NIiter() raises any smaller iteration limit to 100
+            // (niiter.c) for every Newton solve, transient timepoints included.
+            SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self
+                .config
+                .transient_max_iterations
+                .max(1)
+                .max(NGSPICE_NIITER_MIN_ITERATIONS),
+        };
         if startup_recovery {
             standard_budget.min(128)
         } else {

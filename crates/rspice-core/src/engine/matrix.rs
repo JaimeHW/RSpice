@@ -52,9 +52,9 @@ impl Engine {
             }
         }
 
-        // Xyce capacitor IC branches use voltage-source incidence during the
-        // operating point and a physical lead-current observation row during
-        // transient/small-signal analyses. Reserve the union of both.
+        // Xyce capacitor IC branches enforce the initial voltage during the
+        // operating point and carry the physical terminal-KCL current during
+        // transient/small-signal analyses. Reserve the union of both stamps.
         for (index, branch_ordinal) in circuit
             .capacitors
             .ic_branch_indices
@@ -236,9 +236,9 @@ impl Engine {
             }
         }
 
-        // Native Xyce TEAM memristors couple both terminals and the implicit
+        // Native Xyce memristors couple both terminals and the implicit
         // state unknown. Resistance is a derived store output, not an MNA row.
-        for dev in &circuit.xyce_team_memristors {
+        for dev in &circuit.xyce_memristors {
             for &row in &[dev.node_pos, dev.node_neg, dev.node_x] {
                 for &col in &[dev.node_pos, dev.node_neg, dev.node_x] {
                     if row > 0 && col > 0 {

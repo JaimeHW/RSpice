@@ -523,8 +523,6 @@ impl CircuitData {
 
     pub fn stamp_transient_linear_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.stamp_transient_linear_base_direct(matrix, rhs);
-        self.capacitors
-            .stamp_ic_observation_branch_diagonal_direct(matrix, rhs, self.num_nodes);
     }
 
     /// Stamp the linear part of the t=0 transient operating point.

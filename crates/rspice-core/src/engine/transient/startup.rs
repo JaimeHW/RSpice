@@ -120,7 +120,7 @@ impl Engine {
             circuit.stamp_generic_switches(matrix, &mut rhs, 0.0);
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
-                circuit.set_xyce_team_operating_point_mode(true);
+                circuit.set_xyce_memristor_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
                 circuit
                     .stamp_nonlinear(matrix, &mut rhs, &solution)
@@ -155,7 +155,7 @@ impl Engine {
 
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
-                circuit.set_xyce_team_operating_point_mode(true);
+                circuit.set_xyce_memristor_operating_point_mode(true);
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
@@ -202,7 +202,7 @@ impl Engine {
 
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
-                circuit.set_xyce_team_operating_point_mode(true);
+                circuit.set_xyce_memristor_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
                 circuit
                     .stamp_nonlinear(matrix, &mut rhs, &solution)
@@ -240,7 +240,7 @@ impl Engine {
 
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
-                circuit.set_xyce_team_operating_point_mode(true);
+                circuit.set_xyce_memristor_operating_point_mode(true);
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
@@ -753,6 +753,41 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn xyce_initial_timestep(
+        start_time: Value,
+        stop_time: Value,
+        requested_initial_step: Option<Value>,
+        max_step: Value,
+        next_breakpoint: Option<Value>,
+    ) -> Value {
+        // Xyce's OneStep/Gear12 initialize() treats .TRAN TSTEP as an upper
+        // bound, not a prescribed first step. At the beginning of adaptive
+        // integration it also bounds h0 to RESTARTSTEPSCALE (0.005 by
+        // default) times the distance to StepErrorControl's next stop time.
+        const XYCE_INITIAL_STEP_SCALE: Value = 0.005;
+        const XYCE_DEFAULT_INITIAL_STEP: Value = 1.0e-10;
+
+        let analysis_gap = (stop_time - start_time).max(0.0);
+        let stop_gap = next_breakpoint
+            .filter(|breakpoint| {
+                breakpoint.is_finite() && *breakpoint > start_time && *breakpoint <= stop_time
+            })
+            .map(|breakpoint| breakpoint - start_time)
+            .unwrap_or(analysis_gap);
+        let restart_bound = XYCE_INITIAL_STEP_SCALE * stop_gap;
+        let requested = requested_initial_step
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .unwrap_or(XYCE_DEFAULT_INITIAL_STEP);
+        let maximum = if max_step.is_finite() && max_step > 0.0 {
+            max_step
+        } else {
+            Value::INFINITY
+        };
+
+        requested.min(restart_bound).min(maximum).max(1.0e-30)
+    }
+
+    #[inline]
     pub(super) fn ngspice_t0_breakpoint_limited_initial_timestep(
         initial_step: Value,
         first_breakpoint_after_zero: Option<Value>,
@@ -853,6 +888,21 @@ impl Engine {
         preferred_min_timestep.min(ngspice_delmin)
     }
 
+    /// Xyce's machine-precision transient recovery floor at `current_time`.
+    ///
+    /// `StepErrorControl::updateMinTimeStep` in Xyce 7.10 recomputes this as
+    /// `currentTime * 10 * MachinePrecision()` after every accepted point.
+    /// The controller supplies its own tiny positive implementation floor at
+    /// time zero, where the canonical expression is exactly zero.
+    #[inline]
+    pub(super) fn xyce_hard_min_timestep(current_time: Value) -> Value {
+        if current_time.is_finite() {
+            current_time.abs() * 10.0 * Value::EPSILON
+        } else {
+            0.0
+        }
+    }
+
     #[inline]
     pub(super) fn ngspice_breakpoint_tolerance(hinted_max_step: Value) -> Value {
         let hinted_max_step = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
@@ -879,6 +929,24 @@ mod tests {
             (lhs - rhs).abs() <= 1e-15 * scale,
             "left={lhs:.16e}, right={rhs:.16e}"
         );
+    }
+
+    #[test]
+    fn xyce_hard_minimum_tracks_current_time_machine_precision() {
+        let transition_time = 5.380_978_556_560e-4;
+        assert_eq!(
+            Engine::xyce_hard_min_timestep(0.0).to_bits(),
+            0.0f64.to_bits()
+        );
+        assert_eq!(
+            Engine::xyce_hard_min_timestep(transition_time).to_bits(),
+            (transition_time * 10.0 * Value::EPSILON).to_bits()
+        );
+        assert_eq!(
+            Engine::xyce_hard_min_timestep(-transition_time).to_bits(),
+            (transition_time * 10.0 * Value::EPSILON).to_bits()
+        );
+        assert_eq!(Engine::xyce_hard_min_timestep(Value::NAN), 0.0);
     }
 
     #[test]
@@ -929,6 +997,27 @@ mod tests {
         assert_close(
             Engine::ngspice_t0_breakpoint_limited_initial_timestep(initial, Some(1e-9)),
             1e-11,
+        );
+    }
+
+    #[test]
+    fn xyce_initial_timestep_treats_tran_step_as_a_ceiling() {
+        assert_eq!(
+            Engine::xyce_initial_timestep(0.0, 20.0e-3, Some(0.1e-3), 2.0e-3, Some(1.0e-3))
+                .to_bits(),
+            5.0e-6f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn xyce_initial_timestep_honors_smaller_authored_and_solver_bounds() {
+        assert_eq!(
+            Engine::xyce_initial_timestep(0.0, 1.0, Some(2.0e-6), 1.0e-3, Some(1.0e-2)).to_bits(),
+            2.0e-6f64.to_bits()
+        );
+        assert_eq!(
+            Engine::xyce_initial_timestep(0.0, 1.0, Some(2.0e-3), 1.0e-6, Some(1.0e-2)).to_bits(),
+            1.0e-6f64.to_bits()
         );
     }
 

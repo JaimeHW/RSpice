@@ -703,6 +703,85 @@ impl StaticMatrix {
         Ok(residual_inf)
     }
 
+    /// Compute the unscaled infinity norm of `A*x-b` without allocating.
+    pub fn raw_residual_inf_norm(
+        &mut self,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> Result<Value, SolverError> {
+        self.raw_residual_norms(solution, rhs)
+            .map(|(inf_norm, _)| inf_norm)
+    }
+
+    /// Compute the unscaled infinity and Euclidean norms of `A*x-b` in one
+    /// matrix-vector product without allocating.
+    ///
+    /// The Euclidean norm uses the LAPACK scaled sum-of-squares recurrence so
+    /// large and small residual components cannot overflow or underflow an
+    /// otherwise finite norm. Xyce's transient NOX status tests use both norms
+    /// at every nonlinear iterate.
+    pub fn raw_residual_norms(
+        &mut self,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> Result<(Value, Value), SolverError> {
+        self.check_stamping_error()?;
+        if self.nrows != rhs.len() || self.ncols != solution.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Residual vector size mismatch: matrix is {}x{}, solution has {}, RHS has {}",
+                self.nrows,
+                self.ncols,
+                solution.len(),
+                rhs.len()
+            )));
+        }
+
+        self.residual_scratch.resize(self.nrows, 0.0);
+        self.residual_scratch.fill(0.0);
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        for col in 0..self.ncols {
+            let x = solution[col];
+            if !x.is_finite() {
+                return Ok((Value::INFINITY, Value::INFINITY));
+            }
+            if x == 0.0 {
+                continue;
+            }
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                self.residual_scratch[row_idx[idx]] += self.values[idx] * x;
+            }
+        }
+
+        let mut inf_norm = 0.0_f64;
+        let mut l2_scale = 0.0_f64;
+        let mut l2_sum_squares = 1.0_f64;
+        for (row_ax, row_rhs) in self.residual_scratch.iter().zip(rhs) {
+            let residual = row_ax - row_rhs;
+            if !residual.is_finite() {
+                return Ok((Value::INFINITY, Value::INFINITY));
+            }
+            let magnitude = residual.abs();
+            inf_norm = inf_norm.max(magnitude);
+            if magnitude != 0.0 {
+                if l2_scale < magnitude {
+                    let ratio = l2_scale / magnitude;
+                    l2_sum_squares = 1.0 + l2_sum_squares * ratio * ratio;
+                    l2_scale = magnitude;
+                } else {
+                    let ratio = magnitude / l2_scale;
+                    l2_sum_squares += ratio * ratio;
+                }
+            }
+        }
+        let l2_norm = if l2_scale == 0.0 {
+            0.0
+        } else {
+            l2_scale * l2_sum_squares.sqrt()
+        };
+        Ok((inf_norm, l2_norm))
+    }
+
     /// Compute raw residual vector `A*x - b`.
     pub fn residual_vector(
         &self,
@@ -1724,6 +1803,53 @@ mod tests {
         )
         .unwrap();
         assert_eq!(zero_error.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn raw_residual_inf_norm_is_exact_and_reuses_workspace() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 2.0), (0, 1, -1.0), (1, 0, 1.0), (1, 1, 3.0)],
+        )
+        .unwrap();
+
+        assert_eq!(
+            matrix
+                .raw_residual_inf_norm(&[2.0, 1.0], &[3.0, 5.0])
+                .unwrap(),
+            0.0
+        );
+        assert_eq!(
+            matrix
+                .raw_residual_inf_norm(&[2.0, 1.0], &[2.75, 5.5])
+                .unwrap(),
+            0.5
+        );
+        let (inf_norm, l2_norm) = matrix
+            .raw_residual_norms(&[2.0, 1.0], &[2.75, 5.5])
+            .unwrap();
+        assert_eq!(inf_norm.to_bits(), 0.5_f64.to_bits());
+        assert_eq!(l2_norm.to_bits(), 0.3125_f64.sqrt().to_bits());
+        assert!(
+            matrix
+                .raw_residual_inf_norm(&[Value::NAN, 1.0], &[3.0, 5.0])
+                .unwrap()
+                .is_infinite()
+        );
+    }
+
+    #[test]
+    fn raw_residual_l2_norm_is_stable_across_extreme_magnitudes() {
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+
+        let (inf_norm, l2_norm) = matrix
+            .raw_residual_norms(&[1.0e300, 1.0e-300], &[0.0, 0.0])
+            .unwrap();
+
+        assert_eq!(inf_norm.to_bits(), 1.0e300_f64.to_bits());
+        assert!(l2_norm.is_finite());
+        assert_eq!(l2_norm.to_bits(), 1.0e300_f64.to_bits());
     }
 
     #[test]

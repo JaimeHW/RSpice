@@ -2178,7 +2178,7 @@ impl Engine {
         }
 
         Err(SimulationError::Circuit(format!(
-            "Complete DC sensitivity does not yet support native TEAM memristor instance/model parameters (device{}: {}). The analysis was rejected to avoid returning an incomplete sensitivity result.",
+            "Complete DC sensitivity does not yet support native Xyce memristor instance/model parameters (device{}: {}). The analysis was rejected to avoid returning an incomplete sensitivity result.",
             if unsupported.len() == 1 { "" } else { "s" },
             unsupported.join(", ")
         )))
@@ -2698,7 +2698,7 @@ YMEMRISTOR mr1 out 0 team_model ivrelation=0\n\
             .to_string();
 
         assert!(message.contains("Complete DC sensitivity"), "{message}");
-        assert!(message.contains("TEAM memristor"), "{message}");
+        assert!(message.contains("Xyce memristor"), "{message}");
         assert!(message.contains("YMEMRISTOR!MR1"), "{message}");
         assert!(
             message.contains("incomplete sensitivity result"),

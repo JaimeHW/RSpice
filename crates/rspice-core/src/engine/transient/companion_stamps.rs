@@ -503,12 +503,17 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn breakpoint_landing_forces_order_one(dialect: SpiceDialect) -> bool {
+        dialect != SpiceDialect::Xyce
+    }
+
+    #[inline]
     pub(super) fn step_trapezoidal_order(
         method: IntegrationMethod,
         trap_order: u8,
-        at_breakpoint: bool,
+        force_order_one: bool,
     ) -> u8 {
-        if at_breakpoint
+        if force_order_one
             && matches!(
                 method,
                 IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear

@@ -4,9 +4,12 @@
 //! keyword-style Y devices such as `YDELAY` and `YLIN`; unsupported families
 //! must fail explicitly instead of parsing as shifted-node transmission lines.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::SpiceDialect;
+use rspice_core::analysis::IntegrationMethod;
+use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig};
 use rspice_core::netlist::{ElementKind, Netlist, flatten_netlist_with_models};
 use rspice_core::testing::{XyceRunnerConfig, XyceTestRunner};
+use rspice_core::xspice::{register_data_file, unregister_data_file};
 use std::path::PathBuf;
 
 #[test]
@@ -65,7 +68,7 @@ fn xyce_team_memristor_parses_with_canonical_device_namespace() {
 }
 
 #[test]
-fn xyce_memristor_family_selection_keeps_pem_fail_closed() {
+fn xyce_memristor_family_selection_runs_native_pem_oracles() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("tests")
@@ -81,12 +84,71 @@ fn xyce_memristor_family_selection_keeps_pem_fail_closed() {
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
-            result.passed && result.expected_unsupported,
-            "{relative} must remain a named unsupported PEM-family contract, got {result:?}"
+            result.passed && !result.expected_unsupported,
+            "{relative} must run as a native PEM numeric oracle, got {result:?}"
         );
-        assert_eq!(result.contract, "unsupported_xyce_contract");
+        assert_ne!(result.contract, "unsupported_xyce_contract");
         assert!(result.mismatches.is_empty());
     }
+}
+
+#[test]
+fn xyce_pem_whitespace_table_trajectory_matches_the_legacy_parser_contract() {
+    let deck = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/xyce/Netlists/MEMRISTOR/memristorPEM2.cir")
+        .canonicalize()
+        .expect("PEM2 deck exists");
+    let netlist = Netlist::parse_file(&deck).expect("PEM2 deck parses with source-relative tables");
+    let defaults = SimulationConfig::default();
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let config = SimulationConfig {
+        max_iterations: defaults.max_iterations.max(1200),
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        temperature: 300.15,
+        transient_initial_timestep: Some(1.0e-10),
+        integration_method: IntegrationMethod::Trapezoidal,
+        ..defaults
+    };
+    let result = Engine::new(config)
+        .run_tran(&netlist, 6.0e-3, 1.0 / (100.0 * 64.0))
+        .expect("native PEM2 transient converges");
+    let state = result
+        .try_voltage_waveform_named("YMEMRISTOR!MR1_X")
+        .expect("PEM state waveform exists");
+    for (target_time, expected_state) in [
+        (2.0e-4, 0.458),
+        (4.0e-4, 0.773),
+        (1.0e-3, 0.918),
+        (2.0e-3, 0.931),
+        (3.0e-3, 0.938),
+        (4.0e-3, 0.942),
+        (5.0e-3, 0.965),
+    ] {
+        let (index, actual_time) = result
+            .time
+            .iter()
+            .enumerate()
+            .min_by(|(_, lhs), (_, rhs)| {
+                (*lhs - target_time)
+                    .abs()
+                    .total_cmp(&(*rhs - target_time).abs())
+            })
+            .map(|(index, time)| (index, *time))
+            .expect("PEM state time grid is nonempty");
+        assert!(
+            (state[index] - expected_state).abs() <= 5.0e-2,
+            "legacy DAT state at t={actual_time:.12e} was {:.12e}, expected approximately {expected_state:.12e}",
+            state[index]
+        );
+    }
+    let final_state = *state.last().expect("PEM state waveform is nonempty");
+    assert!(
+        (final_state - 1.101_333_28).abs() <= 1.0e-2,
+        "legacy DAT parser trajectory ended at {final_state:.12e}"
+    );
 }
 
 #[test]
@@ -203,21 +265,125 @@ fn xyce_team_generated_names_reject_authored_node_collisions_order_independently
 }
 
 #[test]
-fn xyce_non_team_memristors_do_not_reserve_team_generated_namespaces() {
+fn xyce_pem_reserves_the_shared_memristor_generated_namespace() {
+    let positive = "virtual://pem/y-policy-namespace-positive";
+    let negative = "virtual://pem/y-policy-namespace-negative";
+    register_data_file(positive, "0,1\n1,0\n").expect("register PEM positive table");
+    register_data_file(negative, "0,0\n1,1\n").expect("register PEM negative table");
     let deck = "PEM namespace boundary\n\
                 VCOLLIDE ymemristor!mr1_x 0 0\n\
-                .model pem memristor level=4\n\
+                .model pem memristor level=4 fxpdata=virtual://pem/y-policy-namespace-positive fxmdata=virtual://pem/y-policy-namespace-negative\n\
                 YMEMRISTOR mr1 in 0 pem\n\
                 .op\n\
                 .end\n";
     let netlist = Netlist::parse_validated(deck).expect("PEM namespace fixture parses");
     let message = Engine::new(SimulationConfig::default())
         .build_circuit(&netlist)
-        .expect_err("unsupported PEM family must fail at the model-family boundary")
+        .expect_err("PEM must reserve the shared generated state namespace")
         .to_string();
+    unregister_data_file(positive).expect("unregister PEM positive table");
+    unregister_data_file(negative).expect("unregister PEM negative table");
     assert!(
-        message.contains("requires MEMRISTOR LEVEL=2") && !message.contains("collides"),
-        "a non-TEAM family must not reserve TEAM generated names: {message}"
+        message.contains("Xyce memristor")
+            && message.contains("state")
+            && message.contains("collides with authored node"),
+        "PEM must share the canonical Xyce memristor namespace: {message}"
+    );
+}
+
+#[test]
+fn xyce_pem_loads_virtual_tables_and_reports_malformed_resources() {
+    let positive = "virtual://pem/y-policy-load-positive";
+    let negative = "virtual://pem/y-policy-load-negative";
+    register_data_file(positive, "0,1\n1,0\n").expect("register PEM positive table");
+    register_data_file(negative, "0,0\n1,1\n").expect("register PEM negative table");
+
+    let deck = "PEM virtual table resource\n\
+                V1 in 0 0.1\n\
+                .model pem memristor level=4 fxpdata=virtual://pem/y-policy-load-positive fxmdata=virtual://pem/y-policy-load-negative\n\
+                YMEMRISTOR mr1 in 0 pem\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse_validated(deck).expect("PEM virtual-resource deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("PEM reads registered virtual tables");
+    assert_eq!(
+        result
+            .try_voltage_named("YMEMRISTOR!MR1_X")
+            .expect("PEM state exists")
+            .to_bits(),
+        1.0f64.to_bits()
+    );
+
+    register_data_file(positive, "0,1\n0,0\n").expect("replace with malformed PEM table");
+    let message = Engine::new(SimulationConfig::default())
+        .build_circuit(&netlist)
+        .expect_err("non-increasing PEM table abscissae must fail closed")
+        .to_string();
+    unregister_data_file(positive).expect("unregister PEM positive table");
+    unregister_data_file(negative).expect("unregister PEM negative table");
+    assert!(
+        message.contains("PEM memristor")
+            && message.contains("FXPDATA")
+            && message.contains(positive)
+            && message.contains("strictly increasing"),
+        "PEM table diagnostic must preserve parameter and resource context: {message}"
+    );
+}
+
+#[test]
+fn xyce_pem_dc_resistance_store_retains_its_last_defined_value() {
+    let positive = "virtual://pem/y-policy-store-positive";
+    let negative = "virtual://pem/y-policy-store-negative";
+    register_data_file(positive, "0,1\n1,0\n").expect("register PEM positive table");
+    register_data_file(negative, "0,0\n1,1\n").expect("register PEM negative table");
+    let deck = "PEM DC store persistence\n\
+                V1 in 0 0.1\n\
+                .model pem memristor level=4 fxpdata=virtual://pem/y-policy-store-positive fxmdata=virtual://pem/y-policy-store-negative\n\
+                YMEMRISTOR mr1 in 0 pem\n\
+                .end\n";
+    let netlist = Netlist::parse_validated(deck).expect("PEM store fixture parses");
+    let points = Engine::default()
+        .run_dc_sweep(&netlist, "V1", 0.1, 0.0, -0.1)
+        .expect("PEM store sweep runs");
+    unregister_data_file(positive).expect("unregister PEM positive table");
+    unregister_data_file(negative).expect("unregister PEM negative table");
+
+    assert_eq!(points.len(), 2);
+    let defined = points[0]
+        .1
+        .try_dc_observable_named("N(YMEMRISTOR!MR1:R)")
+        .expect("defined resistance store exists");
+    let held = points[1]
+        .1
+        .try_dc_observable_named("N(YMEMRISTOR!MR1:R)")
+        .expect("held resistance store exists");
+    assert!(defined.is_finite() && defined != 0.0);
+    assert_eq!(held.to_bits(), defined.to_bits());
+}
+
+#[test]
+fn xyce_pem_pss_analysis_fails_closed() {
+    let positive = "virtual://pem/y-policy-pss-positive";
+    let negative = "virtual://pem/y-policy-pss-negative";
+    register_data_file(positive, "0,1\n1,0\n").expect("register PEM positive table");
+    register_data_file(negative, "0,0\n1,1\n").expect("register PEM negative table");
+    let deck = "PEM PSS policy\n\
+                V1 in 0 SIN(0 0.1 1k)\n\
+                .model pem memristor level=4 fxpdata=virtual://pem/y-policy-pss-positive fxmdata=virtual://pem/y-policy-pss-negative\n\
+                YMEMRISTOR mr1 in 0 pem\n\
+                .end\n";
+    let netlist = Netlist::parse_validated(deck).expect("PEM PSS deck validates");
+    let message = Engine::new(SimulationConfig::default())
+        .run_pss(&netlist, rspice_core::analysis::PssConfig::default())
+        .expect_err("PEM PSS must fail until its periodic state contract is implemented")
+        .to_string();
+    unregister_data_file(positive).expect("unregister PEM positive table");
+    unregister_data_file(negative).expect("unregister PEM negative table");
+    assert!(
+        message.contains("PEM") && message.contains("periodic dynamic-state"),
+        "error must identify the unsupported PEM PSS contract: {message}"
     );
 }
 
@@ -237,7 +403,7 @@ fn xyce_team_generated_names_reject_cross_instance_aliases() {
         .expect_err("two TEAM devices must not share a generated namespace alias")
         .to_string();
     assert!(
-        message.contains("TEAM memristors")
+        message.contains("Xyce memristors")
             && message.contains("globally unique")
             && message.contains("':' and '.'"),
         "error must identify the cross-instance generated-name alias: {message}"
@@ -245,7 +411,7 @@ fn xyce_team_generated_names_reject_cross_instance_aliases() {
 }
 
 #[test]
-fn xyce_team_private_capacitor_has_internal_provenance_and_is_not_an_authored_device() {
+fn xyce_memristor_private_capacitor_has_internal_provenance_and_is_not_an_authored_device() {
     let deck = "TEAM private capacitor provenance\n\
                 V1 in 0 0.1\n\
                 C1 in 0 1p\n\
@@ -268,7 +434,10 @@ fn xyce_team_private_capacitor_has_internal_provenance_and_is_not_an_authored_de
     assert!(!capacitors.is_internal(0));
     assert!(capacitors.is_internal(1));
     assert_eq!(capacitors.names[0], "C1");
-    assert_eq!(capacitors.names[1], "__RSPICE_TEAM_Q!YMEMRISTOR!MR1");
+    assert_eq!(
+        capacitors.names[1],
+        "__RSPICE_XYCE_MEMRISTOR_Q!YMEMRISTOR!MR1"
+    );
     assert_eq!(
         circuit.device_count(),
         3,

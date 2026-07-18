@@ -55,7 +55,7 @@ use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
 mod model_policy;
 use model_policy::*;
 mod advanced_mos;
-use advanced_mos::{Bsim3v3SharedModel, Bsim4v8SharedModel};
+use advanced_mos::{Bsim3v3SharedModel, Bsim3v3SharedModelKey, Bsim4v8SharedModel};
 #[cfg(feature = "veriloga-builtins")]
 mod generated_model_routing;
 #[cfg(feature = "veriloga-builtins")]
@@ -100,6 +100,54 @@ fn validate_source_file_inputs(
             validate_source_file_inputs(source_name, transient)
         }
         _ => Ok(()),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeXyceMemristorFamily {
+    Team,
+    Pem,
+}
+
+pub(crate) fn resolve_native_xyce_memristor_family(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    element_name: &str,
+    model_name: &str,
+    temperature_kelvin: f64,
+) -> Result<NativeXyceMemristorFamily, SimulationError> {
+    ensure_model_type(
+        "Xyce memristor",
+        element_name,
+        model_name,
+        model_def,
+        &["MEMRISTOR"],
+    )?;
+    let level = resolve_supported_model_params_upper_map(
+        netlist,
+        model_def,
+        "Xyce memristor",
+        element_name,
+        model_name,
+        &["LEVEL"],
+        temperature_kelvin,
+    )?
+    .get("LEVEL")
+    .copied()
+    .unwrap_or(1.0);
+    if !level.is_finite() || (level - level.round()).abs() > 1.0e-12 {
+        return Err(SimulationError::Circuit(format!(
+            "Xyce memristor '{}' model '{}' requires an integer LEVEL selector, got LEVEL={level}",
+            element_name, model_name
+        )));
+    }
+    match level.round() as i32 {
+        2 => Ok(NativeXyceMemristorFamily::Team),
+        4 => Ok(NativeXyceMemristorFamily::Pem),
+        level => Err(SimulationError::Circuit(format!(
+            "Xyce memristor '{}' model '{}' uses unsupported MEMRISTOR LEVEL={level}; native LEVEL=2 TEAM and LEVEL=4 PEM are supported",
+            element_name, model_name
+        ))),
     }
 }
 
@@ -260,16 +308,279 @@ pub(crate) fn build_xyce_team_memristor(
     })
 }
 
-fn xyce_team_namespace_key(name: &str) -> String {
+fn xyce_pem_table_path(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    element_name: &str,
+    model_name: &str,
+    parameter: &str,
+    default: &str,
+) -> Result<String, SimulationError> {
+    let invalid_scalar_kind = model_def
+        .params
+        .iter()
+        .map(|(name, _)| name)
+        .chain(model_def.expr_params.iter().map(|(name, _)| name))
+        .chain(model_def.string_vector_params.iter().map(|(name, _)| name))
+        .chain(model_def.real_vector_params.iter().map(|(name, _)| name))
+        .chain(
+            model_def
+                .real_vector_expr_params
+                .iter()
+                .map(|(name, _)| name),
+        )
+        .chain(model_def.integer_vector_params.iter().map(|(name, _)| name))
+        .any(|name| name.eq_ignore_ascii_case(parameter));
+    if invalid_scalar_kind {
+        return Err(SimulationError::Circuit(format!(
+            "PEM memristor '{}' model '{}' parameter {parameter} must be a scalar string path",
+            element_name, model_name
+        )));
+    }
+
+    let authored = model_def
+        .string_params
+        .iter()
+        .rev()
+        .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+        .map(|(_, value)| value.clone());
+    let path = authored.unwrap_or_else(|| {
+        netlist
+            .source_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(|base| base.join(default).to_string_lossy().into_owned())
+            .unwrap_or_else(|| default.to_string())
+    });
+    if path.trim().is_empty() {
+        return Err(SimulationError::Circuit(format!(
+            "PEM memristor '{}' model '{}' parameter {parameter} must not be empty",
+            element_name, model_name
+        )));
+    }
+    Ok(path)
+}
+
+fn load_xyce_pem_table(
+    element_name: &str,
+    model_name: &str,
+    parameter: &str,
+    path: &str,
+) -> Result<crate::device::XycePemPwlTable, SimulationError> {
+    let contents = crate::xspice::read_data_file_to_string_limited(
+        path,
+        crate::device::XYCE_PEM_MAX_TABLE_BYTES,
+    )
+    .map_err(|error| {
+        SimulationError::Circuit(format!(
+            "PEM memristor '{}' model '{}' failed to read {parameter} table '{}': {error}",
+            element_name, model_name, path
+        ))
+    })?;
+    let table = crate::device::parse_xyce_7_10_legacy_two_column_table_bounded(
+        path,
+        &contents,
+        crate::device::XYCE_PEM_MAX_TABLE_POINTS,
+    )
+    .map_err(|error| {
+        SimulationError::Circuit(format!(
+            "PEM memristor '{}' model '{}' could not parse {parameter}: {error}",
+            element_name, model_name
+        ))
+    })?;
+    Ok(table)
+}
+
+fn xyce_pem_instance_params(
+    element_name: &str,
+    instance_params: &[(String, f64)],
+) -> Result<crate::device::XycePemInstanceParams, SimulationError> {
+    let mut instance = crate::device::XycePemInstanceParams::default();
+    for (name, value) in instance_params {
+        if !name.eq_ignore_ascii_case("XO") {
+            return Err(SimulationError::Circuit(format!(
+                "PEM memristor '{}' has unsupported instance parameter '{}'",
+                element_name, name
+            )));
+        }
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "PEM memristor '{}' instance parameter XO must be finite, got {value}",
+                element_name
+            )));
+        }
+        instance.x0 = *value;
+        instance.x0_given = true;
+    }
+    Ok(instance)
+}
+
+pub(crate) fn build_xyce_pem_memristor(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    element_name: &str,
+    model_name: &str,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<crate::device::XycePemMemristor, SimulationError> {
+    ensure_model_type(
+        "PEM memristor",
+        element_name,
+        model_name,
+        model_def,
+        &["MEMRISTOR"],
+    )?;
+    if resolve_native_xyce_memristor_family(
+        netlist,
+        model_def,
+        element_name,
+        model_name,
+        temperature_kelvin,
+    )? != NativeXyceMemristorFamily::Pem
+    {
+        return Err(SimulationError::Circuit(format!(
+            "PEM memristor '{}' model '{}' requires MEMRISTOR LEVEL=4",
+            element_name, model_name
+        )));
+    }
+
+    let supported = |name: &str| {
+        XYCE_PEM_MODEL_PARAMS
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    };
+    for name in model_def
+        .params
+        .iter()
+        .map(|(name, _)| name)
+        .chain(model_def.expr_params.iter().map(|(name, _)| name))
+        .chain(model_def.string_params.iter().map(|(name, _)| name))
+        .chain(model_def.string_vector_params.iter().map(|(name, _)| name))
+        .chain(model_def.real_vector_params.iter().map(|(name, _)| name))
+        .chain(
+            model_def
+                .real_vector_expr_params
+                .iter()
+                .map(|(name, _)| name),
+        )
+        .chain(model_def.integer_vector_params.iter().map(|(name, _)| name))
+    {
+        if !supported(name) {
+            return Err(SimulationError::Circuit(format!(
+                "PEM memristor '{}' model '{}' has unsupported parameter '{}'",
+                element_name, model_name, name
+            )));
+        }
+    }
+
+    let params = resolve_supported_model_params_upper_map(
+        netlist,
+        model_def,
+        "PEM memristor",
+        element_name,
+        model_name,
+        XYCE_PEM_NUMERIC_MODEL_PARAMS,
+        temperature_kelvin,
+    )?;
+    let mut model = crate::device::XycePemModelParams::default();
+    macro_rules! assign {
+        ($field:ident, $name:literal) => {
+            if let Some(value) = params.get($name) {
+                model.$field = *value;
+            }
+        };
+    }
+    assign!(v1, "V1");
+    assign!(v2, "V2");
+    assign!(i1, "I1");
+    assign!(i2, "I2");
+    assign!(g0, "G0");
+    assign!(v_p, "VP");
+    assign!(v_n, "VN");
+    assign!(d1, "D1");
+    assign!(d2, "D2");
+    assign!(c1, "C1");
+    assign!(c2, "C2");
+
+    let instance = xyce_pem_instance_params(element_name, instance_params)?;
+
+    let positive_path = xyce_pem_table_path(
+        netlist,
+        model_def,
+        element_name,
+        model_name,
+        "FXPDATA",
+        crate::device::XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE,
+    )?;
+    let negative_path = xyce_pem_table_path(
+        netlist,
+        model_def,
+        element_name,
+        model_name,
+        "FXMDATA",
+        crate::device::XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE,
+    )?;
+    let positive_table = load_xyce_pem_table(element_name, model_name, "FXPDATA", &positive_path)?;
+    let negative_table = load_xyce_pem_table(element_name, model_name, "FXMDATA", &negative_path)?;
+    crate::device::XycePemMemristor::new(model, instance, positive_table, negative_table).map_err(
+        |error| {
+            SimulationError::Circuit(format!(
+                "PEM memristor '{}' model '{}': {error}",
+                element_name, model_name
+            ))
+        },
+    )
+}
+
+pub(crate) fn build_native_xyce_memristor(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    element_name: &str,
+    model_name: &str,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<crate::device::XyceMemristor, SimulationError> {
+    match resolve_native_xyce_memristor_family(
+        netlist,
+        model_def,
+        element_name,
+        model_name,
+        temperature_kelvin,
+    )? {
+        NativeXyceMemristorFamily::Team => build_xyce_team_memristor(
+            netlist,
+            model_def,
+            element_name,
+            model_name,
+            instance_params,
+            temperature_kelvin,
+        )
+        .map(crate::device::XyceMemristor::Team),
+        NativeXyceMemristorFamily::Pem => build_xyce_pem_memristor(
+            netlist,
+            model_def,
+            element_name,
+            model_name,
+            instance_params,
+            temperature_kelvin,
+        )
+        .map(crate::device::XyceMemristor::Pem),
+    }
+}
+
+fn xyce_memristor_namespace_key(name: &str) -> String {
     name.to_ascii_uppercase().replace(':', ".")
 }
 
-/// Reject authored electrical nodes that would alias a generated TEAM state
+/// Reject authored electrical nodes that would alias a generated native Xyce memristor state
 /// node or typed store output. The complete flattened element list is scanned
 /// before construction so the result cannot depend on netlist element order.
-/// The neutral Xyce memristor syntax is filtered through the canonical builder
-/// so other model families never reserve TEAM-only generated names.
-fn validate_xyce_team_generated_namespaces(
+/// The neutral Xyce memristor syntax is filtered through canonical family
+/// resolution so unsupported model families never reserve generated names.
+/// Namespace validation deliberately does not construct devices or load their
+/// external tables; schema/equation validation remains owned by the ordinary
+/// construction pass below.
+fn validate_xyce_memristor_generated_namespaces(
     netlist: &Netlist,
     elements: &[Element],
     temperature_kelvin: f64,
@@ -277,19 +588,24 @@ fn validate_xyce_team_generated_namespaces(
     let mut authored_nodes = BTreeMap::new();
     for node in elements.iter().flat_map(|element| element.nodes.iter()) {
         authored_nodes
-            .entry(xyce_team_namespace_key(node))
+            .entry(xyce_memristor_namespace_key(node))
             .or_insert_with(|| node.clone());
     }
     let authored_devices = elements
         .iter()
-        .map(|element| (xyce_team_namespace_key(&element.name), element.name.clone()))
+        .map(|element| {
+            (
+                xyce_memristor_namespace_key(&element.name),
+                element.name.clone(),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     let mut generated_names = BTreeMap::<String, (String, &'static str, String)>::new();
 
     for element in elements {
         let ElementKind::XyceMemristor {
             model,
-            instance_params,
+            instance_params: _,
             deferred_params,
         } = &element.kind
         else {
@@ -299,12 +615,11 @@ fn validate_xyce_team_generated_namespaces(
             continue;
         };
         if !deferred_params.is_empty()
-            || build_xyce_team_memristor(
+            || resolve_native_xyce_memristor_family(
                 netlist,
                 model_def,
                 &element.name,
                 model,
-                instance_params,
                 temperature_kelvin,
             )
             .is_err()
@@ -316,16 +631,16 @@ fn validate_xyce_team_generated_namespaces(
             ("state", format!("{}_X", element.name)),
             ("store", format!("{}:R", element.name)),
         ] {
-            let namespace_key = xyce_team_namespace_key(&generated_name);
+            let namespace_key = xyce_memristor_namespace_key(&generated_name);
             if let Some(authored_node) = authored_nodes.get(&namespace_key) {
                 return Err(SimulationError::Circuit(format!(
-                    "TEAM memristor '{}' generated {namespace_kind} name '{}' collides with authored node '{}'; generated TEAM state/store names are reserved case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
+                    "Xyce memristor '{}' generated {namespace_kind} name '{}' collides with authored node '{}'; generated Xyce memristor state/store names are reserved case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
                     element.name, generated_name, authored_node
                 )));
             }
             if let Some(authored_device) = authored_devices.get(&namespace_key) {
                 return Err(SimulationError::Circuit(format!(
-                    "TEAM memristor '{}' generated {namespace_kind} name '{}' collides with authored device '{}'; generated TEAM state/store names are reserved case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
+                    "Xyce memristor '{}' generated {namespace_kind} name '{}' collides with authored device '{}'; generated Xyce memristor state/store names are reserved case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
                     element.name, generated_name, authored_device
                 )));
             }
@@ -333,7 +648,7 @@ fn validate_xyce_team_generated_namespaces(
                 generated_names.get(&namespace_key)
             {
                 return Err(SimulationError::Circuit(format!(
-                    "TEAM memristors '{}' and '{}' generate aliased {other_kind}/{} names '{}' and '{}'; generated TEAM state/store names must be globally unique case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
+                    "Xyce memristors '{}' and '{}' generate aliased {other_kind}/{} names '{}' and '{}'; generated Xyce memristor state/store names must be globally unique case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
                     other_element, element.name, namespace_kind, other_name, generated_name
                 )));
             }
@@ -2646,6 +2961,7 @@ fn add_planned_xspice_auto_bridge(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SimulationConfig;
 
     struct DiscardingStamper;
 
@@ -2659,6 +2975,118 @@ mod tests {
         }
 
         fn stamp_rhs(&mut self, _index: crate::circuit::NodeId, _value: crate::Value) {}
+    }
+
+    fn built_bsim3_equation_set(
+        level: i32,
+        model_tail: &str,
+        dialect: SpiceDialect,
+    ) -> Result<crate::device::Bsim3v3EquationSet, SimulationError> {
+        let deck = format!(
+            "BSIM3 front routing\n\
+             M1 d g s 0 MOD W=1u L=1u\n\
+             .MODEL MOD NMOS LEVEL={level} {model_tail}\n\
+             .END\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("BSIM3 routing deck parses");
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let circuit = engine.build_circuit(&netlist)?;
+        let [device] = circuit.bsim3v3.devices.as_slice() else {
+            panic!("expected exactly one native BSIM3 device")
+        };
+        Ok(device.core.model.equation_set)
+    }
+
+    #[test]
+    fn bsim3_equation_family_is_selected_by_simulator_front_and_level() {
+        use crate::device::Bsim3v3EquationSet::{NgspiceV330, XyceV322};
+
+        assert_eq!(
+            built_bsim3_equation_set(9, "", SpiceDialect::Xyce).expect("Xyce LEVEL=9 builds"),
+            XyceV322
+        );
+        assert_eq!(
+            built_bsim3_equation_set(49, "", SpiceDialect::Xyce).expect("Xyce LEVEL=49 builds"),
+            XyceV322
+        );
+        assert_eq!(
+            built_bsim3_equation_set(8, "", SpiceDialect::Ngspice).expect("ngspice LEVEL=8 builds"),
+            NgspiceV330
+        );
+        assert_eq!(
+            built_bsim3_equation_set(49, "", SpiceDialect::Ngspice)
+                .expect("ngspice LEVEL=49 builds"),
+            NgspiceV330
+        );
+        assert_eq!(
+            built_bsim3_equation_set(9, "CAPMOD=3", SpiceDialect::BestAvailable)
+                .expect("auto-detected BSIM3 LEVEL=9 builds"),
+            XyceV322
+        );
+    }
+
+    #[test]
+    fn xyce_level8_fails_closed_instead_of_changing_equation_family() {
+        let error = built_bsim3_equation_set(8, "", SpiceDialect::Xyce)
+            .expect_err("Xyce LEVEL=8 must not route to a different BSIM3 family");
+        assert!(
+            error
+                .to_string()
+                .contains("registered at LEVEL=9 and LEVEL=49")
+        );
+    }
+
+    #[test]
+    fn pem_instances_share_one_parsed_table_pair_per_model() {
+        let unique = format!(
+            "builder-pem-share-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let positive = format!("virtual://pem/{unique}/positive");
+        let negative = format!("virtual://pem/{unique}/negative");
+        crate::xspice::register_data_file(&positive, "0,1\n1,0\n")
+            .expect("register positive table");
+        crate::xspice::register_data_file(&negative, "0,0\n1,1\n")
+            .expect("register negative table");
+        let deck = format!(
+            "shared PEM tables\n\
+             .model pem memristor level=4 fxpdata={positive} fxmdata={negative}\n\
+             YMEMRISTOR first 1 0 pem xo=0.25\n\
+             YMEMRISTOR second 2 0 pem xo=0.75\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("shared PEM deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("shared PEM circuit builds");
+        crate::xspice::unregister_data_file(&positive).expect("unregister positive table");
+        crate::xspice::unregister_data_file(&negative).expect("unregister negative table");
+
+        let [first, second] = circuit.xyce_memristors.as_slice() else {
+            panic!("expected two PEM instances")
+        };
+        let crate::device::XyceMemristor::Pem(first) = &first.device else {
+            panic!("first instance is PEM")
+        };
+        let crate::device::XyceMemristor::Pem(second) = &second.device else {
+            panic!("second instance is PEM")
+        };
+        assert!(
+            first
+                .positive_table()
+                .shares_storage_with(second.positive_table())
+        );
+        assert!(
+            first
+                .negative_table()
+                .shares_storage_with(second.negative_table())
+        );
+        assert_eq!(first.instance().x0, 0.25);
+        assert_eq!(second.instance().x0, 0.75);
     }
 
     #[test]
@@ -3440,7 +3868,11 @@ impl Engine {
             );
             flat_elements = reduction.elements;
         }
-        validate_xyce_team_generated_namespaces(netlist, &flat_elements, self.config.temperature)?;
+        validate_xyce_memristor_generated_namespaces(
+            netlist,
+            &flat_elements,
+            self.config.temperature,
+        )?;
 
         // Debug: log all elements
         log::info!("Building circuit with {} elements:", flat_elements.len());
@@ -3461,10 +3893,15 @@ impl Engine {
 
         // One shared BSIM3v3.3 card + temperature block per .model name,
         // with the (W, L) size knots memoized across instances.
-        let mut bsim3v3_models: HashMap<String, Bsim3v3SharedModel> = HashMap::new();
+        let mut bsim3v3_models: HashMap<Bsim3v3SharedModelKey, Bsim3v3SharedModel> = HashMap::new();
 
         // Likewise for BSIM4 v4.8, keyed on (W, L, NF) size knots.
         let mut bsim4v8_models: HashMap<String, Bsim4v8SharedModel> = HashMap::new();
+
+        // PEM tables are immutable and may be megabytes large. Resolve and
+        // parse them once per effective model, then cheaply clone their Arc
+        // storage while applying each instance's independent XO value.
+        let mut xyce_pem_models: HashMap<String, crate::device::XycePemMemristor> = HashMap::new();
 
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
@@ -4362,7 +4799,15 @@ impl Engine {
                     // LEVEL=9 (Xyce) cards route to the native port. ngspice
                     // also uses LEVEL=9 for MOS9, so BestAvailable dispatch
                     // keeps MOS9-shaped cards on the Berkeley MOS path below.
-                    if matches!(level, 8 | 49)
+                    if level == 8 && self.config.spice_dialect == SpiceDialect::Xyce {
+                        return Err(SimulationError::Circuit(format!(
+                            "MOSFET '{}': Xyce MOSFET_B3 is registered at LEVEL=9 and LEVEL=49, \
+                             not LEVEL=8; use the model level required by the Xyce device front",
+                            element.name
+                        )));
+                    }
+                    if self.config.spice_dialect != SpiceDialect::Xyce
+                        && matches!(level, 8 | 49)
                         && let (Some(params_map), Some(device_model)) =
                             (params_map.as_ref(), model_def)
                         && let Some(version_family) =
@@ -4370,18 +4815,14 @@ impl Engine {
                     {
                         match version_family {
                             Bsim3VersionFamily::LegacyV31Metadata(version) => {
-                                if self.config.spice_dialect != SpiceDialect::Xyce {
-                                    return Err(SimulationError::Circuit(format!(
-                                        "MOSFET '{}': BSIM3 VERSION={version} LEVEL={level} \
-                                         requires a distinct native BSIM3v1 port outside Xyce \
-                                         B3 compatibility mode; RSpice's BSIM3v3.3 native \
-                                         evaluator must not be used as a generic VERSION={version} \
-                                         compatibility fallback",
-                                        element.name
-                                    )));
-                                }
-                                // Xyce MOSFET_B3 treats VERSION=3.1 as accepted metadata on
-                                // its B3 evaluator; it does not switch to ngspice BSIM3v1.
+                                return Err(SimulationError::Circuit(format!(
+                                    "MOSFET '{}': BSIM3 VERSION={version} LEVEL={level} \
+                                     requires a distinct native BSIM3v1 port outside Xyce \
+                                     B3 compatibility mode; RSpice's BSIM3v3.3 native \
+                                     evaluator must not be used as a generic VERSION={version} \
+                                     compatibility fallback",
+                                    element.name
+                                )));
                             }
                             Bsim3VersionFamily::V32(version) => {
                                 return Err(SimulationError::Circuit(format!(
@@ -4430,6 +4871,13 @@ impl Engine {
                         let tnom_default_k = crate::analysis::temperature::celsius_to_kelvin(
                             netlist.options.tnom.unwrap_or(27.0),
                         );
+                        let bsim3_equation_set = if level == 9
+                            || (level == 49 && self.config.spice_dialect == SpiceDialect::Xyce)
+                        {
+                            crate::device::Bsim3v3EquationSet::XyceV322
+                        } else {
+                            crate::device::Bsim3v3EquationSet::NgspiceV330
+                        };
                         Self::build_bsim3v3(
                             &mut circuit,
                             element,
@@ -4440,6 +4888,7 @@ impl Engine {
                             deferred_params,
                             self.config.temperature,
                             tnom_default_k,
+                            bsim3_equation_set,
                             &mut bsim3v3_models,
                         )?;
                         continue;
@@ -4868,48 +5317,90 @@ impl Engine {
                 } => {
                     if !deferred_params.is_empty() {
                         return Err(SimulationError::Circuit(format!(
-                            "TEAM memristor '{}' retains unresolved instance parameter expression(s) after flattening",
+                            "Xyce memristor '{}' retains unresolved instance parameter expression(s) after flattening",
                             element.name
                         )));
                     }
                     let model_def = find_model_def(netlist, model).ok_or_else(|| {
                         SimulationError::Circuit(format!(
-                            "TEAM memristor '{}' references unknown model '{}'",
+                            "Xyce memristor '{}' references unknown model '{}'",
                             element.name, model
                         ))
                     })?;
-                    let device = build_xyce_team_memristor(
+                    let family = resolve_native_xyce_memristor_family(
                         netlist,
                         model_def,
                         &element.name,
                         model,
-                        instance_params,
                         self.config.temperature,
                     )?;
+                    let device = if family == NativeXyceMemristorFamily::Pem {
+                        let model_key = model.to_ascii_uppercase();
+                        if let Some(shared) = xyce_pem_models.get(&model_key) {
+                            let instance =
+                                xyce_pem_instance_params(&element.name, instance_params)?;
+                            crate::device::XycePemMemristor::new(
+                                *shared.model(),
+                                instance,
+                                shared.positive_table().clone(),
+                                shared.negative_table().clone(),
+                            )
+                            .map(crate::device::XyceMemristor::Pem)
+                            .map_err(|error| {
+                                SimulationError::Circuit(format!(
+                                    "PEM memristor '{}' model '{}': {error}",
+                                    element.name, model
+                                ))
+                            })?
+                        } else {
+                            let device = build_xyce_pem_memristor(
+                                netlist,
+                                model_def,
+                                &element.name,
+                                model,
+                                instance_params,
+                                self.config.temperature,
+                            )?;
+                            xyce_pem_models.insert(model_key, device.clone());
+                            crate::device::XyceMemristor::Pem(device)
+                        }
+                    } else {
+                        build_xyce_team_memristor(
+                            netlist,
+                            model_def,
+                            &element.name,
+                            model,
+                            instance_params,
+                            self.config.temperature,
+                        )
+                        .map(crate::device::XyceMemristor::Team)?
+                    };
                     let node_pos = circuit.get_or_create_node(&element.nodes[0]);
                     let node_neg = circuit.get_or_create_node(&element.nodes[1]);
                     let node_x = circuit.get_or_create_node(&format!("{}_X", element.name));
 
                     // Qx=x is exactly a unit capacitor from the hidden state
                     // unknown to ground. Reusing the canonical capacitor
-                    // pipeline gives TEAM the engine's accepted-step history,
+                    // pipeline gives every native Xyce memristor family the
+                    // engine's accepted-step history,
                     // variable-step BE/Trap/Gear companions, LTE control, and
                     // checkpoint behavior without a second integration stack.
                     circuit.capacitors.add_internal(
-                        format!("__RSPICE_TEAM_Q!{}", element.name),
+                        format!("__RSPICE_XYCE_MEMRISTOR_Q!{}", element.name),
                         node_x,
                         0,
                         1.0,
                     );
                     circuit.non_electrical_state_nodes.insert(node_x);
                     circuit
-                        .xyce_team_memristors
-                        .push(crate::circuit::XyceTeamMemristorBinding {
+                        .xyce_memristors
+                        .push(crate::circuit::XyceMemristorBinding {
                             name: element.name.clone(),
                             node_pos,
                             node_neg,
                             node_x,
                             device,
+                            resistance_store: 0.0,
                         });
                 }
                 // MESFET (GaAs FET) families share the JFET device container,
@@ -5711,6 +6202,9 @@ impl Engine {
                         tline.freq = freq_eff;
                         tline.nl = nl_eff;
                         tline.set_dc_series_resistance(dc_series_resistance);
+                        if self.config.spice_dialect == SpiceDialect::Xyce {
+                            tline.set_xyce_tra_interpolation();
+                        }
                         if let Some(params) = model_params {
                             tline.set_ltra_breakpoint_tolerances(
                                 params.rel.unwrap_or(1.0),

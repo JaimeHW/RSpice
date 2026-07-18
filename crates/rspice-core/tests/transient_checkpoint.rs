@@ -115,6 +115,135 @@ fn assert_segmented_xspice_deck_tracks(
     );
 }
 
+fn branch_index(result: &rspice_core::engine::TransientResult, name: &str) -> usize {
+    result
+        .branch_names
+        .iter()
+        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("branch '{name}' present in {:?}", result.branch_names))
+}
+
+#[test]
+fn pem_resume_exposes_checkpointed_retained_resistance_at_the_seam() {
+    let positive = "virtual://checkpoint/pem-retained-positive";
+    let negative = "virtual://checkpoint/pem-retained-negative";
+    register_data_file(positive, "0,1\n1,1\n").expect("register positive PEM table");
+    register_data_file(negative, "0,1\n1,1\n").expect("register negative PEM table");
+    let deck = format!(
+        "PEM retained store checkpoint\n\
+         V1 in 0 0.005\n\
+         .model pem memristor level=4 fxpdata={positive} fxmdata={negative}\n\
+         YMEMRISTOR mr1 in 0 pem xo=1\n\
+         .tran 0.5n 2n\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse_validated(&deck).expect("PEM checkpoint deck validates");
+    let config = SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::Trapezoidal,
+        ..Default::default()
+    };
+    let engine = Engine::new(config);
+    let (first, mut checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 1.0e-9, 0.5e-9)
+        .expect("PEM first segment completes");
+    let retained = *first.store_traces[0]
+        .values
+        .last()
+        .expect("first segment has a retained resistance");
+    assert!(retained.is_finite() && retained != 0.0);
+
+    let state_index = first
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("YMEMRISTOR!MR1_X"))
+        .expect("PEM private state node is present");
+    checkpoint.solution[state_index] = 0.0;
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 2.0e-9, 0.5e-9)
+        .expect("PEM resumed segment completes");
+    assert_eq!(
+        resumed.store_traces[0].values[0].to_bits(),
+        retained.to_bits(),
+        "the resumed seam sample must expose the checkpointed retained store"
+    );
+
+    unregister_data_file(positive).expect("unregister positive PEM table");
+    unregister_data_file(negative).expect("unregister negative PEM table");
+}
+
+#[test]
+fn xyce_generic_switch_store_history_round_trips_across_resume() {
+    let netlist = Netlist::parse_validated(
+        "generic switch checkpoint history\n\
+         V1 1 0 5\n\
+         R2 2 0 100\n\
+         SW1 1 2 SW OFF CONTROL={time/1n}\n\
+         .MODEL SW SWITCH (ON=1 ONH=0.55 OFF=0 OFFH=0.25 RON=1 ROFF=100)\n\
+         .TRAN 0 2n 0 1n\n\
+         .END\n",
+    )
+    .expect("generic-switch checkpoint deck validates");
+    let locked_grid = Arc::new(vec![
+        0.0,
+        0.2e-9,
+        0.269_311_698e-9,
+        0.274_889_451e-9,
+        0.3e-9,
+        0.6e-9,
+        1.0e-9,
+        2.0e-9,
+    ]);
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::BackwardEuler,
+        transient_initial_timestep: Some(0.2e-9),
+        locked_time_grid: Some(locked_grid),
+        ..Default::default()
+    });
+
+    let full = engine
+        .run_tran(&netlist, 2.0e-9, 1.0e-9)
+        .expect("unsegmented generic-switch run completes");
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 0.274_889_451e-9, 1.0e-9)
+        .expect("generic-switch first segment completes");
+    assert!(
+        checkpoint.to_text().contains("generic_switch_stores 1\n"),
+        "checkpoint contains the generic-switch store-vector state"
+    );
+    let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
+        .expect("generic-switch checkpoint text round-trips");
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &restored, 2.0e-9, 1.0e-9)
+        .expect("generic-switch checkpoint resumes");
+
+    let first_branch = branch_index(&first, "SW1");
+    let resumed_branch = branch_index(&resumed, "SW1");
+    assert_eq!(
+        first.branch_currents[first_branch]
+            .last()
+            .expect("first segment has a seam current")
+            .to_bits(),
+        resumed.branch_currents[resumed_branch][0].to_bits(),
+        "restored accepted conductance preserves the seam current bit-exactly"
+    );
+
+    let full_branch = branch_index(&full, "SW1");
+    for time in [0.3e-9, 0.6e-9, 1.0e-9, 2.0e-9] {
+        let expected = interpolate(&full.time, &full.branch_currents[full_branch], time);
+        let actual = interpolate(
+            &resumed.time,
+            &resumed.branch_currents[resumed_branch],
+            time,
+        );
+        assert!(
+            (expected - actual).abs() <= 1.0e-12,
+            "generic-switch resumed current at {time:e} must match the unsegmented trajectory: expected {expected:e}, got {actual:e}"
+        );
+    }
+}
+
 #[test]
 fn segmented_run_continues_the_unsegmented_trajectory() {
     let netlist = Netlist::parse(DECK).expect("deck parses");

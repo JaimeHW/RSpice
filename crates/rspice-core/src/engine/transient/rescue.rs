@@ -84,8 +84,7 @@ impl Engine {
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         let num_nodes = circuit.num_nodes();
-        let budget =
-            Self::transient_newton_iteration_budget(self.config.transient_max_iterations, false);
+        let budget = self.transient_newton_iteration_budget(false);
 
         // The DC schedule walks from a heavily shunted, nearly linear system
         // down to the configured GMIN target; the appended zero level then

@@ -302,6 +302,67 @@ impl VoltageSources {
             .fold(0.0, Value::max)
     }
 
+    /// Tightest Xyce device-provided timestep ceiling at `time`.
+    ///
+    /// Xyce 7.10's VSRC device advertises dynamic ceilings for PULSE and SIN
+    /// waveforms. Current sources deliberately do not participate because
+    /// Xyce's ISRC device does not advertise device maximum timesteps.
+    pub(crate) fn xyce_max_timestep_at(&self, time: Value) -> Option<Value> {
+        let context = self
+            .transient_context
+            .filter(|ctx| ctx.dialect == crate::engine::SpiceDialect::Xyce)?;
+
+        self.source_specs
+            .iter()
+            .filter_map(|spec| spec.as_ref())
+            .filter_map(|spec| Self::xyce_source_max_timestep_at(spec, time, Some(context)))
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .reduce(Value::min)
+    }
+
+    fn xyce_source_max_timestep_at(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        context: Option<TransientSourceContext>,
+    ) -> Option<Value> {
+        use crate::netlist::SourceSpec;
+
+        match spec {
+            SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+                Self::xyce_source_max_timestep_at(inner, time, context)
+            }
+            SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::DcAcTransient { transient, .. } => {
+                Self::xyce_source_max_timestep_at(transient, time, context)
+            }
+            SourceSpec::Pulse {
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                width_defaults_to_zero,
+                ..
+            } => {
+                let (delay, _, _, _, period) = Self::resolve_pulse_timing(
+                    *delay,
+                    *rise,
+                    *fall,
+                    *width,
+                    *period,
+                    *width_defaults_to_zero,
+                    context,
+                );
+                Some(0.1 * if time < delay { delay } else { period })
+            }
+            SourceSpec::Sin { frequency, .. } => {
+                let frequency = Self::resolve_sin_frequency(*frequency, context);
+                Some(0.1 / frequency)
+            }
+            _ => None,
+        }
+    }
+
     #[inline]
     pub fn max_dc_to_transient_delta(&self, time: Value) -> Value {
         let context = self.transient_context;
@@ -407,6 +468,15 @@ impl VoltageSources {
             .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
             .map(|tstop| 1.0 / tstop)
             .unwrap_or(1e3)
+    }
+
+    #[inline]
+    fn resolve_sin_frequency(frequency: Value, context: Option<TransientSourceContext>) -> Value {
+        if frequency.is_finite() && frequency != 0.0 {
+            frequency
+        } else {
+            Self::sin_frequency_default(context)
+        }
     }
 
     /// ngspice's analysis-scaled frequency defaults for SFFM/AM: an omitted
@@ -651,11 +721,7 @@ impl VoltageSources {
                 damping,
                 phase,
             } => {
-                let frequency = if frequency.is_finite() && *frequency != 0.0 {
-                    *frequency
-                } else {
-                    Self::sin_frequency_default(context)
-                };
+                let frequency = Self::resolve_sin_frequency(*frequency, context);
                 if time < *delay {
                     // ngspice holds VO + VA*sin(PHASE) before the delay,
                     // not the bare offset (vsrcload.c).
@@ -1503,6 +1569,141 @@ mod tests {
         let mut transient_solution = vec![1.44];
         assert!(sources.enforce_voltage_constraints(&mut transient_solution, 0.0));
         assert_close(transient_solution[0], 0.0);
+    }
+
+    #[test]
+    fn xyce_voltage_pulse_advertises_dynamic_device_max_timestep() {
+        let mut sources = VoltageSources::new();
+        sources.add_with_ac_and_spec(
+            "vin".to_string(),
+            1,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Pulse {
+                v1: 0.0,
+                v2: 1.0,
+                delay: 10.0e-9,
+                rise: 1.0e-9,
+                fall: 1.0e-9,
+                width: 10.0e-9,
+                period: 30.0e-9,
+                phase: 0.0,
+                width_defaults_to_zero: false,
+            }),
+        );
+        sources.set_transient_context_with_dialect(
+            1.0e-9,
+            100.0e-9,
+            crate::engine::SpiceDialect::Xyce,
+        );
+
+        assert_close(
+            sources.xyce_max_timestep_at(9.0e-9).expect("pre-delay cap"),
+            1.0e-9,
+        );
+        assert_close(
+            sources
+                .xyce_max_timestep_at(10.0e-9)
+                .expect("post-delay cap"),
+            3.0e-9,
+        );
+    }
+
+    #[test]
+    fn voltage_pulse_device_max_timestep_is_xyce_only() {
+        let mut sources = VoltageSources::new();
+        sources.add_with_ac_and_spec(
+            "vin".to_string(),
+            1,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Pulse {
+                v1: 0.0,
+                v2: 1.0,
+                delay: 10.0e-9,
+                rise: 1.0e-9,
+                fall: 1.0e-9,
+                width: 10.0e-9,
+                period: 30.0e-9,
+                phase: 0.0,
+                width_defaults_to_zero: false,
+            }),
+        );
+
+        sources.set_transient_context_with_dialect(
+            1.0e-9,
+            100.0e-9,
+            crate::engine::SpiceDialect::Ngspice,
+        );
+        assert_eq!(sources.xyce_max_timestep_at(0.0), None);
+
+        sources.set_transient_context(1.0e-9, 100.0e-9);
+        assert_eq!(sources.xyce_max_timestep_at(0.0), None);
+    }
+
+    #[test]
+    fn xyce_voltage_sine_advertises_period_fraction_device_max_timestep() {
+        let mut sources = VoltageSources::new();
+        sources.add_with_ac_and_spec(
+            "vin".to_string(),
+            1,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Sin {
+                offset: 0.0,
+                amplitude: 1.0,
+                frequency: 20.0e6,
+                delay: 0.0,
+                damping: 0.0,
+                phase: 0.0,
+            }),
+        );
+        sources.set_transient_context_with_dialect(
+            1.0e-9,
+            100.0e-9,
+            crate::engine::SpiceDialect::Xyce,
+        );
+
+        assert_close(sources.xyce_max_timestep_at(0.0).expect("sine cap"), 5.0e-9);
+
+        sources.source_specs[0] = Some(SourceSpec::Sin {
+            offset: 0.0,
+            amplitude: 1.0,
+            frequency: Value::NAN,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        });
+        assert_close(
+            sources
+                .xyce_max_timestep_at(0.0)
+                .expect("default-frequency sine cap"),
+            10.0e-9,
+        );
+
+        sources.source_specs[0] = Some(SourceSpec::Sin {
+            offset: 0.0,
+            amplitude: 1.0,
+            frequency: 0.0,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        });
+        assert_close(
+            sources
+                .xyce_max_timestep_at(0.0)
+                .expect("zero-frequency sine cap"),
+            10.0e-9,
+        );
     }
 
     #[test]

@@ -10,8 +10,8 @@
 use super::{Engine, SimulationError, SpiceDialect, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
-    BreakpointManager, CompanionCoefficients, IntegrationMethod, LteEstimator, TimestepController,
-    TrapGearController,
+    BreakpointManager, BreakpointStepPolicy, CompanionCoefficients, IntegrationMethod,
+    LteEstimator, TimestepController, TrapGearController,
 };
 use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::device::semiconductor::{
@@ -50,6 +50,7 @@ mod charge_stamper;
 pub(self) use charge_stamper::StaticMatrixChargeStamper;
 mod globalization;
 mod noise;
+mod nox_status;
 mod rescue;
 mod residual;
 mod startup;
@@ -78,7 +79,7 @@ struct DerivedTransientBranchCurrent {
 enum DerivedTransientBranchCurrentKind {
     LinearResistor,
     LinearCapacitor,
-    XyceTeamMemristor,
+    XyceMemristor,
     BehavioralCurrentSource,
     VoltageSwitch,
     CurrentSwitch,
@@ -86,6 +87,33 @@ enum DerivedTransientBranchCurrentKind {
 }
 
 impl Engine {
+    /// Apply Xyce's dynamic voltage-source timestep contract without changing
+    /// native or ngspice stepping. Xyce 7.10 enables `TIMEINT USEDEVICEMAX`
+    /// by default and asks each VSRC waveform for its current ceiling.
+    #[inline]
+    fn transient_device_max_timestep(
+        &self,
+        circuit: &crate::circuit::CircuitData,
+        time: Value,
+        global_max_step: Value,
+    ) -> Value {
+        if self.config.spice_dialect != SpiceDialect::Xyce
+            || !self
+                .config
+                .transient_use_device_max_timestep
+                .unwrap_or(true)
+        {
+            return global_max_step;
+        }
+
+        circuit
+            .voltage_sources
+            .xyce_max_timestep_at(time)
+            .map_or(global_max_step, |device_max| {
+                global_max_step.min(device_max)
+            })
+    }
+
     fn normalized_locked_time_grid(grid: &[Value], resume_time: Value) -> Vec<Value> {
         let mut points: Vec<Value> = grid
             .iter()
@@ -135,7 +163,7 @@ impl Engine {
                 index,
             });
         }
-        for (index, binding) in circuit.xyce_team_memristors.iter().enumerate() {
+        for (index, binding) in circuit.xyce_memristors.iter().enumerate() {
             if existing_branch_names
                 .iter()
                 .any(|existing| existing.eq_ignore_ascii_case(&binding.name))
@@ -147,7 +175,7 @@ impl Engine {
                 continue;
             }
             derived.push(DerivedTransientBranchCurrent {
-                kind: DerivedTransientBranchCurrentKind::XyceTeamMemristor,
+                kind: DerivedTransientBranchCurrentKind::XyceMemristor,
                 index,
             });
         }
@@ -234,8 +262,8 @@ impl Engine {
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 circuit.capacitors.names[branch.index].clone()
             }
-            DerivedTransientBranchCurrentKind::XyceTeamMemristor => {
-                circuit.xyce_team_memristors[branch.index].name.clone()
+            DerivedTransientBranchCurrentKind::XyceMemristor => {
+                circuit.xyce_memristors[branch.index].name.clone()
             }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
                 circuit.behavioral_sources.current_sources[branch.index]
@@ -292,21 +320,21 @@ impl Engine {
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 circuit.capacitors.i_prev[branch.index]
             }
-            DerivedTransientBranchCurrentKind::XyceTeamMemristor => {
-                let binding = &circuit.xyce_team_memristors[branch.index];
+            DerivedTransientBranchCurrentKind::XyceMemristor => {
+                let binding = &circuit.xyce_memristors[branch.index];
                 let v_pos = Self::solution_node_voltage(solution, binding.node_pos);
                 let v_neg = Self::solution_node_voltage(solution, binding.node_neg);
                 let x = Self::solution_node_voltage(solution, binding.node_x);
                 binding
                     .device
-                    .evaluate(v_pos, v_neg, x)
+                    .current_output(v_pos, v_neg, x)
                     .map_err(|error| {
                         SimulationError::Circuit(format!(
-                            "TEAM memristor '{}' output evaluation failed: {error}",
+                            "{} memristor '{}' output evaluation failed: {error}",
+                            binding.device.family_name(),
                             binding.name
                         ))
                     })?
-                    .current
             }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
                 circuit.behavioral_sources.current_sources[branch.index].evaluate(solution, time)
@@ -342,18 +370,20 @@ impl Engine {
         Ok(current)
     }
 
-    fn xyce_team_resistance_output(
-        binding: &crate::circuit::XyceTeamMemristorBinding,
+    fn xyce_memristor_resistance_output(
+        binding: &crate::circuit::XyceMemristorBinding,
         solution: &[Value],
-    ) -> Result<Value, SimulationError> {
+    ) -> Result<Option<Value>, SimulationError> {
+        let v_pos = Self::solution_node_voltage(solution, binding.node_pos);
+        let v_neg = Self::solution_node_voltage(solution, binding.node_neg);
         let x = Self::solution_node_voltage(solution, binding.node_x);
         binding
             .device
-            .resistance(x)
-            .map(|(resistance, _)| resistance)
+            .resistance_output(v_pos, v_neg, x)
             .map_err(|error| {
                 SimulationError::Circuit(format!(
-                    "TEAM memristor '{}' resistance output evaluation failed: {error}",
+                    "{} memristor '{}' resistance output evaluation failed: {error}",
+                    binding.device.family_name(),
                     binding.name
                 ))
             })
@@ -390,16 +420,18 @@ impl Engine {
         for (i, voltages) in result.voltages.iter_mut().take(num_nodes).enumerate() {
             voltages.push(solution.get(i).copied().unwrap_or(0.0));
         }
-        for (index, binding) in circuit.xyce_team_memristors.iter().enumerate() {
+        for (index, binding) in circuit.xyce_memristors.iter_mut().enumerate() {
             let trace = result.store_traces.get_mut(index).ok_or_else(|| {
                 SimulationError::Circuit(format!(
-                    "TEAM memristor '{}' resistance output channel is missing",
+                    "{} memristor '{}' resistance output channel is missing",
+                    binding.device.family_name(),
                     binding.name
                 ))
             })?;
-            trace
-                .values
-                .push(Self::xyce_team_resistance_output(binding, solution)?);
+            if let Some(resistance) = Self::xyce_memristor_resistance_output(binding, solution)? {
+                binding.resistance_store = resistance;
+            }
+            trace.values.push(binding.resistance_store);
         }
 
         let solved_branch_count = circuit.num_branches();
@@ -411,27 +443,9 @@ impl Engine {
         {
             currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
         }
-        // Keep public I(Cname) aligned with the committed companion history;
-        // this is the accepted-point current represented by the dynamic
-        // observation branch equation.
-        for (capacitor, branch_ordinal) in circuit
-            .capacitors
-            .ic_branch_indices
-            .iter()
-            .copied()
-            .enumerate()
-        {
-            let Some(branch_ordinal) = branch_ordinal else {
-                continue;
-            };
-            if let Some(current) = result
-                .branch_currents
-                .get_mut(branch_ordinal - 1)
-                .and_then(|waveform| waveform.last_mut())
-            {
-                *current = circuit.capacitors.i_prev[capacitor];
-            }
-        }
+        // Solved branch unknowns are recorded verbatim. In particular, a
+        // Xyce IC capacitor's branch is now its physical terminal-KCL current,
+        // so post-solving reconstruction would only discard precision.
         for (branch, currents) in derived_branches
             .iter()
             .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
@@ -443,6 +457,7 @@ impl Engine {
         if record_device_op_traces {
             result.record_device_op_sample(circuit.device_op_report());
         }
+        circuit.accept_generic_switch_transient_step();
         Ok(())
     }
 
@@ -744,15 +759,17 @@ impl Engine {
         let hinted_max_step = circuit
             .transient_max_step_hint
             .map_or(max_step, |hint| max_step.min(hint));
-        // Honor an explicitly configured maximum timestep (CLI --max-step,
-        // netlist options, bindings). The default constant is a sentinel for
-        // "not set" -- the same convention the CLI TOML merge uses -- so
-        // default configs keep the caller-provided step unchanged.
+        let hinted_max_step = self
+            .config
+            .transient_timeint_max_timestep
+            .filter(|bound| bound.is_finite() && *bound > 0.0)
+            .map_or(hinted_max_step, |bound| hinted_max_step.min(bound));
+        // Honor every finite explicitly configured maximum timestep (CLI
+        // --max-step, product configuration, bindings). The core default is
+        // positive infinity, so an authored value such as exactly 1 ms can
+        // never collide with an "unset" sentinel.
         let config_max_step = self.config.max_timestep;
-        let hinted_max_step = if config_max_step.is_finite()
-            && config_max_step > 0.0
-            && config_max_step != crate::constants::MAX_TIMESTEP
-        {
+        let hinted_max_step = if config_max_step.is_finite() && config_max_step > 0.0 {
             hinted_max_step.min(config_max_step)
         } else {
             hinted_max_step
@@ -889,7 +906,7 @@ impl Engine {
             && circuit.vswitches.is_empty()
             && circuit.iswitches.is_empty()
             && circuit.generic_switches.is_empty()
-            && circuit.xyce_team_memristors.is_empty()
+            && circuit.xyce_memristors.is_empty()
             && !circuit.has_xspice_devices()
             && {
                 #[cfg(feature = "veriloga")]
@@ -906,6 +923,7 @@ impl Engine {
             &circuit,
             requires_conservative_nonlinear_limiting,
         );
+        let enforce_device_convergence = self.transient_enforce_device_convergence();
         let enforce_force_candidate_safety =
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
         let is_strictly_linear_transient = !circuit.has_nonlinear_devices()
@@ -933,7 +951,14 @@ impl Engine {
             _ => None,
         });
         let breakpoint_tolerance = Self::ngspice_breakpoint_tolerance(hinted_max_step);
-        let mut breakpoints = BreakpointManager::new_with_tolerance(breakpoint_tolerance);
+        let mut breakpoints = if self.config.spice_dialect == SpiceDialect::Xyce {
+            BreakpointManager::new_with_tolerance_and_policy(
+                breakpoint_tolerance,
+                BreakpointStepPolicy::Xyce,
+            )
+        } else {
+            BreakpointManager::new_with_tolerance(breakpoint_tolerance)
+        };
         Self::collect_transient_source_breakpoints(
             &circuit,
             tstop,
@@ -959,14 +984,24 @@ impl Engine {
             .config
             .transient_initial_timestep
             .filter(|step| step.is_finite() && *step > 0.0);
-        let initial_step = configured_initial_step
-            .map(|step| step.max(1e-30))
-            .unwrap_or_else(|| {
-                Self::ngspice_t0_breakpoint_limited_initial_timestep(
-                    Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
-                    breakpoints.next_after(resume_time),
-                )
-            });
+        let initial_step = if self.config.spice_dialect == SpiceDialect::Xyce {
+            Self::xyce_initial_timestep(
+                resume_time,
+                tstop,
+                configured_initial_step.or(tran_step_hint),
+                hinted_max_step,
+                breakpoints.next_after(resume_time),
+            )
+        } else {
+            configured_initial_step
+                .map(|step| step.max(1e-30))
+                .unwrap_or_else(|| {
+                    Self::ngspice_t0_breakpoint_limited_initial_timestep(
+                        Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
+                        breakpoints.next_after(resume_time),
+                    )
+                })
+        };
         let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
             hinted_max_step,
@@ -974,10 +1009,18 @@ impl Engine {
             tran_step_hint,
         );
         let preferred_min_dt = practical_min.max(self.config.min_timestep.max(1e-15));
-        let hard_min_dt = Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt);
-        let startup_max_dt = configured_initial_step
-            .map(|step| hinted_max_step.max(step))
-            .unwrap_or(hinted_max_step);
+        let hard_min_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
+            Self::xyce_hard_min_timestep(resume_time)
+        } else {
+            Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt)
+        };
+        let startup_max_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
+            self.transient_device_max_timestep(&circuit, resume_time, hinted_max_step)
+        } else {
+            configured_initial_step
+                .map(|step| hinted_max_step.max(step))
+                .unwrap_or(hinted_max_step)
+        };
         let mut timestep = TimestepController::new_with_preferred_min(
             initial_step,
             hard_min_dt,
@@ -1059,8 +1102,9 @@ impl Engine {
             }
         };
 
-        // Initialize result storage with actual MNA node names. TEAM resistance
-        // remains a typed store trace and never enters this voltage namespace.
+        // Initialize result storage with actual MNA node names. Native Xyce
+        // memristor resistance remains a typed store trace and never enters
+        // this voltage namespace.
         let node_names = circuit.node_names_sorted();
 
         // Debug: log node names and their indices to verify alignment
@@ -1075,11 +1119,19 @@ impl Engine {
                 applied_ic
             );
         }
-        let mut store_traces = Vec::with_capacity(circuit.xyce_team_memristors.len());
-        for binding in &circuit.xyce_team_memristors {
+        if resume.is_none() {
+            // Xyce seeds both accepted store-vector history levels from the
+            // operating-point trial before the first real transient timepoint.
+            circuit.initialize_generic_switch_transient_history();
+        }
+        let mut store_traces = Vec::with_capacity(circuit.xyce_memristors.len());
+        for binding in &mut circuit.xyce_memristors {
+            if let Some(resistance) = Self::xyce_memristor_resistance_output(binding, &solution)? {
+                binding.resistance_store = resistance;
+            }
             store_traces.push(crate::engine::TransientStoreTrace {
                 name: format!("{}:R", binding.name),
-                values: vec![Self::xyce_team_resistance_output(binding, &solution)?],
+                values: vec![binding.resistance_store],
             });
         }
 
@@ -1215,8 +1267,8 @@ impl Engine {
         voltage_lte_excluded_nodes.sort_unstable();
         voltage_lte_excluded_nodes.dedup();
         let mut xyce_lte_excluded_indices = Vec::new();
-        // Capacitor lead-current observation branches are algebraic outputs,
-        // not integration states, and must never drive LTE rejection or
+        // Capacitor lead-current branches are algebraic currents, not
+        // integration states, and must never drive LTE rejection or
         // accepted-reference timestep control.
         for branch_ordinal in circuit
             .capacitors
@@ -1327,6 +1379,34 @@ impl Engine {
             checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
+            // The first resumed sample represents the accepted checkpoint
+            // state. A PEM store can deliberately retain its last finite
+            // resistance while the instantaneous conductance is zero, so its
+            // checkpointed value must replace the freshly built binding's
+            // default before the seam sample is exposed.
+            for (trace, binding) in result.store_traces.iter_mut().zip(&circuit.xyce_memristors) {
+                if let Some(first) = trace.values.first_mut() {
+                    *first = binding.resistance_store;
+                }
+            }
+            // Derived branches are initialized before checkpoint injection.
+            // Recompute their seam sample from the restored device stores so
+            // hysteretic switch currents and other state-derived observations
+            // represent the accepted checkpoint timepoint exactly.
+            let solved_branch_count = circuit.num_branches();
+            for (branch, currents) in derived_branch_currents
+                .iter()
+                .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
+            {
+                if let Some(first) = currents.first_mut() {
+                    *first = Self::derived_transient_branch_current(
+                        &mut circuit,
+                        &solution,
+                        resume_time,
+                        *branch,
+                    )?;
+                }
+            }
             // The checkpointed companion history is authoritative for the
             // accepted capacitor lead current across an integration restart.
             for (capacitor, branch_ordinal) in circuit
@@ -1542,6 +1622,14 @@ impl Engine {
         while t < tstop && total_iterations < max_total_iterations {
             let attempt_top_start = crate::time_compat::Instant::now();
             mosfet_caps_valid = false;
+            if self.config.spice_dialect == SpiceDialect::Xyce {
+                // Xyce 7.10 updates its machine-precision recovery floor from
+                // the current accepted time before every transient advance.
+                // Stiff state devices can legitimately require steps far below
+                // ngspice's max-step-derived `delmin` while crossing a narrow
+                // physical boundary layer.
+                timestep.set_hard_min_dt(Self::xyce_hard_min_timestep(t));
+            }
             // Progress logging every 2 seconds
             if last_progress_log.elapsed().as_secs() >= 2 {
                 log::info!(
@@ -1579,6 +1667,13 @@ impl Engine {
             }
 
             total_iterations += 1;
+            if locked_grid.is_none() {
+                timestep.set_max_dt(self.transient_device_max_timestep(
+                    &circuit,
+                    t,
+                    hinted_max_step,
+                ));
+            }
             let mut locked_step_lands_on_grid = locked_grid.is_some();
             let (dt, mut at_breakpoint) = match locked_grid.as_ref() {
                 Some(grid) => {
@@ -1678,6 +1773,10 @@ impl Engine {
             // append a result point and therefore remain order one; after any
             // accepted path commits the interval, native fixed Gear2 naturally
             // returns to its preserved order-two `trap_order` on the next step.
+            // Xyce clips an already-proposed interval to a breakpoint without
+            // changing that interval's order. Its integration reinitialize
+            // happens only after the landing point is accepted, so the first
+            // interval *leaving* the breakpoint is the order-one step.
             let is_first_resumed_interval = resume.is_some() && result.time.len() == 1;
             let step_trap_order = if is_first_resumed_interval {
                 1
@@ -1685,7 +1784,9 @@ impl Engine {
                 Self::step_trapezoidal_order(
                     current_method,
                     trap_order,
-                    at_breakpoint || locked_edge_order_reset,
+                    (at_breakpoint
+                        && Self::breakpoint_landing_forces_order_one(self.config.spice_dialect))
+                        || locked_edge_order_reset,
                 )
             };
             if xyce_lte_restart_first_step {
@@ -1772,12 +1873,6 @@ impl Engine {
                 new_solution.clone_from(&solution);
             }
             circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
-            Self::clip_ideal_output_common_modes(
-                &solution,
-                &mut new_solution,
-                newton_step_delta_limit,
-                &ideal_output_pairs,
-            );
             for (i, value) in new_solution.iter_mut().enumerate() {
                 let protected_ideal_output = i < num_nodes
                     && force_accept_protected_nodes
@@ -1826,6 +1921,12 @@ impl Engine {
                     &ideal_output_pairs,
                 );
             }
+            // Xyce's transient NOX solver freezes one weight per MNA unknown
+            // from the initial timepoint iterate and the previously accepted
+            // solution.  Keep those weights immutable across every Newton
+            // correction and globalization trial for this attempted step.
+            let transient_newton_update_weights =
+                self.transient_newton_update_weights(&new_solution, &solution);
             if b3soi_first_transient_handoff && result.time.len() == 1 {
                 Self::reseed_b3soi_first_transient_history(
                     &circuit,
@@ -1850,10 +1951,11 @@ impl Engine {
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
             // budget, not the DC operating-point iteration limit.
-            let tran_max_iterations = Self::transient_newton_iteration_budget(
-                self.config.transient_max_iterations,
-                startup_recovery,
-            );
+            let tran_max_iterations = self.transient_newton_iteration_budget(startup_recovery);
+            let uses_xyce_nox_status = self.config.spice_dialect == SpiceDialect::Xyce;
+            let mut xyce_nox_status = uses_xyce_nox_status
+                .then(|| nox_status::XyceTransientNoxStatus::new(tran_max_iterations));
+            let mut xyce_weighted_update_norm = None;
             let mut converged = false;
             // NOTE: an earlier fast path reused the previous accepted solution
             // without solving whenever its residual on the restamped system
@@ -1869,7 +1971,10 @@ impl Engine {
             // exactly one direct solve below, so the bypass bought one linear
             // solve per step at the cost of wrong waveforms. Removed.
             total_setup_nanos += setup_phase_start.elapsed().as_nanos();
-            for _iter in 0..tran_max_iterations {
+            // NOX evaluates the predictor at iteration zero and the candidate
+            // produced by its MAXSTEP-th solve at iteration MAXSTEP.
+            let newton_status_checks = tran_max_iterations + usize::from(uses_xyce_nox_status);
+            for _iter in 0..newton_status_checks {
                 if converged {
                     break;
                 }
@@ -1885,6 +1990,31 @@ impl Engine {
                 let iteration_delta_limit =
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = crate::time_compat::Instant::now();
+                let transient_system_context = residual::TransientSystemContext {
+                    coeff: &coeff,
+                    bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                    bjt_history: &bjt_history,
+                    jfet_history: &jfet_history,
+                    diode_history: &diode_history,
+                    diode_companion_slots: &diode_companion_slots,
+                    mosfet_history: &mosfet_history,
+                    mosfet_companion_slots: &mosfet_companion_slots,
+                    vdmos_history: &vdmos_history,
+                    vdmos_companion_slots: &vdmos_companion_slots,
+                    b3soi_history: &b3soi_history,
+                    b3soi_zero_first_transient_charge_derivative: b3soi_first_transient_handoff
+                        && result.time.len() == 1
+                        && _iter == 0,
+                    bsim3_history: &bsim3_history,
+                    bsim4_history: &bsim4_history,
+                    ekv26_history: &ekv26_history,
+                    suppress_gate_charge,
+                    baseline_diag_gmin: transient_baseline_diag_gmin,
+                    tline_dc_refs: &tline_dc_refs,
+                    coupled_tline_refs: &coupled_tline_refs,
+                    analysis_initial_step,
+                    analysis_final_step,
+                };
                 self.stamp_transient_system(
                     &mut circuit,
                     &mut matrix,
@@ -1892,36 +2022,13 @@ impl Engine {
                     &new_solution,
                     t + dt,
                     dt,
-                    &residual::TransientSystemContext {
-                        coeff: &coeff,
-                        bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
-                        bjt_history: &bjt_history,
-                        jfet_history: &jfet_history,
-                        diode_history: &diode_history,
-                        diode_companion_slots: &diode_companion_slots,
-                        mosfet_history: &mosfet_history,
-                        mosfet_companion_slots: &mosfet_companion_slots,
-                        vdmos_history: &vdmos_history,
-                        vdmos_companion_slots: &vdmos_companion_slots,
-                        b3soi_history: &b3soi_history,
-                        b3soi_zero_first_transient_charge_derivative: b3soi_first_transient_handoff
-                            && result.time.len() == 1
-                            && _iter == 0,
-                        bsim3_history: &bsim3_history,
-                        bsim4_history: &bsim4_history,
-                        ekv26_history: &ekv26_history,
-                        suppress_gate_charge,
-                        baseline_diag_gmin: transient_baseline_diag_gmin,
-                        tline_dc_refs: &tline_dc_refs,
-                        coupled_tline_refs: &coupled_tline_refs,
-                        analysis_initial_step,
-                        analysis_final_step,
-                    },
+                    &transient_system_context,
                     &mut vbic_snapshot_cache,
                     VbicCachedSnapshotReuse::NewtonBypass,
                     !nonlinear_state_matches_new_solution,
                     0.0,
                 )?;
+                nonlinear_state_matches_new_solution = true;
 
                 // Merit-gated Newton globalization: the freshly stamped
                 // system gives the true nonlinear residual at the current
@@ -1931,7 +2038,10 @@ impl Engine {
                 // are unreachable by timestep reduction alone (the cycle is
                 // driven by the static nonlinearity, not by stiffness).
                 let merit_phase_start = crate::time_compat::Instant::now();
-                if circuit.has_nonlinear_devices() && !is_strictly_linear_transient {
+                if self.config.spice_dialect != SpiceDialect::Xyce
+                    && circuit.has_nonlinear_devices()
+                    && !is_strictly_linear_transient
+                {
                     let current_merit = self
                         .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
                         .unwrap_or(Value::INFINITY);
@@ -1940,7 +2050,7 @@ impl Engine {
                             "NEWTON-MERIT t={:.6e} dt={:.3e} iter={} merit={:.6e} prev={:.6e} searching={}",
                             t,
                             dt,
-                            _iter,
+                            _iter.saturating_add(1),
                             current_merit,
                             last_stamped_merit,
                             merit_backtrack.is_some(),
@@ -2012,6 +2122,71 @@ impl Engine {
                     ));
                 }
                 total_merit_nanos += merit_phase_start.elapsed().as_nanos();
+
+                if let Some(status) = xyce_nox_status.as_mut() {
+                    let (residual_inf_norm, residual_l2_norm) =
+                        matrix.raw_residual_norms(&new_solution, &rhs)?;
+                    let device_converged = !enforce_device_convergence
+                        || !circuit.has_nonlinear_devices()
+                        || circuit.nonlinear_converged(self.device_convergence_criteria());
+                    let behavioral_converged = circuit.behavioral_linearizations_converged(
+                        &new_solution,
+                        t + dt,
+                        self.voltage_reltol(),
+                        self.voltage_abstol(),
+                        self.current_abstol(),
+                    );
+                    let decision = status.evaluate(
+                        nox_status::XyceNoxSample {
+                            iteration: _iter,
+                            residual_inf_norm,
+                            residual_l2_norm,
+                            weighted_update_norm: xyce_weighted_update_norm,
+                            device_converged,
+                        },
+                        self.transient_nonlinear_deltaxtol(),
+                        self.transient_nonlinear_rhstol(),
+                    );
+                    match decision {
+                        nox_status::XyceNoxDecision::Accepted { test, return_code }
+                            if behavioral_converged =>
+                        {
+                            log::trace!(
+                                "Xyce transient NOX accepted t={:.6e}, dt={:.3e}, iter={}, test={}, code={}",
+                                t + dt,
+                                dt,
+                                _iter,
+                                test,
+                                return_code,
+                            );
+                            total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                            converged = true;
+                            break;
+                        }
+                        nox_status::XyceNoxDecision::Accepted { .. } => {
+                            // Behavioral expressions use an internal affine
+                            // linearization that must agree at the candidate
+                            // before any positive NOX status can be committed.
+                            if _iter >= tran_max_iterations {
+                                total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                                break;
+                            }
+                        }
+                        nox_status::XyceNoxDecision::Failed { test, return_code } => {
+                            log::trace!(
+                                "Xyce transient NOX rejected t={:.6e}, dt={:.3e}, iter={}, test={}, code={}",
+                                t + dt,
+                                dt,
+                                _iter,
+                                test,
+                                return_code,
+                            );
+                            total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                            break;
+                        }
+                        nox_status::XyceNoxDecision::Continue => {}
+                    }
+                }
 
                 // Solve and check convergence
                 let newton_stamp_elapsed = newton_stamp_start.elapsed();
@@ -2122,6 +2297,20 @@ impl Engine {
                             }
                         }
 
+                        // Evaluate Xyce's update norm before RSpice's optional
+                        // component-wise recovery clipping. A clipped step is
+                        // a globalization aid, not evidence that the raw
+                        // Newton correction is small. Native/ngspice modes
+                        // retain their established post-limiting nodal test.
+                        // NOX evaluates the unsolved predictor as iteration
+                        // zero; this loop's first post-solve candidate is
+                        // therefore nonlinear iteration one.
+                        let raw_weighted_update_norm = self.transient_newton_weighted_update_norm(
+                            &new_solution,
+                            &sol,
+                            transient_newton_update_weights.as_deref(),
+                        );
+
                         if conservative_limiting_active && !junction_owns_steps {
                             // Trust-region damping is critical for stiff semiconductor
                             // nonlinearities, but it should not throttle linear decks or
@@ -2161,15 +2350,26 @@ impl Engine {
                             break;
                         }
 
-                        let voltage_converged = Self::check_voltage_convergence_with_tolerances(
-                            &new_solution[..num_nodes],
-                            &sol[..num_nodes],
-                            self.voltage_abstol(),
-                            self.voltage_reltol(),
-                        );
-                        let voltage_converged_for_acceptance = voltage_converged;
-                        let residual_converged =
-                            self.residual_convergence_met(&circuit, &mut matrix, &sol, &rhs);
+                        if uses_xyce_nox_status {
+                            // Xyce evaluates the newly solved candidate on the
+                            // next status-test pass, after restamping its true
+                            // nonlinear residual. This is nonlinear iteration
+                            // `_iter + 1`, including the MAXSTEP candidate.
+                            new_solution = sol;
+                            nonlinear_state_matches_new_solution = false;
+                            xyce_weighted_update_norm = raw_weighted_update_norm;
+                            total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
+                            continue;
+                        }
+
+                        let update_converged_for_acceptance = self
+                            .transient_newton_update_convergence_met(
+                                &new_solution,
+                                &sol,
+                                num_nodes,
+                                None,
+                                _iter.saturating_add(1),
+                            );
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
                         new_solution = sol;
@@ -2182,74 +2382,86 @@ impl Engine {
                             nonlinear_state_matches_new_solution = true;
                         }
 
-                        let device_converged = !circuit.has_nonlinear_devices()
+                        let mut device_converged = !enforce_device_convergence
+                            || !circuit.has_nonlinear_devices()
                             || circuit.nonlinear_converged(self.device_convergence_criteria());
-                        let behavioral_converged = circuit.behavioral_linearizations_converged(
+                        // This is RSpice's consistency check for its internal
+                        // behavioral-expression linearization, not a device
+                        // `isConverged` flag controlled by Xyce's
+                        // ENFORCEDEVICECONV status test.
+                        let mut behavioral_converged = circuit.behavioral_linearizations_converged(
                             &new_solution,
                             t + dt,
                             self.voltage_reltol(),
                             self.voltage_abstol(),
                             self.current_abstol(),
                         );
-                        let mut residual_converged_for_acceptance = residual_converged;
-                        if !residual_converged_for_acceptance
-                            && voltage_converged_for_acceptance
+                        let mut residual_converged_for_acceptance = false;
+                        if update_converged_for_acceptance
                             && device_converged
                             && behavioral_converged
                         {
-                            // The first residual check is against the
-                            // pre-solve linearization. If a Newton candidate
-                            // was damped, that linearized system may no longer
-                            // be exactly satisfied even though the restamped
-                            // nonlinear equations at the candidate are.
-                            self.stamp_transient_system(
-                                &mut circuit,
-                                &mut matrix,
-                                &mut rhs,
+                            // A direct solve only makes the candidate satisfy
+                            // the system linearized at the previous iterate.
+                            // Acceptance must use the true nonlinear residual:
+                            // restamp every otherwise-converged candidate at
+                            // its own state before applying the solver's
+                            // residual criterion.
+                            residual_converged_for_acceptance = self
+                                .transient_nonlinear_residual_converged(
+                                    &mut circuit,
+                                    &mut matrix,
+                                    &mut rhs,
+                                    &new_solution,
+                                    t + dt,
+                                    dt,
+                                    &residual::TransientSystemContext {
+                                        coeff: &coeff,
+                                        bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                                        bjt_history: &bjt_history,
+                                        jfet_history: &jfet_history,
+                                        diode_history: &diode_history,
+                                        diode_companion_slots: &diode_companion_slots,
+                                        mosfet_history: &mosfet_history,
+                                        mosfet_companion_slots: &mosfet_companion_slots,
+                                        vdmos_history: &vdmos_history,
+                                        vdmos_companion_slots: &vdmos_companion_slots,
+                                        b3soi_history: &b3soi_history,
+                                        b3soi_zero_first_transient_charge_derivative:
+                                            b3soi_first_transient_handoff
+                                                && result.time.len() == 1
+                                                && _iter == 0,
+                                        bsim3_history: &bsim3_history,
+                                        bsim4_history: &bsim4_history,
+                                        ekv26_history: &ekv26_history,
+                                        suppress_gate_charge,
+                                        baseline_diag_gmin: transient_baseline_diag_gmin,
+                                        tline_dc_refs: &tline_dc_refs,
+                                        coupled_tline_refs: &coupled_tline_refs,
+                                        analysis_initial_step,
+                                        analysis_final_step,
+                                    },
+                                    &mut vbic_snapshot_cache,
+                                )?;
+                            // The proof restamp refreshes nonlinear, generated,
+                            // behavioral, and XSPICE trial state at the exact
+                            // candidate. Re-evaluate convergence afterward so
+                            // limiter state advanced by that refresh cannot be
+                            // accepted through stale pre-restamp booleans.
+                            device_converged = !enforce_device_convergence
+                                || !circuit.has_nonlinear_devices()
+                                || circuit.nonlinear_converged(self.device_convergence_criteria());
+                            behavioral_converged = circuit.behavioral_linearizations_converged(
                                 &new_solution,
                                 t + dt,
-                                dt,
-                                &residual::TransientSystemContext {
-                                    coeff: &coeff,
-                                    bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
-                                    bjt_history: &bjt_history,
-                                    jfet_history: &jfet_history,
-                                    diode_history: &diode_history,
-                                    diode_companion_slots: &diode_companion_slots,
-                                    mosfet_history: &mosfet_history,
-                                    mosfet_companion_slots: &mosfet_companion_slots,
-                                    vdmos_history: &vdmos_history,
-                                    vdmos_companion_slots: &vdmos_companion_slots,
-                                    b3soi_history: &b3soi_history,
-                                    b3soi_zero_first_transient_charge_derivative:
-                                        b3soi_first_transient_handoff
-                                            && result.time.len() == 1
-                                            && _iter == 0,
-                                    bsim3_history: &bsim3_history,
-                                    bsim4_history: &bsim4_history,
-                                    ekv26_history: &ekv26_history,
-                                    suppress_gate_charge,
-                                    baseline_diag_gmin: transient_baseline_diag_gmin,
-                                    tline_dc_refs: &tline_dc_refs,
-                                    coupled_tline_refs: &coupled_tline_refs,
-                                    analysis_initial_step,
-                                    analysis_final_step,
-                                },
-                                &mut vbic_snapshot_cache,
-                                VbicCachedSnapshotReuse::NewtonBypass,
-                                false,
-                                0.0,
-                            )?;
-                            residual_converged_for_acceptance = self.residual_convergence_met(
-                                &circuit,
-                                &mut matrix,
-                                &new_solution,
-                                &rhs,
+                                self.voltage_reltol(),
+                                self.voltage_abstol(),
+                                self.current_abstol(),
                             );
                         }
                         total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 
-                        if voltage_converged_for_acceptance
+                        if update_converged_for_acceptance
                             && device_converged
                             && behavioral_converged
                             && residual_converged_for_acceptance
@@ -2284,10 +2496,15 @@ impl Engine {
                     // Check what specifically didn't converge
                     let v_conv =
                         self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
-                    let d_conv = !circuit.has_nonlinear_devices()
+                    let d_conv = !enforce_device_convergence
+                        || !circuit.has_nonlinear_devices()
                         || circuit.nonlinear_converged(self.device_convergence_criteria());
-                    let r_conv =
-                        self.residual_convergence_met(&circuit, &mut matrix, &new_solution, &rhs);
+                    let r_conv = self.transient_residual_convergence_met(
+                        &circuit,
+                        &mut matrix,
+                        &new_solution,
+                        &rhs,
+                    );
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
                         "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, max_dv={:.3e}, iter={}",
@@ -2366,7 +2583,8 @@ impl Engine {
                 if self.node_voltage_convergence_met(&solution, &new_solution, num_nodes) {
                     // Voltage settled but a device/residual criterion held the
                     // point back — the interesting bucket for criteria tuning.
-                    if !circuit.has_nonlinear_devices()
+                    if !enforce_device_convergence
+                        || !circuit.has_nonlinear_devices()
                         || circuit.nonlinear_converged(self.device_convergence_criteria())
                     {
                         failed_residual_only += 1;
@@ -2928,7 +3146,17 @@ impl Engine {
                     // need two clean accepted points before the truncation
                     // estimators can difference them meaningfully.
                     || lte_warmup_skips > 0;
-            let bjt_truncation_limit = if !linearized_startup_recovery_points
+            // Xyce OneStep/Gear12 uses ck*WRMS(x_candidate-x_predictor) as
+            // its sole compact-device LTE authority.  Its DAE-Q norm is
+            // calculated for diagnostics but is not returned by
+            // DataStore::WRMS_errorNorm, and it has no ngspice CKTterr walk.
+            // Keep every ngspice compact-charge controller out of the Xyce
+            // accepted-solution path; source/device maximum-step contracts
+            // and transmission-line limits remain independent below.
+            let use_ngspice_charge_truncation =
+                Self::uses_ngspice_charge_truncation(&lte_estimator);
+            let bjt_truncation_limit = if use_ngspice_charge_truncation
+                && !linearized_startup_recovery_points
                 && !first_accepted_transient_step
                 && has_bjts
             {
@@ -2950,63 +3178,70 @@ impl Engine {
             } else {
                 None
             };
-            let capacitor_truncation_limit =
-                if !first_accepted_transient_step && !circuit.capacitors.is_empty() {
-                    Self::capacitor_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        mosfet_history.accepted_dt_prev,
-                        mosfet_history.accepted_dt_prev_prev,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
-            let jfet_truncation_limit =
-                if !first_accepted_transient_step && !circuit.jfets.is_empty() {
-                    Self::jfet_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &jfet_history,
-                        suppress_gate_charge,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
-            let diode_truncation_limit =
-                if !first_accepted_transient_step && !circuit.diodes.is_empty() {
-                    Self::diode_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &diode_history,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
-            let mosfet_truncation_limit = if !first_accepted_transient_step
+            let capacitor_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && !circuit.capacitors.is_empty()
+            {
+                Self::capacitor_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    mosfet_history.accepted_dt_prev,
+                    mosfet_history.accepted_dt_prev_prev,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let jfet_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && !circuit.jfets.is_empty()
+            {
+                Self::jfet_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &jfet_history,
+                    suppress_gate_charge,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let diode_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && !circuit.diodes.is_empty()
+            {
+                Self::diode_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &diode_history,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let mosfet_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
                 && !suppress_gate_charge
                 && !circuit.mosfets.is_empty()
             {
@@ -3029,78 +3264,86 @@ impl Engine {
             } else {
                 None
             };
-            let vdmos_truncation_limit =
-                if !first_accepted_transient_step && !circuit.vdmoses.is_empty() {
-                    Self::vdmos_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &vdmos_history,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
-            let b3soi_truncation_limit =
-                if !first_accepted_transient_step && circuit.has_b3soi_devices() {
-                    Self::b3soi_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &b3soi_history,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
-            let bsim3_truncation_limit =
-                if !first_accepted_transient_step && circuit.has_bsim3v3_devices() {
-                    Self::bsim3_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &bsim3_history,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
-            let bsim4_truncation_limit =
-                if !first_accepted_transient_step && circuit.has_bsim4v8_devices() {
-                    Self::bsim4_ngspice_truncation_limit(
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
-                        &bsim4_history,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
-                    )
-                    .filter(|limit| limit.is_finite() && *limit > 0.0)
-                } else {
-                    None
-                };
+            let vdmos_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && !circuit.vdmoses.is_empty()
+            {
+                Self::vdmos_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &vdmos_history,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let b3soi_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && circuit.has_b3soi_devices()
+            {
+                Self::b3soi_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &b3soi_history,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let bsim3_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && circuit.has_bsim3v3_devices()
+            {
+                Self::bsim3_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &bsim3_history,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let bsim4_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && circuit.has_bsim4v8_devices()
+            {
+                Self::bsim4_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &bsim4_history,
+                    transient_lte_reltol,
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    self.transient_trtol(),
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
             let device_truncation_limit = Self::min_truncation_limit(
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(
@@ -3143,14 +3386,7 @@ impl Engine {
                 None
             };
             let candidate_truncation_limit = Self::min_truncation_limit(
-                Self::min_truncation_limit(
-                    if lte_estimator.uses_accepted_solution_reference() {
-                        None
-                    } else {
-                        device_truncation_limit
-                    },
-                    ltra_truncation_limit,
-                ),
+                Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
                 activity_limit,
             );
             total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
@@ -4002,7 +4238,7 @@ impl Engine {
             if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                 eprintln!(
                     "GRID accept t={:.12e} dt={:.6e} order={} bp={} lte={:.6e} promote={}",
-                    t, dt, step_trap_order, hit_breakpoint, lte, xyce_promotes_order_two
+                    t, dt, step_trap_order, hit_breakpoint, lte, xyce_promotes_order_two,
                 );
             }
 
@@ -4028,12 +4264,14 @@ impl Engine {
                 result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
             }
             if first_accepted_transient_step {
-                timestep.set_max_dt(hinted_max_step);
+                let accepted_max_step =
+                    self.transient_device_max_timestep(&circuit, t, hinted_max_step);
+                timestep.set_max_dt(accepted_max_step);
                 let next_dt = if lte_estimator.uses_accepted_solution_reference() {
                     // Xyce does not test LTE on the first successful transient
                     // step (`TESTFIRSTSTEP=false`), then applies its normal
                     // maximum 2x growth before later breakpoint/device caps.
-                    (dt * 2.0).min(max_step)
+                    (dt * 2.0).min(accepted_max_step)
                 } else {
                     // Preserve ngspice's initial repeated-delta behavior for
                     // native predictor-local control.
@@ -4041,6 +4279,9 @@ impl Engine {
                 };
                 timestep.force_step(next_dt);
             } else {
+                let accepted_max_step =
+                    self.transient_device_max_timestep(&circuit, t, hinted_max_step);
+                timestep.set_max_dt(accepted_max_step);
                 Self::recover_timestep_after_accepted_step(
                     &mut timestep,
                     &lte_estimator,
@@ -4048,7 +4289,7 @@ impl Engine {
                     current_method,
                     step_trap_order,
                     dt,
-                    max_step,
+                    accepted_max_step,
                     is_strictly_linear_transient,
                     expected_source_delta,
                     Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
@@ -4057,7 +4298,7 @@ impl Engine {
             }
             if hit_breakpoint {
                 let restart_dt = breakpoints.mark_breakpoint_solved(t);
-                timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
+                timestep.force_step(restart_dt.min(timestep.dt()));
                 if !lte_estimator.uses_accepted_solution_reference() && !circuit.vdmoses.is_empty()
                 {
                     lte_warmup_skips = lte_warmup_skips.max(2);
@@ -4463,6 +4704,24 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 mod tests {
     use super::*;
     use crate::{Netlist, SimulationConfig};
+
+    #[test]
+    fn xyce_preserves_order_on_breakpoint_landing_then_restarts_after_acceptance() {
+        assert!(!Engine::breakpoint_landing_forces_order_one(
+            SpiceDialect::Xyce
+        ));
+        assert!(Engine::breakpoint_landing_forces_order_one(
+            SpiceDialect::Ngspice
+        ));
+        assert_eq!(
+            Engine::step_trapezoidal_order(IntegrationMethod::Trapezoidal, 2, false),
+            2
+        );
+        assert_eq!(
+            Engine::step_trapezoidal_order(IntegrationMethod::Trapezoidal, 2, true),
+            1
+        );
+    }
 
     #[test]
     fn xyce_capacitor_ic_floating_terminal_is_constrained_at_start_then_held_by_companion() {
@@ -5001,14 +5260,22 @@ mod tests {
     }
 
     #[test]
-    fn transient_newton_iteration_budget_uses_ngspice_floor() {
+    fn transient_newton_iteration_budget_is_dialect_specific() {
         // ngspice NIiter floors every Newton call to 100 iterations.
+        let mut engine = Engine::default();
         assert_eq!(
-            Engine::transient_newton_iteration_budget(10, false),
+            engine.transient_newton_iteration_budget(false),
             NGSPICE_NIITER_MIN_ITERATIONS
         );
-        assert_eq!(Engine::transient_newton_iteration_budget(250, false), 250);
-        assert_eq!(Engine::transient_newton_iteration_budget(250, true), 128);
+        engine.config.transient_max_iterations = 250;
+        assert_eq!(engine.transient_newton_iteration_budget(false), 250);
+        assert_eq!(engine.transient_newton_iteration_budget(true), 128);
+
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        engine.config.transient_nonlinear_max_iterations = None;
+        assert_eq!(engine.transient_newton_iteration_budget(false), 20);
+        engine.config.transient_nonlinear_max_iterations = Some(7);
+        assert_eq!(engine.transient_newton_iteration_budget(false), 7);
     }
 
     #[test]
@@ -5127,6 +5394,53 @@ mod tests {
         assert!(
             free_worst > 2.0e-6,
             "default config must not silently cap the caller's max step (worst dt {free_worst:.3e})"
+        );
+    }
+
+    #[test]
+    fn xyce_timeint_delmax_tightens_the_run_maximum() {
+        let netlist =
+            crate::Netlist::parse("TIMEINT DELMAX\nV1 1 0 1\nR1 1 2 1k\nC1 2 0 1u\n.end\n")
+                .expect("deck parses");
+        let engine = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            transient_timeint_max_timestep: Some(3.0e-6),
+            ..Default::default()
+        });
+        let result = engine
+            .run_tran(&netlist, 30.0e-6, 20.0e-6)
+            .expect("transient runs");
+        let worst_dt = result
+            .time
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .fold(0.0, Value::max);
+        assert!(
+            worst_dt <= 3.0e-6 + 1.0e-15,
+            "TIMEINT DELMAX ignored: worst accepted dt {worst_dt:.3e}"
+        );
+    }
+
+    #[test]
+    fn exact_one_millisecond_configured_maximum_is_not_treated_as_unset() {
+        let netlist =
+            crate::Netlist::parse("explicit 1ms maximum\nV1 1 0 1\nR1 1 2 1k\nC1 2 0 1u\n.end\n")
+                .expect("deck parses");
+        let engine = Engine::new(crate::SimulationConfig {
+            max_timestep: 1.0e-3,
+            ..Default::default()
+        });
+        let result = engine
+            .run_tran(&netlist, 4.0e-3, 2.0e-3)
+            .expect("transient runs");
+        let worst_dt = result
+            .time
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .fold(0.0, Value::max);
+        assert!(
+            worst_dt <= 1.0e-3 + 1.0e-15,
+            "exactly 1 ms was mistaken for an unset sentinel: worst dt {worst_dt:.3e}"
         );
     }
 }

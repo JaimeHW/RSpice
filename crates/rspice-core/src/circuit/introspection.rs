@@ -415,7 +415,7 @@ impl CircuitData {
             + self.ekv3s.len()
             + self.vdmoses.len()
             + self.jfets.len()
-            + self.xyce_team_memristors.len()
+            + self.xyce_memristors.len()
             + self.vcvs.len()
             + self.vccs.len()
             + self.cccs.len()

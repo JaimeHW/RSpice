@@ -44,6 +44,26 @@ pub(super) struct TransientSystemContext<'a> {
 }
 
 impl Engine {
+    /// Test the nonlinear residual with the active transient solver's native
+    /// norm. Xyce 7.10 transient Newton uses an unscaled infinity norm of the
+    /// assembled RHS with an independent `RHSTOL` (default `1e-2`).
+    /// Native/ngspice modes retain RSpice's row-scaled residual policy.
+    pub(super) fn transient_residual_convergence_met(
+        &self,
+        circuit: &crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> bool {
+        if self.config.spice_dialect != SpiceDialect::Xyce {
+            return self.residual_convergence_met(circuit, matrix, solution, rhs);
+        }
+
+        matrix
+            .raw_residual_inf_norm(solution, rhs)
+            .is_ok_and(|norm| norm.is_finite() && norm < self.transient_nonlinear_rhstol())
+    }
+
     /// Assemble the complete transient system `A(x)·x = b(x)` at `solution`
     /// for the timepoint `time` reached with step `dt`.
     ///
@@ -98,7 +118,7 @@ impl Engine {
         vbic_reuse: VbicCachedSnapshotReuse,
         refresh_nonlinear: bool,
         extra_diag_gmin: Value,
-        generated_evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
+        evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
     ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
         matrix.clear_values();
@@ -117,9 +137,21 @@ impl Engine {
 
         circuit.refresh_jiles_atherton_inductances(solution);
         circuit.set_b3soi_operating_point_mode(false);
-        circuit.set_xyce_team_operating_point_mode(false);
+        circuit.set_xyce_memristor_operating_point_mode(false);
         if refresh_nonlinear && circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(solution);
+            if evaluation_mode
+                == crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe
+            {
+                // Native semiconductor Newton stamps apply local voltage
+                // limiting and retain the corresponding linearization cache.
+                // A convergence proof must instead evaluate every physical
+                // equation at the candidate itself, just as generated
+                // Verilog-A devices do in StaticProbe mode.
+                circuit.update_bjt_static_linearizations(solution);
+                circuit.update_b3soi_static_linearizations(solution);
+                circuit.update_jfet_static_linearizations(solution);
+            }
         }
         Self::refresh_jfet2_transient_linearizations(circuit, solution, dt, ctx.jfet_history);
 
@@ -257,16 +289,24 @@ impl Engine {
                     ctx.analysis_final_step,
                 );
             }
-            circuit
-                .stamp_nonlinear(matrix, rhs, solution)
-                .map_err(SimulationError::Circuit)?;
+            if evaluation_mode
+                == crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe
+            {
+                circuit
+                    .try_stamp_static_probe_nonlinear(matrix, rhs, solution)
+                    .map_err(SimulationError::Circuit)?;
+            } else {
+                circuit
+                    .stamp_nonlinear(matrix, rhs, solution)
+                    .map_err(SimulationError::Circuit)?;
+            }
             circuit.stamp_behavioral_with_generated_mode(
                 matrix,
                 rhs,
                 solution,
                 time,
                 crate::xspice::AnalysisType::Transient,
-                generated_evaluation_mode,
+                evaluation_mode,
             );
         } else {
             circuit.stamp_behavioral_sources(matrix, rhs, solution, time);
@@ -310,7 +350,7 @@ impl Engine {
             0.0,
             crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
         )?;
-        Ok(self.residual_convergence_met(circuit, matrix, solution, rhs))
+        Ok(self.transient_residual_convergence_met(circuit, matrix, solution, rhs))
     }
 
     #[inline]
@@ -355,6 +395,26 @@ mod tests {
 
     use super::*;
     use crate::Netlist;
+
+    #[test]
+    fn xyce_transient_residual_honors_nonlin_tran_rhstol() {
+        let mut engine = Engine::default();
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        engine.config.transient_nonlinear_rhstol = Some(0.25);
+        let circuit = crate::circuit::Circuit::default();
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0)])
+            .expect("identity matrix");
+
+        assert!(engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &[0.0],
+            &[0.249_999],
+        ));
+        assert!(
+            !engine.transient_residual_convergence_met(&circuit, &mut matrix, &[0.0], &[0.25],)
+        );
+    }
 
     /// The vbic_excess_phase_oracle testbench: the full diffamp N1 card
     /// (Kull epi resistance, avalanche, parasitic transistor, TD=2e-11)

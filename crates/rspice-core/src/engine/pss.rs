@@ -234,7 +234,7 @@ impl Engine {
 
         // Build and prepare circuit
         let mut circuit = self.build_circuit(netlist)?;
-        Self::ensure_supported_xyce_team_small_signal(&circuit, "PSS")?;
+        Self::ensure_supported_xyce_memristor_small_signal(&circuit, "PSS")?;
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -1037,13 +1037,13 @@ impl Engine {
         dt: Value,
         linearize_at: &[Value],
     ) -> Result<(), SimulationError> {
-        let size = circuit.matrix_size();
         matrix.clear_values();
         rhs.fill(0.0);
 
-        for i in 0..size {
-            matrix.add(i, i, 1e-12);
-        }
+        // PSS needs a nodal conductance floor, not a perturbation of dynamic
+        // branch equations. In particular, adding 1e-12 to a scaled capacitor
+        // branch diagonal can cancel its physical -1/geq coefficient.
+        Self::stamp_nodal_gmin(circuit, matrix, 1e-12);
 
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
@@ -1058,47 +1058,11 @@ impl Engine {
             .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.update_transient_rhs(rhs, t_next);
 
-        // Stamp capacitors
-        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-            let capacitance = circuit.capacitors.capacitances[cap_idx];
-            let np = cap.pp.row;
-            let nn = cap.nn.row;
-            let v_n = circuit.capacitors.v_prev[cap_idx];
-            let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
-
-            let geq = coeff.capacitor_geq(capacitance, dt);
-            let i_n_cap = circuit.capacitors.i_prev[cap_idx];
-            let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
-
-            if np > 0 {
-                matrix.add(np - 1, np - 1, geq);
-                if nn > 0 {
-                    matrix.add(np - 1, nn - 1, -geq);
-                }
-            }
-            if nn > 0 {
-                if np > 0 {
-                    matrix.add(nn - 1, np - 1, -geq);
-                }
-                matrix.add(nn - 1, nn - 1, geq);
-            }
-            if np > 0 {
-                rhs[np - 1] += ieq;
-            }
-            if nn > 0 {
-                rhs[nn - 1] -= ieq;
-            }
-            if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx] {
-                let branch = num_nodes + branch_ordinal - 1;
-                if np > 0 {
-                    matrix.add(branch, np - 1, -geq);
-                }
-                if nn > 0 {
-                    matrix.add(branch, nn - 1, geq);
-                }
-                rhs[branch] = -ieq;
-            }
-        }
+        // Reuse the transient capacitor companion so shooting PSS has exactly
+        // the same branch-current convention and numerical scaling as TRAN.
+        circuit
+            .capacitors
+            .stamp_transient_companion(matrix, rhs, dt, coeff, num_nodes);
 
         // Stamp inductors
         for l_idx in 0..circuit.inductors.names.len() {
@@ -1275,25 +1239,30 @@ impl Engine {
             t += dt;
             first_step = false;
 
-            // Update capacitor history with the same companion coefficients
-            // that built this step, before shifting the voltage history those
-            // coefficients read: i_{n+1} = geq*v_{n+1} - ieq(v_n, v_{n-1}, i_n).
+            // Update capacitor history with the same companion that built this
+            // step. IC capacitors own a solved physical-current branch;
+            // ordinary capacitors retain the Norton reconstruction.
             for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
                 let np = cap.pp.row;
                 let nn = cap.nn.row;
                 let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
                     - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
 
-                let capacitance = circuit.capacitors.capacitances[cap_idx];
-                let geq = coeff.capacitor_geq(capacitance, dt);
-                let ieq = coeff.capacitor_ieq(
-                    capacitance,
-                    dt,
-                    circuit.capacitors.v_prev[cap_idx],
-                    circuit.capacitors.v_prev_prev[cap_idx],
-                    circuit.capacitors.i_prev[cap_idx],
-                );
-                circuit.capacitors.i_prev[cap_idx] = geq * v_new - ieq;
+                circuit.capacitors.i_prev[cap_idx] =
+                    if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx] {
+                        new_solution[num_nodes + branch_ordinal - 1]
+                    } else {
+                        let capacitance = circuit.capacitors.capacitances[cap_idx];
+                        let geq = coeff.capacitor_geq(capacitance, dt);
+                        let ieq = coeff.capacitor_ieq(
+                            capacitance,
+                            dt,
+                            circuit.capacitors.v_prev[cap_idx],
+                            circuit.capacitors.v_prev_prev[cap_idx],
+                            circuit.capacitors.i_prev[cap_idx],
+                        );
+                        geq * v_new - ieq
+                    };
                 circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
                 circuit.capacitors.v_prev[cap_idx] = v_new;
             }
