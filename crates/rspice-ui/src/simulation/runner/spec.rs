@@ -118,6 +118,11 @@ where
 fn translate_service_run_error(error: svc_runner::ServiceRunError) -> SimulationError {
     match error {
         svc_runner::ServiceRunError::Aborted => SimulationError::Aborted,
+        svc_runner::ServiceRunError::ResourceLimit(error) => SimulationError::ResourceLimit {
+            resource: error.resource.as_str().to_string(),
+            requested: error.requested,
+            limit: error.limit,
+        },
         svc_runner::ServiceRunError::Failure(message) => SimulationError::InvalidConfig(message),
     }
 }
@@ -532,6 +537,27 @@ R2 out 0 1k\n\
             });
 
         assert!(matches!(result, Err(SimulationError::Aborted)));
+    }
+
+    #[test]
+    fn typed_service_resource_limit_maps_to_runner_resource_limit() {
+        let result: Result<(), SimulationError> =
+            run_abort_aware_service(&rspice_core::abort_signal::NoAbort, || {
+                Err(svc_runner::ServiceRunError::resource_limit(
+                    rspice_core::ResourceKind::BatchRuns,
+                    3,
+                    2,
+                ))
+            });
+
+        assert_eq!(
+            result,
+            Err(SimulationError::ResourceLimit {
+                resource: "batch_runs".to_string(),
+                requested: 3,
+                limit: 2,
+            })
+        );
     }
 
     #[test]

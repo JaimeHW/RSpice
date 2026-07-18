@@ -45,7 +45,10 @@ pub fn run_corner_analysis_with_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<CornerData> {
     let netlist = super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let temperatures = extract_temp_points_with_abort(&netlist, abort)?;
+    let max_batch_runs = super::super::build_engine_config(&netlist, None)
+        .resource_limits
+        .max_batch_runs;
+    let temperatures = extract_temp_points_with_abort(&netlist, max_batch_runs, abort)?;
 
     if temperatures.is_empty() {
         return Err(ServiceRunError::Failure(
@@ -121,7 +124,11 @@ fn run_corner_analysis_with_bound_models(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<CornerData> {
-    let points = expand_corner_points_with_abort(config, abort)?;
+    let points = expand_corner_points_with_abort(
+        config,
+        rspice_core::ResourceLimits::default().max_batch_runs,
+        abort,
+    )?;
     if points.is_empty() {
         return Err(ServiceRunError::Failure(
             "Corner analysis produced no corner points".to_owned(),
@@ -154,6 +161,7 @@ fn run_corner_analysis_with_bound_models(
         let parsed = super::super::parse_runner_netlist_with_abort(&source, source_path, abort)
             .map_err(|error| match error {
                 ServiceRunError::Aborted => ServiceRunError::Aborted,
+                error @ ServiceRunError::ResourceLimit(_) => error,
                 ServiceRunError::Failure(message) => ServiceRunError::Failure(format!(
                     "{} model-section binding failed: {message}",
                     process.as_keyword()
@@ -194,7 +202,10 @@ fn run_corner_analysis_with_netlist(
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
-    let points = expand_corner_points_with_abort(config, abort)?;
+    let max_batch_runs = super::super::build_engine_config(netlist, None)
+        .resource_limits
+        .max_batch_runs;
+    let points = expand_corner_points_with_abort(config, max_batch_runs, abort)?;
     if points.is_empty() {
         return Err(ServiceRunError::Failure(
             "Corner analysis produced no corner points".to_string(),

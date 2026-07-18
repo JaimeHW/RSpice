@@ -2,6 +2,8 @@
 
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
 
+use super::ServiceRunError;
+
 mod corner;
 mod execution;
 mod mapping;
@@ -18,11 +20,17 @@ pub(crate) use types::{REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_EN
 /// its point count cannot drift from execution semantics.
 pub(crate) fn expand_corner_pvt_points(
     config: &CornerRunConfig,
-) -> Vec<(CornerProcess, rspice_core::Value, rspice_core::Value)> {
-    execution::expand_corner_points(config)
-        .into_iter()
-        .map(|point| (point.process, point.voltage, point.temperature_c))
-        .collect()
+) -> Result<Vec<(CornerProcess, rspice_core::Value, rspice_core::Value)>, ServiceRunError> {
+    execution::expand_corner_points(
+        config,
+        rspice_core::ResourceLimits::default().max_batch_runs,
+    )
+    .map(|points| {
+        points
+            .into_iter()
+            .map(|point| (point.process, point.voltage, point.temperature_c))
+            .collect()
+    })
 }
 
 pub use corner::{

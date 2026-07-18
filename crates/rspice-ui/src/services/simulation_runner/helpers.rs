@@ -12,16 +12,41 @@ pub(crate) fn parse_runner_netlist_with_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<rspice_core::Netlist> {
+    parse_runner_netlist_with_resource_limits_and_abort(
+        netlist_text,
+        source_path,
+        rspice_core::ResourceLimits::default(),
+        abort,
+    )
+}
+
+pub(crate) fn parse_runner_netlist_with_resource_limits_and_abort(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+    resource_limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<rspice_core::Netlist> {
     ensure_not_aborted(abort)?;
     let parse_source = runner_parse_source(source_path);
-    let parsed =
-        rspice_core::Netlist::parse_with_path_and_abort(netlist_text, &parse_source, abort)
-            .map_err(|error| match error {
-                rspice_core::netlist::ParseWithAbortError::Aborted => ServiceRunError::Aborted,
-                rspice_core::netlist::ParseWithAbortError::Parse(error) => {
-                    ServiceRunError::Failure(format!("Parse error: {error}"))
-                }
-            });
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits,
+        ..Default::default()
+    };
+    let parsed = rspice_core::Netlist::parse_with_path_and_options_and_abort(
+        netlist_text,
+        &parse_source,
+        options,
+        abort,
+    )
+    .map_err(|error| match error {
+        rspice_core::netlist::ParseWithAbortError::Aborted => ServiceRunError::Aborted,
+        rspice_core::netlist::ParseWithAbortError::Parse(
+            rspice_core::netlist::ParseError::ResourceLimit(error),
+        ) => ServiceRunError::ResourceLimit(error),
+        rspice_core::netlist::ParseWithAbortError::Parse(error) => {
+            ServiceRunError::Failure(format!("Parse error: {error}"))
+        }
+    });
     ensure_not_aborted(abort)?;
     parsed
 }
@@ -126,6 +151,24 @@ pub(crate) fn generate_freq_points_with_abort(
     sweep_type: &str,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Value>> {
+    generate_freq_points_with_limit_and_abort(
+        start,
+        stop,
+        points,
+        sweep_type,
+        rspice_core::ResourceLimits::default().max_analysis_points,
+        abort,
+    )
+}
+
+pub(crate) fn generate_freq_points_with_limit_and_abort(
+    start: Value,
+    stop: Value,
+    points: usize,
+    sweep_type: &str,
+    max_analysis_points: usize,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Vec<Value>> {
     ensure_not_aborted(abort)?;
     let validation = if points == 0 {
         Err(ServiceRunError::Failure(
@@ -150,13 +193,28 @@ pub(crate) fn generate_freq_points_with_abort(
     match sweep_type.as_str() {
         "dec" | "decade" => {
             let num_decades = (stop / start).log10();
-            generate_log_frequency_points(start, stop, points, num_decades, abort)
+            generate_log_frequency_points(
+                start,
+                stop,
+                points,
+                num_decades,
+                max_analysis_points,
+                abort,
+            )
         }
         "oct" | "octave" => {
             let num_octaves = (stop / start).log2();
-            generate_log_frequency_points(start, stop, points, num_octaves, abort)
+            generate_log_frequency_points(
+                start,
+                stop,
+                points,
+                num_octaves,
+                max_analysis_points,
+                abort,
+            )
         }
         "lin" | "linear" => {
+            ensure_analysis_point_limit(points, max_analysis_points)?;
             let mut frequencies = frequency_buffer(points)?;
             for idx in 0..points {
                 poll_periodically(abort, idx)?;
@@ -180,16 +238,20 @@ fn generate_log_frequency_points(
     stop: Value,
     points_per_unit: usize,
     units: Value,
+    max_analysis_points: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Value>> {
     ensure_not_aborted(abort)?;
     let requested = (points_per_unit as f64) * units;
     if !requested.is_finite() || requested > usize::MAX as f64 {
-        return Err(ServiceRunError::Failure(
-            "frequency sweep requests too many points".to_string(),
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::AnalysisPoints,
+            usize::MAX,
+            max_analysis_points,
         ));
     }
     let total_points = (requested.round() as usize).max(2);
+    ensure_analysis_point_limit(total_points, max_analysis_points)?;
     let mut frequencies = frequency_buffer(total_points)?;
     for idx in 0..total_points {
         poll_periodically(abort, idx)?;
@@ -198,6 +260,18 @@ fn generate_log_frequency_points(
     }
     ensure_not_aborted(abort)?;
     Ok(frequencies)
+}
+
+fn ensure_analysis_point_limit(requested: usize, limit: usize) -> ServiceRunResult<()> {
+    if requested <= limit {
+        Ok(())
+    } else {
+        Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::AnalysisPoints,
+            requested,
+            limit,
+        ))
+    }
 }
 
 fn frequency_buffer(capacity: usize) -> ServiceRunResult<Vec<Value>> {
@@ -257,6 +331,29 @@ mod tests {
     }
 
     #[test]
+    fn frequency_generation_enforces_configured_analysis_point_limit() {
+        let result = generate_freq_points_with_limit_and_abort(
+            1.0,
+            10.0,
+            3,
+            "lin",
+            2,
+            &rspice_core::NoAbort,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ServiceRunError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::AnalysisPoints,
+                    requested: 3,
+                    limit: 2,
+                }
+            ))
+        ));
+    }
+
+    #[test]
     fn cancellation_precedes_a_parse_failure() {
         let abort = AbortOnPoll::new(2);
         let result = parse_runner_netlist_with_abort("not a valid deck", None, &abort);
@@ -280,6 +377,31 @@ mod tests {
             abort.polls() >= 100,
             "service adapter must preserve a mid-parse abort"
         );
+    }
+
+    #[test]
+    fn parser_resource_limit_remains_typed() {
+        let source = "typed service limit\nR1 in 0 1k\n.end\n";
+        let mut limits = rspice_core::ResourceLimits::default();
+        limits.max_netlist_bytes = source.len() - 1;
+
+        let result = parse_runner_netlist_with_resource_limits_and_abort(
+            source,
+            None,
+            limits,
+            &rspice_core::NoAbort,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ServiceRunError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::NetlistBytes,
+                    requested,
+                    limit,
+                }
+            )) if requested == source.len() && limit == source.len() - 1
+        ));
     }
 
     #[test]

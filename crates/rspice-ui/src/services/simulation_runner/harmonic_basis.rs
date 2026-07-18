@@ -213,13 +213,13 @@ pub(super) fn build_disto_two_tone_harmonic_plan_with_abort(
         HbToneRunConfig::new(f2_over_f1, 1),
     ];
     let layout = build_multi_tone_hb_layout_with_abort(&tones, 3, abort).map_err(|error| {
-        if error.is_aborted() {
-            return error;
+        match error {
+            ServiceRunError::Failure(message) => ServiceRunError::Failure(format!(
+                "DISTO f2_over_f1={} cannot be represented as a stable low-order rational ratio: {}",
+                f2_over_f1, message
+            )),
+            other => other,
         }
-        ServiceRunError::Failure(format!(
-            "DISTO f2_over_f1={} cannot be represented as a stable low-order rational ratio: {}",
-            f2_over_f1, error
-        ))
     })?;
     ensure_not_aborted(abort)?;
     let tone1_harmonic = layout.tone_harmonics.first().copied().ok_or_else(|| {

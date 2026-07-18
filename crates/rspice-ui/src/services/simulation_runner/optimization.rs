@@ -328,11 +328,12 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     let mut iterations = Vec::with_capacity(config.max_iterations + 1);
     let mut costs = Vec::with_capacity(config.max_iterations + 1);
 
-    let eval_error: RefCell<Option<String>> = RefCell::new(None);
+    let eval_error: RefCell<Option<ServiceRunError>> = RefCell::new(None);
     let successful_evals = Cell::new(0usize);
     let abort_seen = Cell::new(false);
+    let fatal_error_seen = Cell::new(false);
     let mut cost_fn = |vars: &HashMap<String, Value>| -> Value {
-        if abort_seen.get() {
+        if abort_seen.get() || fatal_error_seen.get() {
             return 1e30;
         }
         match evaluate_optimization_objective(netlist_text, vars, config, source_path, abort) {
@@ -344,7 +345,12 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
                 abort_seen.set(true);
                 1e30
             }
-            Err(ServiceRunError::Failure(error)) => {
+            Err(error @ ServiceRunError::ResourceLimit(_)) => {
+                fatal_error_seen.set(true);
+                *eval_error.borrow_mut() = Some(error);
+                1e30
+            }
+            Err(error @ ServiceRunError::Failure(_)) => {
                 if eval_error.borrow().is_none() {
                     *eval_error.borrow_mut() = Some(error);
                 }
@@ -355,6 +361,7 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
 
     let initial_vars = optimizer.current_vars();
     let initial_cost = cost_fn(&initial_vars);
+    propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
     ensure_optimization_not_aborted(abort, &abort_seen)?;
     record_optimization_state(
         0.0,
@@ -369,9 +376,11 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     while optimizer.current_iteration() < config.max_iterations {
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         optimizer.step(&mut cost_fn);
+        propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         let vars = optimizer.current_vars();
         let cost = cost_fn(&vars);
+        propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         record_optimization_state(
             optimizer.current_iteration() as Value,
@@ -388,11 +397,11 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     }
 
     if successful_evals.get() == 0 {
-        return Err(ServiceRunError::Failure(
-            eval_error.into_inner().unwrap_or_else(|| {
-                "Optimization failed: objective evaluation returned no valid samples".to_string()
-            }),
-        ));
+        return Err(eval_error.into_inner().unwrap_or_else(|| {
+            ServiceRunError::Failure(
+                "Optimization failed: objective evaluation returned no valid samples".to_string(),
+            )
+        }));
     }
 
     ensure_not_aborted(abort)?;
@@ -405,6 +414,20 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
         best_variables: best_vars.clone(),
         converged: optimizer.is_converged(),
     })
+}
+
+fn propagate_optimization_fatal_error(
+    fatal_error_seen: &Cell<bool>,
+    eval_error: &RefCell<Option<ServiceRunError>>,
+) -> ServiceRunResult<()> {
+    if fatal_error_seen.get() {
+        Err(eval_error
+            .borrow_mut()
+            .take()
+            .expect("fatal optimization error must retain its typed cause"))
+    } else {
+        Ok(())
+    }
 }
 
 fn ensure_optimization_not_aborted(

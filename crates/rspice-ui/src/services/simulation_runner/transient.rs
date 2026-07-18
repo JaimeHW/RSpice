@@ -187,6 +187,7 @@ pub fn run_simulation_with_options_and_source_path_and_abort(
     let netlist = match parse_runner_netlist_with_abort(netlist_text, source_path, abort) {
         Ok(nl) => nl,
         Err(ServiceRunError::Aborted) => return Err(ServiceRunError::Aborted),
+        Err(error @ ServiceRunError::ResourceLimit(_)) => return Err(error),
         Err(error) => {
             return Ok(failed_simulation_result(error.to_string(), stats));
         }
@@ -229,7 +230,7 @@ pub fn run_simulation_with_options_and_source_path_and_abort(
             }
             Err(error) => {
                 let error = ServiceRunError::from_core("Transient error", error);
-                if error.is_aborted() {
+                if !matches!(error, ServiceRunError::Failure(_)) {
                     return Err(error);
                 }
                 return Ok(failed_simulation_result(error.to_string(), stats));
@@ -262,7 +263,7 @@ pub fn run_simulation_with_options_and_source_path_and_abort(
         }
         Err(error) => {
             let error = ServiceRunError::from_core("DC OP error", error);
-            if error.is_aborted() {
+            if !matches!(error, ServiceRunError::Failure(_)) {
                 return Err(error);
             }
             log::warn!(

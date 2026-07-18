@@ -57,10 +57,15 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
         })?;
 
     let is_data_sweep = matches!(step_cmd.sweep, StepSweep::Data { .. });
+    let engine_config = super::super::build_engine_config(&netlist, None);
     let values = if is_data_sweep {
         Vec::new()
     } else {
-        expand_step_sweep_values_with_abort(&step_cmd.sweep, abort)?
+        expand_step_sweep_values_with_abort(
+            &step_cmd.sweep,
+            engine_config.resource_limits.max_batch_runs,
+            abort,
+        )?
     };
     if values.is_empty() && !is_data_sweep {
         return Err(ServiceRunError::Failure(
@@ -75,7 +80,7 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
         };
         return run_parametric_analysis_with_netlist_and_config(&netlist, &cfg, "TEMP", abort);
     } else {
-        let engine = Engine::new(super::super::build_engine_config(&netlist, None));
+        let engine = Engine::new(engine_config);
         engine
             .run_step_command_with_abort(&netlist, step_cmd, &values, abort)
             .map_err(|error| ServiceRunError::from_core("Parametric analysis error", error))?

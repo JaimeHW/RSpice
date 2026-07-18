@@ -1098,6 +1098,7 @@ fn derive_pvt_points(
         ));
     }
 
+    let max_pvt_points = rspice_core::ResourceLimits::default().max_batch_runs;
     let mut expanded = Vec::new();
     for prepared in tasks {
         let task = prepared.queued_analysis();
@@ -1129,15 +1130,22 @@ fn derive_pvt_points(
                         "Corner PVT expansion requires non-empty process, positive finite voltage, and finite temperature inputs",
                     ));
                 }
-                expanded.extend(
-                    crate::services::simulation_runner::expand_corner_pvt_points(corner)
-                        .into_iter()
-                        .map(|(process, voltage, temperature_celsius)| PreparedPvtPoint {
-                            process: process_from_corner_runner(process),
-                            voltage: Some(voltage),
-                            temperature_celsius,
-                        }),
-                );
+                let expanded_corner =
+                    crate::services::simulation_runner::expand_corner_pvt_points(corner);
+                let points = expanded_corner.map_err(|error| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!("Corner PVT expansion failed: {error}"),
+                    )
+                })?;
+                ensure_pvt_point_capacity(expanded.len(), points.len(), max_pvt_points)?;
+                expanded.extend(points.into_iter().map(
+                    |(process, voltage, temperature_celsius)| PreparedPvtPoint {
+                        process: process_from_corner_runner(process),
+                        voltage: Some(voltage),
+                        temperature_celsius,
+                    },
+                ));
             }
             AnalysisSpec::Parametric => {
                 if let Some(temp) = task.spec_options.temp.as_ref() {
@@ -1152,6 +1160,11 @@ fn derive_pvt_points(
                             "Temperature PVT expansion requires at least one finite temperature",
                         ));
                     }
+                    ensure_pvt_point_capacity(
+                        expanded.len(),
+                        temp.temperatures_c.len(),
+                        max_pvt_points,
+                    )?;
                     expanded.extend(temp.temperatures_c.iter().copied().map(
                         |temperature_celsius| PreparedPvtPoint {
                             process: reference_process,
@@ -1160,16 +1173,20 @@ fn derive_pvt_points(
                         },
                     ));
                 } else {
+                    ensure_pvt_point_capacity(expanded.len(), 1, max_pvt_points)?;
                     expanded.push(reference_pvt_point(
                         reference_process,
                         reference_temperature_celsius,
                     ));
                 }
             }
-            _ => expanded.push(reference_pvt_point(
-                reference_process,
-                reference_temperature_celsius,
-            )),
+            _ => {
+                ensure_pvt_point_capacity(expanded.len(), 1, max_pvt_points)?;
+                expanded.push(reference_pvt_point(
+                    reference_process,
+                    reference_temperature_celsius,
+                ));
+            }
         }
     }
 
@@ -1188,6 +1205,24 @@ fn derive_pvt_points(
         ));
     }
     Ok(expanded)
+}
+
+fn ensure_pvt_point_capacity(
+    retained: usize,
+    additional: usize,
+    limit: usize,
+) -> Result<(), PreparationError> {
+    let requested = retained.saturating_add(additional);
+    if requested <= limit {
+        Ok(())
+    } else {
+        Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!(
+                "PVT plan requests {requested} runs, exceeding the configured batch limit of {limit}"
+            ),
+        ))
+    }
 }
 
 fn reference_pvt_point(process: ProcessCorner, temperature_celsius: f64) -> PreparedPvtPoint {
@@ -1886,5 +1921,16 @@ mod tests {
             .expect_err("digest cannot authenticate a different task");
         assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
         assert!(error.message().contains("actual dispatch payload"));
+    }
+
+    #[test]
+    fn pvt_plan_capacity_check_handles_overflow_and_limit() {
+        let error = ensure_pvt_point_capacity(9, 2, 10).expect_err("eleven runs exceed ten");
+        assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
+        assert!(error.message().contains("11 runs"));
+
+        let overflow = ensure_pvt_point_capacity(usize::MAX, 1, usize::MAX - 1)
+            .expect_err("overflow must fail closed");
+        assert!(overflow.message().contains(&usize::MAX.to_string()));
     }
 }

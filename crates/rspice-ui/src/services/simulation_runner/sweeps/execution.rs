@@ -10,28 +10,67 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 
-pub(super) fn expand_corner_points(config: &CornerRunConfig) -> Vec<CornerPoint> {
-    expand_corner_points_impl(config, None).expect("non-cancellable expansion cannot abort")
+pub(super) fn expand_corner_points(
+    config: &CornerRunConfig,
+    max_batch_runs: usize,
+) -> ServiceRunResult<Vec<CornerPoint>> {
+    expand_corner_points_impl(config, max_batch_runs, None)
 }
 
 pub(super) fn expand_corner_points_with_abort(
     config: &CornerRunConfig,
+    max_batch_runs: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<CornerPoint>> {
-    expand_corner_points_impl(config, Some(abort))
+    expand_corner_points_impl(config, max_batch_runs, Some(abort))
 }
 
 fn expand_corner_points_impl(
     config: &CornerRunConfig,
+    max_batch_runs: usize,
     abort: Option<&dyn AbortSignal>,
 ) -> ServiceRunResult<Vec<CornerPoint>> {
     if let Some(abort) = abort {
         ensure_not_aborted(abort)?;
     }
+    if config.process_corners.is_empty()
+        || config.voltages.is_empty()
+        || config.temperatures_c.is_empty()
+    {
+        return Err(ServiceRunError::Failure(
+            "Corner expansion requires non-empty process, voltage, and temperature axes"
+                .to_string(),
+        ));
+    }
+    let requested = if config.full_matrix {
+        config
+            .process_corners
+            .len()
+            .checked_mul(config.voltages.len())
+            .and_then(|count| count.checked_mul(config.temperatures_c.len()))
+            .unwrap_or(usize::MAX)
+    } else {
+        config
+            .process_corners
+            .len()
+            .max(config.voltages.len())
+            .max(config.temperatures_c.len())
+    };
+    if requested > max_batch_runs {
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::BatchRuns,
+            requested,
+            max_batch_runs,
+        ));
+    }
+    let mut points = Vec::new();
+    points.try_reserve_exact(requested).map_err(|error| {
+        ServiceRunError::Failure(format!(
+            "Corner expansion allocation for {requested} points failed: {error}"
+        ))
+    })?;
+
     if config.full_matrix {
-        let mut points = Vec::with_capacity(
-            config.process_corners.len() * config.voltages.len() * config.temperatures_c.len(),
-        );
         for (process_index, process) in config.process_corners.iter().enumerate() {
             if let Some(abort) = abort {
                 poll_periodically(abort, process_index)?;
@@ -59,13 +98,7 @@ fn expand_corner_points_impl(
         return Ok(points);
     }
 
-    let n = config
-        .process_corners
-        .len()
-        .max(config.voltages.len())
-        .max(config.temperatures_c.len());
-    let mut points = Vec::with_capacity(n);
-    for idx in 0..n {
+    for idx in 0..requested {
         if let Some(abort) = abort {
             poll_periodically(abort, idx)?;
         }
@@ -95,7 +128,21 @@ pub(super) fn run_corner_sweep(
         ));
     }
 
-    let mut results = Vec::with_capacity(points.len());
+    let base_sim_config = super::super::build_engine_config(netlist, None);
+    if points.len() > base_sim_config.resource_limits.max_batch_runs {
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::BatchRuns,
+            points.len(),
+            base_sim_config.resource_limits.max_batch_runs,
+        ));
+    }
+    let mut results = Vec::new();
+    results.try_reserve_exact(points.len()).map_err(|error| {
+        ServiceRunError::Failure(format!(
+            "Corner result allocation for {} points failed: {error}",
+            points.len()
+        ))
+    })?;
 
     for (point_index, point) in points.iter().enumerate() {
         poll_periodically(abort, point_index)?;
@@ -117,13 +164,14 @@ pub(super) fn run_corner_sweep(
         ensure_not_aborted(abort)?;
         apply_voltage_corner(&mut corner_netlist, point.voltage, nominal_voltage, abort)?;
 
-        let mut sim_config = super::super::build_engine_config(&corner_netlist, None);
+        let mut sim_config = base_sim_config.clone();
         sim_config.temperature = point.temperature_c + 273.15;
         let engine = Engine::new(sim_config);
 
         match run_base_mode_point(&engine, &corner_netlist, &config.base_mode, abort) {
             Ok(result) => results.push((point.clone(), result)),
             Err(ServiceRunError::Aborted) => return Err(ServiceRunError::Aborted),
+            Err(error @ ServiceRunError::ResourceLimit(_)) => return Err(error),
             Err(ServiceRunError::Failure(error)) => {
                 log::warn!(
                     "Corner {} ({}) failed: {}",
@@ -146,7 +194,23 @@ pub(super) fn run_temperature_sweep(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<(Value, SweepPointResult)>> {
     ensure_not_aborted(abort)?;
-    let mut results = Vec::with_capacity(temperatures_c.len());
+    let base_config = super::super::build_engine_config(netlist, None);
+    if temperatures_c.len() > base_config.resource_limits.max_batch_runs {
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::BatchRuns,
+            temperatures_c.len(),
+            base_config.resource_limits.max_batch_runs,
+        ));
+    }
+    let mut results = Vec::new();
+    results
+        .try_reserve_exact(temperatures_c.len())
+        .map_err(|error| {
+            ServiceRunError::Failure(format!(
+                "Temperature result allocation for {} points failed: {error}",
+                temperatures_c.len()
+            ))
+        })?;
 
     for (point_index, &temp_c) in temperatures_c.iter().enumerate() {
         poll_periodically(abort, point_index)?;
@@ -156,13 +220,14 @@ pub(super) fn run_temperature_sweep(
             ));
         }
 
-        let mut config = super::super::build_engine_config(netlist, None);
+        let mut config = base_config.clone();
         config.temperature = temp_c + 273.15;
         let engine = Engine::new(config);
 
         match run_base_mode_point(&engine, netlist, base_mode, abort) {
             Ok(point_result) => results.push((temp_c, point_result)),
             Err(ServiceRunError::Aborted) => return Err(ServiceRunError::Aborted),
+            Err(error @ ServiceRunError::ResourceLimit(_)) => return Err(error),
             Err(ServiceRunError::Failure(error)) => {
                 log::warn!(
                     "Temperature corner {}C ({}) failed: {}",
@@ -337,4 +402,50 @@ fn run_base_mode_ac_point(
         node_names,
         node_values,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::types::CornerProcess;
+    use super::*;
+
+    #[test]
+    fn full_corner_matrix_obeys_configured_batch_limit_before_allocation() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT, CornerProcess::FF],
+            voltages: vec![0.9, 1.1],
+            temperatures_c: vec![-40.0, 125.0],
+            ..Default::default()
+        };
+
+        let result = expand_corner_points(&config, 7);
+
+        assert!(matches!(
+            result,
+            Err(ServiceRunError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::BatchRuns,
+                    requested: 8,
+                    limit: 7,
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn diagonal_corner_expansion_uses_largest_axis_as_run_count() {
+        let config = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![0.9, 1.0],
+            temperatures_c: vec![-40.0, 25.0, 125.0],
+            full_matrix: false,
+            ..Default::default()
+        };
+
+        let points = expand_corner_points(&config, 3).expect("three diagonal points");
+
+        assert_eq!(points.len(), 3);
+        assert_eq!(points[2].voltage, 0.9);
+        assert_eq!(points[2].temperature_c, 125.0);
+    }
 }

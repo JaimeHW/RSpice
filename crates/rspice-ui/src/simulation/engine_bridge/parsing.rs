@@ -14,14 +14,29 @@ impl EngineBridge {
     ) -> Result<rspice_core::Netlist, SimulationError> {
         ensure_not_aborted(abort)?;
         let parse_source = Self::netlist_parse_source(source_path);
-        let parsed =
-            rspice_core::Netlist::parse_with_path_and_abort(netlist_str, &parse_source, abort)
-                .map_err(|error| match error {
-                    rspice_core::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
-                    rspice_core::netlist::ParseWithAbortError::Parse(error) => {
-                        SimulationError::ParseError(error.to_string())
-                    }
-                });
+        let options = rspice_core::netlist::NetlistParseOptions {
+            resource_limits: self.engine.config().resource_limits,
+            ..Default::default()
+        };
+        let parsed = rspice_core::Netlist::parse_with_path_and_options_and_abort(
+            netlist_str,
+            &parse_source,
+            options,
+            abort,
+        )
+        .map_err(|error| match error {
+            rspice_core::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+            rspice_core::netlist::ParseWithAbortError::Parse(
+                rspice_core::netlist::ParseError::ResourceLimit(error),
+            ) => SimulationError::ResourceLimit {
+                resource: error.resource.as_str().to_string(),
+                requested: error.requested,
+                limit: error.limit,
+            },
+            rspice_core::netlist::ParseWithAbortError::Parse(error) => {
+                SimulationError::ParseError(error.to_string())
+            }
+        });
         ensure_not_aborted(abort)?;
         parsed
     }
@@ -47,5 +62,47 @@ impl EngineBridge {
             &rspice_core::SimulationConfigOverrides::default(),
         );
         rspice_core::Engine::new(resolved)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rspice_core::NoAbort;
+
+    use super::*;
+
+    #[test]
+    fn bridge_parse_uses_its_configured_resource_policy() {
+        let source = "resource-limited bridge\nR1 in 0 1k\n.end\n";
+        let mut config = rspice_core::SimulationConfig::default();
+        config.resource_limits.max_netlist_bytes = source.len() - 1;
+        let bridge = EngineBridge::try_with_config(config).expect("valid bridge policy");
+
+        let error = bridge
+            .parse_netlist_with_abort_and_source_path(source, None, &NoAbort)
+            .expect_err("strict bridge must reject the source");
+
+        assert_eq!(
+            error,
+            SimulationError::ResourceLimit {
+                resource: "netlist_bytes".to_string(),
+                requested: source.len(),
+                limit: source.len() - 1,
+            }
+        );
+    }
+
+    #[test]
+    fn fallible_bridge_constructor_rejects_invalid_configuration() {
+        let mut config = rspice_core::SimulationConfig::default();
+        config.max_iterations = 0;
+
+        assert!(matches!(
+            EngineBridge::try_with_config(config),
+            Err(rspice_core::SimulationConfigError::InvalidCount {
+                field: "max_iterations",
+                value: 0,
+            })
+        ));
     }
 }

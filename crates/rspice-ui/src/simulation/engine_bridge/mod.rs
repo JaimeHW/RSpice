@@ -69,6 +69,18 @@ impl EngineBridge {
         }
     }
 
+    /// Create a new engine bridge only when the complete configuration is valid.
+    ///
+    /// Prefer this constructor at service and job-queue boundaries so invalid
+    /// configuration is rejected before parsing or simulation work begins.
+    pub fn try_with_config(
+        config: rspice_core::SimulationConfig,
+    ) -> Result<Self, rspice_core::SimulationConfigError> {
+        Ok(Self {
+            engine: rspice_core::Engine::try_new(config)?,
+        })
+    }
+
     /// Run simulation without cooperative cancellation.
     ///
     /// This compatibility convenience API is intended for direct synchronous

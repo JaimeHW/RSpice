@@ -202,6 +202,7 @@ pub fn run_sensitivity_analysis_with_source_path_and_abort(
 fn contextualize_parameter_error(parameter: &str, error: ServiceRunError) -> ServiceRunError {
     match error {
         ServiceRunError::Aborted => ServiceRunError::Aborted,
+        error @ ServiceRunError::ResourceLimit(_) => error,
         ServiceRunError::Failure(message) => ServiceRunError::Failure(format!(
             "Sensitivity error for parameter '{parameter}': {message}"
         )),

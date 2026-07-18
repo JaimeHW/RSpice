@@ -3,13 +3,16 @@ use rspice_core::abort_signal::AbortSignal;
 /// Typed error returned by cancellable simulation-service APIs.
 ///
 /// Legacy synchronous APIs continue to expose `String` for compatibility,
-/// but production execution uses this type so cancellation can never be
-/// mistaken for a configuration or solver failure.
+/// but production execution uses this type so cancellation and resource
+/// exhaustion can never be mistaken for configuration or solver failures.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ServiceRunError {
     /// Cooperative cancellation was requested.
     #[error("Simulation aborted")]
     Aborted,
+    /// A configurable production resource budget was exceeded.
+    #[error(transparent)]
+    ResourceLimit(#[from] rspice_core::ResourceLimitError),
     /// Validation, parsing, circuit, or solver failure.
     #[error("{0}")]
     Failure(String),
@@ -24,7 +27,34 @@ impl ServiceRunError {
     pub fn from_core(context: &str, error: rspice_core::SimulationError) -> Self {
         match error {
             rspice_core::SimulationError::Aborted => Self::Aborted,
+            rspice_core::SimulationError::Configuration(
+                rspice_core::SimulationConfigError::ResourceLimit(error),
+            )
+            | rspice_core::SimulationError::ResourceLimit(error) => Self::ResourceLimit(error),
             other => Self::Failure(format!("{context}: {other}")),
+        }
+    }
+
+    /// Create a typed resource-limit error without relying on display-string
+    /// parsing in UI-owned expansion code.
+    pub fn resource_limit(
+        resource: rspice_core::ResourceKind,
+        requested: usize,
+        limit: usize,
+    ) -> Self {
+        Self::ResourceLimit(rspice_core::ResourceLimitError {
+            resource,
+            requested,
+            limit,
+        })
+    }
+
+    /// Add context to ordinary failures while preserving cancellation and
+    /// structured resource-limit errors.
+    pub fn with_context(self, context: &str) -> Self {
+        match self {
+            Self::Failure(message) => Self::Failure(format!("{context}: {message}")),
+            other => other,
         }
     }
 
@@ -38,6 +68,10 @@ impl From<rspice_core::SimulationError> for ServiceRunError {
     fn from(error: rspice_core::SimulationError) -> Self {
         match error {
             rspice_core::SimulationError::Aborted => Self::Aborted,
+            rspice_core::SimulationError::Configuration(
+                rspice_core::SimulationConfigError::ResourceLimit(error),
+            )
+            | rspice_core::SimulationError::ResourceLimit(error) => Self::ResourceLimit(error),
             other => Self::Failure(other.to_string()),
         }
     }
@@ -104,5 +138,26 @@ mod tests {
         assert!(matches!(error, ServiceRunError::Failure(_)));
         assert!(error.to_string().contains("AC analysis error"));
         assert!(error.to_string().contains("invalid circuit"));
+    }
+
+    #[test]
+    fn core_resource_limit_remains_structured() {
+        let core_error = rspice_core::ResourceLimitError {
+            resource: rspice_core::ResourceKind::BatchRuns,
+            requested: 11,
+            limit: 10,
+        };
+
+        assert_eq!(
+            ServiceRunError::from_core(
+                "Parametric analysis error",
+                rspice_core::SimulationError::ResourceLimit(core_error),
+            ),
+            ServiceRunError::ResourceLimit(core_error)
+        );
+        assert_eq!(
+            ServiceRunError::ResourceLimit(core_error).with_context("ignored context"),
+            ServiceRunError::ResourceLimit(core_error)
+        );
     }
 }
