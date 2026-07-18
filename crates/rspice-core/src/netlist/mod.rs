@@ -2592,6 +2592,7 @@ mod tests {
                 when,
                 from,
                 to,
+                ..
             } => {
                 assert_eq!(signal, "{V(one)-V(two)}");
                 assert_eq!(*at, None);
@@ -2652,6 +2653,7 @@ mod tests {
                 condition,
                 from,
                 to,
+                ..
             } => {
                 assert_eq!(condition.left, "V(ONE)");
                 assert_eq!(
@@ -2721,7 +2723,7 @@ mod tests {
         )
         .expect("typed trigger/target clauses parse");
 
-        let crate::analysis::MeasureType::Delay { trig, targ } =
+        let crate::analysis::MeasureType::Delay { trig, targ, .. } =
             &netlist.measurements[0].measure_type
         else {
             panic!("expected trigger/target delay measurement");
@@ -2758,30 +2760,32 @@ mod tests {
         .expect("conditional MINVAL options parse");
 
         let crate::analysis::MeasureType::Find {
-            when: Some(found), ..
+            when: Some(_),
+            minval,
+            ..
         } = &netlist.measurements[0].measure_type
         else {
             panic!("expected FIND-WHEN measurement");
         };
-        assert_eq!(found.minval, 2.0e-15);
+        assert_eq!(*minval, 2.0e-15);
 
-        let crate::analysis::MeasureType::When { condition, .. } =
+        let crate::analysis::MeasureType::When { minval, .. } =
             &netlist.measurements[1].measure_type
         else {
             panic!("expected WHEN measurement");
         };
-        assert_eq!(condition.minval, 3.0e-15);
+        assert_eq!(*minval, 3.0e-15);
 
-        let crate::analysis::MeasureType::Delay { trig, targ } =
+        let crate::analysis::MeasureType::Delay { trig, targ, minval } =
             &netlist.measurements[2].measure_type
         else {
             panic!("expected TRIG/TARG measurement");
         };
+        assert_eq!(*minval, 4.0e-15);
         for clause in [trig, targ] {
-            let crate::analysis::TriggerEvent::When(condition) = &clause.event else {
+            let crate::analysis::TriggerEvent::When(_) = &clause.event else {
                 panic!("expected conditional TRIG/TARG clause");
             };
-            assert_eq!(condition.minval, 4.0e-15);
         }
     }
 
@@ -2799,6 +2803,50 @@ mod tests {
                 "unexpected error for {minval}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn point_measurements_preserve_last_finite_td_with_optional_separator() {
+        let netlist = Netlist::parse(
+            "point measurement delay windows\n\
+             V1 one 0 0\n\
+             .tran 1n 10n\n\
+             .measure tran found FIND V(one) WHEN V(one)=1 TD=-1n TD 2n\n\
+             .measure tran event WHEN V(one)=2 TD 3n\n\
+             .measure tran slope DERIV V(one) WHEN V(one)=3 TD=4n\n\
+             .end\n",
+        )
+        .expect("point measurement TD options parse");
+
+        let crate::analysis::MeasureType::Find { td, .. } = &netlist.measurements[0].measure_type
+        else {
+            panic!("expected FIND measurement");
+        };
+        assert!(td.is_some_and(|td| (td - 2.0e-9).abs() < 1.0e-24));
+        let crate::analysis::MeasureType::When { td, .. } = &netlist.measurements[1].measure_type
+        else {
+            panic!("expected WHEN measurement");
+        };
+        assert!(td.is_some_and(|td| (td - 3.0e-9).abs() < 1.0e-24));
+        let crate::analysis::MeasureType::Derivative { td, .. } =
+            &netlist.measurements[2].measure_type
+        else {
+            panic!("expected DERIV measurement");
+        };
+        assert!(td.is_some_and(|td| (td - 4.0e-9).abs() < 1.0e-24));
+    }
+
+    #[test]
+    fn point_measurement_td_must_be_finite() {
+        let error = Netlist::parse(
+            "invalid point measurement delay\n\
+             V1 one 0 0\n\
+             .tran 1n 10n\n\
+             .measure tran event WHEN V(one)=1 TD=1e999\n\
+             .end\n",
+        )
+        .expect_err("non-finite TD must fail closed");
+        assert!(error.to_string().contains(".MEAS TD must be finite"));
     }
 
     #[test]
