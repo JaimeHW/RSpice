@@ -13,6 +13,27 @@ pub(in crate::engine::advanced) enum NoiseOutputPort<'a> {
 }
 
 impl Engine {
+    pub(in crate::engine) fn configure_noise_physical_constants(
+        sources: &mut [NoiseSource],
+        correlated_sources: &mut [CorrelatedNoisePair],
+        dialect: crate::engine::SpiceDialect,
+    ) {
+        let constants = match dialect {
+            crate::engine::SpiceDialect::Xyce => {
+                crate::analysis::noise::NoisePhysicalConstants::XYCE_7_10
+            }
+            crate::engine::SpiceDialect::BestAvailable | crate::engine::SpiceDialect::Ngspice => {
+                crate::analysis::noise::NoisePhysicalConstants::MODERN
+            }
+        };
+        for source in sources {
+            source.physical_constants = constants;
+        }
+        for source in correlated_sources {
+            source.physical_constants = constants;
+        }
+    }
+
     #[inline]
     pub(in crate::engine::advanced) fn noise_node_voltage(
         voltages: &[Value],
@@ -1087,7 +1108,7 @@ impl Engine {
                 continue;
             }
 
-            let (ic, ibe, ibc) = bjt.noise_branch_currents();
+            let (ic, ib, _) = bjt.noise_branch_currents();
             if ic > 1e-18 {
                 noise_sources.push(
                     NoiseSource::shot(
@@ -1101,33 +1122,19 @@ impl Engine {
                     ),
                 );
             }
-            if ibe > 1e-18 {
+            if ib > 1e-18 {
                 noise_sources.push(
                     NoiseSource::shot(
-                        format!("{}:IBE", bjt.name),
+                        format!("{}:IB", bjt.name),
                         bjt.node_base,
                         bjt.node_emitter,
-                        ibe,
+                        ib,
                     )
                     .with_identity(
                         crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IB"),
                     ),
                 );
             }
-            if ibc > 1e-18 {
-                noise_sources.push(
-                    NoiseSource::shot(
-                        format!("{}:IBC", bjt.name),
-                        bjt.node_base,
-                        bjt.node_collector,
-                        ibc,
-                    )
-                    .with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IB"),
-                    ),
-                );
-            }
-
             if let Some((kf, af, ef)) = bjt.flicker_noise_coefficients() {
                 let (_, ib, _) = bjt.operating_point_currents();
                 if ib.abs() > 1e-18 {
@@ -1532,8 +1539,13 @@ impl Engine {
             circuit.update_nonlinear(&dc_solution);
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
-        let (noise_sources, correlated_noise_sources) =
+        let (mut noise_sources, mut correlated_noise_sources) =
             Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+        Self::configure_noise_physical_constants(
+            &mut noise_sources,
+            &mut correlated_noise_sources,
+            engine.config.spice_dialect,
+        );
         let mut branch_matrix_indices = Vec::with_capacity(port_sources.len());
         for source_name in port_sources {
             let source_index = circuit
@@ -1882,8 +1894,13 @@ impl Engine {
             circuit.update_nonlinear(&dc_solution);
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
-        let (noise_sources, correlated_noise_sources) =
+        let (mut noise_sources, mut correlated_noise_sources) =
             Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+        Self::configure_noise_physical_constants(
+            &mut noise_sources,
+            &mut correlated_noise_sources,
+            engine.config.spice_dialect,
+        );
         engine.ensure_result_shape(
             frequencies.len(),
             circuit
@@ -2209,6 +2226,36 @@ mod tests {
             crate::engine::SimulationConfig::default()
                 .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
         )
+    }
+
+    #[test]
+    fn xyce_noise_policy_selects_legacy_physical_constants() {
+        let temperature = 300.15;
+        let current = 2.5e-3;
+        let resistance = 750.0;
+        let mut sources = vec![
+            crate::analysis::NoiseSource::shot("Q1:IB".to_string(), 1, 0, current),
+            crate::analysis::NoiseSource::thermal("R1".to_string(), 1, 0, resistance),
+        ];
+        let modern_shot = sources[0].spectral_density(1.0, temperature);
+        assert_eq!(
+            modern_shot,
+            2.0 * crate::analysis::noise::Q_ELECTRON * current
+        );
+
+        Engine::configure_noise_physical_constants(
+            &mut sources,
+            &mut [],
+            crate::engine::SpiceDialect::Xyce,
+        );
+        assert_eq!(
+            sources[0].spectral_density(1.0, temperature),
+            2.0 * crate::analysis::noise::XYCE_Q_ELECTRON * current
+        );
+        assert_eq!(
+            sources[1].spectral_density(1.0, temperature),
+            4.0 * crate::analysis::noise::XYCE_K_BOLTZMANN * temperature / resistance
+        );
     }
 
     #[test]

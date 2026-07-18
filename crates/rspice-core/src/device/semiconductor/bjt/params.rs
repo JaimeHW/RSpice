@@ -600,11 +600,12 @@ impl Bjt {
         }
     }
 
-    /// Select the thermal-voltage constants required by the Xyce device
-    /// compatibility dialect. A subsequent temperature refresh applies the
-    /// selection to all temperature-scaled model quantities.
-    pub(crate) fn set_xyce_thermal_voltage_constants(&mut self, enabled: bool) {
-        self.xyce_thermal_voltage_constants = enabled;
+    /// Select Xyce's legacy GP compatibility contract, including its physical
+    /// constants and limiter-only device-convergence flag. A subsequent
+    /// temperature refresh applies the constant selection to all
+    /// temperature-scaled model quantities.
+    pub(crate) fn set_xyce_compatibility(&mut self, enabled: bool) {
+        self.xyce_compatibility = enabled;
     }
 
     /// Set optional substrate node (0 for ground/unconnected).

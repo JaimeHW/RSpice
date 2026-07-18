@@ -3,6 +3,26 @@
 use super::*;
 
 impl Engine {
+    fn nonlinear_probe_residual_converged(
+        &self,
+        circuit: &CircuitData,
+        probe: &mut StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> bool {
+        if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce {
+            // Xyce 7.10's DC NOX status test accepts the candidate when
+            // the unscaled infinity norm of F=A*x-b is below RHSTOL
+            // (1e-6 by default). It deliberately does not require the
+            // stricter fixed-point polish used by native RSpice.
+            probe
+                .raw_residual_inf_norm(solution, rhs)
+                .is_ok_and(|norm| norm.is_finite() && norm < 1.0e-6)
+        } else {
+            self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs)
+        }
+    }
+
     pub(in crate::engine) fn dc_static_probe_polished_solution(
         &self,
         circuit: &mut CircuitData,
@@ -160,7 +180,7 @@ impl Engine {
             {
                 return false;
             }
-            self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs)
+            self.nonlinear_probe_residual_converged(circuit, probe, solution, rhs)
         });
         circuit.restore_nonlinear_state(snapshot);
         converged
@@ -200,7 +220,7 @@ impl Engine {
                 stamp_error = Some(err);
                 return false;
             }
-            self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs)
+            self.nonlinear_probe_residual_converged(circuit, probe, solution, rhs)
         });
         circuit.restore_nonlinear_state(snapshot);
         if let Some(err) = stamp_error {

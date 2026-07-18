@@ -31,6 +31,40 @@ use crate::{Complex64, Value};
 pub const K_BOLTZMANN: Value = 1.380649e-23;
 /// Electron charge (C)
 pub const Q_ELECTRON: Value = 1.602176634e-19;
+/// Xyce 7.10's legacy Boltzmann constant (J/K).
+pub const XYCE_K_BOLTZMANN: Value = 1.3806226e-23;
+/// Xyce 7.10's legacy electron charge (C).
+pub const XYCE_Q_ELECTRON: Value = 1.6021918e-19;
+
+/// Physical constants used while evaluating primitive noise sources.
+///
+/// Compatibility simulators historically embedded rounded constants in their
+/// device support libraries. Keeping the pair on each source lets one circuit
+/// reproduce that simulator's published behavior without changing the modern
+/// constants used by native RSpice analyses.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoisePhysicalConstants {
+    pub boltzmann: Value,
+    pub electron_charge: Value,
+}
+
+impl NoisePhysicalConstants {
+    pub const MODERN: Self = Self {
+        boltzmann: K_BOLTZMANN,
+        electron_charge: Q_ELECTRON,
+    };
+
+    pub const XYCE_7_10: Self = Self {
+        boltzmann: XYCE_K_BOLTZMANN,
+        electron_charge: XYCE_Q_ELECTRON,
+    };
+}
+
+impl Default for NoisePhysicalConstants {
+    fn default() -> Self {
+        Self::MODERN
+    }
+}
 /// Default temperature (K): 27°C = 300.15K (SPICE convention, ngspice REFTEMP)
 pub const T_NOMINAL: Value = 300.15;
 
@@ -302,6 +336,8 @@ pub struct CorrelatedNoisePair {
     pub second: NoisePort,
     /// Thermal-noise temperature offset in kelvin.
     pub temperature_offset: Value,
+    /// Physical constants selected by the simulator compatibility policy.
+    pub physical_constants: NoisePhysicalConstants,
     model: CorrelatedNoisePairModel,
 }
 
@@ -322,6 +358,7 @@ impl CorrelatedNoisePair {
             first,
             second,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             model: CorrelatedNoisePairModel::Bsim4Tnoi2 {
                 gamma_gd0,
                 ctnoi,
@@ -329,6 +366,12 @@ impl CorrelatedNoisePair {
                 multiplier,
             },
         }
+    }
+
+    /// Select the physical constants used to evaluate this source.
+    pub fn with_physical_constants(mut self, constants: NoisePhysicalConstants) -> Self {
+        self.physical_constants = constants;
+        self
     }
 
     /// Current-noise PSDs (A²/Hz) and relative phase at `frequency`.
@@ -365,7 +408,9 @@ impl CorrelatedNoisePair {
                 };
                 let first_g = gamma_gd0 * ctnoi_sq * multiplier;
                 let second_g = gamma_gd0 * gate_fraction * multiplier;
-                let scale = 4.0 * K_BOLTZMANN * (temperature + self.temperature_offset);
+                let scale = 4.0
+                    * self.physical_constants.boltzmann
+                    * (temperature + self.temperature_offset);
                 let first_psd = (scale * first_g).max(0.0);
                 let second_psd = (scale * second_g).max(0.0);
                 if first_psd <= 0.0 && second_psd <= 0.0 {
@@ -466,6 +511,8 @@ pub struct NoiseSource {
     /// semantics, where the source runs at the analysis temperature plus
     /// this per-instance offset (nevalsrc.c THERMNOISE).
     pub temperature_offset: Value,
+    /// Physical constants selected by the simulator compatibility policy.
+    pub physical_constants: NoisePhysicalConstants,
     /// Tabulated PSD for [`NoiseSourceType::Table`]: sorted (f, p) points
     /// and the log-log interpolation flag, scaled by `parameter`
     pub table: Option<NoiseTable>,
@@ -479,6 +526,13 @@ impl NoiseSource {
     /// Assign the canonical identity exported by the owning device model.
     pub fn with_identity(mut self, identity: NoiseSourceIdentity) -> Self {
         self.identity = identity;
+        self
+    }
+
+    /// Select the physical constants used to evaluate primitive thermal and
+    /// shot noise. Explicit PSD sources are unaffected.
+    pub fn with_physical_constants(mut self, constants: NoisePhysicalConstants) -> Self {
+        self.physical_constants = constants;
         self
     }
 
@@ -500,6 +554,7 @@ impl NoiseSource {
             current: 0.0,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
@@ -519,6 +574,7 @@ impl NoiseSource {
             current: 0.0,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
@@ -558,6 +614,7 @@ impl NoiseSource {
             current,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
@@ -578,6 +635,7 @@ impl NoiseSource {
             current: 0.0,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
@@ -617,6 +675,7 @@ impl NoiseSource {
             current: 0.0,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: Some(std::sync::Arc::new((points, log_interp))),
             bsim4_flicker: None,
             bsim3_flicker: None,
@@ -641,6 +700,7 @@ impl NoiseSource {
             current: model.cd,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: None,
             bsim4_flicker: Some(std::sync::Arc::new(model)),
             bsim3_flicker: None,
@@ -665,6 +725,7 @@ impl NoiseSource {
             current: model.cd,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: Some(std::sync::Arc::new(model)),
@@ -696,6 +757,7 @@ impl NoiseSource {
             current,
             corner_freq,
             temperature_offset: 0.0,
+            physical_constants: NoisePhysicalConstants::MODERN,
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
@@ -710,14 +772,16 @@ impl NoiseSource {
                 // at the instance temperature, ngspice nevalsrc.c THERMNOISE:
                 // 4k·(CKTtemp + dtemp)·g.
                 if self.parameter > 0.0 {
-                    4.0 * K_BOLTZMANN * (temperature + self.temperature_offset) / self.parameter
+                    4.0 * self.physical_constants.boltzmann
+                        * (temperature + self.temperature_offset)
+                        / self.parameter
                 } else {
                     0.0
                 }
             }
             NoiseSourceType::Shot => {
                 // Shot noise: Si = 2qI (A²/Hz)
-                2.0 * Q_ELECTRON * self.parameter
+                2.0 * self.physical_constants.electron_charge * self.parameter
             }
             NoiseSourceType::Flicker => {
                 // Flicker noise: Si = KF * I^AF / f^EF (A²/Hz)

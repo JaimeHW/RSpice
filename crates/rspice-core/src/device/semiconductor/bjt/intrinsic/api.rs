@@ -47,15 +47,16 @@ impl Bjt {
         (self.ic, self.ib, self.ie)
     }
 
-    /// Return the shot-noise branch currents referenced to the physical junctions.
+    /// Return the legacy Gummel-Poon collector and base shot-noise currents.
+    ///
+    /// Xyce's BJT noise model uses the solved total `iC` and `iB` operating-
+    /// point currents, including the complete forward, reverse, and leakage
+    /// current state. Reconstructing separate junction currents does not
+    /// preserve that operating-point contract.
+    /// The third entry is retained for the internal caller shape but is zero
+    /// because the legacy model injects one total base-current source from B-E.
     pub fn noise_branch_currents(&self) -> (Value, Value, Value) {
-        let vp_be = self.polarity() * self.vbe;
-        let vp_bc = self.polarity() * self.vbc;
-        let ibe = self.diode_current_with_is(self.ibei, vp_be, self.nei)
-            + self.diode_current_with_is(self.iben, vp_be, self.nen);
-        let ibc = self.diode_current_with_is(self.ibci, vp_bc, self.nci)
-            + self.diode_current_with_is(self.ibcn, vp_bc, self.ncn);
-        (self.ic.abs(), ibe.abs(), ibc.abs())
+        (self.ic.abs(), self.ib.abs(), 0.0)
     }
 
     /// Return flicker-noise coefficients, if enabled by the model card.
@@ -346,6 +347,80 @@ mod tests {
         assert_limited_direct_stamp_matches_generic(
             Bjt::new_pnp("qp".to_string(), 1, 2, 3),
             [0.0, -5.0, 0.0],
+        );
+    }
+
+    #[test]
+    fn xyce_legacy_bjt_first_iteration_uses_explicit_vcrit_state() {
+        for mut bjt in [
+            Bjt::new_npn("qn".to_string(), 1, 2, 3),
+            Bjt::new_pnp("qp".to_string(), 1, 2, 3),
+        ] {
+            bjt.set_xyce_compatibility(true);
+            let p = bjt.polarity();
+            let raw = IntrinsicTerminalState {
+                vcx: 3.0 * p,
+                vci: 3.0 * p,
+                vbx: p,
+                vbi: p,
+                vei: 0.2 * p,
+                vbp: 3.0 * p,
+                vsi: 0.0,
+                vrth: 0.0,
+            };
+            let raw_branches = bjt.legacy_nonlinear_branch_voltages([
+                raw.vcx, raw.vci, raw.vbx, raw.vbi, raw.vei, raw.vbp, raw.vsi, raw.vrth,
+            ]);
+            let initialized = bjt.limit_legacy_terminal_state_against_iterate(raw, false);
+            let initialized_branches = bjt.legacy_nonlinear_branch_voltages([
+                initialized.vcx,
+                initialized.vci,
+                initialized.vbx,
+                initialized.vbi,
+                initialized.vei,
+                initialized.vbp,
+                initialized.vsi,
+                initialized.vrth,
+            ]);
+            let (_vt, vcrit, _sub_vcrit) = bjt.legacy_limiting_parameters(0.0);
+
+            assert!((initialized_branches.vbe - vcrit).abs() <= 1e-14);
+            assert!((initialized_branches.vbc - raw_branches.vbc).abs() <= 1e-14);
+
+            bjt.initial_off = true;
+            let initialized_off = bjt.limit_legacy_terminal_state_against_iterate(raw, false);
+            let off_branches = bjt.legacy_nonlinear_branch_voltages([
+                initialized_off.vcx,
+                initialized_off.vci,
+                initialized_off.vbx,
+                initialized_off.vbi,
+                initialized_off.vei,
+                initialized_off.vbp,
+                initialized_off.vsi,
+                initialized_off.vrth,
+            ]);
+            assert!(off_branches.vbe.abs() <= 1e-14);
+            assert!(off_branches.vbc.abs() <= 1e-14);
+        }
+    }
+
+    #[test]
+    fn repeated_legacy_bjt_update_is_idempotent_for_one_newton_candidate() {
+        let mut bjt = Bjt::new_npn("q".to_string(), 1, 2, 3);
+        bjt.set_xyce_compatibility(true);
+        let candidate = [0.0, 0.0, 0.0];
+
+        bjt.update(&candidate);
+        let first_vbe = bjt.vbe;
+        let first_vbc = bjt.vbc;
+        let first_currents = [bjt.ic, bjt.ib, bjt.ie, bjt.isub];
+        bjt.update(&candidate);
+
+        assert_eq!(bjt.vbe.to_bits(), first_vbe.to_bits());
+        assert_eq!(bjt.vbc.to_bits(), first_vbc.to_bits());
+        assert_eq!(
+            [bjt.ic, bjt.ib, bjt.ie, bjt.isub].map(Value::to_bits),
+            first_currents.map(Value::to_bits)
         );
     }
 }

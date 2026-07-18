@@ -116,18 +116,29 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let linear_presolve = self.linear_presolve_for_guess(circuit, matrix);
-        let seed_neutral_bjt_junctions = linear_presolve.is_none();
-        let mut initial_guess = linear_presolve.unwrap_or_else(|| vec![0.0; size]);
-
-        Self::apply_bjt_initial_guess_correction(
-            &mut initial_guess,
-            circuit,
-            seed_neutral_bjt_junctions,
-        );
-        Self::apply_b3soi_pd_initial_guess_correction(&mut initial_guess, circuit);
-        Self::apply_bsim4_internal_gate_initial_guess_correction(&mut initial_guess, circuit);
-        Self::apply_vbic_internal_initial_guess_correction(&mut initial_guess, circuit);
+        // Xyce's DCOP Newton solve starts from the zero global solution and
+        // lets each device apply its init-junction policy locally. In
+        // particular, its GP BJT writes tVCrit only into the device's VBE
+        // state; a resistor-only presolve followed by a generic 0.7 V BJT
+        // correction takes a different NOX path and can produce a different
+        // legitimately accepted approximate operating point. Native and
+        // ngspice modes retain RSpice's robust linear warm start.
+        let mut initial_guess = if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce {
+            vec![0.0; size]
+        } else {
+            let linear_presolve = self.linear_presolve_for_guess(circuit, matrix);
+            let seed_neutral_bjt_junctions = linear_presolve.is_none();
+            let mut guess = linear_presolve.unwrap_or_else(|| vec![0.0; size]);
+            Self::apply_bjt_initial_guess_correction(
+                &mut guess,
+                circuit,
+                seed_neutral_bjt_junctions,
+            );
+            Self::apply_b3soi_pd_initial_guess_correction(&mut guess, circuit);
+            Self::apply_bsim4_internal_gate_initial_guess_correction(&mut guess, circuit);
+            Self::apply_vbic_internal_initial_guess_correction(&mut guess, circuit);
+            guess
+        };
         for &(node_id, voltage) in node_hints {
             if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
                 continue;
@@ -267,6 +278,7 @@ impl Engine {
         let node_count = circuit.num_nodes().min(size);
         let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
         Self::enforce_node_voltage_hints(circuit, &mut solution, node_hints);
+        let accepted_reference = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
 
         let mut rhs = vec![0.0; size];
@@ -289,8 +301,13 @@ impl Engine {
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
 
-            let voltage_converged =
-                self.node_voltage_convergence_met(&solution, &new_solution, node_count);
+            let voltage_converged = self.dc_newton_update_convergence_met(
+                &solution,
+                &new_solution,
+                &accepted_reference,
+                node_count,
+                iteration,
+            );
             self.update_device_states_for_dc(circuit, &new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
@@ -502,8 +519,13 @@ impl Engine {
                 }
             }
             // Check convergence (both voltage change and device convergence)
-            let voltage_converged =
-                self.node_voltage_convergence_met(&solution, &new_solution, node_count);
+            let voltage_converged = self.dc_newton_update_convergence_met(
+                &solution,
+                &new_solution,
+                &startup_seed,
+                node_count,
+                iteration,
+            );
             let linearized_residual_converged =
                 self.residual_convergence_met(circuit, matrix, &new_solution, &rhs);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
@@ -560,10 +582,12 @@ impl Engine {
                         iteration + 1
                     );
                 }
-                if let Some(refined) =
-                    self.refine_fallback_candidate(circuit, matrix, &solution, abort)?
-                {
-                    return Ok(refined);
+                if self.config.spice_dialect != crate::engine::SpiceDialect::Xyce {
+                    if let Some(refined) =
+                        self.refine_fallback_candidate(circuit, matrix, &solution, abort)?
+                    {
+                        return Ok(refined);
+                    }
                 }
                 return Ok(solution);
             }

@@ -295,6 +295,48 @@ impl Engine {
         )
     }
 
+    /// Apply the nonlinear update status test for a DC Newton solve.
+    ///
+    /// Xyce recomputes DC weights at every nonlinear iteration from the new
+    /// candidate and the fixed accepted/startup solution in DataStore. It
+    /// measures every MNA unknown, including voltage-source branch currents,
+    /// and deliberately prevents convergence on nonlinear iteration zero.
+    pub(crate) fn dc_newton_update_convergence_met(
+        &self,
+        old: &[Value],
+        new: &[Value],
+        accepted: &[Value],
+        node_count: usize,
+        iteration: usize,
+    ) -> bool {
+        if self.config.spice_dialect != SpiceDialect::Xyce {
+            return self.node_voltage_convergence_met(old, new, node_count);
+        }
+        if iteration == 0
+            || old.len() != new.len()
+            || new.len() != accepted.len()
+            || old
+                .iter()
+                .chain(new)
+                .chain(accepted)
+                .any(|value| !value.is_finite())
+        {
+            return false;
+        }
+
+        const XYCE_DC_RELTOL: Value = 1.0e-3;
+        const XYCE_DC_ABSTOL: Value = 1.0e-12;
+        const XYCE_DC_DELTAXTOL: Value = 1.0;
+        old.iter()
+            .zip(new)
+            .zip(accepted)
+            .all(|((&old_value, &new_value), &accepted_value)| {
+                let weight =
+                    XYCE_DC_RELTOL * new_value.abs().max(accepted_value.abs()) + XYCE_DC_ABSTOL;
+                (new_value - old_value).abs() / weight < XYCE_DC_DELTAXTOL
+            })
+    }
+
     /// Check voltage convergence using explicit absolute and relative tolerances.
     ///
     /// Criterion: `|ΔV| <= VABSTOL + RELTOL * max(|Vnew|, |Vold|)`
@@ -354,6 +396,34 @@ mod tests {
         let next = [1.0, -2.0, Value::NAN];
 
         assert!(!engine.node_voltage_convergence_met(&previous, &next, 2));
+    }
+
+    #[test]
+    fn xyce_dc_update_uses_fixed_accepted_reference_and_full_mna_vector() {
+        let mut engine = Engine::default();
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+
+        assert!(!engine.dc_newton_update_convergence_met(
+            &[0.0, 0.0],
+            &[0.0, 0.0],
+            &[0.0, 0.0],
+            1,
+            0,
+        ));
+        assert!(engine.dc_newton_update_convergence_met(
+            &[0.0, 0.0],
+            &[5.0e-4, 0.0],
+            &[1.0, 0.0],
+            1,
+            1,
+        ));
+        assert!(!engine.dc_newton_update_convergence_met(
+            &[0.0, 0.0],
+            &[5.0e-4, 1.0e-6],
+            &[1.0, 0.0],
+            1,
+            1,
+        ));
     }
 
     #[test]

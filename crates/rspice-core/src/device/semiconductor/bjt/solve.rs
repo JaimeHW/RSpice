@@ -891,6 +891,14 @@ impl Bjt {
             return false;
         }
 
+        if self.xyce_compatibility {
+            // Xyce's native GP BJT contributes to allDevicesConverged only
+            // through origFlag: the device is converged once pnjlim leaves
+            // both junction voltages unchanged. Its DC NOX status test then
+            // applies the global weighted-update and raw-residual gates.
+            return true;
+        }
+
         let reltol = criteria.relative_tolerance();
         let current_tol = criteria.current_tolerance();
         let p = self.polarity();
@@ -1038,6 +1046,37 @@ impl Bjt {
             if vnew < arg { arg } else { vnew }
         } else {
             vnew
+        }
+    }
+
+    /// Xyce 7.10's native GP-BJT junction limiter. Xyce intentionally uses
+    /// its original `DeviceSupport::pnjlim` for this device rather than the
+    /// later ngspice-derived negative-voltage limiter.
+    pub(super) fn limit_xyce_junction_voltage(
+        vnew: Value,
+        vold: Value,
+        vt: Value,
+        vcrit: Value,
+    ) -> Value {
+        let vt = vt.max(1e-18);
+        if !vnew.is_finite() {
+            return vold;
+        }
+        if !vold.is_finite() {
+            return vnew;
+        }
+        if vnew <= vcrit || (vnew - vold).abs() <= 2.0 * vt {
+            return vnew;
+        }
+        if vold > 0.0 {
+            let arg = 1.0 + (vnew - vold) / vt;
+            if arg > 0.0 {
+                vold + vt * arg.ln()
+            } else {
+                vcrit
+            }
+        } else {
+            vt * (vnew / vt).ln()
         }
     }
 }

@@ -298,6 +298,31 @@ impl Bjt {
         let raw = [
             state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
+        // Xyce's DC operating-point initialization is an explicit device
+        // state, not merely the history supplied to pnjlim. On the first
+        // Newton evaluation N_DEV_BJT.C sets VBE to tVCrit (or both junctions
+        // to zero for an OFF instance), copies those values into the store
+        // vector, and only then invokes pnjlim. Reproduce that local branch
+        // state before entering the ordinary previous-iterate path.
+        if self.xyce_compatibility && !previous_iterate_available {
+            let raw_branches = self.legacy_nonlinear_branch_voltages(raw);
+            let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
+            let initialized_branches = LegacyNonlinearBranchVoltages {
+                vbe: if self.initial_off { 0.0 } else { vcrit },
+                vbc: if self.initial_off {
+                    0.0
+                } else {
+                    raw_branches.vbc
+                },
+                vsub: raw_branches.vsub,
+            };
+            let initialized =
+                self.project_legacy_limited_branches_onto_internal_state(raw, initialized_branches);
+            if initialized.iter().all(|value| value.is_finite()) {
+                return self.intrinsic_state_from_internal_vector(initialized);
+            }
+            return state;
+        }
         let previous = if previous_iterate_available {
             [
                 self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
@@ -339,15 +364,21 @@ impl Bjt {
         let raw_branches = self.legacy_nonlinear_branch_voltages(raw);
         let previous_branches = self.legacy_nonlinear_branch_voltages(previous);
         let (vt, vcrit, sub_vcrit) = self.legacy_limiting_parameters(previous[IDX_VRTH]);
+        let limit_junction = |vnew, vold, vcrit| {
+            if self.xyce_compatibility {
+                Self::limit_xyce_junction_voltage(vnew, vold, vt, vcrit)
+            } else {
+                Self::limit_junction_voltage(vnew, vold, vt, vcrit)
+            }
+        };
         let limited_branches = LegacyNonlinearBranchVoltages {
-            vbe: Self::limit_junction_voltage(raw_branches.vbe, previous_branches.vbe, vt, vcrit),
-            vbc: Self::limit_junction_voltage(raw_branches.vbc, previous_branches.vbc, vt, vcrit),
-            vsub: Self::limit_junction_voltage(
-                raw_branches.vsub,
-                previous_branches.vsub,
-                vt,
-                sub_vcrit,
-            ),
+            vbe: limit_junction(raw_branches.vbe, previous_branches.vbe, vcrit),
+            vbc: limit_junction(raw_branches.vbc, previous_branches.vbc, vcrit),
+            vsub: if self.xyce_compatibility {
+                raw_branches.vsub
+            } else {
+                limit_junction(raw_branches.vsub, previous_branches.vsub, sub_vcrit)
+            },
         };
 
         let projected =

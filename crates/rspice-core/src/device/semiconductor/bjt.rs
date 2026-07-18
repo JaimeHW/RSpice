@@ -559,7 +559,7 @@ pub struct Bjt {
     /// Active device temperature (K)
     pub temperature: Value,
     /// Select Xyce's historical SPICE device constants for `kT/q`.
-    xyce_thermal_voltage_constants: bool,
+    xyce_compatibility: bool,
     /// Saturation-current temperature exponent (XTI)
     pub xti: Value,
     /// Bandgap used for IS temperature scaling (EG, eV)
@@ -979,7 +979,12 @@ impl Bjt {
     /// parallel with every nonlinear branch of the bjt/vbic loads.
     #[inline]
     pub fn set_junction_gmin(&mut self, gmin: Value) {
-        self.junction_gmin = gmin.max(0.0);
+        let effective = gmin.max(0.0);
+        if effective.to_bits() != self.junction_gmin.to_bits() {
+            self.junction_gmin = effective;
+            self.reduced_linearization_cache_valid.set(false);
+            self.charge_snapshot_cache_valid.set(false);
+        }
     }
 
     fn new(
@@ -1021,7 +1026,7 @@ impl Bjt {
             tnom: crate::analysis::temperature::T_NOMINAL,
             ambient_temperature: crate::analysis::temperature::T_NOMINAL,
             temperature: crate::analysis::temperature::T_NOMINAL,
-            xyce_thermal_voltage_constants: false,
+            xyce_compatibility: false,
             xti: 3.0,
             eg: 1.11,
             vje: 0.75, // B-E built-in potential
@@ -1250,6 +1255,17 @@ impl Bjt {
             && Self::same_cached_bias(vs, self.vs_ext)
     }
 
+    #[inline]
+    fn cache_exactly_matches_external_biases(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+    ) -> bool {
+        vc == self.vc_ext && vb == self.vb_ext && ve == self.ve_ext && vs == self.vs_ext
+    }
+
     /// External voltages the companion equivalent current anchors at. When
     /// the call matches the cached evaluation, the cached anchor carries the
     /// per-iterate junction-limited point (raw biases otherwise); off-cache
@@ -1278,7 +1294,7 @@ impl Bjt {
         // current SI/CODATA constants; this small distinction is observable
         // in exponential junction models and is therefore part of dialect
         // compatibility rather than a unit-conversion approximation.
-        let (k_boltzmann, q_electron) = if self.xyce_thermal_voltage_constants {
+        let (k_boltzmann, q_electron) = if self.xyce_compatibility {
             (1.3806226e-23, 1.6021918e-19)
         } else {
             (1.380649e-23, 1.602176634e-19)
@@ -1486,13 +1502,18 @@ impl NonlinearDevice for Bjt {
             return;
         }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
-        let previous_linearization_available = self.reduced_linearization_cache_valid.get()
-            && self.cache_matches_external_biases(
-                self.vc_ext,
-                self.vb_ext,
-                self.ve_ext,
-                self.vs_ext,
-            );
+        // Device update and matrix load are separate phases in both the
+        // RSpice and Xyce solver lifecycles. Reusing the same candidate must
+        // therefore be idempotent: applying pnjlim again would advance the
+        // limiter history twice for one Newton iterate. The effective GMIN
+        // setter invalidates this cache whenever continuation changes the
+        // device equations.
+        if self.reduced_linearization_cache_valid.get()
+            && self.cache_exactly_matches_external_biases(vc, vb, ve, vs)
+        {
+            return;
+        }
+        let previous_linearization_available = self.reduced_linearization_cache_valid.get();
         self.previous_reduced_linearization = if previous_linearization_available {
             self.reduced_linearization_cache.get()
         } else {

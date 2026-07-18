@@ -357,8 +357,13 @@ impl Engine {
                 Ok(value)
             };
 
-            let (sources, correlated_sources) =
+            let (mut sources, mut correlated_sources) =
                 Self::try_collect_noise_sources(&circuit, &solution)?;
+            Self::configure_noise_physical_constants(
+                &mut sources,
+                &mut correlated_sources,
+                self.config.spice_dialect,
+            );
             found_noise_source |= !sources.is_empty() || !correlated_sources.is_empty();
             let mut white = vec![0.0; evaluation_frequencies.len()];
             let mut colored: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
