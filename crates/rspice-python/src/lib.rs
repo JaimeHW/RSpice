@@ -109,6 +109,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Configuration classes
     m.add_class::<config::PySimulationConfig>()?;
+    m.add_class::<config::PyResourceLimits>()?;
     m.add_class::<config::PyConvergenceConfig>()?;
     m.add_class::<config::PyBypassConfig>()?;
     m.add_class::<config::PyDampingStrategy>()?;
@@ -186,6 +187,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "UnresolvedOutputSymbol",
             "Engine",
             "SimulationConfig",
+            "ResourceLimits",
             "ConvergenceConfig",
             "BypassConfig",
             "DampingStrategy",

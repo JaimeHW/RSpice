@@ -12,6 +12,9 @@ Release numbers remain tied to the workspace version.
 
 ### Added
 
+- A typed `ResourceLimits` policy shared by every `Netlist.parse*` entry point
+  and `SimulationConfig`, with structured resource/requested/limit attributes
+  on parsing and simulation errors.
 - Complete third-order Volterra `.DISTO` analysis, including harmonic 2F1/3F1
   products, two-tone F1+F2/F1-F2/2F1-F2 products, complex peak phasors,
   relative voltage/current metrics, direct sweep APIs, deck execution, and
@@ -64,6 +67,8 @@ Release numbers remain tied to the workspace version.
 
 ### Fixed
 
+- Normalized Windows extended-length paths before exposing source provenance
+  through public exception and netlist-location attributes.
 - Isolated the validated fixed-BDF2 compatibility coefficients to native
   BSIM4 transient-NQS charge-deficit states, preserving variable-step Gear2
   behavior for BSIM3, quasi-static BSIM4, and Xyce accepted-reference modes.

@@ -104,6 +104,60 @@ class TestSimulationConfig:
         engine = rspice.Engine(rspice.SimulationConfig(tolerance=1e-12))
         assert engine.config.tolerance == 1e-12
 
+    def test_resource_policy_roundtrips_with_copy_semantics(self):
+        limits = rspice.ResourceLimits(max_batch_runs=7, max_analysis_points=1234)
+        config = rspice.SimulationConfig(resource_limits=limits)
+        assert config.resource_limits.max_batch_runs == 7
+        assert config.resource_limits.max_analysis_points == 1234
+
+        config.resource_limits.max_batch_runs = 99
+        assert config.resource_limits.max_batch_runs == 7
+
+        updated = config.resource_limits
+        updated.max_batch_runs = 11
+        config.resource_limits = updated
+        assert config.resource_limits.max_batch_runs == 11
+
+
+class TestResourceLimits:
+    def test_defaults_kwargs_and_properties(self):
+        limits = rspice.ResourceLimits(max_netlist_bytes=1024, max_batch_runs=3)
+        assert limits.max_netlist_bytes == 1024
+        assert limits.max_batch_runs == 3
+        assert limits.max_analysis_points > 0
+
+        limits.max_result_values = 77
+        assert limits.max_result_values == 77
+        assert repr(limits).startswith("ResourceLimits(")
+
+    def test_zero_can_disable_a_resource_and_unlimited_is_explicit(self):
+        disabled = rspice.ResourceLimits(max_shared_cache_bytes=0)
+        assert disabled.max_shared_cache_bytes == 0
+
+        unlimited = rspice.ResourceLimits.unlimited()
+        assert unlimited.max_netlist_bytes > rspice.ResourceLimits().max_netlist_bytes
+        assert unlimited.max_batch_runs > rspice.ResourceLimits().max_batch_runs
+
+    def test_engine_policy_rechecks_a_netlist_parsed_under_looser_defaults(self):
+        source = "strict engine\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n"
+        netlist = rspice.Netlist.parse_spice(source)
+        engine = rspice.Engine(
+            rspice.SimulationConfig(
+                resource_limits=rspice.ResourceLimits(
+                    max_netlist_bytes=len(source.encode()) - 1
+                )
+            )
+        )
+
+        with pytest.raises(rspice.SimulationError) as exc_info:
+            engine.run_dc_op(netlist)
+
+        error = exc_info.value
+        assert error.kind == "resource_limit"
+        assert error.resource == "netlist_bytes"
+        assert error.requested == len(source.encode())
+        assert error.limit == len(source.encode()) - 1
+
 
 class TestConvergenceConfig:
     def test_gmin_range_must_progress_toward_target(self):

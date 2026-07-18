@@ -106,6 +106,35 @@ fn check_circuit_resource_limits(
     Ok(())
 }
 
+fn check_netlist_source_resource_limits(
+    engine: &Engine,
+    netlist: &Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    let Some(source) = netlist.source_text.as_deref() else {
+        return Ok(());
+    };
+    ResourceLimitError::ensure(
+        ResourceKind::NetlistBytes,
+        source.len(),
+        engine.config.resource_limits.max_netlist_bytes,
+    )?;
+    for (index, line) in source.lines().enumerate() {
+        if index.is_multiple_of(64) {
+            check_build_abort(abort)?;
+        }
+        for _ in line.as_bytes().chunks(4096) {
+            check_build_abort(abort)?;
+        }
+        ResourceLimitError::ensure(
+            ResourceKind::NetlistLines,
+            index.saturating_add(1),
+            engine.config.resource_limits.max_netlist_lines,
+        )?;
+    }
+    check_build_abort(abort)
+}
+
 fn validate_source_file_inputs(
     source_name: &str,
     spec: &crate::netlist::SourceSpec,
@@ -3119,6 +3148,48 @@ set auto_bridge_parm_d = vdd
             Err(SimulationError::Aborted)
         ));
     }
+
+    #[test]
+    fn circuit_builder_rechecks_source_limits_from_its_engine_policy() {
+        let source = "strict engine source\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let netlist = Netlist::parse(source).expect("fixture parses under default policy");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.resource_limits.max_netlist_bytes = source.len() - 1;
+
+        let error = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect_err("engine-specific source byte ceiling must be authoritative");
+
+        assert!(matches!(
+            error,
+            SimulationError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::NetlistBytes,
+                requested,
+                limit,
+            }) if requested == source.len() && limit == source.len() - 1
+        ));
+    }
+
+    #[test]
+    fn circuit_builder_rechecks_source_line_limit_from_its_engine_policy() {
+        let source = "strict engine lines\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let netlist = Netlist::parse(source).expect("fixture parses under default policy");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.resource_limits.max_netlist_lines = 2;
+
+        let error = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect_err("engine-specific source line ceiling must be authoritative");
+
+        assert!(matches!(
+            error,
+            SimulationError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::NetlistLines,
+                requested: 3,
+                limit: 2,
+            })
+        ));
+    }
 }
 
 impl Engine {
@@ -3305,6 +3376,7 @@ impl Engine {
     ) -> Result<CircuitData, SimulationError> {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
+        check_netlist_source_resource_limits(self, netlist, abort)?;
         let mut startup_validated;
         let netlist = if netlist.startup_directives.is_empty() {
             netlist

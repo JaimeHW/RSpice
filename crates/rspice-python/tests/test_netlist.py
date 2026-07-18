@@ -42,6 +42,18 @@ class TestParseStatementSemantics:
         netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
         assert netlist.num_elements == 2
 
+    def test_parse_accepts_typed_resource_limits(self):
+        limits = rspice.ResourceLimits(max_netlist_bytes=8)
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end", resource_limits=limits)
+
+        error = exc_info.value
+        assert error.kind == "resource_limit"
+        assert error.category == "resource_limit"
+        assert error.resource == "netlist_bytes"
+        assert error.requested > 8
+        assert error.limit == 8
+
     def test_leading_comment_becomes_title(self):
         netlist = rspice.Netlist.parse("* My circuit\nV1 1 0 10\nR1 1 0 1k\n.end")
         assert "My circuit" in netlist.title
@@ -129,6 +141,18 @@ class TestParseFile:
         deck.write_text("File divider\nV1 1 0 10\nR1 1 0 1k\n.end\n")
         netlist = rspice.Netlist.parse_file(deck)
         assert netlist.num_elements == 2
+
+    def test_parse_file_applies_the_supplied_resource_policy(self, tmp_path: pathlib.Path):
+        deck = tmp_path / "bounded.sp"
+        deck.write_text("bounded file\nV1 1 0 10\n.end\n")
+
+        with pytest.raises(rspice.ParseError) as exc_info:
+            rspice.Netlist.parse_file(
+                deck, resource_limits=rspice.ResourceLimits(max_netlist_bytes=8)
+            )
+
+        assert exc_info.value.resource == "netlist_bytes"
+        assert exc_info.value.limit == 8
 
     def test_parse_file_missing_raises(self, tmp_path: pathlib.Path):
         with pytest.raises(rspice.ParseError):

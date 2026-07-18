@@ -23,6 +23,8 @@ use rspice_core::netlist::{AnalysisCommand, DcSecondSweep, DcSweepMode};
 use rspice_core::{Netlist, Value};
 use std::borrow::Cow;
 
+use crate::config::PyResourceLimits;
+
 /// A parsed SPICE netlist ready for simulation
 ///
 /// The Netlist class represents a parsed circuit description that can be
@@ -85,7 +87,7 @@ impl From<&rspice_core::netlist::NetlistSourceLocation> for PyNetlistSourceLocat
             source: location
                 .path
                 .as_ref()
-                .map(|path| path.to_string_lossy().into_owned()),
+                .map(|path| crate::errors::public_path_string(path)),
         }
     }
 }
@@ -179,6 +181,17 @@ fn ensure_statement_content(content: &str) -> Cow<'_, str> {
         Some(line) if line.starts_with('*') => Cow::Borrowed(content),
         Some(_) => Cow::Owned(format!("* Untitled circuit\n{content}")),
         None => Cow::Borrowed(content),
+    }
+}
+
+fn parse_options(
+    resource_limits: Option<&PyResourceLimits>,
+) -> rspice_core::netlist::NetlistParseOptions {
+    rspice_core::netlist::NetlistParseOptions {
+        resource_limits: resource_limits
+            .map(PyResourceLimits::to_core)
+            .unwrap_or_default(),
+        ..rspice_core::netlist::NetlistParseOptions::default()
     }
 }
 
@@ -355,6 +368,7 @@ impl PyNetlist {
     ///
     /// Args:
     ///     content: SPICE circuit statements
+    ///     resource_limits: Optional resource policy for untrusted input
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
@@ -371,10 +385,14 @@ impl PyNetlist {
     ///     ... .end
     ///     ... ''')
     #[staticmethod]
-    pub fn parse(content: &str) -> PyResult<Self> {
+    #[pyo3(signature = (content, *, resource_limits=None))]
+    pub fn parse(content: &str, resource_limits: Option<PyResourceLimits>) -> PyResult<Self> {
         let normalized = ensure_statement_content(content);
-        let inner =
-            Netlist::parse_validated(&normalized).map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner = Netlist::parse_validated_with_options(
+            &normalized,
+            parse_options(resource_limits.as_ref()),
+        )
+        .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -395,9 +413,11 @@ impl PyNetlist {
     /// Example:
     ///     >>> netlist = Netlist.parse_spice("My Amplifier\nV1 1 0 10\n.end")
     #[staticmethod]
-    pub fn parse_spice(content: &str) -> PyResult<Self> {
+    #[pyo3(signature = (content, *, resource_limits=None))]
+    pub fn parse_spice(content: &str, resource_limits: Option<PyResourceLimits>) -> PyResult<Self> {
         let inner =
-            Netlist::parse_validated(content).map_err(crate::errors::parse_error_to_pyerr)?;
+            Netlist::parse_validated_with_options(content, parse_options(resource_limits.as_ref()))
+                .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -420,9 +440,15 @@ impl PyNetlist {
     ///     >>> netlist = Netlist.parse_file("circuits/amplifier.sp")
     ///     >>> netlist = Netlist.parse_file(pathlib.Path("circuits") / "amplifier.sp")
     #[staticmethod]
-    pub fn parse_file(path: std::path::PathBuf) -> PyResult<Self> {
-        let content = Netlist::read_source(&path).map_err(crate::errors::parse_error_to_pyerr)?;
-        let inner = Netlist::parse_validated_with_path(&content, &path)
+    #[pyo3(signature = (path, *, resource_limits=None))]
+    pub fn parse_file(
+        path: std::path::PathBuf,
+        resource_limits: Option<PyResourceLimits>,
+    ) -> PyResult<Self> {
+        let options = parse_options(resource_limits.as_ref());
+        let content = Netlist::read_source_with_options(&path, options)
+            .map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner = Netlist::parse_validated_with_path_and_options(&content, &path, options)
             .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
@@ -442,7 +468,12 @@ impl PyNetlist {
     /// Raises:
     ///     ParseError: If the netlist contains syntax or semantic errors
     #[staticmethod]
-    pub fn parse_with_includes(content: &str, base_path: std::path::PathBuf) -> PyResult<Self> {
+    #[pyo3(signature = (content, base_path, *, resource_limits=None))]
+    pub fn parse_with_includes(
+        content: &str,
+        base_path: std::path::PathBuf,
+        resource_limits: Option<PyResourceLimits>,
+    ) -> PyResult<Self> {
         let normalized = ensure_statement_content(content);
         // Core resolves includes relative to the *parent* of the given path
         // (it expects a file path). Accept a directory by anchoring a
@@ -452,8 +483,12 @@ impl PyNetlist {
         } else {
             base_path
         };
-        let inner = Netlist::parse_validated_with_path(&normalized, &anchor)
-            .map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner = Netlist::parse_validated_with_path_and_options(
+            &normalized,
+            &anchor,
+            parse_options(resource_limits.as_ref()),
+        )
+        .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 

@@ -29,6 +29,9 @@ regression tests in CI the same way you run unit tests.
 - **Strict error discipline** — accessors raise `IndexError`/`KeyError` for
   invalid nodes; argument errors raise `ValueError`; nothing fabricates
   silent zeros
+- **Resource governance** — one `ResourceLimits` policy bounds netlist and
+  dependency ingestion, hierarchy/circuit growth, analysis/result sizes,
+  batch runs, external data, and shared caches across parsing and execution
 - **Typed** — ships a complete `.pyi` stub with a `py.typed` marker
 
 ## Installation
@@ -179,7 +182,10 @@ netlist = rspice.Netlist.parse_spice("My Amplifier\nV1 1 0 10\n.end")
 
 # From a file, expanding .include/.lib relative to its location;
 # accepts str or os.PathLike
-netlist = rspice.Netlist.parse_file(pathlib.Path("circuits") / "amplifier.sp")
+limits = rspice.ResourceLimits(max_netlist_bytes=8 * 1024 * 1024)
+netlist = rspice.Netlist.parse_file(
+    pathlib.Path("circuits") / "amplifier.sp", resource_limits=limits
+)
 
 # From a string, resolving includes against a directory
 netlist = rspice.Netlist.parse_with_includes(content, "circuits/")
@@ -198,26 +204,28 @@ element raises `ParseError` instead of silently becoming the title. Use
 ```python
 engine = rspice.Engine()                      # defaults
 
+limits = rspice.ResourceLimits(max_batch_runs=1_000)
 config = rspice.SimulationConfig(
     tolerance=1e-12,
     temperature=300.15,                       # Kelvin
     integration_method=rspice.IntegrationMethod.GEAR2,
     convergence=rspice.ConvergenceConfig.robust(),
     bypass=rspice.BypassConfig(enabled=True),
+    resource_limits=limits,
 )
 engine = rspice.Engine(config)
 ```
 
 All configuration classes take keyword arguments. Property getters for
-nested configs return *copies*: `config.convergence.verbose = True` modifies
-a temporary and is lost — assign a whole `ConvergenceConfig` back, or build
-with keywords.
+nested configs return *copies*: `config.convergence.verbose = True` and
+`config.resource_limits.max_batch_runs = 10` modify temporaries and are lost —
+assign the whole nested object back, or build with keywords.
 
 `ConvergenceConfig` exposes the DC convergence aids (GMIN stepping, source
 stepping, pseudo-transient, arc-length continuation, damping strategies,
 tolerance knobs including `charge_abstol`); `BypassConfig` controls
 latent-device bypass; `SimulationConfig` adds `transient_max_iterations`
-(ITL4), `transient_trtol`, and the integration method.
+(ITL4), `transient_trtol`, the integration method, and `ResourceLimits`.
 
 ### Analyses
 

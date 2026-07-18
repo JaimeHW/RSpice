@@ -55,6 +55,12 @@ def wait_until(predicate, timeout=10.0):
     return predicate()
 
 
+def cancellation_engine():
+    """Use an explicit unbounded policy for deliberately enormous workloads."""
+    config = rspice.SimulationConfig(resource_limits=rspice.ResourceLimits.unlimited())
+    return rspice.Engine(config)
+
+
 class TestGilRelease:
     def test_main_thread_stays_live_during_simulation(self, engine):
         netlist = rspice.Netlist.parse(LONG_RC)
@@ -146,7 +152,7 @@ class TestGilRelease:
 
 class TestCancellation:
     def test_engine_cancel_stops_all_active_calls(self):
-        engine = rspice.Engine()
+        engine = cancellation_engine()
         netlist = rspice.Netlist.parse(LONG_RC)
         errors = []
 
@@ -181,7 +187,7 @@ class TestCancellation:
         assert result.voltage("in") == pytest.approx(1.0)
 
     def test_single_active_run_reports_progress(self):
-        engine = rspice.Engine()
+        engine = cancellation_engine()
         netlist = rspice.Netlist.parse(LONG_RC)
         errors = []
 
@@ -204,7 +210,8 @@ class TestCancellation:
         assert isinstance(errors[0], rspice.CancelledError)
         assert engine.progress is None
 
-    def test_keyboard_interrupt_cancels_transient(self, engine):
+    def test_keyboard_interrupt_cancels_transient(self):
+        engine = cancellation_engine()
         netlist = rspice.Netlist.parse(LONG_RC)
 
         # This workload runs for minutes if not cancelled.
@@ -221,7 +228,8 @@ class TestCancellation:
         # Cancellation must be prompt — well under the full run time.
         assert elapsed < 10.0
 
-    def test_keyboard_interrupt_cancels_dc_sweep(self, engine):
+    def test_keyboard_interrupt_cancels_dc_sweep(self):
+        engine = cancellation_engine()
         # A two-million-point nonlinear sweep, cancelled shortly after start.
         netlist = rspice.Netlist.parse(NONLINEAR_DC_SWEEP)
 
@@ -236,7 +244,8 @@ class TestCancellation:
             killer.join()
         assert time.monotonic() - start < 10.0
 
-    def test_keyboard_interrupt_cancels_pss(self, engine):
+    def test_keyboard_interrupt_cancels_pss(self):
+        engine = cancellation_engine()
         # A moderately wide RC ladder makes the stabilization solve long
         # enough that the signal cannot race with normal completion on fast
         # release builds.
@@ -270,7 +279,8 @@ class TestCancellation:
             killer.join()
         assert time.monotonic() - start < 10.0
 
-    def test_keyboard_interrupt_cancels_ac_sweep(self, engine):
+    def test_keyboard_interrupt_cancels_ac_sweep(self):
+        engine = cancellation_engine()
         lines = ["V1 n0 0 AC 1"]
         for index in range(120):
             input_node = "n0" if index == 0 else f"n{index}"
@@ -296,7 +306,8 @@ class TestCancellation:
             killer.join()
         assert time.monotonic() - start < 10.0
 
-    def test_keyboard_interrupt_cancels_stb_sweep(self, engine):
+    def test_keyboard_interrupt_cancels_stb_sweep(self):
+        engine = cancellation_engine()
         netlist = rspice.Netlist.parse(STB_LOOP)
 
         done = threading.Event()

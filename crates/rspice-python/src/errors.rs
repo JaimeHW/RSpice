@@ -13,6 +13,42 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
+pub(crate) fn public_path_string(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = path.strip_prefix(r"\\?\") {
+            return rest.to_owned();
+        }
+    }
+    path.into_owned()
+}
+
+#[cfg(all(test, windows))]
+mod path_tests {
+    use super::public_path_string;
+    use std::path::Path;
+
+    #[test]
+    fn public_paths_hide_windows_verbatim_drive_prefixes() {
+        assert_eq!(
+            public_path_string(Path::new(r"\\?\C:\circuits\deck.cir")),
+            r"C:\circuits\deck.cir"
+        );
+    }
+
+    #[test]
+    fn public_paths_convert_windows_verbatim_unc_prefixes() {
+        assert_eq!(
+            public_path_string(Path::new(r"\\?\UNC\server\share\deck.cir")),
+            r"\\server\share\deck.cir"
+        );
+    }
+}
+
 /// One unresolved circuit symbol retained by an aggregate output-validation
 /// error. The string-valued tags are deliberately stable across core enum
 /// evolution so Python automation does not need to parse display messages.
@@ -64,7 +100,7 @@ impl From<&rspice_core::netlist::UnresolvedOutputSymbol> for PyUnresolvedOutputS
                 .origin
                 .path
                 .as_ref()
-                .map(|path| path.to_string_lossy().into_owned()),
+                .map(|path| public_path_string(path)),
         }
     }
 }
@@ -131,20 +167,14 @@ impl ParseErrorAttributes {
 
     fn set_primary(&mut self, location: &rspice_core::netlist::NetlistSourceLocation) {
         self.line = Some(location.line);
-        self.source = location
-            .path
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned());
+        self.source = location.path.as_ref().map(|path| public_path_string(path));
         self.primary_line = self.line;
         self.primary_source = self.source.clone();
     }
 
     fn set_related(&mut self, location: &rspice_core::netlist::NetlistSourceLocation) {
         self.related_line = Some(location.line);
-        self.related_source = location
-            .path
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned());
+        self.related_source = location.path.as_ref().map(|path| public_path_string(path));
     }
 }
 
@@ -350,7 +380,7 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
                 .detected_at
                 .path
                 .as_ref()
-                .map(|path| path.to_string_lossy().into_owned());
+                .map(|path| public_path_string(path));
             attributes.boundary = Some(
                 match error.boundary {
                     MissingSubcircuitEndsBoundary::EndCard => "end_card",

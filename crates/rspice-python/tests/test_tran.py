@@ -175,7 +175,7 @@ class TestTransientCheckpoint:
         assert np.array_equal(loaded.solution, checkpoint.solution)
 
         other = rspice.Netlist.parse("V1 out 0 2\nR1 out 0 1k\n.end")
-        with pytest.raises(rspice.SimulationError, match="fingerprint"):
+        with pytest.raises(rspice.SimulationError, match="different netlist"):
             engine.resume_tran(other, loaded, stop_time=3e-4, max_step=1e-6)
 
     def test_resume_requires_later_stop(self, engine):

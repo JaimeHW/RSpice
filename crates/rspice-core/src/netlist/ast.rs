@@ -1154,16 +1154,13 @@ impl DcSweepSpec {
         reject_limit: bool,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SweepPointGenerationError> {
-        const MAX_GENERATED_SWEEP_POINTS: usize = 2_000_000;
-        let generated_limit = max_points.min(MAX_GENERATED_SWEEP_POINTS);
-        let reject_generated_limit = reject_limit;
         match &self.mode {
             DcSweepMode::Linear => linear_sweep_points_controlled(
                 self.start,
                 self.stop,
                 self.step,
-                generated_limit,
-                reject_generated_limit,
+                max_points,
+                reject_limit,
                 abort,
             ),
             DcSweepMode::List(values) => {
@@ -1174,8 +1171,8 @@ impl DcSweepSpec {
                 self.stop,
                 *points_per_decade,
                 10.0,
-                generated_limit,
-                reject_generated_limit,
+                max_points,
+                reject_limit,
                 abort,
             ),
             DcSweepMode::Octave { points_per_octave } => logarithmic_sweep_points_controlled(
@@ -1183,8 +1180,8 @@ impl DcSweepSpec {
                 self.stop,
                 *points_per_octave,
                 2.0,
-                generated_limit,
-                reject_generated_limit,
+                max_points,
+                reject_limit,
                 abort,
             ),
         }
@@ -2168,19 +2165,16 @@ mod controlled_step_sweep_tests {
     }
 
     #[test]
-    fn bounded_log_grid_rejects_intrinsic_cap_without_allocating_partial_grid() {
+    fn bounded_log_grid_honors_the_callers_resource_ceiling() {
         let sweep = StepSweep::Decade {
             points_per_decade: 2_000_001,
             start: 1.0,
             stop: 10.0,
         };
-        assert!(matches!(
-            sweep.values_bounded_with_abort(3_000_000, &NoAbort),
-            Err(SweepPointGenerationError::LimitExceeded {
-                requested: 2_000_002,
-                limit: 2_000_000
-            })
-        ));
+        let values = sweep
+            .values_bounded_with_abort(2_000_002, &NoAbort)
+            .expect("explicit ceiling above the default permits the requested grid");
+        assert_eq!(values.len(), 2_000_002);
     }
 }
 

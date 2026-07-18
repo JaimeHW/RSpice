@@ -19,6 +19,7 @@ __all__ = [
     "UnresolvedOutputSymbol",
     "Engine",
     "SimulationConfig",
+    "ResourceLimits",
     "ConvergenceConfig",
     "BypassConfig",
     "DampingStrategy",
@@ -93,6 +94,7 @@ class ParseError(RSpiceError):
         "missing_parameter",
         "undefined_parameter",
         "invalid_value",
+        "resource_limit",
         "io",
     ]
     category: Literal[
@@ -100,6 +102,7 @@ class ParseError(RSpiceError):
         "subcircuit_binding",
         "mutual_inductor_reference",
         "output_symbol_validation",
+        "resource_limit",
         "startup_directive_validation",
     ] | None
     line: int | None
@@ -145,12 +148,18 @@ class ParseError(RSpiceError):
     unresolved_output_symbols: list[UnresolvedOutputSymbol] | None
     first_startup_kind: Literal["ic", "nodeset"] | None
     conflicting_startup_kind: Literal["ic", "nodeset"] | None
+    resource: str | None
+    requested: int | None
+    limit: int | None
 
 class SimulationError(RSpiceError):
     """Raised when simulation fails due to circuit or solver errors."""
 
     kind: str
     iterations: int | None
+    resource: str | None
+    requested: int | None
+    limit: int | None
 
 class ConvergenceError(SimulationError):
     """Raised when Newton-Raphson iteration fails to converge."""
@@ -231,14 +240,21 @@ class UnresolvedOutputSymbol:
 @final
 class Netlist:
     @staticmethod
-    def parse(content: str) -> Netlist: ...
+    def parse(content: str, *, resource_limits: ResourceLimits | None = None) -> Netlist: ...
     @staticmethod
-    def parse_spice(content: str) -> Netlist: ...
+    def parse_spice(
+        content: str, *, resource_limits: ResourceLimits | None = None
+    ) -> Netlist: ...
     @staticmethod
-    def parse_file(path: str | os.PathLike[str]) -> Netlist: ...
+    def parse_file(
+        path: str | os.PathLike[str], *, resource_limits: ResourceLimits | None = None
+    ) -> Netlist: ...
     @staticmethod
     def parse_with_includes(
-        content: str, base_path: str | os.PathLike[str]
+        content: str,
+        base_path: str | os.PathLike[str],
+        *,
+        resource_limits: ResourceLimits | None = None,
     ) -> Netlist: ...
     @property
     def num_elements(self) -> int: ...
@@ -340,6 +356,45 @@ class ConvergenceConfig:
     verbose: bool
 
 @final
+class ResourceLimits:
+    def __new__(
+        cls,
+        *,
+        max_netlist_bytes: int | None = None,
+        max_netlist_lines: int | None = None,
+        max_expanded_source_bytes: int | None = None,
+        max_dependency_source_bytes: int | None = None,
+        max_external_data_bytes: int | None = None,
+        max_external_data_values: int | None = None,
+        max_shared_cache_bytes: int | None = None,
+        max_include_depth: int | None = None,
+        max_hierarchy_depth: int | None = None,
+        max_flattened_elements: int | None = None,
+        max_circuit_nodes: int | None = None,
+        max_matrix_unknowns: int | None = None,
+        max_analysis_points: int | None = None,
+        max_result_values: int | None = None,
+        max_batch_runs: int | None = None,
+    ) -> ResourceLimits: ...
+    @staticmethod
+    def unlimited() -> ResourceLimits: ...
+    max_netlist_bytes: int
+    max_netlist_lines: int
+    max_expanded_source_bytes: int
+    max_dependency_source_bytes: int
+    max_external_data_bytes: int
+    max_external_data_values: int
+    max_shared_cache_bytes: int
+    max_include_depth: int
+    max_hierarchy_depth: int
+    max_flattened_elements: int
+    max_circuit_nodes: int
+    max_matrix_unknowns: int
+    max_analysis_points: int
+    max_result_values: int
+    max_batch_runs: int
+
+@final
 class SimulationConfig:
     def __new__(
         cls,
@@ -354,6 +409,7 @@ class SimulationConfig:
         transient_trtol: float | None = None,
         convergence: ConvergenceConfig | None = None,
         bypass: BypassConfig | None = None,
+        resource_limits: ResourceLimits | None = None,
     ) -> SimulationConfig: ...
     tolerance: float
     max_iterations: int
@@ -365,6 +421,7 @@ class SimulationConfig:
     transient_trtol: float
     convergence: ConvergenceConfig
     bypass: BypassConfig
+    resource_limits: ResourceLimits
 
 @final
 class DeviceOperatingPoint:

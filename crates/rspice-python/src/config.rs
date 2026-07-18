@@ -4,10 +4,11 @@
 //! - `SimulationConfig` - Main simulation parameters
 //! - `ConvergenceConfig` - Newton-Raphson convergence aids
 //! - `BypassConfig` - Model evaluation bypass (latent device optimization)
+//! - `ResourceLimits` - Ingestion, construction, analysis, and cache ceilings
 //! - `DampingStrategy` - Newton iteration damping methods
 //! - `IntegrationMethod` - Transient integration schemes
 //!
-//! All three config classes accept keyword arguments in their constructors so
+//! All four config classes accept keyword arguments in their constructors so
 //! a complete configuration can be built in one expression. This matters
 //! because property getters return *copies* (Rust value semantics): mutating
 //! `config.convergence.gmin_stepping` modifies a temporary and is lost.
@@ -15,6 +16,7 @@
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use rspice_core::ResourceLimits;
 use rspice_core::analysis::IntegrationMethod;
 use rspice_core::engine::{BypassConfig, ConvergenceConfig, DampingStrategy, SimulationConfig};
 
@@ -561,6 +563,185 @@ impl PyConvergenceConfig {
     }
 }
 
+/// Resource ceilings for untrusted, interactive, and batch workloads.
+///
+/// The same object can be supplied to `Netlist.parse*` and
+/// `SimulationConfig`, ensuring parsing and execution use one policy.
+#[pyclass(name = "ResourceLimits", module = "rspice", from_py_object)]
+#[derive(Clone)]
+pub struct PyResourceLimits {
+    #[pyo3(get, set)]
+    pub max_netlist_bytes: usize,
+    #[pyo3(get, set)]
+    pub max_netlist_lines: usize,
+    #[pyo3(get, set)]
+    pub max_expanded_source_bytes: usize,
+    #[pyo3(get, set)]
+    pub max_dependency_source_bytes: usize,
+    #[pyo3(get, set)]
+    pub max_external_data_bytes: usize,
+    #[pyo3(get, set)]
+    pub max_external_data_values: usize,
+    #[pyo3(get, set)]
+    pub max_shared_cache_bytes: usize,
+    #[pyo3(get, set)]
+    pub max_include_depth: usize,
+    #[pyo3(get, set)]
+    pub max_hierarchy_depth: usize,
+    #[pyo3(get, set)]
+    pub max_flattened_elements: usize,
+    #[pyo3(get, set)]
+    pub max_circuit_nodes: usize,
+    #[pyo3(get, set)]
+    pub max_matrix_unknowns: usize,
+    #[pyo3(get, set)]
+    pub max_analysis_points: usize,
+    #[pyo3(get, set)]
+    pub max_result_values: usize,
+    #[pyo3(get, set)]
+    pub max_batch_runs: usize,
+}
+
+impl PyResourceLimits {
+    pub(crate) fn from_core(limits: ResourceLimits) -> Self {
+        Self {
+            max_netlist_bytes: limits.max_netlist_bytes,
+            max_netlist_lines: limits.max_netlist_lines,
+            max_expanded_source_bytes: limits.max_expanded_source_bytes,
+            max_dependency_source_bytes: limits.max_dependency_source_bytes,
+            max_external_data_bytes: limits.max_external_data_bytes,
+            max_external_data_values: limits.max_external_data_values,
+            max_shared_cache_bytes: limits.max_shared_cache_bytes,
+            max_include_depth: limits.max_include_depth,
+            max_hierarchy_depth: limits.max_hierarchy_depth,
+            max_flattened_elements: limits.max_flattened_elements,
+            max_circuit_nodes: limits.max_circuit_nodes,
+            max_matrix_unknowns: limits.max_matrix_unknowns,
+            max_analysis_points: limits.max_analysis_points,
+            max_result_values: limits.max_result_values,
+            max_batch_runs: limits.max_batch_runs,
+        }
+    }
+
+    pub(crate) fn to_core(&self) -> ResourceLimits {
+        let mut limits = ResourceLimits::default();
+        limits.max_netlist_bytes = self.max_netlist_bytes;
+        limits.max_netlist_lines = self.max_netlist_lines;
+        limits.max_expanded_source_bytes = self.max_expanded_source_bytes;
+        limits.max_dependency_source_bytes = self.max_dependency_source_bytes;
+        limits.max_external_data_bytes = self.max_external_data_bytes;
+        limits.max_external_data_values = self.max_external_data_values;
+        limits.max_shared_cache_bytes = self.max_shared_cache_bytes;
+        limits.max_include_depth = self.max_include_depth;
+        limits.max_hierarchy_depth = self.max_hierarchy_depth;
+        limits.max_flattened_elements = self.max_flattened_elements;
+        limits.max_circuit_nodes = self.max_circuit_nodes;
+        limits.max_matrix_unknowns = self.max_matrix_unknowns;
+        limits.max_analysis_points = self.max_analysis_points;
+        limits.max_result_values = self.max_result_values;
+        limits.max_batch_runs = self.max_batch_runs;
+        limits
+    }
+}
+
+#[pymethods]
+impl PyResourceLimits {
+    /// Construct a policy from production-safe defaults, overriding any
+    /// supplied keyword fields. A zero ceiling intentionally rejects the
+    /// first use of that resource.
+    #[new]
+    #[pyo3(signature = (*, max_netlist_bytes=None, max_netlist_lines=None,
+                        max_expanded_source_bytes=None, max_dependency_source_bytes=None,
+                        max_external_data_bytes=None, max_external_data_values=None,
+                        max_shared_cache_bytes=None, max_include_depth=None,
+                        max_hierarchy_depth=None, max_flattened_elements=None,
+                        max_circuit_nodes=None, max_matrix_unknowns=None,
+                        max_analysis_points=None, max_result_values=None,
+                        max_batch_runs=None))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        max_netlist_bytes: Option<usize>,
+        max_netlist_lines: Option<usize>,
+        max_expanded_source_bytes: Option<usize>,
+        max_dependency_source_bytes: Option<usize>,
+        max_external_data_bytes: Option<usize>,
+        max_external_data_values: Option<usize>,
+        max_shared_cache_bytes: Option<usize>,
+        max_include_depth: Option<usize>,
+        max_hierarchy_depth: Option<usize>,
+        max_flattened_elements: Option<usize>,
+        max_circuit_nodes: Option<usize>,
+        max_matrix_unknowns: Option<usize>,
+        max_analysis_points: Option<usize>,
+        max_result_values: Option<usize>,
+        max_batch_runs: Option<usize>,
+    ) -> Self {
+        let mut limits = Self::from_core(ResourceLimits::default());
+        if let Some(value) = max_netlist_bytes {
+            limits.max_netlist_bytes = value;
+        }
+        if let Some(value) = max_netlist_lines {
+            limits.max_netlist_lines = value;
+        }
+        if let Some(value) = max_expanded_source_bytes {
+            limits.max_expanded_source_bytes = value;
+        }
+        if let Some(value) = max_dependency_source_bytes {
+            limits.max_dependency_source_bytes = value;
+        }
+        if let Some(value) = max_external_data_bytes {
+            limits.max_external_data_bytes = value;
+        }
+        if let Some(value) = max_external_data_values {
+            limits.max_external_data_values = value;
+        }
+        if let Some(value) = max_shared_cache_bytes {
+            limits.max_shared_cache_bytes = value;
+        }
+        if let Some(value) = max_include_depth {
+            limits.max_include_depth = value;
+        }
+        if let Some(value) = max_hierarchy_depth {
+            limits.max_hierarchy_depth = value;
+        }
+        if let Some(value) = max_flattened_elements {
+            limits.max_flattened_elements = value;
+        }
+        if let Some(value) = max_circuit_nodes {
+            limits.max_circuit_nodes = value;
+        }
+        if let Some(value) = max_matrix_unknowns {
+            limits.max_matrix_unknowns = value;
+        }
+        if let Some(value) = max_analysis_points {
+            limits.max_analysis_points = value;
+        }
+        if let Some(value) = max_result_values {
+            limits.max_result_values = value;
+        }
+        if let Some(value) = max_batch_runs {
+            limits.max_batch_runs = value;
+        }
+        limits
+    }
+
+    /// Construct a policy with every ceiling disabled.
+    #[staticmethod]
+    pub fn unlimited() -> Self {
+        Self::from_core(ResourceLimits::unlimited())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ResourceLimits(max_netlist_bytes={}, max_analysis_points={}, max_result_values={}, max_batch_runs={})",
+            self.max_netlist_bytes,
+            self.max_analysis_points,
+            self.max_result_values,
+            self.max_batch_runs
+        )
+    }
+}
+
 /// Main simulation configuration
 ///
 /// Controls simulation parameters like tolerances, temperature, and
@@ -573,7 +754,8 @@ impl PyConvergenceConfig {
 ///     ...     convergence=ConvergenceConfig.robust(),
 ///     ... )
 ///
-/// Note: property getters for `convergence` and `bypass` return copies.
+/// Note: property getters for `convergence`, `bypass`, and `resource_limits`
+/// return copies.
 /// `config.convergence.verbose = True` mutates a temporary and is silently
 /// lost — assign a whole ConvergenceConfig instead.
 #[pyclass(name = "SimulationConfig", module = "rspice", from_py_object)]
@@ -600,11 +782,12 @@ impl PySimulationConfig {
     ///     transient_trtol: Truncation-error tolerance factor (TRTOL)
     ///     convergence: DC convergence aid configuration
     ///     bypass: Latent-device bypass configuration
+    ///     resource_limits: Parsing, construction, analysis, and cache ceilings
     #[new]
     #[pyo3(signature = (*, tolerance=None, max_iterations=None, transient_max_iterations=None,
                         min_timestep=None, max_timestep=None, temperature=None,
                         integration_method=None, transient_trtol=None,
-                        convergence=None, bypass=None))]
+                        convergence=None, bypass=None, resource_limits=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tolerance: Option<f64>,
@@ -617,6 +800,7 @@ impl PySimulationConfig {
         transient_trtol: Option<f64>,
         convergence: Option<PyConvergenceConfig>,
         bypass: Option<PyBypassConfig>,
+        resource_limits: Option<PyResourceLimits>,
     ) -> PyResult<Self> {
         let mut inner = SimulationConfig::default();
         if let Some(v) = tolerance {
@@ -649,6 +833,9 @@ impl PySimulationConfig {
         }
         if let Some(v) = bypass {
             inner.bypass_config = v.inner;
+        }
+        if let Some(v) = resource_limits {
+            inner.resource_limits = v.to_core();
         }
         validate_timestep_window(inner.min_timestep, inner.max_timestep)?;
         Ok(Self { inner })
@@ -778,6 +965,17 @@ impl PySimulationConfig {
     #[setter]
     pub fn set_bypass(&mut self, value: PyBypassConfig) {
         self.inner.bypass_config = value.inner;
+    }
+
+    /// Resource policy (returns a copy; assign back to modify)
+    #[getter]
+    fn get_resource_limits(&self) -> PyResourceLimits {
+        PyResourceLimits::from_core(self.inner.resource_limits)
+    }
+
+    #[setter]
+    pub fn set_resource_limits(&mut self, value: PyResourceLimits) {
+        self.inner.resource_limits = value.to_core();
     }
 
     fn __repr__(&self) -> String {
