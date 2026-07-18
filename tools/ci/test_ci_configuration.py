@@ -297,7 +297,9 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertEqual(workflow.count("actions/attest@"), 2)
         self.assertIn("sha256sum --check --strict *.sha256", workflow)
         self.assertIn("gh release upload", workflow)
-        self.assertIn("--clobber", workflow)
+        self.assertNotIn("--clobber", workflow)
+        self.assertIn("cmp --silent", workflow)
+        self.assertIn("refusing to replace immutable release asset", workflow)
         self.assertIn("gh release create", workflow)
         self.assertIn("--verify-tag", workflow)
 

@@ -268,7 +268,32 @@ jobs:
           set -euo pipefail
           mapfile -t assets < <(find release-assets -maxdepth 1 -type f -print | sort)
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            mkdir -p existing-release-assets
+            declare -A existing_assets=()
+            while IFS= read -r name; do
+              existing_assets["$name"]=1
+            done < <(
+              gh release view "$RELEASE_TAG" \
+                --json assets \
+                --jq '.assets[].name' \
+                --repo "$GITHUB_REPOSITORY"
+            )
+
+            for asset in "${assets[@]}"; do
+              name=$(basename "$asset")
+              if [[ -n "${existing_assets[$name]:-}" ]]; then
+                gh release download "$RELEASE_TAG" \
+                  --pattern "$name" \
+                  --dir existing-release-assets \
+                  --repo "$GITHUB_REPOSITORY"
+                if ! cmp --silent "$asset" "existing-release-assets/$name"; then
+                  echo "refusing to replace immutable release asset: $name" >&2
+                  exit 1
+                fi
+              else
+                gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
+              fi
+            done
           else
             gh release create "$RELEASE_TAG" "${assets[@]}" \
               --verify-tag \
