@@ -242,6 +242,8 @@ fn toolbar(
 fn search_field(ui: &mut Ui, query: &mut String, width: f32, request_focus: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let height = t.metrics.ctl_h;
+    // accessibility-pointer-shim: the painted frame forwards pointer focus to
+    // the semantic TextEdit returned by the union below.
     let (rect, outer) = ui.allocate_exact_size(vec2(width.max(1.0), height), Sense::click());
     ui.painter().rect_filled(rect, t.radius, t.color.bg_inset);
     let content = Rect::from_min_max(

@@ -441,7 +441,7 @@ class CiConfigurationTests(unittest.TestCase):
 
         app = read_text("crates/rspice-ui/src/common/app/mod.rs")
         preferences = read_text(
-            "crates/rspice-ui/src/common/app/app_preferences_dialog.rs"
+            "crates/rspice-ui/src/common/app/app_preferences_dialog/preference_pages.rs"
         )
         self.assertIn(
             "options.screen_reader = self.state.ui.browser_spoken_feedback",
@@ -540,7 +540,9 @@ class CiConfigurationTests(unittest.TestCase):
 
             pointer_only_shims = source.count("accessibility-pointer-shim")
             semantic_contracts = source.count(".widget_info(")
-            focus_contracts = source.count("paint_focus_ring(")
+            focus_contracts = source.count("paint_focus_ring(") + source.count(
+                "paint_focus_ring_outset("
+            )
             required = custom_clicks - pointer_only_shims
             if semantic_contracts < required or focus_contracts < required:
                 offenders.append(

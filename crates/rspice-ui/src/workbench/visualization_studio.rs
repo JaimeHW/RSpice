@@ -1827,6 +1827,14 @@ fn section_navigation(ui: &mut Ui, app: &mut RSpiceApp) {
                                 response
                             })
                             .inner;
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::SelectableLabel,
+                                ui.is_enabled(),
+                                active,
+                                section.label(),
+                            )
+                        });
                         ui.ctx().accesskit_node_builder(response.id, |node| {
                             node.set_role(egui::accesskit::Role::Tab);
                             node.set_selected(active);
@@ -1864,6 +1872,7 @@ fn section_navigation(ui: &mut Ui, app: &mut RSpiceApp) {
                                 });
                             }
                         }
+                        theme::paint_focus_ring(ui, &response, response.rect);
                     }
                 });
             });
@@ -1943,6 +1952,14 @@ fn touch_dock(ui: &mut Ui, app: &mut RSpiceApp) {
                             vec2(column.available_width(), TOUCH_DOCK_HEIGHT - 1.0),
                             Sense::click(),
                         );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::Button,
+                                column.is_enabled(),
+                                active,
+                                label,
+                            )
+                        });
                         column.painter().rect_filled(
                             rect,
                             0.0,
@@ -1982,6 +1999,7 @@ fn touch_dock(ui: &mut Ui, app: &mut RSpiceApp) {
                                 pane
                             };
                         }
+                        theme::paint_focus_ring(column, &response, rect);
                     }
                 });
             });
@@ -2919,6 +2937,14 @@ fn viewer_library_row(
             Sense::hover()
         },
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            available && ui.is_enabled(),
+            active,
+            definition.title,
+        )
+    });
     ui.painter().rect_filled(
         rect,
         0.0,
@@ -2967,6 +2993,7 @@ fn viewer_library_row(
         detail_font,
         t.color.text_faint,
     );
+    theme::paint_focus_ring(ui, &response, rect);
     if let Some(reason) = reason {
         response.on_hover_text(reason)
     } else {

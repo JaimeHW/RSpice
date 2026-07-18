@@ -13,3 +13,20 @@ pub(crate) fn spoken_feedback_override() -> Option<bool> {
         _ => None,
     }
 }
+
+/// Push an in-canvas preference change back to the semantic DOM bootstrap
+/// control. Its MutationObserver updates the button state and browser storage.
+pub(crate) fn set_spoken_feedback(enabled: bool) {
+    let Some(root) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.document_element())
+    else {
+        return;
+    };
+    if let Err(error) = root.set_attribute(
+        SPOKEN_FEEDBACK_ATTRIBUTE,
+        if enabled { "true" } else { "false" },
+    ) {
+        log::warn!("Failed to synchronize browser spoken feedback: {error:?}");
+    }
+}

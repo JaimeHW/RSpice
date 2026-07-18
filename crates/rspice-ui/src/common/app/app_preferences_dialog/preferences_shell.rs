@@ -219,6 +219,8 @@ pub(super) fn show(
     let mut initial_focus_control_id = None;
     let mut dialog_surface_id = None;
     let _ = area.show(ctx, |ui| {
+        // accessibility-pointer-shim: the modal backdrop consumes pointer
+        // gestures but is deliberately absent from keyboard and AT order.
         ui.allocate_rect(
             viewport,
             Sense::click_and_drag().difference(Sense::focusable_noninteractive()),

@@ -667,6 +667,7 @@ fn inspector_hero(
         if response.double_clicked() && !app.state.active_view_read_only() {
             crate::common::app::open_property_editor(&mut app.state, component.id);
         }
+        theme::paint_focus_ring(ui, &response, rect);
         response.on_hover_text("Double-click to edit component properties");
     } else {
         super::super::design_system::WorkbenchIcon::Select.paint(

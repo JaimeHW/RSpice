@@ -434,6 +434,14 @@ fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> 
     let width = (14.0 + 17.0 + 5.0 + label_galley.size().x).max(if touch { 44.0 } else { 0.0 });
     let height = if touch { 44.0 } else { 23.0 };
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            selected,
+            format!("Arm {label} placement"),
+        )
+    });
     let fill = if selected {
         t.color.bg_active
     } else if response.hovered() {

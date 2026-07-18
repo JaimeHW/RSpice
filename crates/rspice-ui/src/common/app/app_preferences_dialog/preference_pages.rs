@@ -914,6 +914,26 @@ fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePage
             });
         },
     );
+    #[cfg(target_arch = "wasm32")]
+    setting_row(
+        ui,
+        "Speak control changes (browser)",
+        "Uses the browser speech fallback while a semantic accessibility tree is unavailable.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let mut value = state.ui.browser_spoken_feedback;
+                if preference_switch(
+                    ui,
+                    "preferences.accessibility.browser-spoken-feedback",
+                    "Speak control changes (browser)",
+                    &mut value,
+                ) {
+                    state.ui.browser_spoken_feedback = value;
+                    crate::common::browser_accessibility::set_spoken_feedback(value);
+                }
+            });
+        },
+    );
     choice_row(
         ui,
         state,

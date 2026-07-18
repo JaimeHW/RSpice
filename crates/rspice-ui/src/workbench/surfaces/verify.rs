@@ -1421,8 +1421,13 @@ fn render_virtual_data_table(
                             },
                         );
                         response.widget_info(|| {
+                            let widget_type = if rows_are_actionable {
+                                egui::WidgetType::Button
+                            } else {
+                                egui::WidgetType::Label
+                            };
                             egui::WidgetInfo::labeled(
-                                egui::WidgetType::Label,
+                                widget_type,
                                 ui.is_enabled(),
                                 headers
                                     .iter()
@@ -1453,6 +1458,7 @@ fn render_virtual_data_table(
                             rect.bottom(),
                             egui::Stroke::new(1.0, t.color.border),
                         );
+                        theme::paint_focus_ring(ui, &response, rect);
                     }
                 });
         });

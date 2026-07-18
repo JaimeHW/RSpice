@@ -2360,6 +2360,8 @@ fn launcher_search_field(
     request_focus: bool,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
+    // accessibility-pointer-shim: the painted frame forwards pointer focus to
+    // the semantic TextEdit returned by the union below.
     let (rect, outer_response) =
         ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
     ui.painter().rect_filled(rect, t.radius, t.color.bg_inset);

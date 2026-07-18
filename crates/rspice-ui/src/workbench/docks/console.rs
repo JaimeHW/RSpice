@@ -292,11 +292,10 @@ fn console_tab(
         0.0
     };
     let width = 20.0 + galley.size().x + count_width;
-    let sense = if selected {
-        Sense::click()
-    } else {
-        Sense::click().difference(Sense::focusable_noninteractive())
-    };
+    let mut sense = Sense::click();
+    if !selected {
+        sense = sense.difference(Sense::focusable_noninteractive());
+    }
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
     response.widget_info(|| {
         egui::WidgetInfo::selected(

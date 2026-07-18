@@ -456,11 +456,10 @@ fn document_tab(
         + suffix_width
         + TAB_PADDING_X)
         .min(TAB_MAX_WIDTH);
-    let sense = if selected {
-        Sense::click()
-    } else {
-        Sense::click().difference(Sense::focusable_noninteractive())
-    };
+    let mut sense = Sense::click();
+    if !selected {
+        sense = sense.difference(Sense::focusable_noninteractive());
+    }
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
     response.widget_info(|| {
         egui::WidgetInfo::selected(
@@ -554,6 +553,8 @@ fn document_tab(
             egui::pos2(suffix_x + 2.0, rect.center().y - TAB_CLOSE_SIZE * 0.5),
             Vec2::splat(TAB_CLOSE_SIZE),
         );
+        // accessibility-pointer-shim: the close glyph is a pointer shortcut;
+        // the semantic tab exposes the equivalent Delete-key action.
         let close_response = ui.interact(
             close_rect,
             response.id.with("close"),

@@ -639,14 +639,7 @@ fn menu_item(
         row_color,
     );
 
-    if focused {
-        ui.painter().rect_stroke(
-            rect.expand(3.0),
-            3.0,
-            Stroke::new(2.0, t.color.accent),
-            StrokeKind::Middle,
-        );
-    }
+    theme::paint_focus_ring(ui, &response, rect);
 
     if enabled {
         response
