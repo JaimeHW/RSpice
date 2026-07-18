@@ -116,6 +116,8 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
+        let xyce_zero_start = self.config.spice_dialect == crate::engine::SpiceDialect::Xyce;
+        let entry_state = xyce_zero_start.then(|| circuit.nonlinear_state_snapshot());
         // Xyce's DCOP Newton solve starts from the zero global solution and
         // lets each device apply its init-junction policy locally. In
         // particular, its GP BJT writes tVCrit only into the device's VBE
@@ -123,29 +125,79 @@ impl Engine {
         // correction takes a different NOX path and can produce a different
         // legitimately accepted approximate operating point. Native and
         // ngspice modes retain RSpice's robust linear warm start.
-        let mut initial_guess = if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce {
+        let mut initial_guess = if xyce_zero_start {
             vec![0.0; size]
         } else {
-            let linear_presolve = self.linear_presolve_for_guess(circuit, matrix);
-            let seed_neutral_bjt_junctions = linear_presolve.is_none();
-            let mut guess = linear_presolve.unwrap_or_else(|| vec![0.0; size]);
-            Self::apply_bjt_initial_guess_correction(
-                &mut guess,
-                circuit,
-                seed_neutral_bjt_junctions,
-            );
-            Self::apply_b3soi_pd_initial_guess_correction(&mut guess, circuit);
-            Self::apply_bsim4_internal_gate_initial_guess_correction(&mut guess, circuit);
-            Self::apply_vbic_internal_initial_guess_correction(&mut guess, circuit);
-            guess
+            self.robust_operating_point_initial_guess(circuit, matrix, size)
         };
-        for &(node_id, voltage) in node_hints {
-            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
-                continue;
-            }
-            initial_guess[node_id - 1] = voltage;
-        }
+        Self::enforce_node_voltage_hints(circuit, &mut initial_guess, node_hints);
 
+        let primary = self.solve_nonlinear_from_seed_with_node_hints(
+            circuit,
+            matrix,
+            initial_guess,
+            node_hints,
+            abort,
+        );
+        match primary {
+            Ok(solution) => Ok(solution),
+            Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
+            Err(primary_error)
+                if xyce_zero_start
+                    && Self::is_recoverable_xyce_zero_start_error(&primary_error) =>
+            {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                if let Some(entry_state) = entry_state {
+                    circuit.restore_nonlinear_state(entry_state);
+                }
+                let mut recovery = self.robust_operating_point_initial_guess(circuit, matrix, size);
+                Self::enforce_node_voltage_hints(circuit, &mut recovery, node_hints);
+                log::debug!(
+                    "Xyce-compatible zero-start DC solve failed ({primary_error}); retrying from the robust linear operating-point seed."
+                );
+                self.solve_nonlinear_from_seed_with_node_hints(
+                    circuit, matrix, recovery, node_hints, abort,
+                )
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn is_recoverable_xyce_zero_start_error(error: &SimulationError) -> bool {
+        match error {
+            SimulationError::ConvergenceFailed(_) => true,
+            SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(_)) => false,
+            SimulationError::Solver(_) => true,
+            _ => false,
+        }
+    }
+
+    fn robust_operating_point_initial_guess(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        size: usize,
+    ) -> Vec<Value> {
+        let linear_presolve = self.linear_presolve_for_guess(circuit, matrix);
+        let seed_neutral_bjt_junctions = linear_presolve.is_none();
+        let mut guess = linear_presolve.unwrap_or_else(|| vec![0.0; size]);
+        Self::apply_bjt_initial_guess_correction(&mut guess, circuit, seed_neutral_bjt_junctions);
+        Self::apply_b3soi_pd_initial_guess_correction(&mut guess, circuit);
+        Self::apply_bsim4_internal_gate_initial_guess_correction(&mut guess, circuit);
+        Self::apply_vbic_internal_initial_guess_correction(&mut guess, circuit);
+        guess
+    }
+
+    fn solve_nonlinear_from_seed_with_node_hints(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        mut initial_guess: Vec<Value>,
+        node_hints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         if !node_hints.is_empty() {
             match self.solve_nonlinear_nodeset_dc_startup_with_abort(
                 circuit,
