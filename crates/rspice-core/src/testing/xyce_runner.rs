@@ -22821,7 +22821,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     fn is_extra_wrapper_ac_output_analysis_command(command: &str) -> bool {
         matches!(
             command.to_ascii_lowercase().as_str(),
-            ".dc" | ".four" | ".hb" | ".noise" | ".probe" | ".save" | ".sens" | ".tran"
+            ".dc" | ".four" | ".hb" | ".lin" | ".noise" | ".probe" | ".save" | ".sens" | ".tran"
         )
     }
 
@@ -47882,6 +47882,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .fold(0.0_f64, f64::max);
         for element in &netlist.elements {
             match &element.kind {
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::RfPort { .. })
+                | ElementKind::CurrentSource(crate::netlist::SourceSpec::RfPort { .. }) => {
+                    return Err(format!(
+                        "native static .PRINT AC comparison does not cover RF port source '{}' without executing its .LIN/S-parameter contract",
+                        element.name
+                    ));
+                }
                 ElementKind::VoltageSource(_)
                 | ElementKind::CurrentSource(_)
                 | ElementKind::Resistor { .. }
@@ -47974,14 +47981,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if max_frequency <= 100.0
                         && Self::netlist_device_is_native_legacy_bjt(netlist, &element.name) => {}
                 ElementKind::Bjt { .. }
-                    if Self::netlist_element_is_native_static_ac_exact_bf_is_bjt(
+                    if Self::netlist_element_is_native_static_ac_exact_bf_is_pnp(
                         netlist, element,
                     ) => {}
                 ElementKind::Diode { .. }
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes and IS/BF legacy BJTs, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes and high-frequency IS/BF PNPs, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -53047,7 +53054,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 .is_some_and(Self::model_is_native_scoped_model_relational_bjt)
     }
 
-    fn netlist_element_is_native_static_ac_exact_bf_is_bjt(
+    fn netlist_element_is_native_static_ac_exact_bf_is_pnp(
         netlist: &Netlist,
         element: &crate::netlist::Element,
     ) -> bool {
@@ -53064,13 +53071,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && instance_params.is_empty()
             && deferred_params.is_empty()
             && Self::find_unique_model_in(&netlist.models, model)
-                .is_some_and(Self::model_is_native_static_ac_exact_bf_is_bjt)
+                .is_some_and(Self::model_is_native_static_ac_exact_bf_is_pnp)
     }
 
-    fn model_is_native_static_ac_exact_bf_is_bjt(model: &crate::netlist::ModelDef) -> bool {
+    fn model_is_native_static_ac_exact_bf_is_pnp(model: &crate::netlist::ModelDef) -> bool {
         if !matches!(
             model.model_type.to_ascii_uppercase().as_str(),
-            "NPN" | "PNP" | "LPNP"
+            "PNP" | "LPNP"
         ) || !model.expr_params.is_empty()
             || !model.string_params.is_empty()
             || !model.string_vector_params.is_empty()
@@ -80596,6 +80603,24 @@ Q1 c b 0 QN
             validate(&source("IS=8e-16 BF=250", "IS=8e-16 N=1.1")).is_err(),
             "the broad hierarchy path must not admit unvalidated diode parameters"
         );
+        assert!(
+            validate(&source("IS=8e-16 BF=250", "IS=8e-16").replace("PNP", "NPN")).is_err(),
+            "high-frequency NPN hierarchy remains outside the oracle-validated subset"
+        );
+    }
+
+    #[test]
+    fn wrapper_static_ac_contract_rejects_unexecuted_lin_analysis() {
+        let source = "RF port fixture\n\
+                      P1 out 0 PORT=1 Z0=50\n\
+                      .AC LIN 2 1 2\n\
+                      .PRINT AC V(out)\n\
+                      .LIN FORMAT=TOUCHSTONE\n\
+                      .END\n";
+
+        let error = XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(source, false)
+            .expect_err(".LIN must not be silently ignored by the static AC output contract");
+        assert!(error.contains(".LIN") || error.contains(".lin"), "{error}");
     }
 
     #[test]
