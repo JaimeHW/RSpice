@@ -254,6 +254,25 @@ impl Engine {
         }
     }
 
+    fn retain_requested_derived_transient_branches(
+        netlist: &Netlist,
+        circuit: &crate::circuit::CircuitData,
+        branches: &mut Vec<DerivedTransientBranchCurrent>,
+    ) {
+        // An empty save set means the public engine API retains every vector.
+        // Measurements are evaluated after integration and may reference a
+        // current that was not also named on a .PRINT/.SAVE card, so retain
+        // the complete derived-current set for those decks as well.
+        if netlist.saves.keeps_everything() || !netlist.measurements.is_empty() {
+            return;
+        }
+
+        branches.retain(|&branch| {
+            let name = Self::derived_transient_branch_name(circuit, branch);
+            netlist.saves.selects(&format!("I({name})"))
+        });
+    }
+
     fn solution_node_voltage(solution: &[Value], node: usize) -> Value {
         if node == 0 {
             0.0
@@ -1175,8 +1194,13 @@ impl Engine {
         }
 
         let mut branch_names = circuit.branch_names_sorted();
-        let derived_branch_currents =
+        let mut derived_branch_currents =
             Self::derived_transient_branch_currents(&circuit, &branch_names);
+        Self::retain_requested_derived_transient_branches(
+            netlist,
+            &circuit,
+            &mut derived_branch_currents,
+        );
         branch_names.extend(
             derived_branch_currents
                 .iter()

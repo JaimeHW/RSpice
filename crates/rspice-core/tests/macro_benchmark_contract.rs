@@ -36,6 +36,13 @@ fn assert_linear_ladder_runs(source: &str) {
         .expect("linear benchmark transient completes");
     assert!(result.time.len() > 2, "benchmark retained transient points");
     assert_eq!(result.time.len(), result.voltages[0].len());
+    assert!(
+        result
+            .branch_names
+            .iter()
+            .all(|name| !name.starts_with('R') && !name.starts_with('C')),
+        "voltage-only .PRINT must not retain every derived R/C current"
+    );
 }
 
 #[test]
@@ -46,4 +53,34 @@ fn rc_ladder_1k_remains_a_healthy_linear_benchmark() {
 #[test]
 fn rc_ladder_10k_remains_a_healthy_linear_benchmark() {
     assert_linear_ladder_runs(RC_LADDER_10K);
+}
+
+#[test]
+fn explicitly_requested_derived_current_is_retained() {
+    let deck = "selected derived current\n\
+                V1 in 0 PULSE(0 1 0 1n 1n 8n 20n)\n\
+                R1 in out 1k\n\
+                C1 out 0 1p\n\
+                .tran 1n 5n\n\
+                .print tran I(R1)\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("selection deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 5.0e-9, 1.0e-9)
+        .expect("selection deck runs");
+
+    assert!(
+        result
+            .branch_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("R1")),
+        "I(R1) must retain the derived resistor-current channel"
+    );
+    assert!(
+        result
+            .branch_names
+            .iter()
+            .all(|name| !name.eq_ignore_ascii_case("C1")),
+        "an unrequested derived capacitor current must not be retained"
+    );
 }
