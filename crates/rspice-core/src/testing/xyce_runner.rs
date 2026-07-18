@@ -4106,6 +4106,64 @@ struct XyceStaticNoisePlan {
     input_source: String,
     frequencies: Vec<Value>,
     steps: Vec<StepCommand>,
+    contract: XyceStaticNoiseContract,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticNoiseContract {
+    StdPrn,
+    NoIndexPrn,
+    ProbeFallbackPrn,
+    RawFallbackPrn,
+    TouchstoneFallbackPrn,
+    GnuplotPrn,
+    SplotPrn,
+    Csv,
+}
+
+impl XyceStaticNoiseContract {
+    fn for_format(format: Option<&str>) -> Result<Self, String> {
+        let normalized = format.unwrap_or("STD").trim();
+        match normalized.to_ascii_uppercase().as_str() {
+            "STD" => Ok(Self::StdPrn),
+            "NOINDEX" => Ok(Self::NoIndexPrn),
+            // Xyce NOISE deliberately falls these output selectors back to
+            // its ordinary whitespace PRN writer.
+            "PROBE" => Ok(Self::ProbeFallbackPrn),
+            "RAW" => Ok(Self::RawFallbackPrn),
+            "TOUCHSTONE" | "TOUCHSTONE2" => Ok(Self::TouchstoneFallbackPrn),
+            "GNUPLOT" => Ok(Self::GnuplotPrn),
+            "SPLOT" => Ok(Self::SplotPrn),
+            "CSV" => Ok(Self::Csv),
+            _ => Err(format!(
+                "native NOISE oracle does not cover FORMAT={normalized}"
+            )),
+        }
+    }
+
+    fn is_csv(self) -> bool {
+        matches!(self, Self::Csv)
+    }
+
+    fn reference_extension(self) -> &'static str {
+        if self.is_csv() {
+            "NOISE.csv"
+        } else {
+            "NOISE.prn"
+        }
+    }
+
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::Csv => "static_csv_noise",
+            Self::NoIndexPrn => "static_noindex_prn_noise",
+            Self::GnuplotPrn | Self::SplotPrn => "static_gnuplot_prn_noise",
+            Self::StdPrn
+            | Self::ProbeFallbackPrn
+            | Self::RawFallbackPrn
+            | Self::TouchstoneFallbackPrn => "static_prn_noise",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -20446,12 +20504,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let print = print_output.as_ref().map(|request| XycePrintRequest {
             probes: request.probes.clone(),
         });
-        if print_output
-            .as_ref()
-            .and_then(|request| request.format.as_deref())
-            .is_some_and(|format| !format.eq_ignore_ascii_case("STD"))
-        {
-            return Err("native NOISE oracle currently requires FORMAT=STD".to_string());
+        let contract = XyceStaticNoiseContract::for_format(
+            print_output
+                .as_ref()
+                .and_then(|request| request.format.as_deref()),
+        )?;
+        if let Some(primary) = print_output.as_ref() {
+            Self::validate_static_noise_output_destinations(&source, primary, contract)?;
         }
 
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
@@ -20543,7 +20602,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT
         };
         let reference_path = self
-            .static_output_reference_path(&deck.path, "NOISE.prn")
+            .static_output_reference_path(&deck.path, contract.reference_extension())
             .filter(|path| path.is_file());
         if reference_path.is_none()
             && measurement_reference_paths.is_empty()
@@ -20580,7 +20639,50 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             input_source,
             frequencies,
             steps,
+            contract,
         })
+    }
+
+    fn validate_static_noise_output_destinations(
+        source: &str,
+        primary: &XycePrintOutputRequest,
+        primary_contract: XyceStaticNoiseContract,
+    ) -> Result<(), String> {
+        let requests = Self::aggregate_print_output_requests(
+            Self::print_output_requests(source, "NOISE")?,
+            "NOISE",
+        )?;
+        let mut destinations = BTreeSet::new();
+        for request in requests.iter().filter(|request| request.file.is_some()) {
+            let file = request
+                .file
+                .as_deref()
+                .expect("filtered NOISE side output has FILE");
+            if !destinations.insert(file.to_ascii_lowercase()) {
+                return Err(format!(
+                    "native NOISE output contract has duplicate FILE= destination '{file}'"
+                ));
+            }
+            let side_contract = XyceStaticNoiseContract::for_format(request.format.as_deref())?;
+            if side_contract.is_csv() != primary_contract.is_csv() {
+                return Err(format!(
+                    "native NOISE output contract does not mix primary {:?} output with FILE='{file}' {:?} output",
+                    primary_contract, side_contract
+                ));
+            }
+            if request.probes.len() != primary.probes.len()
+                || !request
+                    .probes
+                    .iter()
+                    .zip(&primary.probes)
+                    .all(|(left, right)| left.eq_ignore_ascii_case(right))
+            {
+                return Err(format!(
+                    "native NOISE FILE='{file}' output must preserve the primary output probe schema"
+                ));
+            }
+        }
+        Ok(())
     }
 
     #[cfg_attr(feature = "veriloga-builtins", allow(dead_code))]
@@ -23492,7 +23594,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         start: Instant,
     ) -> XyceTestResult {
         let contract = if plan.reference_path.is_some() {
-            "static_prn_noise"
+            plan.contract.result_contract()
         } else {
             "wrapper_scalar_measure_noise"
         };
@@ -23575,7 +23677,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     Vec::new(),
                 );
             };
-            let reference = match Self::parse_prn_file(reference_path) {
+            let reference = match Self::parse_noise_reference_file(plan.contract, reference_path) {
                 Ok(reference) => reference,
                 Err(err) => {
                     return self.failure_result(
@@ -56328,6 +56430,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    fn parse_noise_reference_file(
+        contract: XyceStaticNoiseContract,
+        path: &Path,
+    ) -> Result<XycePrnTable, String> {
+        if contract.is_csv() {
+            Self::parse_csv_file(path)
+        } else {
+            Self::parse_prn_file(path)
+        }
+    }
+
     fn parse_tran_reference_file(
         contract: XyceStaticTranContract,
         path: &Path,
@@ -56403,7 +56516,115 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     fn parse_csv_file(path: &Path) -> Result<XycePrnTable, String> {
         let content =
             fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
-        Self::parse_prn_table(&content)
+        Self::parse_csv_table(&content)
+    }
+
+    fn parse_csv_table(content: &str) -> Result<XycePrnTable, String> {
+        let lines = content
+            .lines()
+            .enumerate()
+            .map(|(index, line)| (index + 1, line.trim()))
+            .filter(|(_, line)| !line.is_empty())
+            .collect::<Vec<_>>();
+        let Some(&(header_line_number, header_line)) = lines.first() else {
+            return Err("empty Xyce CSV table".to_string());
+        };
+        let columns = Self::parse_csv_record(header_line).map_err(|error| {
+            format!("invalid Xyce CSV header at line {header_line_number}: {error}")
+        })?;
+        if columns.is_empty() || columns.iter().any(|column| column.trim().is_empty()) {
+            return Err("Xyce CSV header contains an empty column".to_string());
+        }
+        if !columns.first().is_some_and(|column| {
+            Self::is_prn_metadata_header_token(column)
+                || Self::looks_like_reference_probe_header(column)
+        }) {
+            return Err(format!(
+                "Xyce CSV header begins with unsupported column '{}'",
+                columns[0]
+            ));
+        }
+
+        let mut rows = Vec::new();
+        for &(line_number, line) in lines.iter().skip(1) {
+            if line.to_ascii_lowercase().starts_with("end of xyce") {
+                break;
+            }
+            let fields = Self::parse_csv_record(line).map_err(|error| {
+                format!("invalid Xyce CSV record at line {line_number}: {error}")
+            })?;
+            if Self::same_prn_columns(&columns, &fields) {
+                continue;
+            }
+            if fields.len() != columns.len() {
+                return Err(format!(
+                    "Xyce CSV data line {line_number} has {} values, expected {}",
+                    fields.len(),
+                    columns.len()
+                ));
+            }
+            let row = fields
+                .iter()
+                .map(|field| {
+                    Self::parse_xyce_numeric_token(field).map_err(|error| {
+                        format!(
+                            "invalid numeric token '{field}' on Xyce CSV data line {line_number}: {error}"
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.push(row);
+        }
+        if rows.is_empty() {
+            return Err("Xyce CSV table has no data rows".to_string());
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn parse_csv_record(line: &str) -> Result<Vec<String>, String> {
+        let mut fields = Vec::new();
+        let mut field = String::new();
+        let mut chars = line.chars().peekable();
+        let mut quoted = false;
+        let mut quote_closed = false;
+
+        while let Some(ch) = chars.next() {
+            if quoted {
+                if ch == '"' {
+                    if chars.peek() == Some(&'"') {
+                        chars.next();
+                        field.push('"');
+                    } else {
+                        quoted = false;
+                        quote_closed = true;
+                    }
+                } else {
+                    field.push(ch);
+                }
+                continue;
+            }
+            match ch {
+                '"' if field.trim().is_empty() && !quote_closed => {
+                    field.clear();
+                    quoted = true;
+                }
+                ',' => {
+                    fields.push(field.trim().to_string());
+                    field.clear();
+                    quote_closed = false;
+                }
+                ch if quote_closed && ch.is_whitespace() => {}
+                _ if quote_closed => {
+                    return Err("characters follow a closed quoted field".to_string());
+                }
+                _ => field.push(ch),
+            }
+        }
+        if quoted {
+            return Err("unterminated quoted field".to_string());
+        }
+        fields.push(field.trim().to_string());
+        Ok(fields)
     }
 
     fn parse_raw_file(path: &Path) -> Result<XycePrnTable, String> {
@@ -67257,6 +67478,81 @@ mod tests {
         )
         .expect("DNO/DNI calls must be extracted as symbolic probes");
         assert_eq!(calls, vec!["DNO(R1)", "DNI(XTOP:M1,fn)"]);
+    }
+
+    #[test]
+    fn static_noise_output_contract_maps_xyce_format_fallbacks_explicitly() {
+        for format in [
+            None,
+            Some("STD"),
+            Some("NOINDEX"),
+            Some("PROBE"),
+            Some("RAW"),
+            Some("TOUCHSTONE"),
+            Some("TOUCHSTONE2"),
+            Some("GNUPLOT"),
+            Some("SPLOT"),
+        ] {
+            let contract = XyceStaticNoiseContract::for_format(format)
+                .expect("Xyce NOISE PRN-compatible format is typed");
+            assert_eq!(contract.reference_extension(), "NOISE.prn");
+            assert!(!contract.is_csv());
+        }
+        let csv = XyceStaticNoiseContract::for_format(Some("CSV"))
+            .expect("Xyce NOISE CSV format is typed");
+        assert_eq!(csv.reference_extension(), "NOISE.csv");
+        assert!(csv.is_csv());
+        assert!(XyceStaticNoiseContract::for_format(Some("TECPLOT")).is_err());
+    }
+
+    #[test]
+    fn static_noise_side_outputs_preserve_format_family_and_probe_schema() {
+        let primary = XycePrintOutputRequest {
+            format: Some("RAW".to_string()),
+            file: None,
+            probes: vec!["INOISE".to_string(), "ONOISE".to_string()],
+        };
+        let compatible = ".PRINT NOISE FORMAT=RAW INOISE ONOISE\n\
+                          .PRINT NOISE FORMAT=TOUCHSTONE FILE=side.prn INOISE ONOISE\n";
+        XyceTestRunner::validate_static_noise_output_destinations(
+            compatible,
+            &primary,
+            XyceStaticNoiseContract::RawFallbackPrn,
+        )
+        .expect("PRN-fallback side output preserves the primary schema");
+
+        let csv_side = compatible.replace("FORMAT=TOUCHSTONE", "FORMAT=CSV");
+        assert!(
+            XyceTestRunner::validate_static_noise_output_destinations(
+                &csv_side,
+                &primary,
+                XyceStaticNoiseContract::RawFallbackPrn,
+            )
+            .is_err()
+        );
+        let changed_probe = compatible.replace("INOISE ONOISE\n", "INOISE V(1)\n");
+        assert!(
+            XyceTestRunner::validate_static_noise_output_destinations(
+                &changed_probe,
+                &primary,
+                XyceStaticNoiseContract::RawFallbackPrn,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn csv_table_parser_handles_quoted_xyce_headers_and_escaped_quotes() {
+        let table = XyceTestRunner::parse_csv_table(
+            "\"FREQ\",\"Re(V(4))\",\"DNO(R\"\"1)\"\n\
+             1.0,2.0,3.0\n",
+        )
+        .expect("quoted Xyce CSV table parses");
+        assert_eq!(table.columns, ["FREQ", "Re(V(4))", "DNO(R\"1)"]);
+        assert_eq!(table.rows, [vec![1.0, 2.0, 3.0]]);
+
+        assert!(XyceTestRunner::parse_csv_table("\"FREQ\",\"V(1)\n1,2\n").is_err());
+        assert!(XyceTestRunner::parse_csv_table("\"FREQ\"junk,\"V(1)\"\n1,2\n").is_err());
     }
 
     #[test]
