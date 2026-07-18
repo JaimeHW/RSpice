@@ -24,6 +24,14 @@ function asErrorDetails(error) {
     "category",
     "primarySource",
     "primaryLine",
+    "relatedSource",
+    "relatedLine",
+    "firstStartupKind",
+    "conflictingStartupKind",
+    "iterations",
+    "resource",
+    "requested",
+    "limit",
     "unresolvedOutputSymbols",
   ]) {
     if (Object.prototype.hasOwnProperty.call(details, field)) {

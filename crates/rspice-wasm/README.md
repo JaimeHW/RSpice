@@ -1,11 +1,11 @@
 # RSpice WASM
 
 WebAssembly bindings for the RSpice simulation engine. The crate is
-deliberately thin — a single `src/lib.rs` that exposes four functions and
-five serializable snapshot types over `rspice-core`, so a browser can parse
-a netlist and run DC operating-point, AC, and transient analyses entirely
-client-side. All numerical work happens in `rspice-core`; this crate only
-adapts inputs and serializes results across the JS boundary.
+deliberately thin: a single `src/lib.rs` exposes serializable snapshots,
+structured errors, and browser-safe execution policies over `rspice-core`, so
+a browser can parse a netlist and run DC operating-point, AC, and transient
+analyses entirely client-side. All numerical work happens in `rspice-core`;
+this crate adapts inputs and serializes results across the JS boundary.
 
 This is what powers the "run it in your browser" demo on the project site.
 The client-owned [`web/`](web/) shell is overlaid onto the standalone
@@ -14,21 +14,48 @@ The client-owned [`web/`](web/) shell is overlaid onto the standalone
 
 ## Public API (the contract JavaScript sees)
 
-Every export takes the netlist as a string, returns a plain JS object
-(serialized with `serde-wasm-bindgen`, not a JSON string), and reports
-errors by throwing with the engine's error message.
+Analysis exports take the netlist as a string, return a plain JS object
+(serialized with `serde-wasm-bindgen`, not a JSON string), and report errors
+by throwing an `RSpiceError` with stable structured fields.
 
 | JS function | Arguments | Returns |
 | :--- | :--- | :--- |
-| `summarizeNetlist(source)` | netlist text | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count}` |
-| `runDcOperatingPoint(source)` | netlist text | `{node_names, node_voltages, branch_names, branch_currents}` |
-| `runAcAnalysis(source, frequencies)` | netlist text, `Float64Array`/array of Hz values (must be non-empty; every frequency must be finite and non-negative) | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}` — one entry per frequency |
-| `runTransientAnalysis(source, tstop, max_step)` | netlist text, stop time, max timestep (both must be positive and finite) | `{time, node_names, voltages}` where `voltages` is one `f64` array per node |
+| `defaultResourceLimits()` | none | camelCase browser resource policy object |
+| `summarizeNetlist(source[, options])` | netlist text and optional execution options | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count}` |
+| `runDcOperatingPoint(source[, options])` | netlist text and optional execution options | `{node_names, node_voltages, branch_names, branch_currents}` |
+| `runAcAnalysis(source, frequencies[, options])` | netlist text, `Float64Array`/array of Hz values (non-empty, finite, and non-negative), and optional options | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}`, one entry per frequency |
+| `runTransientAnalysis(source, tstop, max_step[, options])` | netlist text, positive finite stop/max-step values, and optional options | `{time, node_names, voltages}` where `voltages` is one `f64` array per node |
+
+The optional object is additive and existing calls need no changes:
+
+```js
+const options = {
+  resourceLimits: {
+    maxNetlistBytes: 2 * 1024 * 1024,
+    maxAnalysisPoints: 50_000,
+    maxResultValues: 1_000_000,
+  },
+};
+const result = runAcAnalysis(source, frequencies, options);
+```
+
+Omitted resource fields inherit browser-safe defaults. Unknown option or
+resource fields are rejected, so a misspelled control cannot silently fall
+back to a looser policy. `defaultResourceLimits()` returns all 15 current
+ceilings. The defaults cap netlists at 8 MiB, circuit matrices at 2,000
+unknowns, analysis grids at 200,000 points, retained results at 2,000,000
+scalar values, and shared caches at 64 MiB.
+
+Thrown errors expose `kind`, `category`, and `details`. Resource failures add
+`resource`, `requested`, and `limit`; convergence errors add `iterations`;
+diagnostic errors retain source locations and unresolved output symbols.
 
 The same four operations are also exported as plain Rust functions
 (`summarize_netlist`, `run_dc_operating_point`, `run_ac_analysis`,
 `run_transient_analysis`) returning `Result<T, String>`, since the crate
-builds as both `cdylib` and `rlib`.
+builds as both `cdylib` and `rlib`. Their `*_detailed` variants return
+`WasmError`, and `*_with_options_detailed` variants accept the typed
+`WasmExecutionOptions` policy.
 
 ## Module layout
 
@@ -36,7 +63,8 @@ There are no submodules — `src/lib.rs` contains:
 
 - Snapshot types: `NetlistSummary`, `DcOperatingPoint`, `ComplexSeries`
   (parallel real/imag vectors), `AcPointSnapshot`, `TransientSnapshot`
-- Input validation and error-to-string conversion
+- Browser-safe resource defaults, typed per-call options, and input validation
+- Structured error conversion with stable machine-readable resource details
 - The `#[wasm_bindgen]` export shims
 
 ## Relationship to rspice-core
@@ -76,20 +104,20 @@ wasm-bindgen target/wasm32-unknown-unknown/release/rspice_wasm.wasm \
 ```
 
 `web/pkg/` is a build artifact and is not committed. Known gaps tracked in
-`web/README.md`: `wasm-opt` is not applied (the module is roughly 3 MB
-release-unoptimized), no TypeScript definitions are generated, and the worker
-uses one single-threaded engine instance rather than wasm threads.
+`web/README.md`: `wasm-opt` is not applied, no TypeScript definitions are
+generated, and the worker uses one single-threaded engine instance rather than
+wasm threads.
 
 ## Testing
 
-The crate has no standalone Rust test suite (`test = false`, `doctest = false`
-in `Cargo.toml`). Validation is exercised through the playground page and the
-assembled site demo for summary, DC operating-point, AC, and transient flows.
-The static browser contract is guarded by `tools/ci/test_wasm_playground.py`,
-which verifies that the canonical playground routes engine calls through
-`engine-worker.js`, that AC controls are present, and that the worker calls the
-`runAcAnalysis` export instead of importing synchronous solve functions on the
-main page. The engine logic itself is tested in `rspice-core`.
+`cargo test -p rspice-wasm` runs native unit and integration tests for browser
+defaults, option decoding, fail-closed field handling, structured error
+contracts, and the four analysis adapters. CI also builds the real
+`wasm32-unknown-unknown` artifact. The static browser contract is guarded by
+`tools/ci/test_wasm_playground.py`, which verifies that the canonical
+playground routes engine calls through `engine-worker.js`, that AC controls are
+present, and that synchronous solve exports stay off the main page. Numerical
+engine behavior remains covered in `rspice-core`.
 
 ## License
 

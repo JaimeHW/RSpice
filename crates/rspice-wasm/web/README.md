@@ -36,14 +36,18 @@ after engine changes. The wasm-bindgen CLI version must match the
   magnitude in dB.
 - **.op** — `runDcOperatingPoint`, rendered as a node/branch table.
 - **Summarize** — `summarizeNetlist` element/analysis counts.
-- Errors from the parser/engine surface in the console strip.
+- Every worker call uses browser-safe defaults (8 MiB netlists, 2,000 matrix
+  unknowns, 200,000 analysis points, and 2,000,000 retained scalar values).
+  Direct API callers can pass a final `{resourceLimits: {...}}` options object.
+- Errors from the parser/engine surface in the console strip; worker replies
+  retain structured resource, convergence, source, and output-symbol details.
 
 ## Known gaps / next steps
 
 - The playground uses one single-threaded worker. Future production browser
   builds can add wasm threads or a worker pool for Monte Carlo and large sweeps.
-- `wasm-opt` (Binaryen) not applied; the module is ~2.8 MB release-unoptimized
-  — expect meaningful size wins when the toolchain is added.
+- `wasm-opt` (Binaryen) is not yet applied; expect meaningful size wins when
+  the toolchain is added.
 - The bindings expose op/ac/tran only; `.meas`, sweeps, and noise come with
   the full app.
 - `tools/ci/test_wasm_playground.py` guards this canonical worker contract;

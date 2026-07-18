@@ -1,5 +1,6 @@
 use rspice_wasm::{
-    run_ac_analysis, run_ac_analysis_detailed, summarize_netlist, summarize_netlist_detailed,
+    WasmExecutionOptions, run_ac_analysis, run_ac_analysis_detailed,
+    run_ac_analysis_with_options_detailed, summarize_netlist, summarize_netlist_detailed,
 };
 
 const INVALID_OUTPUT_DECK: &str = "typed browser error\n\
@@ -84,4 +85,27 @@ fn execution_and_argument_boundaries_publish_structured_categories() {
             .expect_err("legacy API retains invalid-grid message"),
         argument_error.message
     );
+}
+
+#[test]
+fn resource_failures_serialize_stable_machine_readable_details() {
+    let mut options = WasmExecutionOptions::default();
+    options.resource_limits.max_analysis_points = 1;
+    let error = run_ac_analysis_with_options_detailed(
+        "valid\nV1 1 0 1\nR1 1 0 1k\n.END\n",
+        &[1_000.0, 2_000.0],
+        &options,
+    )
+    .expect_err("explicit browser ceiling must reject the frequency grid");
+
+    assert_eq!(error.kind, "resource_limit");
+    assert_eq!(error.category, "resource_limit");
+    assert_eq!(error.resource.as_deref(), Some("analysis_points"));
+    assert_eq!(error.requested, Some(2));
+    assert_eq!(error.limit, Some(1));
+
+    let serialized = serde_json::to_value(&error).expect("resource error serializes");
+    assert_eq!(serialized["resource"], "analysis_points");
+    assert_eq!(serialized["requested"], 2);
+    assert_eq!(serialized["limit"], 1);
 }
