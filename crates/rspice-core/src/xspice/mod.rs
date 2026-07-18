@@ -71,6 +71,7 @@ pub(crate) fn checkpoint_virtual_data_file_contents(path: &str) -> Option<std::s
 pub(crate) use context::CmContextCheckpoint;
 pub use context::{AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase};
 pub(crate) use data_file::read_to_string as read_data_file_to_string;
+pub(crate) use data_file::read_to_string_limited as read_data_file_to_string_limited;
 pub use data_file::{clear_registered_data_files, register_data_file, unregister_data_file};
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub use event::{Event, EventQueue, EventValue};

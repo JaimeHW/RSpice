@@ -1133,11 +1133,17 @@ pub struct GenericSwitch {
     /// Whether ONH/OFFH semantics are active
     pub hysteresis_enabled: bool,
 
-    /// Xyce-compatible stored normalized control state from the previous
-    /// accepted evaluation.
+    /// Xyce `lastStoVector` normalized control state. This is one accepted
+    /// timepoint older than `current_state` and is the history level consulted
+    /// by the generic-switch hysteresis law.
     last_state: Value,
-    transition_hold: Option<XyceSwitchHysteresisSide>,
-    transition_hold_steps: u8,
+    /// Xyce `currStoVector` normalized control state from the most recently
+    /// accepted timepoint.
+    current_state: Value,
+    /// Xyce `nextStoVector` candidate produced by the current trial evaluation.
+    /// Keeping all three history levels distinct prevents repeated Newton
+    /// stamps and rejected steps from consuming hysteresis history.
+    trial_state: Value,
     current_conductance: Value,
 }
 
@@ -1177,8 +1183,8 @@ impl GenericSwitch {
             offh: 0.0,
             hysteresis_enabled: false,
             last_state: 0.0,
-            transition_hold: None,
-            transition_hold_steps: 0,
+            current_state: 0.0,
+            trial_state: 0.0,
             current_conductance: 1.0e-6,
         })
     }
@@ -1485,14 +1491,14 @@ impl GenericSwitch {
         match state {
             SwitchState::On => {
                 self.last_state = 1.0;
-                self.transition_hold = None;
-                self.transition_hold_steps = 0;
+                self.current_state = 1.0;
+                self.trial_state = 1.0;
                 self.current_conductance = 1.0 / self.ron;
             }
             SwitchState::Off | SwitchState::Transitioning => {
                 self.last_state = 0.0;
-                self.transition_hold = None;
-                self.transition_hold_steps = 0;
+                self.current_state = 0.0;
+                self.trial_state = 0.0;
                 self.current_conductance = 1.0 / self.roff;
             }
         }
@@ -1569,9 +1575,7 @@ impl GenericSwitch {
         let base_state = (control - self.off) * d_inv;
 
         if !self.hysteresis_enabled {
-            self.last_state = base_state;
-            self.transition_hold = None;
-            self.transition_hold_steps = 0;
+            self.trial_state = base_state;
             return self.interpolated_conductance(base_state);
         }
 
@@ -1580,48 +1584,68 @@ impl GenericSwitch {
         let hys_off_state = (control - self.offh) / Self::safe_delta(self.on - self.offh);
 
         if base_state >= 1.0 || (previous_state >= 1.0 && hys_on_state >= 1.0) {
-            self.last_state = hys_on_state;
-            self.transition_hold = None;
-            self.transition_hold_steps = 0;
+            // Xyce writes the hysteretic normalization unconditionally in the
+            // ON branch, including when the unhysterized control crossed 1.
+            self.trial_state = hys_on_state;
             return 1.0 / self.ron;
         }
 
         if base_state <= 0.0 || (previous_state <= 0.0 && hys_off_state <= 0.0) {
-            self.last_state = hys_off_state;
-            self.transition_hold = None;
-            self.transition_hold_steps = 0;
+            // Xyce likewise writes the hysteretic normalization
+            // unconditionally in the OFF branch.
+            self.trial_state = hys_off_state;
             return 1.0 / self.roff;
         }
 
-        let interpolation_state = match self.transition_hold {
-            Some(XyceSwitchHysteresisSide::Off) if self.transition_hold_steps > 0 => {
-                self.transition_hold_steps -= 1;
-                if self.transition_hold_steps == 0 {
-                    self.transition_hold = None;
-                }
-                hys_off_state
-            }
-            Some(XyceSwitchHysteresisSide::On) if self.transition_hold_steps > 0 => {
-                self.transition_hold_steps -= 1;
-                if self.transition_hold_steps == 0 {
-                    self.transition_hold = None;
-                }
-                hys_on_state
-            }
-            None if previous_state <= 0.0 => {
-                self.transition_hold = Some(XyceSwitchHysteresisSide::Off);
-                self.transition_hold_steps = 3;
-                hys_off_state
-            }
-            None if previous_state >= 1.0 => {
-                self.transition_hold = Some(XyceSwitchHysteresisSide::On);
-                self.transition_hold_steps = 3;
-                hys_on_state
-            }
-            _ => base_state,
+        let interpolation_state = if previous_state <= 0.0 {
+            hys_off_state
+        } else if previous_state >= 1.0 {
+            hys_on_state
+        } else {
+            base_state
         };
-        self.last_state = base_state;
+        // Xyce writes the unhysterized normalized control to its next store
+        // vector in the interpolation branch, even when the conductance uses
+        // a hysteresis-adjusted state for this accepted point.
+        self.trial_state = base_state;
         self.interpolated_conductance(interpolation_state)
+    }
+
+    /// Advance Xyce's three-level store-vector history after an accepted
+    /// transient timepoint. Rejected steps and repeated Newton stamps leave
+    /// both accepted history levels untouched.
+    pub(crate) fn accept_transient_step(&mut self) {
+        self.last_state = self.current_state;
+        self.current_state = self.trial_state;
+    }
+
+    /// Seed both accepted store-vector history levels from the operating-point
+    /// trial, matching Xyce's `DataStore::setConstantHistory` handoff into
+    /// transient analysis.
+    pub(crate) fn initialize_transient_history(&mut self) {
+        self.last_state = self.trial_state;
+        self.current_state = self.trial_state;
+    }
+
+    /// Return the complete generic-switch transient store state. The first
+    /// three entries correspond to Xyce's last/current/next store vectors; the
+    /// fourth preserves the accepted-point conductance used by derived-current
+    /// traces at a checkpoint seam.
+    pub(crate) fn transient_store_snapshot(&self) -> [Value; 4] {
+        [
+            self.last_state,
+            self.current_state,
+            self.trial_state,
+            self.current_conductance,
+        ]
+    }
+
+    /// Restore a previously validated transient store snapshot.
+    pub(crate) fn restore_transient_store_snapshot(&mut self, snapshot: [Value; 4]) {
+        self.last_state = snapshot[0];
+        self.current_state = snapshot[1];
+        self.trial_state = snapshot[2];
+        self.current_conductance = snapshot[3];
     }
 
     /// Stamp the switch conductance for a given analysis time.
@@ -1701,21 +1725,32 @@ mod tests {
 
         let rising_g = switch.conductance_for_control(0.269_311_698);
         assert!((rising_g - 0.010_090_431_945).abs() < 1.0e-12);
+        assert!((switch.conductance_for_control(0.269_311_698) - rising_g).abs() < 1.0e-15);
+        switch.accept_transient_step();
+
+        // Xyce's hysteresis decision reads lastStoVector, not currStoVector,
+        // so the held-off curve remains active for one more accepted point.
+        let second_rising_g = switch.conductance_for_control(0.274_889_451);
+        assert!((second_rising_g - 0.010_149_897_256).abs() < 1.0e-12);
+        switch.accept_transient_step();
 
         assert!((switch.conductance_for_control(1.0) - 1.0).abs() < 1.0e-15);
+        switch.accept_transient_step();
+        assert!((switch.conductance_for_control(1.0) - 1.0).abs() < 1.0e-15);
+        switch.accept_transient_step();
         assert!((switch.conductance_for_control(0.562_116_094) - 1.0).abs() < 1.0e-15);
+        switch.accept_transient_step();
 
         let falling_g = switch.conductance_for_control(0.381_041_069);
         assert!((falling_g - 0.354_599_436_328).abs() < 1.0e-12);
 
         let held_falling_g = switch.conductance_for_control(0.381_041_069);
         assert!((held_falling_g - 0.354_599_436_328).abs() < 1.0e-12);
+        switch.accept_transient_step();
 
         let second_held_falling_g = switch.conductance_for_control(0.381_041_069);
         assert!((second_held_falling_g - 0.354_599_436_328).abs() < 1.0e-12);
-
-        let third_held_falling_g = switch.conductance_for_control(0.381_041_069);
-        assert!((third_held_falling_g - 0.354_599_436_328).abs() < 1.0e-12);
+        switch.accept_transient_step();
 
         let base_falling_g = switch.conductance_for_control(0.381_041_069);
         assert!((base_falling_g - 0.044_653_639_971).abs() < 1.0e-12);

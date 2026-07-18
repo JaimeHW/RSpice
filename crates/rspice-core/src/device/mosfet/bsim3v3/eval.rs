@@ -30,7 +30,7 @@
 //!   this into an engine must not add a second per-device gmin on top.
 
 use super::common::{CHARGE_Q, DELTA_1, DELTA_3, DELTA_4, EPSSI, EXP_THRESHOLD, MAX_EXP, MIN_EXP};
-use super::params::Bsim3v3Model;
+use super::params::{Bsim3v3EquationSet, Bsim3v3Model};
 use super::temp::{Bsim3v3InstTemp, Bsim3v3ModelTemp, Bsim3v3SizeDep};
 use crate::Value;
 
@@ -1726,13 +1726,6 @@ pub fn eval(
             let delta_phi = vtm * (1.0 + t1 * vgsteff_cv / denomi).ln();
             let ddelta_phi_dvg = 2.0 * vtm * (t1 - t0) / (denomi + t1 * vgsteff_cv);
 
-            // VgDP = Vgsteff - DeltaPhi (b3ld.c:2056-2061).
-            let t0 = vgsteff_cv - delta_phi - 0.001;
-            let dt0_dvg = 1.0 - ddelta_phi_dvg;
-            let t1 = (t0 * t0 + vgsteff_cv * 0.004).sqrt();
-            let vg_dp = 0.5 * (t0 + t1);
-            let dvg_dp_dvg = 0.5 * (dt0_dvg + (t0 * dt0_dvg + 0.002) / t1);
-
             let t3 = 4.0 * (vth - inst.vfbzb - p.phi);
             tox += tox;
             let (t0, dt0_dvd, dt0_dvb);
@@ -1767,30 +1760,79 @@ pub fn eval(
 
             let abulk_cv = abulk0 * p.abulk_cv_factor;
             let dabulk_cv_dvb = p.abulk_cv_factor * dabulk0_dvb;
-            let vdsat_cv = vg_dp / abulk_cv;
-            let t0 = vdsat_cv - vds_c - DELTA_4;
-            let dt0_dvg = dvg_dp_dvg / abulk_cv;
-            let dt0_dvb = -vdsat_cv * dabulk_cv_dvb / abulk_cv;
-            let t1 = (t0 * t0 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
-            let mut dt1_dvg = (t0 + DELTA_4 + DELTA_4) / t1;
-            let dt1_dvd = -t0 / t1;
-            let dt1_dvb = dt1_dvg * dt0_dvb;
-            dt1_dvg *= dt0_dvg;
-            let (mut vdseff_cv, mut dvdseff_cv_dvg, dvdseff_cv_dvd, mut dvdseff_cv_dvb);
-            if t0 >= 0.0 {
-                vdseff_cv = vdsat_cv - 0.5 * (t0 + t1);
-                dvdseff_cv_dvg = 0.5 * (dt0_dvg - dt1_dvg);
-                dvdseff_cv_dvd = 0.5 * (1.0 - dt1_dvd);
-                dvdseff_cv_dvb = 0.5 * (dt0_dvb - dt1_dvb);
+            let (
+                channel_overdrive,
+                dchannel_overdrive_dvg,
+                mut vdseff_cv,
+                mut dvdseff_cv_dvg,
+                dvdseff_cv_dvd,
+                mut dvdseff_cv_dvb,
+            ) = if model.equation_set == Bsim3v3EquationSet::XyceV322 {
+                // Xyce 7.10 MOSFET_B3 / BSIM3 3.2.2 charge-thickness
+                // equations (N_DEV_MOSFET_B3.C:8039-8059; b3v32ld.c:
+                // 2317-2348).  Version 3.3 introduced the smoothed VgDP
+                // transform and a different VdseffCV evaluation below.
+                let overdrive = vgsteff_cv - delta_phi;
+                let doverdrive_dvg = 1.0 - ddelta_phi_dvg;
+                let vdsat_cv = overdrive / abulk_cv;
+                let v4 = vdsat_cv - vds_c - DELTA_4;
+                let root = (v4 * v4 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
+                let vdseff_cv = vdsat_cv - 0.5 * (v4 + root);
+                let t1 = 0.5 * (1.0 + v4 / root);
+                let t2 = DELTA_4 / root;
+                let t3 = (1.0 - t1 - t2) / abulk_cv;
+                (
+                    overdrive,
+                    doverdrive_dvg,
+                    vdseff_cv,
+                    t3 * doverdrive_dvg,
+                    t1,
+                    -t3 * vdsat_cv * dabulk_cv_dvb,
+                )
             } else {
-                let t3 = (DELTA_4 + DELTA_4) / (t1 - t0);
-                let t4 = 1.0 - t3;
-                let t5 = vdsat_cv * t3 / (t1 - t0);
-                vdseff_cv = vdsat_cv * t4;
-                dvdseff_cv_dvg = dt0_dvg * t4 + t5 * (dt1_dvg - dt0_dvg);
-                dvdseff_cv_dvd = t5 * (dt1_dvd + 1.0);
-                dvdseff_cv_dvb = dt0_dvb * (1.0 - t5) + t5 * dt1_dvb;
-            }
+                // BSIM3 3.3 VgDP smoothing (ngspice-46 b3ld.c:
+                // 2056-2061, 2134-2180).
+                let t0 = vgsteff_cv - delta_phi - 0.001;
+                let dt0_dvg_unscaled = 1.0 - ddelta_phi_dvg;
+                let t1 = (t0 * t0 + vgsteff_cv * 0.004).sqrt();
+                let vg_dp = 0.5 * (t0 + t1);
+                let dvg_dp_dvg = 0.5 * (dt0_dvg_unscaled + (t0 * dt0_dvg_unscaled + 0.002) / t1);
+                let vdsat_cv = vg_dp / abulk_cv;
+                let t0 = vdsat_cv - vds_c - DELTA_4;
+                let dt0_dvg = dvg_dp_dvg / abulk_cv;
+                let dt0_dvb = -vdsat_cv * dabulk_cv_dvb / abulk_cv;
+                let t1 = (t0 * t0 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
+                let mut dt1_dvg = (t0 + DELTA_4 + DELTA_4) / t1;
+                let dt1_dvd = -t0 / t1;
+                let dt1_dvb = dt1_dvg * dt0_dvb;
+                dt1_dvg *= dt0_dvg;
+                let (vdseff_cv, dvdseff_cv_dvg, dvdseff_cv_dvd, dvdseff_cv_dvb) = if t0 >= 0.0 {
+                    (
+                        vdsat_cv - 0.5 * (t0 + t1),
+                        0.5 * (dt0_dvg - dt1_dvg),
+                        0.5 * (1.0 - dt1_dvd),
+                        0.5 * (dt0_dvb - dt1_dvb),
+                    )
+                } else {
+                    let t3 = (DELTA_4 + DELTA_4) / (t1 - t0);
+                    let t4 = 1.0 - t3;
+                    let t5 = vdsat_cv * t3 / (t1 - t0);
+                    (
+                        vdsat_cv * t4,
+                        dt0_dvg * t4 + t5 * (dt1_dvg - dt0_dvg),
+                        t5 * (dt1_dvd + 1.0),
+                        dt0_dvb * (1.0 - t5) + t5 * dt1_dvb,
+                    )
+                };
+                (
+                    vg_dp,
+                    dvg_dp_dvg,
+                    vdseff_cv,
+                    dvdseff_cv_dvg,
+                    dvdseff_cv_dvd,
+                    dvdseff_cv_dvb,
+                )
+            };
             // Added to eliminate non-zero VdseffCV at Vds=0.0.
             if vds_c == 0.0 {
                 vdseff_cv = 0.0;
@@ -1799,7 +1841,7 @@ pub fn eval(
             }
 
             let t0 = abulk_cv * vdseff_cv;
-            let t1 = vg_dp;
+            let t1 = channel_overdrive;
             let mut t2 = 12.0 * (t1 - 0.5 * t0 + 1.0e-20);
             let t3 = t0 / t2;
             let t4 = 1.0 - 12.0 * t3 * t3;
@@ -1809,7 +1851,7 @@ pub fn eval(
             qgate = cox_wl_cen * (t1 - t0 * (0.5 - t3));
             let qinoi = qgate;
             qov_cox = qgate / coxeff;
-            let mut cgg1 = cox_wl_cen * (t4 * dvg_dp_dvg + t5 * dvdseff_cv_dvg);
+            let mut cgg1 = cox_wl_cen * (t4 * dchannel_overdrive_dvg + t5 * dvdseff_cv_dvg);
             let cgd1 =
                 cox_wl_cen * t5 * dvdseff_cv_dvd + cgg1 * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
             let cgb1 = cox_wl_cen * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb)
@@ -1820,7 +1862,7 @@ pub fn eval(
             let t7 = 1.0 - abulk_cv;
             let t8 = t2 * t2;
             let t9 = 12.0 * t7 * t0 * t0 / (t8 * abulk_cv);
-            let t10 = t9 * dvg_dp_dvg;
+            let t10 = t9 * dchannel_overdrive_dvg;
             let t11 = -t7 * t5 / abulk_cv;
             let t12 = -(t9 * t1 / abulk_cv + vdseff_cv * (0.5 - t0 / t2));
 
@@ -1843,7 +1885,7 @@ pub fn eval(
                 t2 += t2;
                 let t3 = t2 * t2;
                 let t7 = -(0.25 - 12.0 * t0 * (4.0 * t1 - t0) / t3);
-                let t4 = -(0.5 + 24.0 * t0 * t0 / t3) * dvg_dp_dvg;
+                let t4 = -(0.5 + 24.0 * t0 * t0 / t3) * dchannel_overdrive_dvg;
                 t5 = t7 * abulk_cv;
                 let t6 = t7 * vdseff_cv;
 
@@ -1869,7 +1911,7 @@ pub fn eval(
                 let t6 = abulk_cv * (qsrc / t2 + t3 * t8);
                 let t7 = t6 * vdseff_cv / abulk_cv;
 
-                csg = t5 * dvg_dp_dvg + t6 * dvdseff_cv_dvg;
+                csg = t5 * dchannel_overdrive_dvg + t6 * dvdseff_cv_dvg;
                 csd = csg * dvgsteff_cv_dvd + t6 * dvdseff_cv_dvd + qov_cox * dcoxeff_dvd;
                 csb = csg * dvgsteff_cv_dvb
                     + t6 * dvdseff_cv_dvb

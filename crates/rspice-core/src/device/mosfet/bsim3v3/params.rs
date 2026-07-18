@@ -9,6 +9,30 @@ use super::common::{EPSOX, PI};
 use crate::Value;
 use std::collections::HashMap;
 
+/// Canonical BSIM3 bulk-MOS equation family selected by the simulator front.
+///
+/// Xyce 7.10's `MOSFET_B3` device is the BSIM3 3.2.2 implementation for both
+/// levels 9 and 49.  Ngspice's `bsim3` device is BSIM3 3.3.0.  A model-card
+/// `VERSION` value is metadata in Xyce and must therefore not silently select
+/// a different set of equations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Bsim3v3EquationSet {
+    /// Xyce 7.10 `MOSFET_B3`, BSIM3 3.2.2 equations.
+    XyceV322,
+    /// Ngspice 46 `bsim3`, BSIM3 3.3.0 equations.
+    NgspiceV330,
+}
+
+impl Bsim3v3EquationSet {
+    #[inline]
+    pub(crate) fn default_version(self) -> &'static str {
+        match self {
+            Self::XyceV322 => "3.2.2",
+            Self::NgspiceV330 => "3.3.0",
+        }
+    }
+}
+
 /// Binned model parameter: nominal value plus L/W/cross-term dependence.
 ///
 /// `b3temp.c` evaluates every binned family as
@@ -36,6 +60,10 @@ impl Binned {
 /// consumed by the engine's `.NOISE` source collector.
 #[derive(Debug, Clone)]
 pub struct Bsim3v3Model {
+    /// Equations implemented by this model instance. This is simulator-front
+    /// semantics, not user-editable model-card metadata.
+    pub equation_set: Bsim3v3EquationSet,
+
     /// +1.0 for NMOS, -1.0 for PMOS (ngspice `BSIM3type`).
     pub mtype: Value,
 
@@ -340,8 +368,29 @@ impl Bsim3v3Model {
         is_pmos: bool,
         nominal_temp_k: Value,
     ) -> Result<Self, String> {
+        Self::try_from_params_with_equation_set(
+            params,
+            is_pmos,
+            nominal_temp_k,
+            Bsim3v3EquationSet::NgspiceV330,
+        )
+    }
+
+    /// Construct a model card for a specific canonical simulator equation
+    /// family. Public programmatic callers retain ngspice-3.3 behavior through
+    /// [`Self::try_from_params`]; compatibility fronts call this explicitly.
+    pub fn try_from_params_with_equation_set(
+        params: &HashMap<String, Value>,
+        is_pmos: bool,
+        nominal_temp_k: Value,
+        equation_set: Bsim3v3EquationSet,
+    ) -> Result<Self, String> {
         let p = params;
         let mtype: Value = if is_pmos { -1.0 } else { 1.0 };
+        let geometry_exponent_default = match equation_set {
+            Bsim3v3EquationSet::XyceV322 => 0.0,
+            Bsim3v3EquationSet::NgspiceV330 => 1.0,
+        };
 
         let mob_mod = selector(p, "MOBMOD", 1, &[1, 2, 3])?;
         let cap_mod = selector(p, "CAPMOD", 3, &[0, 1, 2, 3])?;
@@ -405,6 +454,7 @@ impl Bsim3v3Model {
         let tnom = get(p, "TNOM").map(|t| t + 273.15).unwrap_or(nominal_temp_k);
 
         Ok(Self {
+            equation_set,
             mtype,
             mob_mod,
             cap_mod,
@@ -421,7 +471,7 @@ impl Bsim3v3Model {
             // itself never branches on it — b3check.c only warns on != 3.3*).
             version: get(p, "VERSION")
                 .map(|v| format!("{v}"))
-                .unwrap_or_else(|| "3.3.0".to_string()),
+                .unwrap_or_else(|| equation_set.default_version().to_string()),
             tox,
             toxm: val(p, "TOXM", tox),
 
@@ -593,10 +643,10 @@ impl Bsim3v3Model {
             lint,
             ll,
             llc: val(p, "LLC", ll),
-            lln: val(p, "LLN", 1.0),
+            lln: val(p, "LLN", geometry_exponent_default),
             lw,
             lwc: val(p, "LWC", lw),
-            lwn: val(p, "LWN", 1.0),
+            lwn: val(p, "LWN", geometry_exponent_default),
             lwl,
             lwlc: val(p, "LWLC", lwl),
             lmin: val(p, "LMIN", 0.0),
@@ -604,10 +654,21 @@ impl Bsim3v3Model {
             wint,
             wl,
             wlc: val(p, "WLC", wl),
-            wln: val(p, "WLN", 1.0),
+            wln: val(p, "WLN", geometry_exponent_default),
             ww,
-            wwc: val(p, "WWC", ww),
-            wwn: val(p, "WWN", 1.0),
+            wwc: val(
+                p,
+                "WWC",
+                match equation_set {
+                    // Xyce MOSFET_B3 leaves the independently registered WWC
+                    // parameter at its zero default when omitted.
+                    Bsim3v3EquationSet::XyceV322 => 0.0,
+                    // ngspice BSIM3setup aliases the omitted CV correction to
+                    // the DC width-correction coefficient.
+                    Bsim3v3EquationSet::NgspiceV330 => ww,
+                },
+            ),
+            wwn: val(p, "WWN", geometry_exponent_default),
             wwl,
             wwlc: val(p, "WWLC", wwl),
             wmin: val(p, "WMIN", 0.0),
@@ -627,5 +688,67 @@ impl Bsim3v3Model {
 
             cox,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equation_families_apply_their_canonical_empty_card_defaults() {
+        let params = HashMap::new();
+        let xyce = Bsim3v3Model::try_from_params_with_equation_set(
+            &params,
+            false,
+            300.15,
+            Bsim3v3EquationSet::XyceV322,
+        )
+        .expect("Xyce BSIM3 3.2.2 defaults resolve");
+        let ngspice = Bsim3v3Model::try_from_params_with_equation_set(
+            &params,
+            false,
+            300.15,
+            Bsim3v3EquationSet::NgspiceV330,
+        )
+        .expect("ngspice BSIM3 3.3 defaults resolve");
+
+        assert_eq!(xyce.equation_set, Bsim3v3EquationSet::XyceV322);
+        assert_eq!(xyce.version, "3.2.2");
+        assert_eq!(
+            (xyce.lln, xyce.lwn, xyce.wln, xyce.wwn),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+        assert_eq!(xyce.wwc, 0.0);
+
+        assert_eq!(ngspice.equation_set, Bsim3v3EquationSet::NgspiceV330);
+        assert_eq!(ngspice.version, "3.3.0");
+        assert_eq!(
+            (ngspice.lln, ngspice.lwn, ngspice.wln, ngspice.wwn),
+            (1.0, 1.0, 1.0, 1.0)
+        );
+        assert_eq!(ngspice.wwc, 0.0);
+    }
+
+    #[test]
+    fn equation_specific_wwc_fallback_does_not_cross_simulator_fronts() {
+        let params = HashMap::from([("WW".to_string(), 2.5e-8)]);
+        let xyce = Bsim3v3Model::try_from_params_with_equation_set(
+            &params,
+            false,
+            300.15,
+            Bsim3v3EquationSet::XyceV322,
+        )
+        .expect("Xyce card resolves");
+        let ngspice = Bsim3v3Model::try_from_params_with_equation_set(
+            &params,
+            false,
+            300.15,
+            Bsim3v3EquationSet::NgspiceV330,
+        )
+        .expect("ngspice card resolves");
+
+        assert_eq!(xyce.wwc, 0.0);
+        assert_eq!(ngspice.wwc, 2.5e-8);
     }
 }

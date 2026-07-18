@@ -54,7 +54,7 @@ pub mod temp;
 
 pub use device::{Bsim3v3ChargeMatrix, Bsim3v3Device};
 pub use eval::{Bsim3v3Bias, Bsim3v3Charge, Bsim3v3Op};
-pub use params::{Binned, Bsim3v3Model};
+pub use params::{Binned, Bsim3v3EquationSet, Bsim3v3Model};
 pub use temp::{Bsim3v3Geometry, Bsim3v3InstTemp, Bsim3v3ModelTemp, Bsim3v3SizeDep, SizeDepCache};
 
 use crate::Value;

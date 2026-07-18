@@ -3,6 +3,7 @@
 use crate::Value;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -254,6 +255,70 @@ fn read_native_to_string_with_stamp(path: &str) -> Result<(Arc<str>, DataFileSta
     read_path(path_ref).map_err(|err| err.to_string())
 }
 
+fn read_native_to_string_with_stamp_limited(
+    path: &str,
+    max_bytes: usize,
+) -> Result<(Arc<str>, DataFileStamp), String> {
+    fn read_path(
+        path: &Path,
+        max_bytes: usize,
+    ) -> Result<(Arc<str>, DataFileStamp), std::io::Error> {
+        let file = std::fs::File::open(path)?;
+        let metadata = file.metadata()?;
+        if metadata.len() > max_bytes as u64 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "data file is {} bytes; safety limit is {max_bytes} bytes",
+                    metadata.len()
+                ),
+            ));
+        }
+
+        // Metadata is only an early rejection. Bound the actual read as well
+        // so a concurrently growing file cannot force an allocation beyond
+        // the caller's declared resource budget.
+        let mut bytes = Vec::with_capacity((metadata.len() as usize).min(max_bytes));
+        file.take(max_bytes as u64 + 1).read_to_end(&mut bytes)?;
+        if bytes.len() > max_bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "data file exceeded the {max_bytes}-byte safety limit while it was being read"
+                ),
+            ));
+        }
+        let contents = String::from_utf8(bytes).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("data file is not valid UTF-8: {error}"),
+            )
+        })?;
+        let stamp = stamp_from_metadata(metadata, content_hash(contents.as_bytes()));
+        Ok((Arc::<str>::from(contents), stamp))
+    }
+
+    let path_ref = Path::new(path);
+    if let Some(preferred) = ngspice_input_dir_path(path_ref) {
+        match read_path(&preferred, max_bytes) {
+            Ok(file) => return Ok(file),
+            Err(preferred_err) => match read_path(path_ref, max_bytes) {
+                Ok(file) => return Ok(file),
+                Err(fallback_err) => {
+                    return Err(native_path_error(
+                        &preferred,
+                        &preferred_err,
+                        path_ref,
+                        &fallback_err,
+                    ));
+                }
+            },
+        }
+    }
+
+    read_path(path_ref, max_bytes).map_err(|error| error.to_string())
+}
+
 fn native_stamp(path: &str) -> Result<DataFileStamp, String> {
     read_native_to_string_with_stamp(path).map(|(_, stamp)| stamp)
 }
@@ -355,6 +420,25 @@ pub(crate) fn read_to_string(path: &str) -> Result<Arc<str>, String> {
     read_to_string_with_stamp(path).map(|(contents, _)| contents)
 }
 
+/// Read a virtual or native data file without allocating beyond `max_bytes`.
+///
+/// Registered virtual files already own their storage, so their immutable
+/// length stamp is checked before the cheap `Arc` clone. Native files are
+/// rejected from metadata first and are also read through a hard byte cap to
+/// remain safe if the file grows concurrently.
+pub(crate) fn read_to_string_limited(path: &str, max_bytes: usize) -> Result<Arc<str>, String> {
+    if let Some(file) = registered(path)? {
+        if file.stamp.len > max_bytes as u64 {
+            return Err(format!(
+                "registered data file is {} bytes; safety limit is {max_bytes} bytes",
+                file.stamp.len
+            ));
+        }
+        return Ok(file.contents);
+    }
+    read_native_to_string_with_stamp_limited(path, max_bytes).map(|(contents, _)| contents)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +501,23 @@ mod tests {
         assert!(!Arc::ptr_eq(&second_contents, &third_contents));
 
         unregister_data_file(&path).expect("unregister virtual data file");
+    }
+
+    #[test]
+    fn limited_reader_rejects_oversized_virtual_data_before_cloning_contents() {
+        let _guard = test_registry_guard();
+        let path = format!("virtual://rspice/data-file/limited-{}", std::process::id());
+        let _ = unregister_data_file(&path);
+        register_data_file(&path, "0123456789").expect("register oversized virtual data");
+
+        let error = read_to_string_limited(&path, 9)
+            .expect_err("virtual data above the hard byte limit must fail");
+        assert!(error.contains("10 bytes") && error.contains("9 bytes"));
+        assert_eq!(
+            &*read_to_string_limited(&path, 10).expect("exact byte limit is accepted"),
+            "0123456789"
+        );
+        unregister_data_file(&path).expect("unregister limited virtual data");
     }
 
     #[test]

@@ -154,6 +154,28 @@ fn device_with_card(card: HashMap<String, Value>, l: Value, w: Value) -> Bsim3v3
     Bsim3v3::new("m1".to_string(), model, geom, T300).expect("device")
 }
 
+fn device_with_card_and_equation_set(
+    card: HashMap<String, Value>,
+    l: Value,
+    w: Value,
+    equation_set: Bsim3v3EquationSet,
+) -> Bsim3v3 {
+    let model = Arc::new(
+        Bsim3v3Model::try_from_params_with_equation_set(&card, false, T300, equation_set)
+            .expect("model card"),
+    );
+    let geom = Bsim3v3Geometry {
+        l,
+        w,
+        drain_area: w * 0.42e-6,
+        source_area: w * 0.42e-6,
+        drain_perimeter: 2.0 * (w + 0.42e-6),
+        source_perimeter: 2.0 * (w + 0.42e-6),
+        ..Bsim3v3Geometry::default()
+    };
+    Bsim3v3::new("m1".to_string(), model, geom, T300).expect("device")
+}
+
 fn construct_device_with_card(card: HashMap<String, Value>) -> Result<Bsim3v3, String> {
     let model = Arc::new(Bsim3v3Model::try_from_params(&card, false, T300)?);
     let geom = Bsim3v3Geometry {
@@ -459,9 +481,7 @@ fn junction_diode_matches_ijth_linearization() {
     );
 }
 
-#[test]
-fn charge_model_capmod3_jacobian_consistency() {
-    let dev = device(0.18e-6, 10e-6);
+fn assert_charge_model_capmod3_jacobian_consistency(dev: &Bsim3v3) {
     let charge = |vds: Value, vgs: Value, vbs: Value| {
         dev.eval(Bsim3v3Bias { vds, vgs, vbs }, GMIN, true)
             .expect("charge eval")
@@ -520,6 +540,19 @@ fn charge_model_capmod3_jacobian_consistency() {
             );
         }
     }
+}
+
+#[test]
+fn ngspice_charge_model_capmod3_jacobian_consistency() {
+    let dev = device(0.18e-6, 10e-6);
+    assert_charge_model_capmod3_jacobian_consistency(&dev);
+}
+
+#[test]
+fn xyce_v322_charge_model_capmod3_jacobian_consistency() {
+    let dev =
+        device_with_card_and_equation_set(nmos018(), 0.18e-6, 10e-6, Bsim3v3EquationSet::XyceV322);
+    assert_charge_model_capmod3_jacobian_consistency(&dev);
 }
 
 #[test]
