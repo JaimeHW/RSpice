@@ -1438,8 +1438,8 @@ fn test_xyce_tl1x_mpi_transient_case_runs() {
         "{relative} should match the checked-in Xyce .prn oracle"
     );
     assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the Release 7.10 integrated-RMS transient contract"
     );
 }
 
@@ -2010,12 +2010,12 @@ fn test_xyce_current_source_waveform_transient_cases_run() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/IEXP/iexp.cir",
-        "Netlists/IPULSE/ipulse.cir",
-        "Netlists/IPWL/ipwl.cir",
-        "Netlists/ISFFM/isffm.cir",
-        "Netlists/ISIN/isin.cir",
+    for (relative, expected_contract) in [
+        ("Netlists/IEXP/iexp.cir", "static_prn_tran"),
+        ("Netlists/IPULSE/ipulse.cir", "static_prn_tran"),
+        ("Netlists/IPWL/ipwl.cir", "static_prn_tran"),
+        ("Netlists/ISFFM/isffm.cir", "static_xyce_verify_prn_tran"),
+        ("Netlists/ISIN/isin.cir", "static_prn_tran"),
     ] {
         assert!(
             !runner.requires_upstream_wrapper(relative),
@@ -2031,8 +2031,8 @@ fn test_xyce_current_source_waveform_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, expected_contract,
+            "{relative} should report its canonical native transient .prn contract"
         );
     }
 }
@@ -2384,10 +2384,19 @@ fn test_xyce_midrange_certification_transient_cases_run() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/Certification_Tests/BUG_574/bug_574_mpi.cir",
-        "Netlists/Certification_Tests/BUG_575_SON/bug575son.cir",
-        "Netlists/Certification_Tests/BUG_794_SON/test1.cir",
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_574/bug_574_mpi.cir",
+            "static_prn_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_575_SON/bug575son.cir",
+            "static_prn_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_794_SON/test1.cir",
+            "static_xyce_verify_prn_tran",
+        ),
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
@@ -2399,8 +2408,8 @@ fn test_xyce_midrange_certification_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, expected_contract,
+            "{relative} should report its canonical native transient .prn contract"
         );
     }
 }
@@ -2548,7 +2557,7 @@ fn test_xyce_time_dependent_global_parameter_transient_runs() {
         result.mismatches.is_empty(),
         "{relative} should match the checked-in Xyce .prn oracle"
     );
-    assert_eq!(result.contract, "static_prn_tran");
+    assert_eq!(result.contract, "static_xyce_verify_prn_tran");
 }
 
 #[test]
@@ -3174,8 +3183,8 @@ fn test_xyce_transient_branch_current_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, "static_xyce_verify_prn_tran",
+            "{relative} should report the Release 7.10 integrated-RMS transient contract"
         );
     }
 }
@@ -3441,19 +3450,31 @@ fn test_xyce_behavioral_source_transient_cases_run() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/ABM_ATAN_TAN/atan_tan.cir",
-        "Netlists/ABM_BREAK/break.cir",
-        "Netlists/ABM_BREAK/fastRisePulse.cir",
-        "Netlists/ABM_BREAK/fastTable.cir",
-        "Netlists/ABM_EXPLN/exp_ln.cir",
-        "Netlists/ABM_FUNC/func.cir",
-        "Netlists/ABM_LOG/log.cir",
-        "Netlists/BREAK/break.cir",
-        "Netlists/Certification_Tests/ISSUE_229/GlobalInExpressionBug.cir",
-        "Netlists/Certification_Tests/ISSUE_310/issue310.cir",
-        "Netlists/Certification_Tests/BUG_794_SON/test2.cir",
-        "Netlists/Certification_Tests/BUG_86_SON/bug86.cir",
+    for (relative, expected_contract) in [
+        ("Netlists/ABM_ATAN_TAN/atan_tan.cir", "static_prn_tran"),
+        ("Netlists/ABM_BREAK/break.cir", "static_prn_tran"),
+        ("Netlists/ABM_BREAK/fastRisePulse.cir", "static_prn_tran"),
+        ("Netlists/ABM_BREAK/fastTable.cir", "static_prn_tran"),
+        ("Netlists/ABM_EXPLN/exp_ln.cir", "static_prn_tran"),
+        ("Netlists/ABM_FUNC/func.cir", "static_prn_tran"),
+        ("Netlists/ABM_LOG/log.cir", "static_prn_tran"),
+        ("Netlists/BREAK/break.cir", "static_prn_tran"),
+        (
+            "Netlists/Certification_Tests/ISSUE_229/GlobalInExpressionBug.cir",
+            "static_prn_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_310/issue310.cir",
+            "static_xyce_verify_prn_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_794_SON/test2.cir",
+            "static_xyce_verify_prn_tran",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_86_SON/bug86.cir",
+            "static_prn_tran",
+        ),
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
@@ -3465,8 +3486,8 @@ fn test_xyce_behavioral_source_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, expected_contract,
+            "{relative} should report its canonical native transient .prn contract"
         );
     }
 }
@@ -3584,8 +3605,8 @@ fn test_xyce_bsource_table_digitizer_transition_case_runs() {
         "{relative} should match the checked-in Xyce .prn oracle"
     );
     assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the Release 7.10 integrated-RMS transient contract"
     );
 }
 
