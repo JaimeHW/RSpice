@@ -232,8 +232,12 @@ fn faer_backward_error_tolerance(max_row_nnz: usize) -> Value {
 /// Consequently, checking `D_r*A*D_c`, `y`, and `D_r*b` is mathematically
 /// identical to checking the original system with `x = D_c*y`, while avoiding
 /// overflow when valid original-coordinate terms approach `f64::MAX`.
-/// The safe terms follow LAPACK's treatment of rows whose denominator is near
-/// underflow. `residual` is retained as `b - A*x` for iterative refinement.
+/// Rows whose entire signal is near underflow use a safe denominator floor.
+/// Unlike LAPACK's forward-error estimator, this solve-acceptance check does
+/// not add the floor to the numerator: doing so turns an unavoidable single
+/// subnormal rounding bit into an order-one error and rejects otherwise exact
+/// sparse solves (notably the inactive tail of a large RC ladder).
+/// `residual` is retained as `b - A*x` for iterative refinement.
 fn componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Value],
@@ -282,7 +286,6 @@ fn componentwise_backward_error(
     }
 
     let safe1 = (max_row_nnz.saturating_add(1) as Value) * Value::MIN_POSITIVE;
-    let safe2 = safe1 / Value::EPSILON;
     let mut error: Value = 0.0;
     for row in 0..nrows {
         let residual_abs = residual[row].abs();
@@ -290,13 +293,7 @@ fn componentwise_backward_error(
         if !residual_abs.is_finite() || !scale.is_finite() {
             return Err(SolverError::Overflow);
         }
-        let row_error = if residual_abs == 0.0 {
-            0.0
-        } else if scale > safe2 {
-            residual_abs / scale
-        } else {
-            (residual_abs + safe1) / (scale + safe1)
-        };
+        let row_error = residual_abs / scale.max(safe1);
         error = error.max(row_error);
     }
     Ok(error)
@@ -1711,6 +1708,23 @@ mod tests {
         )
         .unwrap();
         assert!(perturbed_error > faer_backward_error_tolerance(2));
+
+        // A one-ulp subnormal tail is below the arithmetic noise floor. It
+        // must not turn into an order-one backward error merely because both
+        // the exact row signal and its residual are below MIN_POSITIVE.
+        let subnormal_error = componentwise_backward_error(
+            &StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0)])
+                .unwrap()
+                .csc,
+            &[1.0],
+            &[Value::from_bits(1)],
+            &[0.0],
+            &mut residual,
+            &mut denominator,
+            1,
+        )
+        .unwrap();
+        assert!(subnormal_error <= faer_backward_error_tolerance(1));
 
         let zero_row = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
         let zero_error = componentwise_backward_error(
