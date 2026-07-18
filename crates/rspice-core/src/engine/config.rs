@@ -152,7 +152,11 @@ pub struct SimulationConfig {
     /// The transient engine may temporarily shrink below this during nonlinear
     /// recovery, but will bias accepted smooth regions back above it.
     pub min_timestep: Value,
-    /// Maximum timestep for transient analysis
+    /// Maximum timestep for transient analysis.
+    ///
+    /// The default [`crate::constants::MAX_TIMESTEP`] value is a compatibility
+    /// sentinel meaning that no configuration-level hard cap was supplied.
+    /// Callers still provide the analysis timestep through the transient API.
     pub max_timestep: Value,
     /// Optional explicit first transient timestep.
     ///
@@ -240,7 +244,9 @@ impl SimulationConfig {
         }
         if let Some(initial_timestep) = self.transient_initial_timestep {
             validate_positive("transient_initial_timestep", initial_timestep)?;
-            if initial_timestep > self.max_timestep {
+            if self.max_timestep != crate::constants::MAX_TIMESTEP
+                && initial_timestep > self.max_timestep
+            {
                 return Err(SimulationConfigError::InitialTimestepExceedsMaximum {
                     initial_timestep,
                     max_timestep: self.max_timestep,

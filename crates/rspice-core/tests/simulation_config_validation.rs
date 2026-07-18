@@ -54,6 +54,14 @@ fn timestep_bounds_and_initial_step_are_validated() {
             max_timestep: 1.0e-9,
         })
     );
+
+    let default_maximum_sentinel = SimulationConfig {
+        transient_initial_timestep: Some(rspice_core::constants::MAX_TIMESTEP * 10.0),
+        ..SimulationConfig::default()
+    };
+    default_maximum_sentinel
+        .validate()
+        .expect("the default maximum-timestep sentinel is not a hard cap");
 }
 
 #[test]
