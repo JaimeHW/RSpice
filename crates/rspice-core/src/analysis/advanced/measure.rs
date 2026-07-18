@@ -77,6 +77,9 @@ pub enum MeasureOperand {
     Waveform(String),
 }
 
+/// Xyce's default absolute equality tolerance for conditional measurements.
+pub const XYCE_DEFAULT_MEASURE_MINVAL: Value = 1.0e-12;
+
 /// Selects a particular conditional crossing in accepted-point order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventOccurrence {
@@ -101,6 +104,8 @@ pub struct WhenCondition {
     pub left: String,
     pub right: MeasureOperand,
     pub occurrence: EventOccurrence,
+    /// Absolute equality tolerance used when detecting the conditional event.
+    pub minval: Value,
 }
 
 /// Event form for one side of a trigger/target delay measurement.
@@ -131,6 +136,7 @@ impl TrigSpec {
                     edge: EdgeType::Cross,
                     number: 1,
                 },
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             }),
             td: None,
         }
@@ -2127,6 +2133,7 @@ fn delay_clause_event(
                 axis.len(),
                 segment_starts,
                 condition.occurrence.edge,
+                condition.minval,
             )
             .into_iter()
             .filter_map(|(segment, fraction)| {
@@ -2142,7 +2149,6 @@ fn delay_clause_event(
 }
 
 fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) -> bool {
-    const XYCE_DEFAULT_MINVAL: Value = 1.0e-12;
     let Some((&minimum, &maximum)) = axis
         .iter()
         .min_by(|left, right| left.total_cmp(right))
@@ -2150,7 +2156,9 @@ fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) 
     else {
         return false;
     };
-    if target < minimum - XYCE_DEFAULT_MINVAL || target > maximum + XYCE_DEFAULT_MINVAL {
+    if target < minimum - XYCE_DEFAULT_MEASURE_MINVAL
+        || target > maximum + XYCE_DEFAULT_MEASURE_MINVAL
+    {
         return false;
     }
     let ascending = axis
@@ -2163,9 +2171,9 @@ fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) 
         .unwrap_or(true);
     axis.iter().any(|sample| {
         if ascending {
-            sample - XYCE_DEFAULT_MINVAL >= target
+            sample - XYCE_DEFAULT_MEASURE_MINVAL >= target
         } else {
-            sample - XYCE_DEFAULT_MINVAL <= target
+            sample - XYCE_DEFAULT_MEASURE_MINVAL <= target
         }
     })
 }
@@ -2206,6 +2214,7 @@ fn first_measure_condition_event(
         axis.len(),
         segment_starts,
         condition.occurrence.edge,
+        condition.minval,
     )
     .into_iter()
     .filter_map(|(segment, fraction)| {
@@ -2238,6 +2247,7 @@ fn continuous_condition_events(
         axis.len(),
         segment_starts,
         condition.occurrence.edge,
+        condition.minval,
     )
     .into_iter()
     .filter_map(|(segment, fraction)| {
@@ -2462,6 +2472,7 @@ fn continuous_delay_clause_events(
                 axis.len(),
                 segment_starts,
                 condition.occurrence.edge,
+                condition.minval,
             )
             .into_iter()
             .filter_map(|(segment, fraction)| {
@@ -2538,9 +2549,10 @@ fn measurement_condition_crossings(
     point_count: usize,
     segment_starts: &[usize],
     edge: EdgeType,
+    minval: Value,
 ) -> Vec<(usize, Value)> {
-    const XYCE_WHEN_ABSOLUTE_TOLERANCE: Value = 1.0e-12;
-    if left.len() != point_count || point_count < 2 {
+    const FLAT_LEFT_NUMERIC_TOLERANCE: Value = 1.0e-12;
+    if left.len() != point_count || point_count < 2 || !minval.is_finite() || minval < 0.0 {
         return Vec::new();
     }
 
@@ -2552,7 +2564,9 @@ fn measurement_condition_crossings(
         let left_previous = left[segment];
         let left_current = left[segment + 1];
         let left_scale = left_previous.abs().max(left_current.abs()).max(1.0);
-        if (left_current - left_previous).abs() <= XYCE_WHEN_ABSOLUTE_TOLERANCE * left_scale {
+        // MINVAL applies to equality with the target, not to Xyce's
+        // independent requirement that the left operand itself move.
+        if (left_current - left_previous).abs() <= FLAT_LEFT_NUMERIC_TOLERANCE * left_scale {
             continue;
         }
         let Some(right_previous) = right.value_at(segment) else {
@@ -2563,8 +2577,8 @@ fn measurement_condition_crossings(
         };
         let previous_difference = left_previous - right_previous;
         let current_difference = left_current - right_current;
-        let previous_equal = previous_difference.abs() < XYCE_WHEN_ABSOLUTE_TOLERANCE;
-        let current_equal = current_difference.abs() < XYCE_WHEN_ABSOLUTE_TOLERANCE;
+        let previous_equal = previous_difference.abs() < minval;
+        let current_equal = current_difference.abs() < minval;
         // Entering Xyce's MINVAL equality band is the crossing.  Normalize
         // that state before the next strict-sign test so leaving the band
         // cannot emit the same physical root a second time.
@@ -3173,6 +3187,7 @@ mod tests {
                 left: "Y".to_string(),
                 right: MeasureOperand::Waveform("TARGET".to_string()),
                 occurrence: EventOccurrence::default(),
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             }),
             None,
             None,
@@ -3185,6 +3200,7 @@ mod tests {
                 left: "DOUBLE".to_string(),
                 right: MeasureOperand::Constant(0.5),
                 occurrence: EventOccurrence::default(),
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             }),
             Some(2.75),
             None,
@@ -3197,6 +3213,7 @@ mod tests {
                 left: "CONSTANT".to_string(),
                 right: MeasureOperand::Constant(1.0),
                 occurrence: EventOccurrence::default(),
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             }),
             None,
             None,
@@ -3225,6 +3242,7 @@ mod tests {
                     left: "CONDITION".to_string(),
                     right: MeasureOperand::Constant(2.5),
                     occurrence: EventOccurrence::default(),
+                    minval: XYCE_DEFAULT_MEASURE_MINVAL,
                 },
                 from,
                 to,
@@ -3262,6 +3280,7 @@ mod tests {
             left: "CONDITION".to_string(),
             right: MeasureOperand::Constant(4.0),
             occurrence: EventOccurrence::default(),
+            minval: XYCE_DEFAULT_MEASURE_MINVAL,
         };
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
@@ -3316,6 +3335,7 @@ mod tests {
                             left: "ALT".to_string(),
                             right: MeasureOperand::Constant(0.0),
                             occurrence: EventOccurrence { edge, number },
+                            minval: XYCE_DEFAULT_MEASURE_MINVAL,
                         },
                         from,
                         to: None,
@@ -3354,6 +3374,7 @@ mod tests {
                 nearly_equal.len(),
                 &[],
                 EdgeType::Cross,
+                XYCE_DEFAULT_MEASURE_MINVAL,
             ),
             vec![(0, 1.0)]
         );
@@ -3369,6 +3390,34 @@ mod tests {
                 enters_then_leaves.len(),
                 &[],
                 EdgeType::Cross,
+                XYCE_DEFAULT_MEASURE_MINVAL,
+            ),
+            vec![(0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn custom_minval_controls_endpoint_equality_band() {
+        let nearly_equal = [-1.0, -1.0e-14];
+        assert!(
+            measurement_condition_crossings(
+                &nearly_equal,
+                ResolvedMeasureOperand::Constant(0.0),
+                nearly_equal.len(),
+                &[],
+                EdgeType::Cross,
+                1.0e-16,
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            measurement_condition_crossings(
+                &nearly_equal,
+                ResolvedMeasureOperand::Constant(0.0),
+                nearly_equal.len(),
+                &[],
+                EdgeType::Cross,
+                1.0e-13,
             ),
             vec![(0, 1.0)]
         );
@@ -3387,6 +3436,7 @@ mod tests {
                 edge: EdgeType::Cross,
                 number,
             },
+            minval: XYCE_DEFAULT_MEASURE_MINVAL,
         };
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
@@ -3516,6 +3566,7 @@ mod tests {
                 edge: EdgeType::Cross,
                 number,
             },
+            minval: XYCE_DEFAULT_MEASURE_MINVAL,
         }
     }
 
@@ -3629,6 +3680,7 @@ mod tests {
                             edge: EdgeType::Cross,
                             number: 1,
                         },
+                        minval: XYCE_DEFAULT_MEASURE_MINVAL,
                     }),
                     td: None,
                 },
@@ -3719,6 +3771,7 @@ mod tests {
                     left: "Y".to_string(),
                     right: MeasureOperand::Constant(0.5),
                     occurrence: EventOccurrence::default(),
+                    minval: XYCE_DEFAULT_MEASURE_MINVAL,
                 },
                 from: None,
                 to: None,

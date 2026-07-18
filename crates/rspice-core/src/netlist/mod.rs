@@ -2744,6 +2744,64 @@ mod tests {
     }
 
     #[test]
+    fn conditional_measurements_preserve_statement_wide_minval() {
+        let netlist = Netlist::parse(
+            "statement-wide conditional minval\n\
+             V1 one 0 0\n\
+             V2 two 0 0\n\
+             .dc V1 0 4 1\n\
+             .measure dc found FIND V(one) WHEN V(one)=1 MINVAL=1e-15 RISE=1 MINVAL=2e-15\n\
+             .measure dc event WHEN V(one)=2 MINVAL=3e-15 CROSS=1\n\
+             .measure dc delay TRIG V(one)=1 CROSS=1 TARG V(two)=2 CROSS=1 MINVAL=4e-15\n\
+             .end\n",
+        )
+        .expect("conditional MINVAL options parse");
+
+        let crate::analysis::MeasureType::Find {
+            when: Some(found), ..
+        } = &netlist.measurements[0].measure_type
+        else {
+            panic!("expected FIND-WHEN measurement");
+        };
+        assert_eq!(found.minval, 2.0e-15);
+
+        let crate::analysis::MeasureType::When { condition, .. } =
+            &netlist.measurements[1].measure_type
+        else {
+            panic!("expected WHEN measurement");
+        };
+        assert_eq!(condition.minval, 3.0e-15);
+
+        let crate::analysis::MeasureType::Delay { trig, targ } =
+            &netlist.measurements[2].measure_type
+        else {
+            panic!("expected TRIG/TARG measurement");
+        };
+        for clause in [trig, targ] {
+            let crate::analysis::TriggerEvent::When(condition) = &clause.event else {
+                panic!("expected conditional TRIG/TARG clause");
+            };
+            assert_eq!(condition.minval, 4.0e-15);
+        }
+    }
+
+    #[test]
+    fn conditional_measurement_minval_must_be_finite_and_non_negative() {
+        for minval in ["-1e-15", "1e999"] {
+            let source = format!(
+                "invalid conditional minval\nV1 one 0 0\n.dc V1 0 1 1\n.measure dc event WHEN V(one)=0 MINVAL={minval}\n.end\n"
+            );
+            let error = Netlist::parse(&source).expect_err("invalid MINVAL must fail closed");
+            assert!(
+                error
+                    .to_string()
+                    .contains("MINVAL must be finite and non-negative"),
+                "unexpected error for {minval}: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn error_function_measurements_preserve_operands_norms_and_filters() {
         let netlist = Netlist::parse(
             "typed error functions\n\

@@ -2192,13 +2192,13 @@ pub(super) fn parse_meas_command(
             ),
         });
     }
-    let (goal, tolerance, default_value, print_policy) =
+    let (goal, tolerance, default_value, print_policy, minval) =
         scan_meas_statement_options(stream, line_num, params)?;
 
     // Create the measurement type based on keyword
     let measure_type = match measure_type_key.as_str() {
         "TRIG" => {
-            let trig = parse_meas_delay_spec(stream, line_num, params, "TRIG", true)?;
+            let trig = parse_meas_delay_spec(stream, line_num, params, "TRIG", true, minval)?;
             let targ_keyword = expect_ident(stream, line_num)?;
             if !targ_keyword.eq_ignore_ascii_case("TARG") {
                 return Err(ParseError::Syntax {
@@ -2209,7 +2209,7 @@ pub(super) fn parse_meas_command(
                     ),
                 });
             }
-            let targ = parse_meas_delay_spec(stream, line_num, params, "TARG", false)?;
+            let targ = parse_meas_delay_spec(stream, line_num, params, "TARG", false, minval)?;
             MeasureType::Delay { trig, targ }
         }
         "PARAM" | "EQN" => {
@@ -2343,7 +2343,8 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "FIND" => {
-                    let options = parse_point_measure_options(stream, line_num, params, "FIND")?;
+                    let options =
+                        parse_point_measure_options(stream, line_num, params, "FIND", minval)?;
 
                     MeasureType::Find {
                         signal: signal.clone(),
@@ -2354,7 +2355,8 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "DERIV" | "DERIVATIVE" => {
-                    let options = parse_point_measure_options(stream, line_num, params, "DERIV")?;
+                    let options =
+                        parse_point_measure_options(stream, line_num, params, "DERIV", minval)?;
 
                     MeasureType::Derivative {
                         signal: signal.clone(),
@@ -2379,6 +2381,7 @@ pub(super) fn parse_meas_command(
                             left: signal.clone(),
                             right,
                             occurrence,
+                            minval,
                         },
                         from,
                         to,
@@ -2418,6 +2421,7 @@ fn parse_point_measure_options(
     line_num: usize,
     params: &ParamContext,
     measure_type: &str,
+    minval: Value,
 ) -> Result<PointMeasureOptions, ParseError> {
     use crate::analysis::WhenCondition;
 
@@ -2474,6 +2478,7 @@ fn parse_point_measure_options(
                     left,
                     right,
                     occurrence: crate::analysis::EventOccurrence::default(),
+                    minval,
                 });
             }
             "RISE" | "FALL" | "CROSS" => {
@@ -2598,13 +2603,18 @@ fn parse_measure_error_function_options(
     let mut options = ErrorFunctionOptions {
         from: None,
         to: None,
-        minval: 1.0e-12,
+        minval: crate::analysis::measure::XYCE_DEFAULT_MEASURE_MINVAL,
         ymin: 1.0e-15,
         ymax: 1.0e15,
         weight: None,
     };
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        if consume_meas_statement_qualifier(stream, line_num, params)?.is_some() {
+        if let Some(qualifier) = consume_meas_statement_qualifier(stream, line_num, params)? {
+            if let ParsedMeasStatementQualifier::Numeric { key, value } = qualifier
+                && key == "MINVAL"
+            {
+                options.minval = value;
+            }
             continue;
         }
         let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -2619,7 +2629,7 @@ fn parse_measure_error_function_options(
         }
         if !matches!(
             keyword.as_str(),
-            "FROM" | "TO" | "MINVAL" | "YMIN" | "YMAX" | "IGNOR" | "IGNORE" | "WEIGHT"
+            "FROM" | "TO" | "YMIN" | "YMAX" | "IGNOR" | "IGNORE" | "WEIGHT"
         ) {
             return Err(ParseError::Syntax {
                 line: line_num,
@@ -2643,7 +2653,6 @@ fn parse_measure_error_function_options(
         match keyword.as_str() {
             "FROM" => options.from = Some(value),
             "TO" => options.to = Some(value),
-            "MINVAL" => options.minval = value,
             "YMIN" | "IGNOR" | "IGNORE" => {
                 if value < 0.0 {
                     return Err(ParseError::Syntax {
@@ -2978,7 +2987,7 @@ fn collect_measure_equation_expression(
                     && matches!(stream.peek_n(1).kind, TokenKind::Equals)
                     && matches!(
                         name.to_ascii_uppercase().as_str(),
-                        "FROM" | "TO" | "TD" | "DEFAULT_VAL" | "GOAL" | "TOL" | "PRINT"
+                        "FROM" | "TO" | "TD" | "DEFAULT_VAL" | "GOAL" | "TOL" | "PRINT" | "MINVAL"
                     ) =>
             {
                 break;
@@ -3013,6 +3022,7 @@ fn scan_meas_statement_options(
         Option<Value>,
         Option<Value>,
         crate::analysis::MeasurePrintPolicy,
+        Value,
     ),
     ParseError,
 > {
@@ -3021,6 +3031,7 @@ fn scan_meas_statement_options(
     let mut tolerance = None;
     let mut default_value = None;
     let mut print_policy = crate::analysis::MeasurePrintPolicy::All;
+    let mut minval = crate::analysis::measure::XYCE_DEFAULT_MEASURE_MINVAL;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         let base_assignment_ahead = matches!(stream.peek().kind, TokenKind::Ident(_))
             && matches!(stream.peek_n(1).kind, TokenKind::Equals);
@@ -3033,6 +3044,7 @@ fn scan_meas_statement_options(
                         "GOAL" => goal = Some(value),
                         "TOL" => tolerance = Some(value),
                         "DEFAULT_VAL" => default_value = Some(value),
+                        "MINVAL" => minval = value,
                         _ => unreachable!(),
                     },
                     ParsedMeasStatementQualifier::Print(policy) => print_policy = policy,
@@ -3042,7 +3054,7 @@ fn scan_meas_statement_options(
         }
         stream.advance();
     }
-    Ok((goal, tolerance, default_value, print_policy))
+    Ok((goal, tolerance, default_value, print_policy, minval))
 }
 
 enum ParsedMeasStatementQualifier {
@@ -3059,7 +3071,10 @@ fn consume_meas_statement_qualifier(
         return Ok(None);
     };
     let key = key.to_ascii_uppercase();
-    if !matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL" | "PRINT") {
+    if !matches!(
+        key.as_str(),
+        "GOAL" | "TOL" | "DEFAULT_VAL" | "PRINT" | "MINVAL"
+    ) {
         return Ok(None);
     }
     stream.advance();
@@ -3088,6 +3103,12 @@ fn consume_meas_statement_qualifier(
             message: format!(".MEAS DEFAULT_VAL must be finite, found {value}"),
         });
     }
+    if key == "MINVAL" && (!value.is_finite() || value < 0.0) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".MEAS MINVAL must be finite and non-negative, found {value}"),
+        });
+    }
     Ok(Some(ParsedMeasStatementQualifier::Numeric { key, value }))
 }
 
@@ -3097,6 +3118,7 @@ pub(super) fn parse_meas_delay_spec(
     params: &ParamContext,
     section_name: &str,
     stop_at_targ: bool,
+    minval: Value,
 ) -> Result<crate::analysis::TrigSpec, ParseError> {
     use crate::analysis::{EdgeType, EventOccurrence, TrigSpec, TriggerEvent, WhenCondition};
 
@@ -3126,6 +3148,7 @@ pub(super) fn parse_meas_delay_spec(
             left,
             right,
             occurrence: EventOccurrence::default(),
+            minval,
         })
     };
     let mut spec = TrigSpec { event, td: None };
