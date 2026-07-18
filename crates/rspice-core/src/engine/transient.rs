@@ -2207,11 +2207,40 @@ impl Engine {
                     }
                 }
                 let newton_solve_start = crate::time_compat::Instant::now();
-                let solve_result = if prefer_dense_solver {
-                    matrix.solve_dense(&rhs)
+                let uses_inductor_correction = !circuit.inductors.is_empty()
+                    || !circuit.coupled_inductor_pairs.is_empty()
+                    || !circuit.multi_winding_transformers.is_empty();
+                let mut solve_rhs = if uses_inductor_correction {
+                    matrix.correction_rhs(&rhs, &new_solution)
                 } else {
-                    matrix.solve(&rhs)
+                    Ok(rhs.clone())
                 };
+                if let Ok(correction_rhs) = solve_rhs.as_mut()
+                    && uses_inductor_correction
+                {
+                    circuit.stabilize_inductor_transient_correction_rhs(
+                        correction_rhs,
+                        &new_solution,
+                        dt,
+                        &coeff,
+                    );
+                }
+                let solve_result = solve_rhs.and_then(|solve_rhs| {
+                    let solved = if prefer_dense_solver {
+                        matrix.solve_dense(&solve_rhs)
+                    } else {
+                        matrix.solve(&solve_rhs)
+                    }?;
+                    if uses_inductor_correction {
+                        Ok(solved
+                            .into_iter()
+                            .zip(&new_solution)
+                            .map(|(correction, iterate)| correction + iterate)
+                            .collect())
+                    } else {
+                        Ok(solved)
+                    }
+                });
                 let newton_solve_elapsed = newton_solve_start.elapsed();
                 total_solve_nanos += newton_solve_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_SOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -2342,9 +2371,12 @@ impl Engine {
                             continue;
                         }
 
-                        if is_strictly_linear_transient {
-                            // A purely linear deck does not need Newton fixed-point
-                            // iterations: one direct solve per timestep is exact.
+                        if is_strictly_linear_transient && !uses_inductor_correction {
+                            // An absolute solve is exact for an ordinary linear
+                            // deck. Correction-form inductive solves still run
+                            // the normal fixed-point/status check so a second
+                            // small correction can remove forward error from an
+                            // ill-conditioned companion row.
                             new_solution = sol;
                             converged = true;
                             break;

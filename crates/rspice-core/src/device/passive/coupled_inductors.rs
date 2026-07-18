@@ -225,6 +225,44 @@ impl CoupledInductorPair {
         matrix.stamp_rhs(branch2, -v2_mut);
     }
 
+    /// Add the mutual-inductance part of a cancellation-resistant Newton
+    /// correction residual to two already-stabilized standalone branch rows.
+    pub fn add_transient_mutual_correction_rhs(
+        &self,
+        branch1: NodeId,
+        branch2: NodeId,
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        let (Some(&current1), Some(&current2)) =
+            (iterate.get(branch1 - 1), iterate.get(branch2 - 1))
+        else {
+            return;
+        };
+        let derivative1 = coeff.inductor_charge_derivative_correction(
+            self.m,
+            dt,
+            current1,
+            self.current1_prev,
+            self.current1_prev_prev,
+        );
+        let derivative2 = coeff.inductor_charge_derivative_correction(
+            self.m,
+            dt,
+            current2,
+            self.current2_prev,
+            self.current2_prev_prev,
+        );
+        if let Some(row1) = correction_rhs.get_mut(branch1 - 1) {
+            *row1 += derivative2;
+        }
+        if let Some(row2) = correction_rhs.get_mut(branch2 - 1) {
+            *row2 += derivative1;
+        }
+    }
+
     /// Update history from an accepted solution vector, given the two branch
     /// matrix indices (1-based, num_nodes + ordinal).
     pub fn update_state_with_branches(
@@ -466,6 +504,54 @@ impl MultiWindingTransformer {
         }
     }
 
+    /// Replace transformer branch entries in a Newton correction RHS with
+    /// the stable inductance-matrix DAE residual.
+    pub fn overwrite_transient_correction_rhs(
+        &self,
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        for row in 0..self.num_windings {
+            let Some(branch_row) = self.branches[row] else {
+                continue;
+            };
+            let (pos, neg) = self.nodes[row];
+            let voltage = if pos == 0 {
+                0.0
+            } else {
+                iterate.get(pos - 1).copied().unwrap_or(0.0)
+            } - if neg == 0 {
+                0.0
+            } else {
+                iterate.get(neg - 1).copied().unwrap_or(0.0)
+            };
+            let mut correction = -voltage;
+            if coeff.needs_current_history {
+                correction -= self.voltages_prev[row];
+            }
+            for column in 0..self.num_windings {
+                let Some(branch_column) = self.branches[column] else {
+                    continue;
+                };
+                let Some(&current) = iterate.get(branch_column - 1) else {
+                    continue;
+                };
+                correction += coeff.inductor_charge_derivative_correction(
+                    self.inductance_matrix[row][column],
+                    dt,
+                    current,
+                    self.currents_prev[column],
+                    self.currents_prev_prev[column],
+                );
+            }
+            if let Some(rhs_slot) = correction_rhs.get_mut(branch_row - 1) {
+                *rhs_slot = correction;
+            }
+        }
+    }
+
     /// Update history from an accepted solution vector.
     pub fn update_state_from_solution(&mut self, solution: &[Value]) {
         for i in 0..self.num_windings {
@@ -509,3 +595,81 @@ impl DynamicDevice for MultiWindingTransformer {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod correction_tests {
+    use super::*;
+
+    #[test]
+    fn mutual_correction_matches_absolute_companion_polynomial() {
+        let mut pair = CoupledInductorPair::new("K1".to_string(), 1, 0, 2.0, 2, 0, 8.0, 0.5);
+        pair.current1_prev = 1.25;
+        pair.current1_prev_prev = 1.0;
+        pair.current2_prev = -0.75;
+        pair.current2_prev_prev = -0.5;
+        let iterate = [0.0, 0.0, 1.5, -1.0];
+        let dt = 0.125;
+
+        for coeff in [
+            CompanionCoefficients::backward_euler(),
+            CompanionCoefficients::trapezoidal(),
+            CompanionCoefficients::gear2_variable_step(dt, 0.25),
+        ] {
+            let mut correction_rhs = [0.0; 4];
+            pair.add_transient_mutual_correction_rhs(
+                3,
+                4,
+                &mut correction_rhs,
+                &iterate,
+                dt,
+                &coeff,
+            );
+            let (mutual_resistance, history1, history2) = pair.mutual_companion_values(dt, &coeff);
+            let expected1 = mutual_resistance * iterate[3] - history1;
+            let expected2 = mutual_resistance * iterate[2] - history2;
+            assert!((correction_rhs[2] - expected1).abs() <= 32.0 * Value::EPSILON);
+            assert!((correction_rhs[3] - expected2).abs() <= 32.0 * Value::EPSILON);
+        }
+    }
+
+    #[test]
+    fn multi_winding_correction_matches_absolute_companion_polynomial() {
+        let mut transformer = MultiWindingTransformer::new(
+            "K1".to_string(),
+            vec![(1, 0), (2, 0)],
+            vec![2.0, 8.0],
+            vec![vec![1.0, 0.25], vec![0.25, 1.0]],
+        );
+        transformer.set_branches(vec![3, 4]);
+        transformer.currents_prev = vec![1.25, -0.75];
+        transformer.currents_prev_prev = vec![1.0, -0.5];
+        transformer.voltages_prev = vec![0.125, -0.25];
+        let iterate = [0.5, -1.0, 1.5, -1.0];
+        let dt = 0.125;
+
+        for coeff in [
+            CompanionCoefficients::backward_euler(),
+            CompanionCoefficients::trapezoidal(),
+            CompanionCoefficients::gear2_variable_step(dt, 0.25),
+        ] {
+            let mut correction_rhs = [0.0; 4];
+            transformer.overwrite_transient_correction_rhs(
+                &mut correction_rhs,
+                &iterate,
+                dt,
+                &coeff,
+            );
+            let (resistance, history) = transformer.companion_matrix(dt, &coeff);
+            for row in 0..2 {
+                let absolute = -history[row] - iterate[row]
+                    + resistance[row][0] * iterate[2]
+                    + resistance[row][1] * iterate[3];
+                assert!(
+                    (correction_rhs[row + 2] - absolute).abs() <= 64.0 * Value::EPSILON,
+                    "row={row} coeff={coeff:?} stable={} absolute={absolute}",
+                    correction_rhs[row + 2]
+                );
+            }
+        }
+    }
+}

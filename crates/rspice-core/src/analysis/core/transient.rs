@@ -2265,6 +2265,35 @@ impl CompanionCoefficients {
         self.coeff_g * inductance / dt
     }
 
+    /// Evaluate the charge-history part of an inductor Newton correction in
+    /// DAE form.
+    ///
+    /// Forming `Q=L*i` at each state and differencing those charges before the
+    /// timestep division mirrors production SPICE time integrators. It avoids
+    /// constructing and then cancelling the much larger absolute companion
+    /// terms `R_eq*i`, while keeping the arithmetic order of the underlying
+    /// DAE instead of relying on an algebraically equivalent fused expression.
+    #[inline]
+    pub fn inductor_charge_derivative_correction(
+        &self,
+        inductance: Value,
+        dt: Value,
+        current: Value,
+        current_prev: Value,
+        current_prev_prev: Value,
+    ) -> Value {
+        let charge = inductance * current;
+        let charge_prev = inductance * current_prev;
+        let first_difference = charge - charge_prev;
+        if self.needs_two_history {
+            let charge_prev_prev = inductance * current_prev_prev;
+            let previous_difference = charge_prev - charge_prev_prev;
+            (self.coeff_g * first_difference + self.coeff_v_n_minus_1 * previous_difference) / dt
+        } else {
+            self.coeff_g * (first_difference / dt)
+        }
+    }
+
     /// Calculate the equivalent voltage-source magnitude for an inductor.
     ///
     /// Exact dual of [`Self::capacitor_ieq`] (v <-> i, C <-> L): the i_n

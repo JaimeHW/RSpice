@@ -877,6 +877,73 @@ impl StaticMatrix {
         self.solve_faer(rhs)
     }
 
+    /// Form the Newton correction right-hand side `b - A*x` without changing
+    /// the stamped absolute system.
+    ///
+    /// Solving for a correction around the current iterate is algebraically
+    /// equivalent to solving `A*x=b` directly, but it preserves substantially
+    /// more forward accuracy when the iterate is already close to the answer.
+    /// Dynamic-device callers may subsequently replace their own rows with a
+    /// constitutive residual evaluated from state differences, avoiding loss
+    /// that already occurred while forming a large absolute history source.
+    pub fn correction_rhs(
+        &self,
+        rhs: &[Value],
+        iterate: &[Value],
+    ) -> Result<Vec<Value>, SolverError> {
+        self.check_stamping_error()?;
+        if rhs.len() != self.nrows || iterate.len() != self.ncols {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Correction system requires RHS/iterate dimensions {} and {}, got {} and {}",
+                self.nrows,
+                self.ncols,
+                rhs.len(),
+                iterate.len()
+            )));
+        }
+        if rhs.iter().chain(iterate).any(|value| !value.is_finite()) {
+            return Err(SolverError::Overflow);
+        }
+
+        // Accumulate every row as a double-double expansion. Newton
+        // corrections are most valuable precisely when large KCL terms nearly
+        // cancel; ordinary f64 accumulation would round that small residual to
+        // the same scale as the forward error we are trying to remove.
+        let mut correction_hi = rhs.to_vec();
+        let mut correction_lo = vec![0.0; self.nrows];
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        for col in 0..self.ncols {
+            let x = iterate[col];
+            for index in col_ptr[col]..col_ptr[col + 1] {
+                let value = self.values[index];
+                if !value.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+                let row = row_idx[index];
+                let product_hi = (-value) * x;
+                let product_lo = (-value).mul_add(x, -product_hi);
+                let sum = correction_hi[row] + product_hi;
+                let virtual_addend = sum - correction_hi[row];
+                let sum_error =
+                    (correction_hi[row] - (sum - virtual_addend)) + (product_hi - virtual_addend);
+                let tail = correction_lo[row] + product_lo + sum_error;
+                let refined = sum + tail;
+                correction_lo[row] = tail - (refined - sum);
+                correction_hi[row] = refined;
+            }
+        }
+        let correction = correction_hi
+            .into_iter()
+            .zip(correction_lo)
+            .map(|(hi, lo)| hi + lo)
+            .collect::<Vec<_>>();
+        if correction.iter().any(|value| !value.is_finite()) {
+            return Err(SolverError::Overflow);
+        }
+        Ok(correction)
+    }
+
     /// Solve through faer's sparse LU in equilibrated coordinates.
     ///
     /// Kept separate from backend selection so solver tests can exercise this
@@ -1803,6 +1870,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(zero_error.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn correction_rhs_solves_for_an_update_around_the_iterate() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)],
+        )
+        .unwrap();
+        let rhs = [6.0, 8.0];
+        let iterate = [0.75, 2.25];
+
+        let correction_rhs = matrix.correction_rhs(&rhs, &iterate).unwrap();
+        assert_eq!(correction_rhs, vec![0.75, -0.25]);
+        let delta = matrix.solve(&correction_rhs).unwrap();
+        let corrected = iterate
+            .iter()
+            .zip(delta)
+            .map(|(value, update)| value + update)
+            .collect::<Vec<_>>();
+
+        assert!((corrected[0] - 1.0).abs() <= 8.0 * Value::EPSILON);
+        assert!((corrected[1] - 2.0).abs() <= 8.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn correction_rhs_retains_a_small_kcl_residual_between_large_terms() {
+        let matrix =
+            StaticMatrix::from_triplets(1, 3, &[(0, 0, -1.0e16), (0, 1, 1.0), (0, 2, 1.0e16)])
+                .unwrap();
+
+        let correction = matrix.correction_rhs(&[0.0], &[1.0, 1.0, 1.0]).unwrap();
+
+        assert_eq!(correction, vec![-1.0]);
     }
 
     #[test]
