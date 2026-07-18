@@ -47853,23 +47853,33 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         ac: &XyceAcAnalysis,
     ) -> Result<(), String> {
+        let mut flattened_netlist;
+        let netlist = if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            let flattened =
+                crate::netlist::flatten_netlist_with_models(netlist).map_err(|error| {
+                    format!(
+                        "native static .PRINT AC comparison could not flatten subcircuits: {error}"
+                    )
+                })?;
+            flattened_netlist = netlist.clone();
+            flattened_netlist.elements = flattened.elements;
+            flattened_netlist.models.extend(flattened.scoped_models);
+            flattened_netlist.subcircuits.clear();
+            &flattened_netlist
+        } else {
+            netlist
+        };
+
         let max_frequency = ac
             .frequencies
             .iter()
             .copied()
             .filter(|frequency| frequency.is_finite())
             .fold(0.0_f64, f64::max);
-        if netlist
-            .elements
-            .iter()
-            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
-        {
-            return Err(
-                "native static .PRINT AC comparison does not support subcircuit flattening yet"
-                    .to_string(),
-            );
-        }
-
         for element in &netlist.elements {
             match &element.kind {
                 ElementKind::VoltageSource(_)
@@ -47963,9 +47973,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Bjt { .. }
                     if max_frequency <= 100.0
                         && Self::netlist_device_is_native_legacy_bjt(netlist, &element.name) => {}
+                ElementKind::Bjt { .. }
+                    if Self::netlist_element_is_native_static_ac_exact_bf_is_bjt(
+                        netlist, element,
+                    ) => {}
+                ElementKind::Diode { .. }
+                    if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes and IS/BF legacy BJTs, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -53029,6 +53045,59 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && deferred_params.is_empty()
             && Self::find_unique_model_in(&netlist.models, model)
                 .is_some_and(Self::model_is_native_scoped_model_relational_bjt)
+    }
+
+    fn netlist_element_is_native_static_ac_exact_bf_is_bjt(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 3
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_static_ac_exact_bf_is_bjt)
+    }
+
+    fn model_is_native_static_ac_exact_bf_is_bjt(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NPN" | "PNP" | "LPNP"
+        ) || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || model.params.len() != 2
+        {
+            return false;
+        }
+        let bf_count = model
+            .params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("BF"))
+            .count();
+        let is_count = model
+            .params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("IS"))
+            .count();
+        bf_count == 1
+            && is_count == 1
+            && model.params.iter().all(|(name, value)| {
+                value.is_finite()
+                    && *value > 0.0
+                    && matches!(name.to_ascii_uppercase().as_str(), "BF" | "IS")
+            })
     }
 
     fn model_is_native_scoped_model_relational_bjt(model: &crate::netlist::ModelDef) -> bool {
@@ -80489,6 +80558,44 @@ Q1 c b 0 QN
         for payload in &nonnumeric_payloads {
             reject(payload, "non-numeric model payload");
         }
+    }
+
+    #[test]
+    fn static_ac_contract_flattens_exact_scoped_bjt_and_diode_models() {
+        let source = |bjt_params: &str, diode_params: &str| {
+            format!(
+                "scoped static AC fixture\n\
+                 V1 out 0 AC 1\n\
+                 R1 out 0 1k\n\
+                 X1 out 0 0 CELL\n\
+                 .SUBCKT CELL C B E\n\
+                 Q1 C B E QX\n\
+                 D1 C E DX\n\
+                 .MODEL QX PNP ({bjt_params})\n\
+                 .MODEL DX D ({diode_params})\n\
+                 .ENDS\n\
+                 .AC DEC 10 100 100k\n\
+                 .PRINT AC V(out)\n\
+                 .END\n"
+            )
+        };
+        let validate = |source: &str| {
+            let netlist = Netlist::parse(source).expect("scoped static AC fixture parses");
+            let ac = XyceTestRunner::single_ac_analysis(&netlist)
+                .expect("scoped static AC fixture has one analysis");
+            XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+        };
+
+        validate(&source("IS=8e-16 BF=250", "IS=8e-16"))
+            .expect("exact scoped BF/IS BJT and IS diode models are supported");
+        assert!(
+            validate(&source("IS=8e-16 BF=250 TF=1n", "IS=8e-16")).is_err(),
+            "the broad hierarchy path must not admit unvalidated BJT parameters"
+        );
+        assert!(
+            validate(&source("IS=8e-16 BF=250", "IS=8e-16 N=1.1")).is_err(),
+            "the broad hierarchy path must not admit unvalidated diode parameters"
+        );
     }
 
     #[test]
