@@ -182,6 +182,16 @@ const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA0_BLAKE3: &str =
 const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BYTES: usize = 2_138;
 const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BLAKE3: &str =
     "56423533d5521d52bc2208b8230084e989de77818aadea97bada8e584d6d2b1f";
+const XYCE_MEASURE_NOISE_STEP_DERIV_RECORD: &str = "netlists/measure_noise/step/derivtestnoise.cir";
+const XYCE_MEASURE_NOISE_STEP_DERIV_SOURCE_BYTES: usize = 2_115;
+const XYCE_MEASURE_NOISE_STEP_DERIV_SOURCE_BLAKE3: &str =
+    "ab68163ace0b97eec114870078ca9c8bb13b2f5ddf36ca64f06e7583656e404e";
+const XYCE_MEASURE_NOISE_STEP_DERIV_MA0_BYTES: usize = 404;
+const XYCE_MEASURE_NOISE_STEP_DERIV_MA0_BLAKE3: &str =
+    "121373fe9f0ad0219b1f3ca30884b5ab3935c2e09faf8fc57d6655f250d24956";
+const XYCE_MEASURE_NOISE_STEP_DERIV_MA1_BYTES: usize = 404;
+const XYCE_MEASURE_NOISE_STEP_DERIV_MA1_BLAKE3: &str =
+    "43b79149352880fbe065bcc8fdf7fb787acfbbe71d1a6f63d051abc47391c945";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
@@ -20533,16 +20543,173 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Ok(())
     }
 
+    fn validate_measure_noise_step_deriv_provenance(
+        &self,
+        deck: &XyceDeck,
+    ) -> Result<Vec<u8>, String> {
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path)
+                != XYCE_MEASURE_NOISE_STEP_DERIV_RECORD
+            || !self.requires_upstream_wrapper(&deck.relative_path)
+        {
+            return Err("MEASURE_NOISE STEP derivative record lost exact wrapper ownership".into());
+        }
+        let canonical_deck = deck.path.canonicalize().map_err(|error| {
+            format!("failed to canonicalize MEASURE_NOISE STEP derivative record: {error}")
+        })?;
+        let canonical_expected = self
+            .root
+            .join("Netlists/MEASURE_NOISE/STEP/DerivTestNoise.cir")
+            .canonicalize()
+            .map_err(|error| {
+                format!("canonical MEASURE_NOISE STEP derivative record is missing: {error}")
+            })?;
+        if canonical_deck != canonical_expected {
+            return Err(
+                "MEASURE_NOISE STEP derivative record resolved outside its canonical corpus path"
+                    .into(),
+            );
+        }
+
+        let source = Self::validate_measure_cont_regular_text_identity(
+            &canonical_expected,
+            (
+                XYCE_MEASURE_NOISE_STEP_DERIV_SOURCE_BYTES,
+                XYCE_MEASURE_NOISE_STEP_DERIV_SOURCE_BLAKE3,
+            ),
+            "MEASURE_NOISE STEP derivative source",
+        )?;
+        for (relative, identity, label) in [
+            (
+                "OutputData/MEASURE_NOISE/STEP/DerivTestNoise.cir.ma0",
+                (
+                    XYCE_MEASURE_NOISE_STEP_DERIV_MA0_BYTES,
+                    XYCE_MEASURE_NOISE_STEP_DERIV_MA0_BLAKE3,
+                ),
+                "MEASURE_NOISE STEP derivative ma0",
+            ),
+            (
+                "OutputData/MEASURE_NOISE/STEP/DerivTestNoise.cir.ma1",
+                (
+                    XYCE_MEASURE_NOISE_STEP_DERIV_MA1_BYTES,
+                    XYCE_MEASURE_NOISE_STEP_DERIV_MA1_BLAKE3,
+                ),
+                "MEASURE_NOISE STEP derivative ma1",
+            ),
+        ] {
+            Self::validate_measure_cont_regular_text_identity(
+                &self.root.join(relative),
+                identity,
+                label,
+            )?;
+        }
+
+        let manifest_path = self.root.join(HARNESS_MANIFEST_FILE);
+        let manifest_bytes = fs::read(&manifest_path)
+            .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+        let canonical_manifest =
+            Self::canonical_lf_text_identity("MEASURE_NOISE STEP manifest", &manifest_bytes)?;
+        let manifest = std::str::from_utf8(&canonical_manifest)
+            .map_err(|error| format!("MEASURE_NOISE STEP manifest is not UTF-8: {error}"))?;
+        let owner = "Netlists/MEASURE_NOISE/STEP/DerivTestNoise.cir\trequires_upstream_wrapper";
+        if manifest.lines().filter(|line| *line == owner).count() != 1 {
+            return Err(
+                "MEASURE_NOISE STEP derivative manifest lost its exact case-sensitive owner row"
+                    .into(),
+            );
+        }
+        Ok(source)
+    }
+
+    fn validate_measure_noise_step_deriv_plan(
+        netlist: &Netlist,
+        print: Option<&XycePrintRequest>,
+        frequencies: &[Value],
+    ) -> Result<(), String> {
+        let steps = Self::step_commands(netlist)?;
+        let exact_step = matches!(steps.as_slice(), [StepCommand {
+            target: StepTarget::Device,
+            name,
+            param_name: None,
+            sweep: StepSweep::Linear { start, stop, step },
+        }] if name.eq_ignore_ascii_case("V2")
+            && start.to_bits() == 12.0f64.to_bits()
+            && stop.to_bits() == 6.0f64.to_bits()
+            && step.to_bits() == (-6.0f64).to_bits());
+        let probes = print
+            .map(|request| {
+                request
+                    .probes
+                    .iter()
+                    .map(|probe| Self::normalize_probe(probe))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let expected_probes = [
+            "vm(out)", "vr(out)", "vi(out)", "im(v1)", "inoise", "onoise",
+        ];
+        let derivative_count = netlist
+            .measurements
+            .iter()
+            .filter(|measurement| {
+                measurement.analysis.eq_ignore_ascii_case("NOISE")
+                    && matches!(
+                        measurement.measure_type,
+                        crate::analysis::MeasureType::Derivative { .. }
+                    )
+            })
+            .count();
+        if !exact_step
+            || probes != expected_probes
+            || frequencies.len() != 51
+            || frequencies.first().map(|value| value.to_bits()) != Some(1.0e-2f64.to_bits())
+            || frequencies
+                .last()
+                .is_none_or(|value| (*value - 1.0e3).abs() > 1.0e-9)
+            || netlist.analyses.len() != 2
+            || netlist.output_requests.len() != netlist.measurements.len() + 1
+            || netlist.measurements.len() != 15
+            || derivative_count != 14
+            || !netlist.diagnostics.is_empty()
+            || netlist.models.len() != 1
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || netlist.elements.len() != 10
+        {
+            return Err(format!(
+                "MEASURE_NOISE STEP derivative exact contract changed: step={steps:?}, probes={probes:?}, frequencies={:?}/{:?}/{}, analyses={}, outputs={}, measurements={}/15, derivatives={derivative_count}/14, diagnostics={}, models={}, subcircuits={}, data={}, elements={}",
+                frequencies.first(),
+                frequencies.last(),
+                frequencies.len(),
+                netlist.analyses.len(),
+                netlist.output_requests.len(),
+                netlist.measurements.len(),
+                netlist.diagnostics.len(),
+                netlist.models.len(),
+                netlist.subcircuits.len(),
+                netlist.data_tables.len(),
+                netlist.elements.len()
+            ));
+        }
+        Ok(())
+    }
+
     fn static_noise_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticNoisePlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
         let output_override = requires_wrapper
             && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
         let qualified_step_cont_derivative = Self::normalize_manifest_key(&deck.relative_path)
             == XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD;
+        let qualified_step_scalar_derivative = Self::normalize_manifest_key(&deck.relative_path)
+            == XYCE_MEASURE_NOISE_STEP_DERIV_RECORD;
         let source = if qualified_step_cont_derivative {
             let bytes = self.validate_measure_cont_step_noise_deriv_provenance(deck)?;
             String::from_utf8(bytes)
                 .map_err(|error| format!("MEASURE_CONT STEP NOISE source is not UTF-8: {error}"))?
+        } else if qualified_step_scalar_derivative {
+            let bytes = self.validate_measure_noise_step_deriv_provenance(deck)?;
+            String::from_utf8(bytes)
+                .map_err(|error| format!("MEASURE_NOISE STEP source is not UTF-8: {error}"))?
         } else {
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?
         };
@@ -20611,7 +20778,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     crate::analysis::MeasureType::Derivative { .. }
                 )
         });
-        if !steps.is_empty() && has_scalar_derivative && !has_continuous_derivative {
+        if !steps.is_empty()
+            && has_scalar_derivative
+            && !has_continuous_derivative
+            && !qualified_step_scalar_derivative
+        {
             return Err(
                 "native scalar-only .STEP NOISE DERIV measurements are not yet qualified to Xyce precision"
                     .to_string(),
@@ -20623,6 +20794,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 print.as_ref(),
                 &frequencies,
             )?;
+        } else if qualified_step_scalar_derivative {
+            Self::validate_measure_noise_step_deriv_plan(&netlist, print.as_ref(), &frequencies)?;
         }
         let use_continuous_files = netlist.options.measure_use_cont_files();
         let measurement_reference_paths = if netlist.measurements.iter().any(|measurement| {
