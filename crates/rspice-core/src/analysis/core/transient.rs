@@ -435,34 +435,57 @@ impl BreakpointManager {
         self.remove_runtime_through(time);
     }
 
+    fn permanent_breakpoint_within_tolerance(&self, time: Value) -> Option<Value> {
+        if !time.is_finite() {
+            return None;
+        }
+
+        let remaining = self.breakpoints.get(self.current_index..)?;
+        let position = match remaining.binary_search_by(|breakpoint| breakpoint.total_cmp(&time)) {
+            Ok(position) | Err(position) => position,
+        };
+        let first_candidate = position.saturating_sub(1);
+
+        remaining
+            .get(first_candidate..position.saturating_add(1).min(remaining.len()))?
+            .iter()
+            .copied()
+            .find(|breakpoint| (time - breakpoint).abs() < self.tolerance)
+    }
+
+    fn runtime_breakpoint_within_tolerance(&self, time: Value) -> Option<Value> {
+        if !time.is_finite() {
+            return None;
+        }
+
+        let key = BreakpointTimeKey(time);
+        self.runtime_breakpoints
+            .range(..=key)
+            .next_back()
+            .filter(|breakpoint| (time - breakpoint.0).abs() < self.tolerance)
+            .or_else(|| {
+                self.runtime_breakpoints
+                    .range((Excluded(key), Unbounded))
+                    .next()
+                    .filter(|breakpoint| (time - breakpoint.0).abs() < self.tolerance)
+            })
+            .map(|breakpoint| breakpoint.0)
+    }
+
     /// Check if current time is exactly at a breakpoint
     pub fn at_breakpoint(&self, time: Value) -> bool {
-        self.breakpoints
-            .iter()
-            .skip(self.current_index)
-            .any(|&bp| (time - bp).abs() < self.tolerance)
-            || self
-                .runtime_breakpoints
-                .iter()
-                .any(|bp| (time - bp.0).abs() < self.tolerance)
+        self.permanent_breakpoint_within_tolerance(time).is_some()
+            || self.runtime_breakpoint_within_tolerance(time).is_some()
     }
 
     /// Return the exact breakpoint time when `time` is within the breakpoint
     /// tolerance. This keeps source evaluation and breakpoint bookkeeping on
     /// the same side of discontinuities after floating-point timestep cuts.
     pub fn snap_to_breakpoint(&self, time: Value) -> Value {
-        if let Some(&breakpoint) = self
-            .breakpoints
-            .iter()
-            .skip(self.current_index)
-            .find(|&&bp| (time - bp).abs() < self.tolerance)
-        {
+        if let Some(breakpoint) = self.permanent_breakpoint_within_tolerance(time) {
             return breakpoint;
         }
-        self.runtime_breakpoints
-            .iter()
-            .find(|breakpoint| (time - breakpoint.0).abs() < self.tolerance)
-            .map(|breakpoint| breakpoint.0)
+        self.runtime_breakpoint_within_tolerance(time)
             .unwrap_or(time)
     }
 
@@ -736,6 +759,49 @@ mod breakpoint_manager_tests {
         assert!(!breakpoints.at_breakpoint(1.0e-18));
         assert_eq!(breakpoints.snap_to_breakpoint(1.0e-18), 1.0e-18);
         assert_eq!(breakpoints.next_after(0.0), Some(2.0e-6));
+    }
+
+    #[test]
+    fn breakpoint_lookup_preserves_strict_tolerance_and_sorted_tie_breaking() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0);
+        breakpoints.add(10.0);
+        breakpoints.add(11.0);
+
+        assert!(breakpoints.at_breakpoint(10.5));
+        assert_eq!(breakpoints.snap_to_breakpoint(10.5), 10.0);
+        assert!(!breakpoints.at_breakpoint(9.0));
+        assert_eq!(breakpoints.snap_to_breakpoint(9.0), 9.0);
+        assert!(!breakpoints.at_breakpoint(12.0));
+        assert_eq!(breakpoints.snap_to_breakpoint(12.0), 12.0);
+    }
+
+    #[test]
+    fn breakpoint_lookup_uses_only_the_unprocessed_permanent_schedule() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-12);
+        for index in 0..=100_000 {
+            breakpoints.add(index as Value * 1.0e-6);
+        }
+
+        breakpoints.discard_through(5.0e-2);
+
+        assert!(!breakpoints.at_breakpoint(5.0e-2));
+        assert_eq!(breakpoints.snap_to_breakpoint(5.0e-2), 5.0e-2);
+        let near_future_knot = 7.5e-2 + 0.25e-12;
+        assert!(breakpoints.at_breakpoint(near_future_knot));
+        assert_eq!(breakpoints.snap_to_breakpoint(near_future_knot), 7.5e-2);
+    }
+
+    #[test]
+    fn runtime_breakpoint_lookup_preserves_order_and_strict_tolerance() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0);
+        breakpoints.replace_runtime_breakpoints([20.0, 21.0]);
+
+        assert!(breakpoints.at_breakpoint(20.5));
+        assert_eq!(breakpoints.snap_to_breakpoint(20.5), 20.0);
+        assert!(!breakpoints.at_breakpoint(19.0));
+        assert_eq!(breakpoints.snap_to_breakpoint(19.0), 19.0);
+        assert!(!breakpoints.at_breakpoint(22.0));
+        assert_eq!(breakpoints.snap_to_breakpoint(22.0), 22.0);
     }
 }
 
