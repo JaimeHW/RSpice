@@ -10,4 +10,4 @@ pub use raw_export::{
     RawExporter, RawFormat, RawVariable, VariableType, export_dc_sweep, export_transient,
 };
 pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
-pub use waveform_stream::{StreamingWaveformReader, StreamingWaveformWriter};
+pub use waveform_stream::{StreamingWaveformReader, StreamingWaveformWriter, WaveformStreamError};

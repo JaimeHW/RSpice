@@ -91,7 +91,7 @@ pub use advanced::harmonic_balance::{
 pub use output::{
     CompressionConfig, RawExporter, RawFormat, RawVariable, StreamingWaveformReader,
     StreamingWaveformWriter, TransientResultCompressed, VariableType, WaveformRecorder,
-    export_dc_sweep, export_transient,
+    WaveformStreamError, export_dc_sweep, export_transient,
 };
 
 use crate::Value;

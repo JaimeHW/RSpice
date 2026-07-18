@@ -11,13 +11,21 @@
 //!
 //! The header uses key-value pairs terminated by "Values:" or "Binary:"
 
-use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Cursor, Read};
 use std::path::Path;
 use thiserror::Error;
+
+use crate::resource::{
+    ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_bytes_limited,
+    read_file_bytes_limited,
+};
 
 /// Errors that can occur when parsing .raw files
 #[derive(Debug, Error)]
 pub enum RawParseError {
+    #[error(transparent)]
+    ResourceLimit(#[from] ResourceLimitError),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -32,6 +40,15 @@ pub enum RawParseError {
 
     #[error("Missing required field: {0}")]
     MissingField(String),
+}
+
+impl From<ResourceReadError> for RawParseError {
+    fn from(error: ResourceReadError) -> Self {
+        match error {
+            ResourceReadError::Io(error) => Self::Io(error),
+            ResourceReadError::ResourceLimit(error) => Self::ResourceLimit(error),
+        }
+    }
 }
 
 /// Raw file header metadata
@@ -113,26 +130,60 @@ pub struct RawWaveformData {
 
 /// Parse a .raw file from a file path
 pub fn parse_raw_file(path: &Path) -> Result<RawWaveformData, RawParseError> {
-    let file = std::fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
-    parse_raw_reader(&mut reader)
+    parse_raw_file_with_limits(path, ResourceLimits::default())
+}
+
+/// Parse a `.raw` file with explicit external-data and retained-result limits.
+pub fn parse_raw_file_with_limits(
+    path: &Path,
+    resource_limits: ResourceLimits,
+) -> Result<RawWaveformData, RawParseError> {
+    let bytes = read_file_bytes_limited(
+        path,
+        ResourceKind::ExternalDataBytes,
+        resource_limits.max_external_data_bytes,
+    )?;
+    parse_raw_bytes(&bytes, resource_limits)
 }
 
 /// Parse a .raw file from a reader
-pub fn parse_raw_reader<R: BufRead + Read + Seek>(
-    reader: &mut R,
-) -> Result<RawWaveformData, RawParseError> {
-    // Parse ASCII header
-    let (mut header, variables, data_offset) = parse_header(reader)?;
+pub fn parse_raw_reader<R: Read>(reader: &mut R) -> Result<RawWaveformData, RawParseError> {
+    parse_raw_reader_with_limits(reader, ResourceLimits::default())
+}
 
-    // Seek to data section
-    reader.seek(SeekFrom::Start(data_offset))?;
+/// Parse `.raw` data from a reader with explicit resource limits.
+pub fn parse_raw_reader_with_limits<R: Read>(
+    reader: &mut R,
+    resource_limits: ResourceLimits,
+) -> Result<RawWaveformData, RawParseError> {
+    let bytes = read_bytes_limited(
+        reader,
+        ResourceKind::ExternalDataBytes,
+        resource_limits.max_external_data_bytes,
+    )?;
+    parse_raw_bytes(&bytes, resource_limits)
+}
+
+fn parse_raw_bytes(
+    bytes: &[u8],
+    resource_limits: ResourceLimits,
+) -> Result<RawWaveformData, RawParseError> {
+    let mut reader = BufReader::new(Cursor::new(bytes));
+    // Parse ASCII header
+    let (mut header, variables, data_offset) = parse_header(&mut reader, resource_limits)?;
+    let data_offset = usize::try_from(data_offset).map_err(|_| {
+        RawParseError::DataError("raw data offset exceeds this platform".to_string())
+    })?;
+    let data_bytes = bytes.get(data_offset..).ok_or_else(|| {
+        RawParseError::DataError("raw data offset exceeds the input length".to_string())
+    })?;
 
     // Parse data
     let (waveforms, actual_points) = if header.is_binary {
-        parse_binary_data(reader, &header, &variables)?
+        parse_binary_data(data_bytes, &header, &variables, resource_limits)?
     } else {
-        parse_ascii_data(reader, &header, &variables)?
+        let mut data_reader = BufReader::new(Cursor::new(data_bytes));
+        parse_ascii_data(&mut data_reader, &header, &variables, resource_limits)?
     };
     if header.no_points == 0 {
         header.no_points = actual_points;
@@ -148,6 +199,7 @@ pub fn parse_raw_reader<R: BufRead + Read + Seek>(
 /// Parse the ASCII header section
 fn parse_header<R: BufRead>(
     reader: &mut R,
+    resource_limits: ResourceLimits,
 ) -> Result<(RawFileHeader, Vec<RawVariable>, u64), RawParseError> {
     let mut header = RawFileHeader::default();
     let mut variables = Vec::new();
@@ -192,6 +244,16 @@ fn parse_header<R: BufRead>(
                     parts[0], line
                 ))
             })?;
+            ResourceLimitError::ensure(
+                ResourceKind::ExternalDataValues,
+                variables.len().saturating_add(1),
+                resource_limits.max_external_data_values,
+            )?;
+            variables.try_reserve(1).map_err(|error| {
+                RawParseError::DataError(format!(
+                    "unable to allocate raw variable metadata: {error}"
+                ))
+            })?;
             variables.push(RawVariable {
                 index,
                 name: parts[1].to_string(),
@@ -216,19 +278,30 @@ fn parse_header<R: BufRead>(
                         .flags
                         .iter()
                         .any(|f| f.eq_ignore_ascii_case("complex"));
-                    header.is_double = !header.flags.iter().any(|f| f.eq_ignore_ascii_case("real"));
+                    header.is_double = header
+                        .flags
+                        .iter()
+                        .any(|f| f.eq_ignore_ascii_case("double"));
                 }
                 "no. variables" => {
                     saw_no_variables = true;
                     header.no_variables = value.parse().map_err(|_| {
                         RawParseError::InvalidHeader(format!("Invalid no. variables: {}", value))
                     })?;
+                    ResourceLimitError::ensure(
+                        ResourceKind::ExternalDataValues,
+                        header.no_variables,
+                        resource_limits.max_external_data_values,
+                    )?;
                 }
                 "no. points" => {
                     saw_no_points = true;
                     header.no_points = value.parse().map_err(|_| {
                         RawParseError::InvalidHeader(format!("Invalid no. points: {}", value))
                     })?;
+                    if header.no_points > 0 {
+                        ensure_waveform_dimensions(&header, header.no_points, resource_limits)?;
+                    }
                 }
                 "variables" => {
                     in_variables = true;
@@ -272,12 +345,18 @@ enum BinaryEncoding {
 }
 
 impl BinaryEncoding {
-    fn row_size_bytes(self, num_vars: usize) -> usize {
+    fn row_size_bytes(self, num_vars: usize) -> Option<usize> {
         match self {
-            Self::RealAllF64 => num_vars * 8,
-            Self::RealMixedAxisF64RestF32 => 8 + num_vars.saturating_sub(1) * 4,
-            Self::ComplexAllF64 => num_vars * 16,
-            Self::ComplexMixedAxisF64RestF32 => 16 + num_vars.saturating_sub(1) * 8,
+            Self::RealAllF64 => num_vars.checked_mul(8),
+            Self::RealMixedAxisF64RestF32 => num_vars
+                .saturating_sub(1)
+                .checked_mul(4)
+                .and_then(|bytes| bytes.checked_add(8)),
+            Self::ComplexAllF64 => num_vars.checked_mul(16),
+            Self::ComplexMixedAxisF64RestF32 => num_vars
+                .saturating_sub(1)
+                .checked_mul(8)
+                .and_then(|bytes| bytes.checked_add(16)),
         }
     }
 
@@ -307,13 +386,15 @@ fn detect_binary_encoding(
 
     let mut matches = Vec::new();
     for encoding in candidates {
-        let row_size = encoding.row_size_bytes(num_vars);
+        let Some(row_size) = encoding.row_size_bytes(num_vars) else {
+            continue;
+        };
         if row_size == 0 {
             continue;
         }
 
         if header.no_points > 0 {
-            if payload_len == row_size.saturating_mul(header.no_points) {
+            if row_size.checked_mul(header.no_points) == Some(payload_len) {
                 matches.push((encoding, header.no_points));
             }
         } else if payload_len.is_multiple_of(row_size) {
@@ -335,7 +416,7 @@ fn detect_binary_encoding(
     if let Some(preferred) = matches
         .iter()
         .copied()
-        .find(|(encoding, _)| encoding.is_all_f64())
+        .find(|(encoding, _)| encoding.is_all_f64() == header.is_double)
     {
         return Ok(preferred);
     }
@@ -343,45 +424,126 @@ fn detect_binary_encoding(
     Ok(matches[0])
 }
 
+fn checked_product(values: &[usize]) -> usize {
+    values
+        .iter()
+        .copied()
+        .try_fold(1usize, usize::checked_mul)
+        .unwrap_or(usize::MAX)
+}
+
+fn ensure_waveform_dimensions(
+    header: &RawFileHeader,
+    num_points: usize,
+    resource_limits: ResourceLimits,
+) -> Result<(), RawParseError> {
+    ResourceLimitError::ensure(
+        ResourceKind::ExternalDataValues,
+        checked_product(&[
+            header.no_variables,
+            num_points,
+            if header.is_complex { 2 } else { 1 },
+        ]),
+        resource_limits.max_external_data_values,
+    )?;
+    ResourceLimitError::ensure(
+        ResourceKind::ResultValues,
+        checked_product(&[
+            header.no_variables,
+            num_points,
+            if header.is_complex { 3 } else { 2 },
+        ]),
+        resource_limits.max_result_values,
+    )?;
+    Ok(())
+}
+
+fn value_buffer(capacity: usize) -> Result<Vec<f64>, RawParseError> {
+    let mut values = Vec::new();
+    values.try_reserve_exact(capacity).map_err(|error| {
+        RawParseError::DataError(format!(
+            "unable to allocate storage for {capacity} raw values: {error}"
+        ))
+    })?;
+    Ok(values)
+}
+
+fn data_columns(count: usize, capacity: usize) -> Result<Vec<Vec<f64>>, RawParseError> {
+    let mut columns = Vec::new();
+    columns.try_reserve_exact(count).map_err(|error| {
+        RawParseError::DataError(format!(
+            "unable to allocate {count} raw data columns: {error}"
+        ))
+    })?;
+    for _ in 0..count {
+        columns.push(value_buffer(capacity)?);
+    }
+    Ok(columns)
+}
+
+fn clone_values(values: &[f64]) -> Result<Vec<f64>, RawParseError> {
+    let mut cloned = value_buffer(values.len())?;
+    cloned.extend_from_slice(values);
+    Ok(cloned)
+}
+
 fn build_waveforms(
     data: Vec<Vec<f64>>,
     data_imag: Option<Vec<Vec<f64>>>,
     variables: &[RawVariable],
-) -> Vec<RawWaveform> {
-    let x_data = data.first().cloned().unwrap_or_default();
-    let mut waveforms = Vec::with_capacity(variables.len());
+) -> Result<Vec<RawWaveform>, RawParseError> {
+    let mut x_data = data
+        .first()
+        .map(|values| clone_values(values))
+        .transpose()?
+        .unwrap_or_default();
+    let mut waveforms = Vec::new();
+    waveforms
+        .try_reserve_exact(variables.len())
+        .map_err(|error| {
+            RawParseError::DataError(format!(
+                "unable to allocate {} raw waveforms: {error}",
+                variables.len()
+            ))
+        })?;
+    let mut imaginary_columns = data_imag.map(Vec::into_iter);
 
-    for (var_idx, var) in variables.iter().enumerate() {
+    let last_variable = variables.len().saturating_sub(1);
+    for (index, (var, values)) in variables.iter().zip(data).enumerate() {
+        let x = if index == last_variable {
+            std::mem::take(&mut x_data)
+        } else {
+            clone_values(&x_data)?
+        };
         waveforms.push(RawWaveform {
             name: var.name.clone(),
-            x: x_data.clone(),
-            y: data.get(var_idx).cloned().unwrap_or_default(),
-            y_imag: data_imag
-                .as_ref()
-                .map(|imag| imag.get(var_idx).cloned().unwrap_or_default()),
+            x,
+            y: values,
+            y_imag: imaginary_columns.as_mut().and_then(Iterator::next),
         });
     }
 
-    waveforms
+    Ok(waveforms)
 }
 
 /// Parse binary data section (IEEE 754 format)
-fn parse_binary_data<R: Read>(
-    reader: &mut R,
+fn parse_binary_data(
+    payload: &[u8],
     header: &RawFileHeader,
     variables: &[RawVariable],
+    resource_limits: ResourceLimits,
 ) -> Result<(Vec<RawWaveform>, usize), RawParseError> {
     let num_vars = header.no_variables;
-    let mut payload = Vec::new();
-    reader.read_to_end(&mut payload)?;
     let (encoding, num_points) = detect_binary_encoding(payload.len(), header, num_vars)?;
+    ensure_waveform_dimensions(header, num_points, resource_limits)?;
     let mut cursor = Cursor::new(payload);
 
     // Initialize storage
-    let mut data: Vec<Vec<f64>> = vec![Vec::with_capacity(num_points); num_vars];
+    let mut data = data_columns(num_vars, num_points)?;
     let mut data_imag = header
         .is_complex
-        .then(|| vec![Vec::with_capacity(num_points); num_vars]);
+        .then(|| data_columns(num_vars, num_points))
+        .transpose()?;
 
     // Read all data points
     for _ in 0..num_points {
@@ -399,6 +561,7 @@ fn parse_binary_data<R: Read>(
                     }
                 }
             };
+            ensure_finite_binary_value(real_value)?;
 
             data[var_idx].push(real_value);
 
@@ -416,12 +579,13 @@ fn parse_binary_data<R: Read>(
                         unreachable!("imaginary storage requested for real binary encoding")
                     }
                 };
+                ensure_finite_binary_value(imag_value)?;
                 imag[var_idx].push(imag_value);
             }
         }
     }
 
-    Ok((build_waveforms(data, data_imag, variables), num_points))
+    Ok((build_waveforms(data, data_imag, variables)?, num_points))
 }
 
 /// Parse ASCII data section
@@ -429,24 +593,26 @@ fn parse_ascii_data<R: BufRead>(
     reader: &mut R,
     header: &RawFileHeader,
     variables: &[RawVariable],
+    resource_limits: ResourceLimits,
 ) -> Result<(Vec<RawWaveform>, usize), RawParseError> {
     let num_vars = header.no_variables;
-    let lines = reader
-        .lines()
-        .map(|line| line.map(|line| line.trim().to_string()))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-
-    let mut data: Vec<Vec<f64>> = vec![Vec::new(); num_vars];
+    let mut lines = Vec::new();
+    for line in reader.lines() {
+        let line = line?.trim().to_string();
+        if line.is_empty() {
+            continue;
+        }
+        lines.try_reserve(1).map_err(|error| {
+            RawParseError::DataError(format!("unable to retain raw ASCII rows: {error}"))
+        })?;
+        lines.push(line);
+    }
     let row_oriented = lines
         .first()
         .map(|line| line.split_whitespace().count() > num_vars)
         .unwrap_or(false);
 
-    if row_oriented {
-        let point_count = header.no_points.max(lines.len());
+    let point_count = if row_oriented {
         if header.no_points > 0 && lines.len() != header.no_points {
             return Err(RawParseError::DataError(format!(
                 "No. Points declares {} point(s), but ASCII data contains {} row(s)",
@@ -454,15 +620,52 @@ fn parse_ascii_data<R: BufRead>(
                 lines.len()
             )));
         }
+        header.no_points.max(lines.len())
+    } else {
+        let expected_rows = header.no_points.checked_mul(num_vars).ok_or_else(|| {
+            RawParseError::DataError(
+                "raw ASCII point and variable counts overflow this platform".to_string(),
+            )
+        })?;
+        if header.no_points > 0 && lines.len() != expected_rows {
+            return Err(RawParseError::DataError(format!(
+                "No. Points declares {} point(s), but ASCII data contains {} value row(s) for {} variable(s)",
+                header.no_points,
+                lines.len(),
+                num_vars
+            )));
+        }
+        if !lines.len().is_multiple_of(num_vars) {
+            return Err(RawParseError::DataError(format!(
+                "ASCII data row count {} is not divisible by variable count {}",
+                lines.len(),
+                num_vars
+            )));
+        }
+        if header.no_points > 0 {
+            header.no_points
+        } else {
+            lines.len() / num_vars
+        }
+    };
+    if point_count == 0 {
+        return Err(RawParseError::DataError(
+            "ASCII raw data contains no points".to_string(),
+        ));
+    }
+    ensure_waveform_dimensions(header, point_count, resource_limits)?;
+    let mut data = data_columns(num_vars, point_count)?;
 
+    if row_oriented {
         for (point_idx, line) in lines.iter().enumerate().take(point_count) {
             let parts = line.split_whitespace().collect::<Vec<_>>();
-            if parts.len() != num_vars + 1 {
+            let expected_columns = num_vars.saturating_add(1);
+            if parts.len() != expected_columns {
                 return Err(RawParseError::DataError(format!(
                     "ASCII row {} has {} column(s), expected {}",
                     point_idx,
                     parts.len(),
-                    num_vars + 1
+                    expected_columns
                 )));
             }
             let row_index = parts[0].parse::<usize>().map_err(|_| {
@@ -482,29 +685,16 @@ fn parse_ascii_data<R: BufRead>(
             }
         }
     } else {
-        if header.no_points > 0 && lines.len() != header.no_points * num_vars {
-            return Err(RawParseError::DataError(format!(
-                "No. Points declares {} point(s), but ASCII data contains {} value row(s) for {} variable(s)",
-                header.no_points,
-                lines.len(),
-                num_vars
-            )));
-        }
-        if !lines.len().is_multiple_of(num_vars) {
-            return Err(RawParseError::DataError(format!(
-                "ASCII data row count {} is not divisible by variable count {}",
-                lines.len(),
-                num_vars
-            )));
-        }
-        let point_count = if header.no_points > 0 {
-            header.no_points
-        } else {
-            lines.len() / num_vars
-        };
         for point_idx in 0..point_count {
             for (var_idx, column) in data.iter_mut().enumerate().take(num_vars) {
-                let line_idx = point_idx * num_vars + var_idx;
+                let line_idx = point_idx
+                    .checked_mul(num_vars)
+                    .and_then(|index| index.checked_add(var_idx))
+                    .ok_or_else(|| {
+                        RawParseError::DataError(
+                            "raw ASCII row index overflowed this platform".to_string(),
+                        )
+                    })?;
                 let line = &lines[line_idx];
                 let parts = line.split_whitespace().collect::<Vec<_>>();
                 let value_str = if var_idx == 0 {
@@ -553,11 +743,6 @@ fn parse_ascii_data<R: BufRead>(
     }
 
     let actual_points = data.first().map(Vec::len).unwrap_or(0);
-    if actual_points == 0 {
-        return Err(RawParseError::DataError(
-            "ASCII raw data contains no points".to_string(),
-        ));
-    }
     for (var_idx, column) in data.iter().enumerate() {
         if column.len() != actual_points {
             return Err(RawParseError::DataError(format!(
@@ -571,7 +756,17 @@ fn parse_ascii_data<R: BufRead>(
             )));
         }
     }
-    Ok((build_waveforms(data, None, variables), actual_points))
+    Ok((build_waveforms(data, None, variables)?, actual_points))
+}
+
+fn ensure_finite_binary_value(value: f64) -> Result<(), RawParseError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(RawParseError::DataError(format!(
+            "Non-finite binary raw value: {value}"
+        )))
+    }
 }
 
 fn parse_ascii_raw_value(value_str: &str) -> Result<f64, RawParseError> {
@@ -671,5 +866,59 @@ mod tests {
 
         assert_eq!(parsed.variables[1].name, "V(n:out)");
         assert_eq!(parsed.waveforms[1].y, vec![1.0]);
+    }
+
+    #[test]
+    fn raw_reader_enforces_byte_limit_before_parsing() {
+        let source = b"Title: bounded\n";
+        let mut limits = ResourceLimits::default();
+        limits.max_external_data_bytes = source.len() - 1;
+        let mut reader = Cursor::new(source);
+
+        let error = parse_raw_reader_with_limits(&mut reader, limits)
+            .expect_err("byte limit must reject the source");
+
+        assert!(matches!(
+            error,
+            RawParseError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::ExternalDataBytes,
+                requested,
+                limit,
+            }) if requested == source.len() && limit == source.len() - 1
+        ));
+    }
+
+    #[test]
+    fn declared_raw_dimensions_enforce_retained_result_limit() {
+        let source = "Title: limited\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 1.0\n";
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values = 3;
+        let mut reader = Cursor::new(source.as_bytes());
+
+        let error = parse_raw_reader_with_limits(&mut reader, limits)
+            .expect_err("two waveforms retain four scalar values");
+
+        assert!(matches!(
+            error,
+            RawParseError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::ResultValues,
+                requested: 4,
+                limit: 3,
+            })
+        ));
+    }
+
+    #[test]
+    fn binary_raw_rejects_nonfinite_values() {
+        let mut source = b"Title: binary\nPlotname: Transient Analysis\nFlags: double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nBinary:\n".to_vec();
+        source.extend_from_slice(&0.0_f64.to_le_bytes());
+        source.extend_from_slice(&f64::NAN.to_le_bytes());
+        let mut reader = Cursor::new(source);
+
+        let error = parse_raw_reader(&mut reader).expect_err("NaN binary value must reject");
+
+        assert!(
+            matches!(error, RawParseError::DataError(message) if message.contains("Non-finite"))
+        );
     }
 }
