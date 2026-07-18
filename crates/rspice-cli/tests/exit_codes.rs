@@ -452,6 +452,104 @@ fn configured_batch_limit_rejects_multi_run_before_execution() {
 }
 
 #[test]
+fn configured_worker_limit_rejects_excessive_explicit_parallelism() {
+    let dir = test_dir("bounded_workers");
+    let deck = dir.join("bounded.sp");
+    let config = dir.join("rspice.toml");
+    std::fs::write(
+        &deck,
+        "* bounded workers\n\
+         V1 in 0 1\n\
+         R1 in 0 1k\n\
+         .op\n\
+         .alter second\n\
+         V1 in 0 2\n\
+         .alter third\n\
+         V1 in 0 3\n\
+         .end\n",
+    )
+    .expect("write deck");
+    std::fs::write(&config, "[resources]\nmax_parallel_workers = 2\n").expect("write config");
+
+    let output = run_rspice(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--error-format",
+        "json",
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--jobs",
+        "3",
+    ]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(78),
+        "worker-policy rejection must be a configuration error; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let diagnostic: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("structured diagnostic");
+    assert_eq!(diagnostic["error"]["code"], "resource_limit");
+    assert_eq!(diagnostic["error"]["resource"], "parallel_workers");
+    assert_eq!(diagnostic["error"]["requested"], 3);
+    assert_eq!(diagnostic["error"]["limit"], 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn automatic_parallelism_clamps_to_configured_worker_limit() {
+    let dir = test_dir("automatic_worker_cap");
+    let deck = dir.join("bounded.sp");
+    let config = dir.join("rspice.toml");
+    let summary = dir.join("summary.json");
+    std::fs::write(
+        &deck,
+        "* automatic worker cap\n\
+         V1 in 0 1\n\
+         R1 in 0 1k\n\
+         .op\n\
+         .alter second\n\
+         V1 in 0 2\n\
+         .alter third\n\
+         V1 in 0 3\n\
+         .end\n",
+    )
+    .expect("write deck");
+    std::fs::write(&config, "[resources]\nmax_parallel_workers = 1\n").expect("write config");
+
+    let output = run_rspice(&[
+        "--config",
+        config.to_str().unwrap(),
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--jobs",
+        "0",
+        "--summary",
+        summary.to_str().unwrap(),
+    ]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "automatic parallelism must clamp instead of failing; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&summary).expect("automatic worker summary"))
+            .expect("valid summary");
+    assert_eq!(report["execution"]["requested_jobs"], 0);
+    assert_eq!(report["execution"]["workers"], 1);
+    assert_eq!(report["resource_limits"]["max_parallel_workers"], 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resource_policy_applies_to_run_check_and_info_ingestion() {
     let dir = test_dir("bounded_frontends");
     let deck = dir.join("bounded.sp");

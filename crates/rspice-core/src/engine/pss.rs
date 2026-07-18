@@ -752,7 +752,7 @@ impl Engine {
         if n >= 2 {
             use rayon::prelude::*;
 
-            let workers = rayon::current_num_threads().clamp(1, n);
+            let workers = self.parallel_worker_count(n);
             let chunk_len = n.div_ceil(workers);
             let indices: Vec<usize> = (0..n).collect();
             let work: Vec<(Circuit, Vec<usize>)> = indices
@@ -760,18 +760,20 @@ impl Engine {
                 .map(|chunk| (circuit.clone(), chunk.to_vec()))
                 .collect();
 
-            let chunk_columns: Result<Vec<Vec<Vec<Value>>>, SimulationError> = work
-                .into_par_iter()
-                .map(|(mut worker_circuit, chunk)| {
-                    let matrix = self.build_matrix(&worker_circuit)?;
-                    worker_circuit.link_indices(&matrix);
-                    let mut worker_matrix = matrix;
-                    chunk
-                        .into_iter()
-                        .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
+            let chunk_columns: Result<Vec<Vec<Vec<Value>>>, SimulationError> = self
+                .install_parallel(|| {
+                    work.into_par_iter()
+                        .map(|(mut worker_circuit, chunk)| {
+                            let matrix = self.build_matrix(&worker_circuit)?;
+                            worker_circuit.link_indices(&matrix);
+                            let mut worker_matrix = matrix;
+                            chunk
+                                .into_iter()
+                                .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
+                                .collect()
+                        })
                         .collect()
-                })
-                .collect();
+                })?;
             return chunk_columns.map(|chunks| chunks.into_iter().flatten().collect());
         }
 

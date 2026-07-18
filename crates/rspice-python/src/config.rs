@@ -599,6 +599,8 @@ pub struct PyResourceLimits {
     #[pyo3(get, set)]
     pub max_result_values: usize,
     #[pyo3(get, set)]
+    pub max_parallel_workers: usize,
+    #[pyo3(get, set)]
     pub max_batch_runs: usize,
 }
 
@@ -619,6 +621,7 @@ impl PyResourceLimits {
             max_matrix_unknowns: limits.max_matrix_unknowns,
             max_analysis_points: limits.max_analysis_points,
             max_result_values: limits.max_result_values,
+            max_parallel_workers: limits.max_parallel_workers,
             max_batch_runs: limits.max_batch_runs,
         }
     }
@@ -639,6 +642,7 @@ impl PyResourceLimits {
         limits.max_matrix_unknowns = self.max_matrix_unknowns;
         limits.max_analysis_points = self.max_analysis_points;
         limits.max_result_values = self.max_result_values;
+        limits.max_parallel_workers = self.max_parallel_workers;
         limits.max_batch_runs = self.max_batch_runs;
         limits
     }
@@ -657,7 +661,7 @@ impl PyResourceLimits {
                         max_hierarchy_depth=None, max_flattened_elements=None,
                         max_circuit_nodes=None, max_matrix_unknowns=None,
                         max_analysis_points=None, max_result_values=None,
-                        max_batch_runs=None))]
+                        max_parallel_workers=None, max_batch_runs=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         max_netlist_bytes: Option<usize>,
@@ -674,6 +678,7 @@ impl PyResourceLimits {
         max_matrix_unknowns: Option<usize>,
         max_analysis_points: Option<usize>,
         max_result_values: Option<usize>,
+        max_parallel_workers: Option<usize>,
         max_batch_runs: Option<usize>,
     ) -> Self {
         let mut limits = Self::from_core(ResourceLimits::default());
@@ -719,6 +724,9 @@ impl PyResourceLimits {
         if let Some(value) = max_result_values {
             limits.max_result_values = value;
         }
+        if let Some(value) = max_parallel_workers {
+            limits.max_parallel_workers = value;
+        }
         if let Some(value) = max_batch_runs {
             limits.max_batch_runs = value;
         }
@@ -733,10 +741,11 @@ impl PyResourceLimits {
 
     fn __repr__(&self) -> String {
         format!(
-            "ResourceLimits(max_netlist_bytes={}, max_analysis_points={}, max_result_values={}, max_batch_runs={})",
+            "ResourceLimits(max_netlist_bytes={}, max_analysis_points={}, max_result_values={}, max_parallel_workers={}, max_batch_runs={})",
             self.max_netlist_bytes,
             self.max_analysis_points,
             self.max_result_values,
+            self.max_parallel_workers,
             self.max_batch_runs
         )
     }

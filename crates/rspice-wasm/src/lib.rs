@@ -31,6 +31,7 @@ fn browser_resource_limits() -> ResourceLimits {
     limits.max_matrix_unknowns = 2_000;
     limits.max_analysis_points = 200_000;
     limits.max_result_values = 2_000_000;
+    limits.max_parallel_workers = 1;
     limits.max_batch_runs = 1_000;
     limits
 }
@@ -57,6 +58,7 @@ pub struct WasmResourceLimits {
     pub max_matrix_unknowns: usize,
     pub max_analysis_points: usize,
     pub max_result_values: usize,
+    pub max_parallel_workers: usize,
     pub max_batch_runs: usize,
 }
 
@@ -77,6 +79,7 @@ impl WasmResourceLimits {
             max_matrix_unknowns: limits.max_matrix_unknowns,
             max_analysis_points: limits.max_analysis_points,
             max_result_values: limits.max_result_values,
+            max_parallel_workers: limits.max_parallel_workers,
             max_batch_runs: limits.max_batch_runs,
         }
     }
@@ -97,6 +100,7 @@ impl WasmResourceLimits {
         limits.max_matrix_unknowns = self.max_matrix_unknowns;
         limits.max_analysis_points = self.max_analysis_points;
         limits.max_result_values = self.max_result_values;
+        limits.max_parallel_workers = self.max_parallel_workers;
         limits.max_batch_runs = self.max_batch_runs;
         limits
     }
@@ -948,6 +952,7 @@ mod tests {
         assert_eq!(browser.max_netlist_bytes, 8 * MEBIBYTE);
         assert_eq!(browser.max_analysis_points, 200_000);
         assert_eq!(browser.max_result_values, 2_000_000);
+        assert_eq!(browser.max_parallel_workers, 1);
         assert!(browser.max_netlist_bytes < desktop.max_netlist_bytes);
         assert!(browser.max_analysis_points < desktop.max_analysis_points);
     }

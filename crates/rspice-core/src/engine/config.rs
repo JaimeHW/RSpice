@@ -267,6 +267,11 @@ impl SimulationConfig {
             "transient_node_activity_bound",
             self.transient_node_activity_bound,
         )?;
+        ResourceLimitError::ensure(
+            ResourceKind::ParallelWorkers,
+            1,
+            self.resource_limits.max_parallel_workers,
+        )?;
 
         self.convergence_config.validate()?;
         self.bypass_config.validate()?;

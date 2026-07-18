@@ -389,13 +389,16 @@ max_circuit_nodes = 250000
 max_matrix_unknowns = 250000
 max_analysis_points = 2000000
 max_result_values = 25000000
+max_parallel_workers = 64               # cap batch/analysis worker fan-out
 max_batch_runs = 10000
 ```
 
 The same resource policy is applied consistently to `run`, `check`, and
 `info`, including stdin, include expansion, `.ALTER`/`.DATA` materialization,
 derived corner/S-parameter decks, circuit construction, and result retention.
-Lower these ceilings for a service with a fixed memory budget.
+The worker ceiling also bounds automatic `--jobs 0` fan-out; an explicit
+`--jobs` request that would exceed it is rejected. Lower these ceilings for a
+service with a fixed CPU or memory budget.
 
 Environment variable overrides:
 

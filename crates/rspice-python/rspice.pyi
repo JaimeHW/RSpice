@@ -375,6 +375,7 @@ class ResourceLimits:
         max_matrix_unknowns: int | None = None,
         max_analysis_points: int | None = None,
         max_result_values: int | None = None,
+        max_parallel_workers: int | None = None,
         max_batch_runs: int | None = None,
     ) -> ResourceLimits: ...
     @staticmethod
@@ -393,6 +394,7 @@ class ResourceLimits:
     max_matrix_unknowns: int
     max_analysis_points: int
     max_result_values: int
+    max_parallel_workers: int
     max_batch_runs: int
 
 @final

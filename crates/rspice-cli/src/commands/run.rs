@@ -473,7 +473,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     let mut outputs: Vec<PathBuf> = Vec::new();
     let mut first_error: Option<String> = None;
 
-    let workers = effective_jobs(args.jobs, plan.len());
+    let workers = effective_jobs(args.jobs, plan.len(), config.resources.max_parallel_workers)?;
     if workers > 1 {
         // Parallel multi-run execution: every run is independent (own
         // parse, own engine, tagged output files). Per-run console
@@ -1002,6 +1002,7 @@ fn resource_limits_summary(limits: rspice_core::ResourceLimits) -> serde_json::V
         "max_matrix_unknowns": limits.max_matrix_unknowns,
         "max_analysis_points": limits.max_analysis_points,
         "max_result_values": limits.max_result_values,
+        "max_parallel_workers": limits.max_parallel_workers,
         "max_batch_runs": limits.max_batch_runs,
     })
 }
@@ -1198,17 +1199,47 @@ fn write_report_files(
     Ok(())
 }
 
-/// Worker count for a multi-run plan: `--jobs 0` = all cores, never
-/// more workers than runs, and single-run plans stay serial.
-fn effective_jobs(requested: usize, runs: usize) -> usize {
+/// Worker count for a multi-run plan: `--jobs 0` = all available cores up to
+/// the configured worker budget, never more workers than runs, and single-run
+/// plans stay serial. Explicit requests that would exceed the budget fail
+/// instead of silently changing operator intent.
+fn effective_jobs(
+    requested: usize,
+    runs: usize,
+    max_parallel_workers: usize,
+) -> Result<usize, CliError> {
+    if max_parallel_workers == 0 {
+        return Err(rspice_core::SimulationConfigError::ResourceLimit(
+            rspice_core::ResourceLimitError {
+                resource: rspice_core::ResourceKind::ParallelWorkers,
+                requested: 1,
+                limit: 0,
+            },
+        )
+        .into());
+    }
     if runs <= 1 {
-        return 1;
+        return Ok(1);
     }
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    let workers = if requested == 0 { cores } else { requested };
-    workers.min(runs).max(1)
+    if requested == 0 {
+        return Ok(cores.min(runs).min(max_parallel_workers).max(1));
+    }
+
+    let workers = requested.min(runs).max(1);
+    if workers > max_parallel_workers {
+        return Err(rspice_core::SimulationConfigError::ResourceLimit(
+            rspice_core::ResourceLimitError {
+                resource: rspice_core::ResourceKind::ParallelWorkers,
+                requested: workers,
+                limit: max_parallel_workers,
+            },
+        )
+        .into());
+    }
+    Ok(workers)
 }
 
 /// `out.csv` + `hot` -> `out.hot.csv` (run-level analog of the

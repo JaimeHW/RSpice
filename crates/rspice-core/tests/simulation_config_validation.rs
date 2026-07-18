@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use rspice_core::{Engine, Netlist, SimulationConfig, SimulationConfigError, SimulationError};
+use rspice_core::{
+    Engine, Netlist, ResourceKind, ResourceLimitError, SimulationConfig, SimulationConfigError,
+    SimulationError,
+};
 
 #[test]
 fn default_configuration_is_valid() {
@@ -62,6 +65,21 @@ fn timestep_bounds_and_initial_step_are_validated() {
     default_maximum_sentinel
         .validate()
         .expect("the default maximum-timestep sentinel is not a hard cap");
+}
+
+#[test]
+fn worker_budget_must_allow_at_least_the_calling_thread() {
+    let mut config = SimulationConfig::default();
+    config.resource_limits.max_parallel_workers = 0;
+
+    assert!(matches!(
+        Engine::try_new(config),
+        Err(SimulationConfigError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ParallelWorkers,
+            requested: 1,
+            limit: 0,
+        }))
+    ));
 }
 
 #[test]

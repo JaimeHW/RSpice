@@ -42,10 +42,11 @@ const result = runAcAnalysis(source, frequencies, options);
 
 Omitted resource fields inherit browser-safe defaults. Unknown option or
 resource fields are rejected, so a misspelled control cannot silently fall
-back to a looser policy. `defaultResourceLimits()` returns all 15 current
+back to a looser policy. `defaultResourceLimits()` returns all 16 current
 ceilings. The defaults cap netlists at 8 MiB, circuit matrices at 2,000
 unknowns, analysis grids at 200,000 points, retained results at 2,000,000
-scalar values, and shared caches at 64 MiB.
+scalar values, shared caches at 64 MiB, and parallel workers at one because
+the browser build is single-threaded.
 
 Thrown errors expose the cross-interface `code`, compatibility `kind`,
 `category`, conservative `retryable` policy, and `details`. Resource failures add

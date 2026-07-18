@@ -774,7 +774,11 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
         }
     }
 
-    let jobs = super::effective_jobs(ctx.args.jobs, corners.len());
+    let jobs = super::effective_jobs(
+        ctx.args.jobs,
+        corners.len(),
+        ctx.engine.config().resource_limits.max_parallel_workers,
+    )?;
     let results: Vec<(String, bool, bool)> = if jobs > 1 && corners.len() > 1 {
         run_corners_parallel(ctx, &corners, corner_lib.as_deref(), jobs)?
     } else {
@@ -1012,8 +1016,7 @@ fn run_corners_parallel(
     lib: Option<&std::path::Path>,
     jobs: usize,
 ) -> Result<Vec<(String, bool, bool)>, CliError> {
-    use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use rayon::prelude::*;
 
     let setup = corner_setup(ctx)?;
     let workers = jobs.min(corners.len());
@@ -1025,31 +1028,22 @@ fn run_corners_parallel(
         );
     }
 
-    let next = AtomicUsize::new(0);
-    let slots: Vec<Mutex<Option<CornerOutcome>>> =
-        (0..corners.len()).map(|_| Mutex::new(None)).collect();
-
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let index = next.fetch_add(1, Ordering::SeqCst);
-                    if index >= corners.len() {
-                        break;
-                    }
-                    let outcome = run_corner_job(&setup, lib, &corners[index]);
-                    *slots[index].lock().expect("corner slot") = Some(outcome);
-                }
-            });
-        }
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(workers)
+        .thread_name(|index| format!("rspice-corner-{index}"))
+        .build()
+        .map_err(|error| CliError::InternalError {
+            message: format!("failed to create bounded corner worker pool: {error}"),
+        })?;
+    let outcomes: Vec<CornerOutcome> = pool.install(|| {
+        corners
+            .par_iter()
+            .map(|corner| run_corner_job(&setup, lib, corner))
+            .collect()
     });
 
     let mut results = Vec::with_capacity(corners.len());
-    for (name, slot) in corners.iter().zip(slots) {
-        let outcome = slot
-            .into_inner()
-            .expect("corner slot lock")
-            .expect("worker filled its slot");
+    for (name, outcome) in corners.iter().zip(outcomes) {
         if let Some(ref err) = outcome.error
             && !ctx.quiet
         {

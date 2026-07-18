@@ -8,10 +8,13 @@ use crate::netlist::{ElementKind, SubcircuitDef};
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
+
 /// Main simulation engine
 pub struct Engine {
     pub(crate) config: SimulationConfig,
     config_error: Option<SimulationConfigError>,
+    #[cfg(feature = "parallel")]
+    parallel_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
 }
 
 impl Engine {
@@ -41,6 +44,8 @@ impl Engine {
         Self {
             config,
             config_error,
+            #[cfg(feature = "parallel")]
+            parallel_pool: std::sync::OnceLock::new(),
         }
     }
 
@@ -55,6 +60,8 @@ impl Engine {
         Ok(Self {
             config,
             config_error: None,
+            #[cfg(feature = "parallel")]
+            parallel_pool: std::sync::OnceLock::new(),
         })
     }
 
@@ -102,6 +109,50 @@ impl Engine {
             self.config.resource_limits.max_batch_runs,
         )?;
         Ok(())
+    }
+
+    /// Effective parallel work width for an operation, honoring both the
+    /// engine policy and any bounded Rayon pool already driving this engine.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn parallel_worker_count(&self, work_items: usize) -> usize {
+        let available = if rayon::current_thread_index().is_some() {
+            rayon::current_num_threads()
+        } else {
+            std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(1)
+        };
+        available
+            .min(self.config.resource_limits.max_parallel_workers)
+            .clamp(1, work_items.max(1))
+    }
+
+    /// Execute Rayon work without initializing its unbounded global pool.
+    ///
+    /// A frontend-owned Rayon worker (for example a CLI multi-run plan) is
+    /// reused so nested analyses cannot multiply thread counts. Standalone
+    /// engine calls lazily create one pool bounded by the shared resource
+    /// policy and reuse it for the engine's lifetime.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn install_parallel<R: Send>(
+        &self,
+        operation: impl FnOnce() -> R + Send,
+    ) -> Result<R, SimulationError> {
+        if rayon::current_thread_index().is_some() {
+            return Ok(operation());
+        }
+
+        let pool = self.parallel_pool.get_or_init(|| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(self.parallel_worker_count(usize::MAX))
+                .thread_name(|index| format!("rspice-core-{index}"))
+                .build()
+                .map_err(|error| format!("failed to create bounded analysis worker pool: {error}"))
+        });
+        let pool = pool.as_ref().map_err(|message| {
+            SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(message.clone()))
+        })?;
+        Ok(pool.install(operation))
     }
 
     pub(crate) fn ensure_result_shape(

@@ -212,6 +212,7 @@ impl Engine {
         let workers = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
+            .min(self.config.resource_limits.max_parallel_workers)
             .min(num_runs.max(1));
         let mut run_outcomes: Vec<RunOutcome> = Vec::new();
         if workers <= 1 {
@@ -236,12 +237,16 @@ impl Engine {
             let next = AtomicUsize::new(0);
             let slots: Vec<Mutex<Option<RunOutcome>>> =
                 (0..num_runs).map(|_| Mutex::new(None)).collect();
-            let config = self.config().clone();
+            let mut worker_config = self.config().clone();
+            // Independent Monte Carlo runs already consume the complete
+            // worker budget. Keep each child engine serial so a future
+            // internally parallel DC path cannot multiply the thread count.
+            worker_config.resource_limits.max_parallel_workers = 1;
 
             std::thread::scope(|scope| {
                 for _ in 0..workers {
                     scope.spawn(|| {
-                        let engine = Self::new(config.clone());
+                        let engine = Self::new(worker_config.clone());
                         loop {
                             if abort.is_aborted() {
                                 break;

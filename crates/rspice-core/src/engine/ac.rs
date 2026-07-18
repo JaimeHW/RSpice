@@ -2381,22 +2381,26 @@ impl Engine {
         if frequencies.len() >= 10 {
             use rayon::prelude::*;
 
-            let workers = rayon::current_num_threads().clamp(1, frequencies.len());
+            let workers = self.parallel_worker_count(frequencies.len());
             let chunk_len = frequencies.len().div_ceil(workers);
             let work: Vec<(CircuitData, &[Value])> = frequencies
                 .chunks(chunk_len)
                 .map(|chunk| (circuit.clone(), chunk))
                 .collect();
-            let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = work
-                .into_par_iter()
-                .map(|(mut worker_circuit, chunk)| {
-                    let mut workspace = ComplexMatrix::from_real_structure(&matrix);
-                    chunk
-                        .iter()
-                        .map(|&freq| solve_at_freq(&mut worker_circuit, &mut workspace, freq))
+            let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = self
+                .install_parallel(|| {
+                    work.into_par_iter()
+                        .map(|(mut worker_circuit, chunk)| {
+                            let mut workspace = ComplexMatrix::from_real_structure(&matrix);
+                            chunk
+                                .iter()
+                                .map(|&freq| {
+                                    solve_at_freq(&mut worker_circuit, &mut workspace, freq)
+                                })
+                                .collect()
+                        })
                         .collect()
-                })
-                .collect();
+                })?;
             return chunk_results.map(|chunks| chunks.into_iter().flatten().collect());
         }
 

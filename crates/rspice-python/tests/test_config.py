@@ -121,8 +121,11 @@ class TestSimulationConfig:
 
 class TestResourceLimits:
     def test_defaults_kwargs_and_properties(self):
-        limits = rspice.ResourceLimits(max_netlist_bytes=1024, max_batch_runs=3)
+        limits = rspice.ResourceLimits(
+            max_netlist_bytes=1024, max_parallel_workers=4, max_batch_runs=3
+        )
         assert limits.max_netlist_bytes == 1024
+        assert limits.max_parallel_workers == 4
         assert limits.max_batch_runs == 3
         assert limits.max_analysis_points > 0
 

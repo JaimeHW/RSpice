@@ -44,6 +44,8 @@ pub enum ResourceKind {
     AnalysisPoints,
     /// Scalar values retained by one result object or inline numeric dataset.
     ResultValues,
+    /// Concurrent worker threads used by one engine or frontend workload.
+    ParallelWorkers,
     /// Independent runs requested from a batch analysis.
     BatchRuns,
 }
@@ -66,6 +68,7 @@ impl ResourceKind {
             Self::MatrixUnknowns => "matrix_unknowns",
             Self::AnalysisPoints => "analysis_points",
             Self::ResultValues => "result_values",
+            Self::ParallelWorkers => "parallel_workers",
             Self::BatchRuns => "batch_runs",
         }
     }
@@ -398,6 +401,8 @@ pub struct ResourceLimits {
     pub max_analysis_points: usize,
     /// Maximum scalar values materialized, retained, or emitted by one result or waveform dataset.
     pub max_result_values: usize,
+    /// Maximum concurrent worker threads used by one engine or frontend workload.
+    pub max_parallel_workers: usize,
     /// Maximum independent runs in one batch analysis.
     pub max_batch_runs: usize,
 }
@@ -419,6 +424,7 @@ impl Default for ResourceLimits {
             max_matrix_unknowns: 250_000,
             max_analysis_points: 2_000_000,
             max_result_values: 25_000_000,
+            max_parallel_workers: 64,
             max_batch_runs: 10_000,
         }
     }
@@ -442,6 +448,7 @@ impl ResourceLimits {
             max_matrix_unknowns: usize::MAX,
             max_analysis_points: usize::MAX,
             max_result_values: usize::MAX,
+            max_parallel_workers: usize::MAX,
             max_batch_runs: usize::MAX,
         }
     }
@@ -473,6 +480,7 @@ mod tests {
             ResourceKind::SharedCacheBytes.as_str(),
             "shared_cache_bytes"
         );
+        assert_eq!(ResourceKind::ParallelWorkers.as_str(), "parallel_workers");
         assert_eq!(ResourceKind::MatrixUnknowns.to_string(), "matrix_unknowns");
     }
 
@@ -526,6 +534,7 @@ mod tests {
         assert_eq!(limits.max_matrix_unknowns, usize::MAX);
         assert_eq!(limits.max_analysis_points, usize::MAX);
         assert_eq!(limits.max_result_values, usize::MAX);
+        assert_eq!(limits.max_parallel_workers, usize::MAX);
         assert_eq!(limits.max_batch_runs, usize::MAX);
     }
 }

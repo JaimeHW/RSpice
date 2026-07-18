@@ -206,7 +206,7 @@ element raises `ParseError` instead of silently becoming the title. Use
 ```python
 engine = rspice.Engine()                      # defaults
 
-limits = rspice.ResourceLimits(max_batch_runs=1_000)
+limits = rspice.ResourceLimits(max_batch_runs=1_000, max_parallel_workers=8)
 config = rspice.SimulationConfig(
     tolerance=1e-12,
     temperature=300.15,                       # Kelvin
