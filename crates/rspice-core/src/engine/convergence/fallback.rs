@@ -556,6 +556,7 @@ impl Engine {
     pub(in crate::engine::convergence) fn apply_bjt_initial_guess_correction(
         guess: &mut [Value],
         circuit: &CircuitData,
+        seed_neutral_junctions: bool,
     ) {
         const VBE_FORWARD: Value = 0.7; // Typical forward B-E voltage
         const VCE_SAT: Value = 0.2; // Saturation voltage
@@ -587,7 +588,8 @@ impl Engine {
                 // presolve. Rewriting it solely because the collector is on
                 // the other side of the base can select a different DC root
                 // in compact models with non-monotone literal parameters.
-                let correct_base = (vb - ve).abs() > 1.0;
+                let vbe = vb - ve;
+                let correct_base = vbe.abs() > 1.0 || (seed_neutral_junctions && vbe.abs() < 0.1);
                 let vb_new = if correct_base { ve + VBE_FORWARD } else { vb };
                 let correct_collector = vc < vb_new;
                 let vc_new = if correct_collector {
@@ -616,7 +618,8 @@ impl Engine {
                 }
             } else {
                 // PNP mirror of the NPN policy above.
-                let correct_base = (ve - vb).abs() > 1.0;
+                let veb = ve - vb;
+                let correct_base = veb.abs() > 1.0 || (seed_neutral_junctions && veb.abs() < 0.1);
                 let vb_new = if correct_base { ve - VBE_FORWARD } else { vb };
                 let correct_collector = vc > vb_new;
                 let vc_new = if correct_collector {

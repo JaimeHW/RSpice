@@ -2664,7 +2664,13 @@ fn test_xyce_step_data_static_dc_wrapper_case_runs_natively() {
 fn test_xyce_repeated_dc_cards_form_one_sweep_vector() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let runner = XyceTestRunner::new(
+        &root,
+        XyceRunnerConfig {
+            max_time_per_test_ms: 10_000,
+            ..XyceRunnerConfig::default()
+        },
+    );
     let relative = "Netlists/Certification_Tests/BUG_695/bug695.cir";
 
     let result = runner.run_test(root.join(relative));

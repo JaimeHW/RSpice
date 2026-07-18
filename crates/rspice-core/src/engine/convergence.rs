@@ -48,6 +48,10 @@ impl Engine {
     const ARC_LENGTH_MAX_STEPS: usize = 128;
     const ABORT_POLL_MASK: usize = 0x7;
     const DC_RESIDUAL_STALL_LIMIT: usize = 3;
+    const DC_LIMIT_CYCLE_HISTORY: usize = 64;
+    const DC_LIMIT_CYCLE_HIT_LIMIT: usize = 3;
+    const DC_LIMIT_CYCLE_MIN_PERIOD: usize = 4;
+    const DC_LIMIT_CYCLE_MAX_TRACKED_VALUES: usize = 1024;
     const MAX_CONTINUATION_CORRECTOR_ITERS: usize = 512;
 }
 

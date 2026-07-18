@@ -116,11 +116,15 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let mut initial_guess = self
-            .linear_presolve_for_guess(circuit, matrix)
-            .unwrap_or_else(|| vec![0.0; size]);
+        let linear_presolve = self.linear_presolve_for_guess(circuit, matrix);
+        let seed_neutral_bjt_junctions = linear_presolve.is_none();
+        let mut initial_guess = linear_presolve.unwrap_or_else(|| vec![0.0; size]);
 
-        Self::apply_bjt_initial_guess_correction(&mut initial_guess, circuit);
+        Self::apply_bjt_initial_guess_correction(
+            &mut initial_guess,
+            circuit,
+            seed_neutral_bjt_junctions,
+        );
         Self::apply_b3soi_pd_initial_guess_correction(&mut initial_guess, circuit);
         Self::apply_bsim4_internal_gate_initial_guess_correction(&mut initial_guess, circuit);
         Self::apply_vbic_internal_initial_guess_correction(&mut initial_guess, circuit);
@@ -327,18 +331,30 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes().min(size);
+        let seed_was_suspicious = initial_guess.is_some_and(|guess| {
+            let normalized = Self::normalize_initial_guess(guess, size);
+            Self::is_suspicious_solution(circuit, &normalized, node_count)
+        });
         // Sanitize any warm-start seed before Newton so pathological presolve
         // artifacts do not launch the iteration from physically impossible rails.
         let mut solution = match initial_guess {
-            Some(guess) => {
-                Self::sanitize_initial_guess(circuit, guess, size, circuit.num_nodes().min(size))
-            }
+            Some(guess) => Self::sanitize_initial_guess(circuit, guess, size, node_count),
             None => {
                 let mut guess = vec![0.0; size];
-                Self::apply_bjt_initial_guess_correction(&mut guess, circuit);
+                Self::apply_bjt_initial_guess_correction(&mut guess, circuit, true);
                 guess
             }
         };
+        if seed_was_suspicious {
+            // Sanitizing an unphysical presolve resets the vector. Reapply the
+            // compact-model startup seeds afterward so a floating nonlinear
+            // node does not silently fall back to the same all-zero guess.
+            Self::apply_bjt_initial_guess_correction(&mut solution, circuit, true);
+            Self::apply_b3soi_pd_initial_guess_correction(&mut solution, circuit);
+            Self::apply_bsim4_internal_gate_initial_guess_correction(&mut solution, circuit);
+            Self::apply_vbic_internal_initial_guess_correction(&mut solution, circuit);
+        }
         let startup_seed = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
 
@@ -381,6 +397,21 @@ impl Engine {
         let mut direct_iterations = 0usize;
         let mut residual_stall_iterations = 0usize;
         let mut residual_stalled = false;
+        let convergence_aids_enabled = {
+            let config = &self.config.convergence_config;
+            config.source_stepping
+                || config.pseudo_transient
+                || config.gmin_stepping
+                || config.arc_length
+        };
+        let track_limit_cycles =
+            convergence_aids_enabled && solution.len() <= Self::DC_LIMIT_CYCLE_MAX_TRACKED_VALUES;
+        let mut recent_iterates: std::collections::VecDeque<Vec<Value>> =
+            std::collections::VecDeque::with_capacity(
+                Self::DC_LIMIT_CYCLE_HISTORY.min(dc_max_iterations),
+            );
+        let mut limit_cycle_hits = 0usize;
+        let mut limit_cycle_detected = false;
         let mut direct_solver_error = None;
         for iteration in 0..dc_max_iterations {
             direct_iterations = iteration + 1;
@@ -497,6 +528,15 @@ impl Engine {
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
                 && self.try_nonlinear_residual_converged(circuit, matrix, &new_solution)?;
+            let repeats_prior_iterate = track_limit_cycles
+                && !voltage_converged
+                && recent_iterates
+                    .iter()
+                    .rev()
+                    .skip(Self::DC_LIMIT_CYCLE_MIN_PERIOD - 1)
+                    .any(|prior| {
+                        self.node_voltage_convergence_met(prior, &new_solution, node_count)
+                    });
             solution = new_solution;
             if voltage_converged && device_converged && nonlinear_residual_converged {
                 if hit_voltage_limit {
@@ -511,6 +551,22 @@ impl Engine {
                     return Ok(refined);
                 }
                 return Ok(solution);
+            }
+
+            if repeats_prior_iterate {
+                limit_cycle_hits += 1;
+                if limit_cycle_hits >= Self::DC_LIMIT_CYCLE_HIT_LIMIT {
+                    limit_cycle_detected = true;
+                    break;
+                }
+            } else {
+                limit_cycle_hits = 0;
+            }
+            if track_limit_cycles {
+                if recent_iterates.len() == Self::DC_LIMIT_CYCLE_HISTORY {
+                    recent_iterates.pop_front();
+                }
+                recent_iterates.push_back(solution.clone());
             }
 
             if voltage_converged && device_converged && !nonlinear_residual_converged {
@@ -529,6 +585,11 @@ impl Engine {
                 "DC Newton-Raphson linear solve failed after {} iteration(s): {}. Trying configured convergence aids...",
                 direct_iterations.max(1),
                 err
+            );
+        } else if limit_cycle_detected {
+            log::info!(
+                "DC Newton-Raphson entered a repeated-iterate limit cycle after {} iterations. Trying configured convergence aids...",
+                direct_iterations.max(1)
             );
         } else if hit_voltage_limit {
             log::warn!(
@@ -598,7 +659,8 @@ impl Engine {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0)
         };
         let prefer_gate_generation_aids = circuit.has_jfet_gate_generation_branches();
-        let prefer_gmin_aids = prefer_gate_generation_aids || !circuit.b3soi.is_empty();
+        let prefer_gmin_aids =
+            prefer_gate_generation_aids || !circuit.b3soi.is_empty() || !circuit.bjts.is_empty();
         let mut gmin_attempted = false;
 
         if prefer_gmin_aids && allow_gmin {
