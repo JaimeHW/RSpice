@@ -51,6 +51,18 @@ pub enum DrcViolationType {
     OrphanNetLabel,
     /// Wire segment not connected to anything
     DanglingWire,
+    /// Bus geometry or declaration is structurally invalid.
+    MalformedBus,
+    /// Bus has no typed declaration.
+    UnnamedBus,
+    /// Connected bus declarations or a tap selector disagree.
+    BusRangeConflict,
+    /// Bus tap does not terminate on its required target kind.
+    DanglingBusTap,
+    /// Scalar and vector connectivity are mixed at a bus tap.
+    MixedBusTap,
+    /// More than one output drives the same typed scalar bus member.
+    DuplicateBusMemberDriver,
 
     //-------------------------------------------------------------------------
     // Electrical Issues
@@ -109,6 +121,11 @@ impl DrcViolationType {
             Self::ShortCircuit => DrcSeverity::Error,
             Self::SourceToSource => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
+            Self::MalformedBus
+            | Self::BusRangeConflict
+            | Self::DanglingBusTap
+            | Self::MixedBusTap
+            | Self::DuplicateBusMemberDriver => DrcSeverity::Error,
             Self::SymbolUnplacedPin | Self::SymbolOrphanedPin | Self::SymbolPinOffGrid => {
                 DrcSeverity::Error
             }
@@ -118,6 +135,7 @@ impl DrcViolationType {
             Self::DanglingWire => DrcSeverity::Warning,
             Self::OrphanNetLabel => DrcSeverity::Warning,
             Self::ValueOutOfRange => DrcSeverity::Warning,
+            Self::UnnamedBus => DrcSeverity::Warning,
 
             // Info
             Self::EmptyName => DrcSeverity::Info,
@@ -133,6 +151,12 @@ impl DrcViolationType {
             Self::UnconnectedPin => "Component pin is not connected",
             Self::OrphanNetLabel => "Net label has no connections",
             Self::DanglingWire => "Wire segment is not connected to anything",
+            Self::MalformedBus => "Bus geometry or declaration is malformed",
+            Self::UnnamedBus => "Bus has no typed declaration",
+            Self::BusRangeConflict => "Connected bus ranges or selectors are incompatible",
+            Self::DanglingBusTap => "Bus tap does not terminate on the required target",
+            Self::MixedBusTap => "Bus tap mixes scalar and vector connectivity",
+            Self::DuplicateBusMemberDriver => "Typed bus member has multiple output drivers",
             Self::ShortedOutputs => "Multiple voltage sources connected to same net",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::ShortCircuit => "Direct short circuit detected",
@@ -156,6 +180,12 @@ impl DrcViolationType {
             Self::UnconnectedPin => "Connect a wire to this pin or mark as intentionally NC",
             Self::OrphanNetLabel => "Connect wires to both ends of the net or remove the label",
             Self::DanglingWire => "Complete the wire connection or delete the segment",
+            Self::MalformedBus => "Repair or redraw the invalid bus geometry and declaration",
+            Self::UnnamedBus => "Assign a valid bus name and range",
+            Self::BusRangeConflict => "Make connected bus declarations and tap ranges identical",
+            Self::DanglingBusTap => "Connect the tap to the required scalar wire or typed bus",
+            Self::MixedBusTap => "Separate scalar wires from vector bus connectivity",
+            Self::DuplicateBusMemberDriver => "Leave only one output driver on this bus member",
             Self::ShortedOutputs => "Connect only one voltage source per net",
             Self::MissingGround => "Add a ground symbol (GND) to the circuit",
             Self::ShortCircuit => "Remove the short or check intended connectivity",
@@ -231,9 +261,13 @@ pub enum DrcLocation {
     /// At a specific schematic coordinate
     Point { x: f64, y: f64 },
     /// On a component
-    Component { id: usize, name: String },
+    Component { id: u64, name: String },
     /// On a wire
-    Wire { id: usize },
+    Wire { id: u64 },
+    /// On a bus.
+    Bus { id: u64 },
+    /// On a bus tap.
+    BusTap { id: u64 },
     /// On a net label
     NetLabel { name: String },
     /// On a node (by net name)
@@ -255,6 +289,8 @@ impl DrcLocation {
             Self::Point { x, y } => format!("({:.1}, {:.1})", x, y),
             Self::Component { name, .. } => format!("Component {}", name),
             Self::Wire { id } => format!("Wire #{}", id),
+            Self::Bus { id } => format!("Bus #{}", id),
+            Self::BusTap { id } => format!("Bus tap #{}", id),
             Self::NetLabel { name } => format!("Net '{}'", name),
             Self::Node { net_name } => format!("Node '{}'", net_name),
             Self::Global => "Global".to_string(),

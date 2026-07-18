@@ -1,11 +1,13 @@
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::common::app::AppState;
-use crate::state::{Component, ComponentType, Point, ResolvedCellSymbol, Tool};
+use crate::state::{Bus, BusTap, Component, ComponentType, Point, ResolvedCellSymbol, Tool};
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
 use super::SchematicSymbolContext;
-use super::coordinates::{screen_to_grid, screen_to_wire_grid};
+use super::bus_interaction::resolve_bus_tap_candidate;
+use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
+use super::drawing::{draw_bus, draw_bus_tap};
 use super::resolved_symbol_render::draw_resolved_symbol;
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_diode_symbol, draw_ground_symbol, draw_inductor_symbol,
@@ -25,7 +27,9 @@ pub(super) fn draw_interaction_previews(
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
+    draw_bus_preview(painter, response, state, viewport);
     draw_wire_preview(painter, response, state, viewport, symbol_context);
+    draw_bus_tap_preview(painter, response, state, viewport);
     draw_junction_preview(painter, response, state, viewport);
     draw_component_preview(
         painter,
@@ -58,15 +62,97 @@ fn draw_junction_preview(
     let preview = candidate.unwrap_or(requested);
     let pos = viewport.schematic_to_screen(preview);
     let palette = crate::ui::tokens::active_palette();
+    let mixed_bus = candidate.is_some_and(|point| {
+        state
+            .schematic
+            .buses
+            .iter()
+            .any(|bus| bus.contains_point(point))
+    });
     let color = match candidate {
+        Some(_) if mixed_bus => palette.err,
         Some(point) if state.schematic.has_junction(point) => palette.warn,
         Some(_) => palette.accent,
         None => palette.err,
     };
     let radius = (4.0 * viewport.zoom).max(3.0);
     painter.circle_stroke(pos, radius, Stroke::new(1.0, color));
-    if candidate.is_some_and(|point| !state.schematic.has_junction(point)) {
+    if !mixed_bus && candidate.is_some_and(|point| !state.schematic.has_junction(point)) {
         painter.circle_filled(pos, (1.75 * viewport.zoom).max(1.5), color);
+    }
+}
+
+fn draw_bus_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &mut AppState,
+    viewport: &Viewport,
+) {
+    if state.schematic.tool != Tool::Bus || !state.schematic.bus_drawing.active {
+        return;
+    }
+    if let Some(hover) = response.hover_pos() {
+        let position = screen_to_wire_grid(viewport, state.schematic.grid_size, hover);
+        state.schematic.update_bus_preview(position);
+    }
+
+    let mut points = state.schematic.bus_drawing.points.clone();
+    let preview = state.schematic.bus_drawing.preview_path();
+    points.extend(preview.into_iter().skip(1));
+    if points.len() < 2 {
+        if let Some(start) = points.first() {
+            painter.circle_stroke(
+                viewport.schematic_to_screen(*start),
+                (5.0 * viewport.zoom).max(3.0),
+                Stroke::new(1.0, crate::ui::tokens::active_palette().accent),
+            );
+        }
+        return;
+    }
+    let bus = Bus {
+        id: 0,
+        points,
+        declaration: state.schematic.bus_drawing.declaration.clone(),
+    };
+    draw_bus(painter, viewport, &bus, true);
+}
+
+fn draw_bus_tap_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &AppState,
+    viewport: &Viewport,
+) {
+    if state.schematic.read_only || state.schematic.tool != Tool::BusTap {
+        return;
+    }
+    let Some(hover) = response.hover_pos() else {
+        return;
+    };
+    let requested = screen_to_schematic(viewport, hover);
+    let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+    match resolve_bus_tap_candidate(&state.schematic, requested, hit_radius) {
+        Ok(candidate) => {
+            let Some(pending) = state.schematic.pending_bus_tap.as_ref() else {
+                return;
+            };
+            let tap = BusTap {
+                id: 0,
+                bus_id: candidate.bus_id,
+                bus_point: candidate.bus_point,
+                connection_point: candidate.connection_point,
+                slice: pending.slice.clone(),
+                orientation: candidate.orientation,
+            };
+            draw_bus_tap(painter, viewport, &tap, true);
+        }
+        Err(_) => {
+            painter.circle_stroke(
+                viewport.schematic_to_screen(requested),
+                (4.0 * viewport.zoom).max(3.0),
+                Stroke::new(1.0, crate::ui::tokens::active_palette().err),
+            );
+        }
     }
 }
 

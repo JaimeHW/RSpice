@@ -1,3 +1,4 @@
+mod bus_ops;
 mod clipboard_ops;
 mod connection_ops;
 mod junction_labels;

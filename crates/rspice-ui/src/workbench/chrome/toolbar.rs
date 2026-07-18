@@ -15,6 +15,13 @@ use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
+const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon); 5] = [
+    (Command::SelectTool, WorkbenchIcon::Select),
+    (Command::PlaceWire, WorkbenchIcon::Wire),
+    (Command::PlaceBus, WorkbenchIcon::Bus),
+    (Command::PlaceLabel, WorkbenchIcon::Label),
+    (Command::PlaceProbe, WorkbenchIcon::Probe),
+];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
@@ -328,43 +335,18 @@ fn project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 }
 
 fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let select = app.state.schematic.tool == Tool::Select;
-    let wire = app.state.schematic.tool == Tool::Wire;
-    let label = app.state.schematic.tool == Tool::Label;
-    let probe = app.state.schematic.tool == Tool::Probe;
     let grid = app.state.ui.grid != crate::workbench::GridStyle::Off;
-    toolbar_icon_command_selected(
-        ui,
-        app,
-        Command::SelectTool,
-        WorkbenchIcon::Select,
-        select,
-        layout,
-    );
-    toolbar_icon_command_selected(
-        ui,
-        app,
-        Command::PlaceWire,
-        WorkbenchIcon::Wire,
-        wire,
-        layout,
-    );
-    toolbar_icon_command_selected(
-        ui,
-        app,
-        Command::PlaceLabel,
-        WorkbenchIcon::Label,
-        label,
-        layout,
-    );
-    toolbar_icon_command_selected(
-        ui,
-        app,
-        Command::PlaceProbe,
-        WorkbenchIcon::Probe,
-        probe,
-        layout,
-    );
+    for (command, icon) in DESIGN_DIRECT_TOOLBAR_COMMANDS {
+        let selected = match command {
+            Command::SelectTool => app.state.schematic.tool == Tool::Select,
+            Command::PlaceWire => app.state.schematic.tool == Tool::Wire,
+            Command::PlaceBus => app.state.schematic.tool == Tool::Bus,
+            Command::PlaceLabel => app.state.schematic.tool == Tool::Label,
+            Command::PlaceProbe => app.state.schematic.tool == Tool::Probe,
+            _ => false,
+        };
+        toolbar_icon_command_selected(ui, app, command, icon, selected, layout);
+    }
     context_separator(ui, layout);
     toolbar_icon_command(
         ui,
@@ -1245,6 +1227,25 @@ mod tests {
         assert_eq!(explicit_label_width("Run"), 76.0);
         assert!(explicit_label_width("Run schematic checks (Ctrl+E)") > 162.0);
         assert!(explicit_label_width("A very long engineering command label") <= 224.0);
+    }
+
+    #[test]
+    fn desktop_design_toolbar_matches_the_mockup_and_omits_bus_tap() {
+        assert_eq!(
+            DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(command, _)| command),
+            [
+                Command::SelectTool,
+                Command::PlaceWire,
+                Command::PlaceBus,
+                Command::PlaceLabel,
+                Command::PlaceProbe,
+            ]
+        );
+        assert!(
+            !DESIGN_DIRECT_TOOLBAR_COMMANDS
+                .iter()
+                .any(|(command, _)| *command == Command::PlaceBusTap)
+        );
     }
 
     #[test]

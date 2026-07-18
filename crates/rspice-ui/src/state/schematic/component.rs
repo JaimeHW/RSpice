@@ -246,7 +246,10 @@ impl Component {
                     let transformed = self.transform_point(offset);
                     (
                         Self::terminal_label(idx),
-                        Point::new(self.pos.x + transformed.x, self.pos.y + transformed.y),
+                        Point::new(
+                            self.pos.x.saturating_add(transformed.x),
+                            self.pos.y.saturating_add(transformed.y),
+                        ),
                     )
                 })
                 .collect();
@@ -260,7 +263,10 @@ impl Component {
                 let transformed = self.transform_point(offset);
                 (
                     name,
-                    Point::new(self.pos.x + transformed.x, self.pos.y + transformed.y),
+                    Point::new(
+                        self.pos.x.saturating_add(transformed.x),
+                        self.pos.y.saturating_add(transformed.y),
+                    ),
                 )
             })
             .collect()
@@ -282,7 +288,10 @@ impl Component {
                         self.transform_point(resolved_symbol.effective_pin_offset(pin));
                     (
                         pin.name.clone(),
-                        Point::new(self.pos.x + transformed.x, self.pos.y + transformed.y),
+                        Point::new(
+                            self.pos.x.saturating_add(transformed.x),
+                            self.pos.y.saturating_add(transformed.y),
+                        ),
                     )
                 })
                 .collect();
@@ -404,16 +413,24 @@ impl Component {
     /// This matches the standard EDA convention (Cadence Virtuoso, etc.)
     pub fn transform_point(&self, p: Point) -> Point {
         // Step 1: Apply mirror transforms
-        let x = if self.mirror_h { -p.x } else { p.x };
-        let y = if self.mirror_v { -p.y } else { p.y };
+        let x = if self.mirror_h {
+            p.x.saturating_neg()
+        } else {
+            p.x
+        };
+        let y = if self.mirror_v {
+            p.y.saturating_neg()
+        } else {
+            p.y
+        };
         let mirrored = Point::new(x, y);
 
         // Step 2: Apply rotation
         match self.rotation {
             Rotation::R0 => mirrored,
-            Rotation::R90 => Point::new(-mirrored.y, mirrored.x),
-            Rotation::R180 => Point::new(-mirrored.x, -mirrored.y),
-            Rotation::R270 => Point::new(mirrored.y, -mirrored.x),
+            Rotation::R90 => Point::new(mirrored.y.saturating_neg(), mirrored.x),
+            Rotation::R180 => Point::new(mirrored.x.saturating_neg(), mirrored.y.saturating_neg()),
+            Rotation::R270 => Point::new(mirrored.y, mirrored.x.saturating_neg()),
         }
     }
 
@@ -425,9 +442,9 @@ impl Component {
     pub fn rotate_point(&self, p: Point) -> Point {
         match self.rotation {
             Rotation::R0 => p,
-            Rotation::R90 => Point::new(-p.y, p.x),
-            Rotation::R180 => Point::new(-p.x, -p.y),
-            Rotation::R270 => Point::new(p.y, -p.x),
+            Rotation::R90 => Point::new(p.y.saturating_neg(), p.x),
+            Rotation::R180 => Point::new(p.x.saturating_neg(), p.y.saturating_neg()),
+            Rotation::R270 => Point::new(p.y, p.x.saturating_neg()),
         }
     }
 

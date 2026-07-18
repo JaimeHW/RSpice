@@ -12,6 +12,18 @@ impl<'a> NetlistGenerator<'a> {
     /// point matters only if some other geometry references it), at a
     /// fraction of the cost and memory.
     pub(super) fn extract_nets(&mut self) {
+        let bus_analysis =
+            crate::schematic::bus_connectivity::analyze_bus_connectivity(self.schematic);
+        for diagnostic in &bus_analysis.diagnostics {
+            use crate::schematic::bus_connectivity::BusDiagnosticKind;
+            let destination = if diagnostic.kind == BusDiagnosticKind::UnnamedBus {
+                &mut self.warnings
+            } else {
+                &mut self.errors
+            };
+            destination.push(diagnostic.message.clone());
+        }
+
         // Seeded nodes: always nets, even when isolated (a floating
         // terminal must still get its own SPICE node).
         let mut point_graph: HashMap<Point, HashSet<Point>> = HashMap::new();
@@ -44,6 +56,9 @@ impl<'a> NetlistGenerator<'a> {
             }
             for label in &self.schematic.net_labels {
                 add_candidate(label.pos);
+            }
+            for binding in &bus_analysis.scalar_taps {
+                add_candidate(binding.point);
             }
         }
         for xs in by_row.values_mut() {
@@ -210,9 +225,14 @@ impl<'a> NetlistGenerator<'a> {
     /// their nets (standard schematic-label semantics). Conflicts keep the
     /// first label and warn; a label off any wire or terminal warns.
     pub(super) fn apply_net_labels(&mut self) {
-        // Process in id order so conflict resolution is deterministic.
-        let mut labels: Vec<_> = self.schematic.net_labels.iter().collect();
-        labels.sort_by_key(|label| label.id);
+        // Typed scalar aliases are the electrical contract, so resolve them
+        // before ordinary labels. A conflicting free-form label is a blocking
+        // error rather than a warning that silently changes DATA[n] into an
+        // unrelated scalar node name.
+        let mut typed_bindings =
+            crate::schematic::bus_connectivity::analyze_bus_connectivity(self.schematic)
+                .scalar_taps;
+        typed_bindings.sort_by_key(|binding| binding.tap_id);
 
         // Seed with names already assigned (interface ports run first), so
         // a label matching a port name connects to the port's net instead
@@ -229,6 +249,45 @@ impl<'a> NetlistGenerator<'a> {
                 })
             })
             .collect();
+        for binding in &typed_bindings {
+            let name = binding.member_name.as_str();
+            if let Err(error) = validate_net_name(name, self.schematic.document_policy.net_naming) {
+                self.errors
+                    .push(format!("Invalid typed bus member \"{name}\": {error}"));
+                continue;
+            }
+            let Some(&net_id) = self.point_to_net.get(&binding.point) else {
+                self.errors.push(format!(
+                    "Typed bus member \"{name}\" at ({}, {}) is not on a scalar net",
+                    binding.point.x, binding.point.y
+                ));
+                continue;
+            };
+            if let Some(existing) = self.net(net_id).and_then(|net| net.label.as_deref())
+                && !net_names_equal(existing, name, self.schematic.document_policy.net_naming)
+            {
+                self.errors.push(format!(
+                    "Typed bus member \"{name}\" conflicts with net name \"{existing}\""
+                ));
+                continue;
+            }
+
+            let key = net_name_key(name, self.schematic.document_policy.net_naming);
+            let effective_net_id = match name_to_net.get(&key).copied() {
+                Some(primary) if primary != net_id => {
+                    self.merge_nets(primary, net_id);
+                    primary
+                }
+                _ => net_id,
+            };
+            name_to_net.insert(key, effective_net_id);
+            if let Some(net) = self.nets.iter_mut().find(|net| net.id == effective_net_id) {
+                net.label = Some(name.to_owned());
+            }
+        }
+
+        let mut labels: Vec<_> = self.schematic.net_labels.iter().collect();
+        labels.sort_by_key(|label| label.id);
         for label in labels {
             let name = label.name.trim();
             if name.is_empty() {
@@ -246,6 +305,22 @@ impl<'a> NetlistGenerator<'a> {
                 ));
                 continue;
             };
+
+            let typed_conflict = typed_bindings.iter().find_map(|binding| {
+                (self.point_to_net.get(&binding.point) == Some(&net_id)
+                    && !net_names_equal(
+                        &binding.member_name,
+                        name,
+                        self.schematic.document_policy.net_naming,
+                    ))
+                .then_some(binding.member_name.as_str())
+            });
+            if let Some(typed_name) = typed_conflict {
+                self.errors.push(format!(
+                    "Net label \"{name}\" conflicts with typed bus member \"{typed_name}\""
+                ));
+                continue;
+            }
 
             let key = net_name_key(name, self.schematic.document_policy.net_naming);
             match name_to_net.get(&key) {

@@ -5,7 +5,7 @@ use crate::state::{Component, OperatingPointAnnotationPolicy, Point};
 
 use super::super::symbols::SymbolLibrary;
 use super::SchematicSymbolContext;
-use super::drawing::{draw_component, draw_junction, draw_wire};
+use super::drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire};
 use super::grid::draw_grid;
 use super::viewport::Viewport;
 
@@ -50,7 +50,10 @@ pub(super) fn draw_scene(
 
     // First-run guidance: an empty sheet says what to do next instead of
     // presenting a silent dot field.
-    if state.schematic.components.is_empty() && state.schematic.wires.is_empty() {
+    if state.schematic.components.is_empty()
+        && state.schematic.wires.is_empty()
+        && state.schematic.buses.is_empty()
+    {
         draw_empty_hint(painter, available);
     }
 
@@ -65,6 +68,19 @@ pub(super) fn draw_scene(
     // world rect are transformed and tessellated.
     let (wx0, wy0, wx1, wy1) = viewport.visible_world_rect(CULL_MARGIN);
     let cache = state.schematic.canvas_cache();
+
+    for bus in &state.schematic.buses {
+        if !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1) {
+            continue;
+        }
+        let mut selected = state.schematic.selection.has_bus(bus.id);
+        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+            selected = bus.points.windows(2).any(|segment| {
+                super::segment_intersects_rect(segment[0], segment[1], min_x, min_y, max_x, max_y)
+            });
+        }
+        draw_bus(painter, viewport, bus, selected);
+    }
 
     for (index, wire) in state.schematic.wires.iter().enumerate() {
         if let Some((min, max)) = cache.and_then(|c| c.wire_bounds.get(index))
@@ -86,6 +102,34 @@ pub(super) fn draw_scene(
 
         let is_highlighted = state.schematic.net_highlight.is_wire_highlighted(wire.id);
         draw_wire(painter, viewport, wire, is_selected, is_highlighted);
+    }
+
+    for tap in &state.schematic.bus_taps {
+        let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
+        let Some(first) = route.first() else {
+            continue;
+        };
+        let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.x, first.x, first.y, first.y);
+        for point in &route[1..] {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_y = min_y.min(point.y);
+            max_y = max_y.max(point.y);
+        }
+        if (max_x as f32) < wx0
+            || (min_x as f32) > wx1
+            || (max_y as f32) < wy0
+            || (min_y as f32) > wy1
+        {
+            continue;
+        }
+        let mut selected = state.schematic.selection.has_bus_tap(tap.id);
+        if !selected && let Some((rx0, ry0, rx1, ry1)) = preview_bounds {
+            selected = route.windows(2).any(|segment| {
+                super::segment_intersects_rect(segment[0], segment[1], rx0, ry0, rx1, ry1)
+            });
+        }
+        draw_bus_tap(painter, viewport, tap, selected);
     }
 
     for component in &state.schematic.components {
@@ -145,6 +189,20 @@ pub(super) fn draw_scene(
 
     // Check results last — violation badges annotate everything below.
     super::violations::draw_violation_markers(painter, viewport, state);
+}
+
+fn polyline_intersects_view(points: &[Point], wx0: f32, wy0: f32, wx1: f32, wy1: f32) -> bool {
+    let Some(first) = points.first() else {
+        return false;
+    };
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (first.x, first.y, first.x, first.y);
+    for point in &points[1..] {
+        min_x = min_x.min(point.x);
+        min_y = min_y.min(point.y);
+        max_x = max_x.max(point.x);
+        max_y = max_y.max(point.y);
+    }
+    (max_x as f32) >= wx0 && (min_x as f32) <= wx1 && (max_y as f32) >= wy0 && (min_y as f32) <= wy1
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -310,21 +368,21 @@ fn draw_empty_hint(painter: &Painter, available: Rect) {
     painter.text(
         center - egui::vec2(0.0, 22.0),
         egui::Align2::CENTER_CENTER,
-        "Empty schematic",
+        EMPTY_HINT_DESKTOP_LINES[0],
         theme::sans(15.0, FontWeight::Medium),
         palette.text_dim,
     );
     painter.text(
         center + egui::vec2(0.0, 2.0),
         egui::Align2::CENTER_CENTER,
-        "Pick a part from the left panel to place a device or source",
+        EMPTY_HINT_DESKTOP_LINES[1],
         theme::sans(12.0, FontWeight::Regular),
         palette.text_faint,
     );
     painter.text(
         center + egui::vec2(0.0, 22.0),
         egui::Align2::CENTER_CENTER,
-        "File ▸ Open example loads a ready-to-run circuit",
+        EMPTY_HINT_DESKTOP_LINES[2],
         theme::sans(12.0, FontWeight::Regular),
         palette.text_faint,
     );

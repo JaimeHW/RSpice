@@ -1,7 +1,7 @@
 /// Simplified component info for DRC checking.
 #[derive(Debug, Clone)]
 pub struct ComponentInfo {
-    pub id: usize,
+    pub id: u64,
     pub name: String,
     pub component_type: String,
     pub pins: Vec<PinInfo>,
@@ -24,7 +24,7 @@ pub struct PinInfo {
 /// Simplified wire info.
 #[derive(Debug, Clone)]
 pub struct WireInfo {
-    pub id: usize,
+    pub id: u64,
     pub start_x: f64,
     pub start_y: f64,
     pub end_x: f64,

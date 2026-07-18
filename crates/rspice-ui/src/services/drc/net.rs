@@ -3,11 +3,16 @@ use std::collections::{HashMap, HashSet};
 /// Internal net tracking info.
 #[derive(Debug, Clone, Default)]
 pub(super) struct NetInfo {
+    /// Every explicit name projected onto this electrical cluster. Retaining
+    /// aliases is required to detect typed bus-member/name conflicts instead
+    /// of silently discarding all but the canonical display name.
+    pub(super) names: HashSet<String>,
     pub(super) connection_count: usize,
     pub(super) has_voltage_source: bool,
     pub(super) has_current_source: bool,
     pub(super) is_ground: bool,
     pub(super) connected_components: Vec<String>,
+    pub(super) output_drivers: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,6 +49,7 @@ pub(super) struct NetAccumulator {
     pub(super) has_voltage_source: bool,
     pub(super) has_current_source: bool,
     pub(super) connected_components: HashSet<String>,
+    pub(super) output_drivers: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -115,10 +121,14 @@ pub(super) fn point_on_segment(point: PointKey, seg_start: PointKey, seg_end: Po
         point.y == seg_start.y && point.x >= min_x && point.x <= max_x
     } else {
         // Fallback for non-Manhattan segments.
-        let dx1 = point.x - seg_start.x;
-        let dy1 = point.y - seg_start.y;
-        let dx2 = seg_end.x - seg_start.x;
-        let dy2 = seg_end.y - seg_start.y;
+        // Coordinates originate as i32 schematic units, but the products of
+        // two full-range deltas do not fit in i64. Promote before subtracting
+        // so malformed/imported extreme geometry remains deterministic in
+        // debug and release builds.
+        let dx1 = i128::from(point.x) - i128::from(seg_start.x);
+        let dy1 = i128::from(point.y) - i128::from(seg_start.y);
+        let dx2 = i128::from(seg_end.x) - i128::from(seg_start.x);
+        let dy2 = i128::from(seg_end.y) - i128::from(seg_start.y);
         let cross = dx1 * dy2 - dy1 * dx2;
         if cross != 0 {
             return false;
@@ -209,6 +219,7 @@ pub(super) fn merge_net_accumulator(
         || canonical_name.eq_ignore_ascii_case("gnd")
         || canonical_name.eq_ignore_ascii_case("ground")
         || acc.names.iter().any(|name| is_ground_like(name));
+    entry.names.extend(acc.names);
 
     for component in acc.connected_components {
         if !entry
@@ -219,6 +230,7 @@ pub(super) fn merge_net_accumulator(
             entry.connected_components.push(component);
         }
     }
+    entry.output_drivers.extend(acc.output_drivers);
 }
 
 pub(super) fn canonical_net_name(
@@ -254,11 +266,35 @@ pub(super) fn is_ground_like(name: &str) -> bool {
 }
 
 pub(super) fn is_auto_generated_net_name(name: &str) -> bool {
-    if name.starts_with("net_") {
-        return true;
+    if let Some(coordinates) = name.strip_prefix("net_") {
+        return coordinates
+            .split_once('_')
+            .is_some_and(|(x, y)| x.parse::<i64>().is_ok() && y.parse::<i64>().is_ok());
     }
     name.contains('_')
         && name
             .chars()
             .all(|c| c.is_numeric() || c == '_' || c == '-' || c == '.')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_coordinate_fallbacks_are_classified_as_generated_net_names() {
+        assert!(is_auto_generated_net_name("net_10_-20"));
+        assert!(is_auto_generated_net_name("10_-20"));
+        assert!(!is_auto_generated_net_name("net_user"));
+        assert!(!is_auto_generated_net_name("net_10_20_suffix"));
+    }
+
+    #[test]
+    fn diagonal_point_test_handles_full_i32_coordinate_range() {
+        let start = PointKey::from_f64(f64::from(i32::MIN), f64::from(i32::MIN));
+        let end = PointKey::from_f64(f64::from(i32::MAX), f64::from(i32::MAX));
+        let origin = PointKey::from_f64(0.0, 0.0);
+
+        assert!(point_on_segment(origin, start, end));
+    }
 }

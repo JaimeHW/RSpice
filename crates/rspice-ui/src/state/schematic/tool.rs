@@ -25,6 +25,12 @@ pub enum Tool {
     /// Click to start/extend wire, right-click or Escape to finish.
     Wire,
 
+    /// Draw a multi-conductor bus polyline.
+    Bus,
+
+    /// Place a typed scalar or slice tap on a declared bus.
+    BusTap,
+
     /// Place an explicit electrical junction at a conductor intersection.
     Junction,
 
@@ -50,6 +56,8 @@ impl Tool {
         match self {
             Tool::Select => "Select",
             Tool::Wire => "Wire",
+            Tool::Bus => "Bus",
+            Tool::BusTap => "Bus tap",
             Tool::Junction => "Junction",
             Tool::Place(kind) => kind.display_name(),
             Tool::Probe => "Probe",
@@ -62,6 +70,8 @@ impl Tool {
         match self {
             Tool::Select => Some('s'),
             Tool::Wire => Some('w'),
+            Tool::Bus => Some('b'),
+            Tool::BusTap => Some('t'),
             Tool::Junction => Some('j'),
             Tool::Place(ComponentType::Resistor) => None, // 'r' is for rotate
             Tool::Place(ComponentType::Capacitor) => Some('c'),
@@ -80,7 +90,7 @@ impl Tool {
 
     /// Check if this tool places a durable schematic object.
     pub fn is_place_tool(&self) -> bool {
-        matches!(self, Tool::Place(_) | Tool::Junction)
+        matches!(self, Tool::Place(_) | Tool::Junction | Tool::BusTap)
     }
 
     /// Check if this is the select tool
@@ -91,6 +101,11 @@ impl Tool {
     /// Check if this is the wire tool
     pub fn is_wire(&self) -> bool {
         matches!(self, Tool::Wire)
+    }
+
+    /// Check if this is the bus drawing tool.
+    pub fn is_bus(&self) -> bool {
+        matches!(self, Tool::Bus)
     }
 
     /// Get the component type being placed (if any)
@@ -106,6 +121,7 @@ impl Tool {
         match self {
             Tool::Select => "default",
             Tool::Wire => "crosshair",
+            Tool::Bus | Tool::BusTap => "crosshair",
             Tool::Junction => "crosshair",
             Tool::Place(_) => "copy",
             Tool::Probe => "crosshair",

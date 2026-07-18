@@ -2,6 +2,7 @@
 //!
 //! Copy/paste functionality for schematic elements.
 
+use super::bus::{Bus, BusTap};
 use super::component::Component;
 use super::point::Point;
 use super::wire::Wire;
@@ -31,6 +32,14 @@ pub struct ClipboardData {
     #[serde(default)]
     pub junctions: Vec<Point>,
 
+    /// Copied bus polylines.
+    #[serde(default)]
+    pub buses: Vec<Bus>,
+
+    /// Copied taps whose source buses are included above.
+    #[serde(default)]
+    pub bus_taps: Vec<BusTap>,
+
     /// Origin point (center of copied selection)
     ///
     /// Used to calculate offsets when pasting at a new location.
@@ -45,17 +54,29 @@ impl ClipboardData {
 
     /// Check if clipboard has any content
     pub fn has_content(&self) -> bool {
-        !self.components.is_empty() || !self.wires.is_empty() || !self.junctions.is_empty()
+        !self.components.is_empty()
+            || !self.wires.is_empty()
+            || !self.junctions.is_empty()
+            || !self.buses.is_empty()
+            || !self.bus_taps.is_empty()
     }
 
     /// Check if clipboard is empty
     pub fn is_empty(&self) -> bool {
-        self.components.is_empty() && self.wires.is_empty() && self.junctions.is_empty()
+        self.components.is_empty()
+            && self.wires.is_empty()
+            && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
     }
 
     /// Get total number of items in clipboard
     pub fn count(&self) -> usize {
-        self.components.len() + self.wires.len() + self.junctions.len()
+        self.components.len()
+            + self.wires.len()
+            + self.junctions.len()
+            + self.buses.len()
+            + self.bus_taps.len()
     }
 
     /// Clear all clipboard content
@@ -63,6 +84,8 @@ impl ClipboardData {
         self.components.clear();
         self.wires.clear();
         self.junctions.clear();
+        self.buses.clear();
+        self.bus_taps.clear();
         self.origin = Point::origin();
     }
 
@@ -75,43 +98,87 @@ impl ClipboardData {
         wires: Vec<Wire>,
         junctions: Vec<Point>,
     ) -> Self {
-        let origin = Self::calculate_center(&components, &wires, &junctions);
+        Self::from_selection_with_buses(components, wires, junctions, Vec::new(), Vec::new())
+    }
+
+    /// Create clipboard data including typed buses and their taps.
+    pub fn from_selection_with_buses(
+        components: Vec<Component>,
+        wires: Vec<Wire>,
+        junctions: Vec<Point>,
+        buses: Vec<Bus>,
+        bus_taps: Vec<BusTap>,
+    ) -> Self {
+        let origin = Self::calculate_center(&components, &wires, &junctions, &buses, &bus_taps);
         Self {
             components,
             wires,
             junctions,
+            buses,
+            bus_taps,
             origin,
         }
     }
 
     /// Calculate the center point of every copied schematic object.
-    fn calculate_center(components: &[Component], wires: &[Wire], junctions: &[Point]) -> Point {
-        let mut cx = 0i32;
-        let mut cy = 0i32;
-        let mut count = 0;
+    fn calculate_center(
+        components: &[Component],
+        wires: &[Wire],
+        junctions: &[Point],
+        buses: &[Bus],
+        bus_taps: &[BusTap],
+    ) -> Point {
+        let mut cx = 0i64;
+        let mut cy = 0i64;
+        let mut count = 0i64;
 
         for comp in components {
-            cx += comp.pos.x;
-            cy += comp.pos.y;
-            count += 1;
+            cx = cx.saturating_add(i64::from(comp.pos.x));
+            cy = cy.saturating_add(i64::from(comp.pos.y));
+            count = count.saturating_add(1);
         }
 
         for wire in wires {
             if let Some(first) = wire.points.first() {
-                cx += first.x;
-                cy += first.y;
-                count += 1;
+                cx = cx.saturating_add(i64::from(first.x));
+                cy = cy.saturating_add(i64::from(first.y));
+                count = count.saturating_add(1);
             }
         }
 
         for junction in junctions {
-            cx += junction.x;
-            cy += junction.y;
-            count += 1;
+            cx = cx.saturating_add(i64::from(junction.x));
+            cy = cy.saturating_add(i64::from(junction.y));
+            count = count.saturating_add(1);
+        }
+
+        for bus in buses {
+            if let Some(first) = bus.points.first() {
+                cx = cx.saturating_add(i64::from(first.x));
+                cy = cy.saturating_add(i64::from(first.y));
+                count = count.saturating_add(1);
+            }
+        }
+
+        for tap in bus_taps {
+            cx = cx.saturating_add(i64::from(tap.connection_point.x));
+            cy = cy.saturating_add(i64::from(tap.connection_point.y));
+            count = count.saturating_add(1);
         }
 
         if count > 0 {
-            Point::new(cx / count, cy / count)
+            Point::new(
+                i32::try_from(cx / count).unwrap_or(if cx.is_negative() {
+                    i32::MIN
+                } else {
+                    i32::MAX
+                }),
+                i32::try_from(cy / count).unwrap_or(if cy.is_negative() {
+                    i32::MIN
+                } else {
+                    i32::MAX
+                }),
+            )
         } else {
             Point::origin()
         }
@@ -135,5 +202,18 @@ mod tests {
         assert!(!clipboard.is_empty());
         assert_eq!(clipboard.count(), 1);
         assert_eq!(clipboard.origin, point);
+    }
+
+    #[test]
+    fn center_accumulation_does_not_overflow_i32_coordinates() {
+        let clipboard = ClipboardData::from_selection(
+            Vec::new(),
+            Vec::new(),
+            vec![
+                Point::new(i32::MAX, i32::MIN),
+                Point::new(i32::MAX, i32::MIN),
+            ],
+        );
+        assert_eq!(clipboard.origin, Point::new(i32::MAX, i32::MIN));
     }
 }

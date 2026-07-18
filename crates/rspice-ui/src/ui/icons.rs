@@ -33,6 +33,8 @@ pub enum Icon {
     Select,
     /// Wire drawing tool.
     Wire,
+    /// Bus drawing tool.
+    Bus,
     /// Net label tool.
     NetLabel,
     /// Pin / port placement tool.
@@ -106,6 +108,7 @@ impl Icon {
         match self {
             Self::Select => "Select",
             Self::Wire => "Draw wire",
+            Self::Bus => "Draw bus",
             Self::NetLabel => "Place net label",
             Self::Pin => "Place pin",
             Self::Probe => "Probe",
@@ -149,6 +152,11 @@ impl Icon {
                 Line(&[[4.0, 18.0], [11.0, 18.0], [11.0, 6.0], [20.0, 6.0]]),
                 Dot([4.0, 18.0], 1.6),
                 Dot([20.0, 6.0], 1.6),
+            ],
+            Icon::Bus => &[
+                Line(&[[3.0, 17.0], [17.0, 3.0]]),
+                Line(&[[7.0, 21.0], [21.0, 7.0]]),
+                Line(&[[3.0, 9.0], [15.0, 21.0]]),
             ],
             Icon::NetLabel => &[
                 Line(&[[5.0, 7.0], [5.0, 5.0], [19.0, 5.0], [19.0, 7.0]]),
@@ -380,6 +388,7 @@ mod tests {
         let all = [
             Icon::Select,
             Icon::Wire,
+            Icon::Bus,
             Icon::NetLabel,
             Icon::Pin,
             Icon::Probe,

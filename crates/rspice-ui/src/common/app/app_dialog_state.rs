@@ -179,6 +179,69 @@ impl CommandPaletteState {
     }
 }
 
+/// Retained, isolated draft for the mockup-owned bus-tap placement
+/// transaction. The parsed electrical contract is not published to the
+/// schematic until the primary action validates every field.
+#[derive(Debug, Clone)]
+pub(crate) struct BusTapDialogState {
+    pub(crate) open: bool,
+    pub(crate) bus: String,
+    pub(crate) slice: String,
+    pub(crate) orientation: crate::state::BusTapOrientation,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl Default for BusTapDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            bus: String::new(),
+            slice: String::new(),
+            orientation: crate::state::BusTapOrientation::Automatic,
+            dirty: false,
+            discard_confirm: false,
+        }
+    }
+}
+
+impl BusTapDialogState {
+    pub(crate) fn open(&mut self) {
+        *self = Self {
+            open: true,
+            bus: "DATA[15:0]".to_owned(),
+            slice: "DATA[7:0]".to_owned(),
+            orientation: crate::state::BusTapOrientation::Automatic,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Record an input edit without publishing any schematic state. Editing
+    /// after the first close attempt returns the footer to its ordinary
+    /// Cancel state, matching the mockup workflow lifecycle.
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = true;
+        self.discard_confirm = false;
+    }
+
+    /// Try to close the isolated draft. An edited draft requires the same
+    /// second explicit discard action as the mockup workflow shell.
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
 /// Dialog visibility state
 
 #[derive(Debug, Clone, Default)]
@@ -288,6 +351,9 @@ pub struct DialogState {
     /// Command palette state
     pub command_palette: CommandPaletteState,
 
+    /// Validated configuration transaction for Place bus tap.
+    pub(crate) bus_tap: BusTapDialogState,
+
     /// Project-owned technology attachment transaction.
     pub(crate) technology_attachment: TechnologyAttachmentDialogState,
 
@@ -333,6 +399,7 @@ impl DialogState {
             || self.shortcut_editor.open
             || self.license_dialog.open
             || self.command_palette.open
+            || self.bus_tap.open
             || self.technology_attachment.open
             || self.interaction.schematic_delete_confirmation_open
             || self.confirmation_dialog.visible
@@ -373,6 +440,7 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
         assert_blocks_shortcuts(|dialogs| dialogs.technology_attachment.open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs.interaction.schematic_delete_confirmation_open = true;

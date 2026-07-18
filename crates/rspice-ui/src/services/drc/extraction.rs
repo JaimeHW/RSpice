@@ -1,6 +1,6 @@
 use super::checker::{DrcChecker, DrcConfig};
 use super::input::{ComponentInfo, JunctionInfo, NetLabelInfo, PinInfo, WireInfo};
-use super::types::DrcResult;
+use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::simulation::netlist_gen::HierarchySource;
 use crate::state::{Component, Point};
 
@@ -105,6 +105,15 @@ fn extract_drc_data_with_terminals_and_junctions(
     for comp in &schematic.components {
         let terminal_positions = terminal_positions_for(comp);
         let mut pins = Vec::with_capacity(terminal_positions.len());
+        let declared_output_pins: std::collections::HashSet<String> = comp
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.interface())
+            .into_iter()
+            .flatten()
+            .filter(|port| port.direction == crate::state::PortDirection::Out)
+            .map(|port| port.name)
+            .collect();
 
         for (pin_name, pin_pos) in terminal_positions {
             // Look up net name from the cached mapping, or create a positional name
@@ -120,7 +129,8 @@ fn extract_drc_data_with_terminals_and_junctions(
                     | ComponentType::VoltageSourcePulse
                     | ComponentType::VoltageSourceSin
                     | ComponentType::VoltageSourcePwl
-            ) && pin_name == "+";
+            ) && pin_name == "+"
+                || declared_output_pins.contains(&pin_name);
 
             pins.push(PinInfo {
                 name: pin_name,
@@ -150,7 +160,7 @@ fn extract_drc_data_with_terminals_and_junctions(
         );
 
         components.push(ComponentInfo {
-            id: comp.id as usize,
+            id: comp.id,
             name: if comp.name.is_empty() {
                 comp.spice_instance_name()
             } else {
@@ -171,7 +181,7 @@ fn extract_drc_data_with_terminals_and_junctions(
                 let start = &wire.points[i];
                 let end = &wire.points[i + 1];
                 wires.push(WireInfo {
-                    id: wire.id as usize,
+                    id: wire.id,
                     start_x: start.x as f64,
                     start_y: start.y as f64,
                     end_x: end.x as f64,
@@ -187,6 +197,15 @@ fn extract_drc_data_with_terminals_and_junctions(
             name: label.name.clone(),
             x: label.pos.x as f64,
             y: label.pos.y as f64,
+        });
+    }
+    for binding in
+        crate::schematic::bus_connectivity::analyze_bus_connectivity(schematic).scalar_taps
+    {
+        net_labels.push(NetLabelInfo {
+            name: binding.member_name,
+            x: binding.point.x as f64,
+            y: binding.point.y as f64,
         });
     }
 
@@ -227,9 +246,16 @@ fn extract_drc_data_with_terminals_and_junctions(
 /// }
 /// ```
 pub fn run_drc_check(schematic: &crate::state::SchematicState) -> DrcResult {
+    let start = crate::common::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) = extract_drc_data_with_junctions(schematic);
     let mut checker = DrcChecker::new();
-    checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions)
+    checker.set_net_naming_policy(schematic.document_policy.net_naming);
+    let mut result =
+        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
+    append_bus_violations(schematic, &mut result, &Default::default());
+    result.completed = true;
+    result.duration_ms = start.elapsed().as_millis() as u64;
+    result
 }
 
 /// Run a complete DRC check with project-cell symbol resolution enabled.
@@ -237,10 +263,17 @@ pub fn run_drc_check_with_hierarchy(
     schematic: &crate::state::SchematicState,
     hierarchy: &HierarchySource<'_>,
 ) -> DrcResult {
+    let start = crate::common::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) =
         extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
     let mut checker = DrcChecker::new();
-    checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions)
+    checker.set_net_naming_policy(schematic.document_policy.net_naming);
+    let mut result =
+        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
+    append_bus_violations(schematic, &mut result, &Default::default());
+    result.completed = true;
+    result.duration_ms = start.elapsed().as_millis() as u64;
+    result
 }
 
 /// Run a complete DRC check with custom configuration.
@@ -248,9 +281,17 @@ pub fn run_drc_check_with_config(
     schematic: &crate::state::SchematicState,
     config: DrcConfig,
 ) -> DrcResult {
+    let start = crate::common::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) = extract_drc_data_with_junctions(schematic);
+    let severity_overrides = config.severity_overrides.clone();
     let mut checker = DrcChecker::with_config(config);
-    checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions)
+    checker.set_net_naming_policy(schematic.document_policy.net_naming);
+    let mut result =
+        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
+    append_bus_violations(schematic, &mut result, &severity_overrides);
+    result.completed = true;
+    result.duration_ms = start.elapsed().as_millis() as u64;
+    result
 }
 
 /// Run a configured DRC check with project-cell symbol resolution enabled.
@@ -259,18 +300,63 @@ pub fn run_drc_check_with_hierarchy_and_config(
     hierarchy: &HierarchySource<'_>,
     config: DrcConfig,
 ) -> DrcResult {
+    let start = crate::common::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) =
         extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
+    let severity_overrides = config.severity_overrides.clone();
     let mut checker = DrcChecker::with_config(config);
-    checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions)
+    checker.set_net_naming_policy(schematic.document_policy.net_naming);
+    let mut result =
+        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
+    append_bus_violations(schematic, &mut result, &severity_overrides);
+    result.completed = true;
+    result.duration_ms = start.elapsed().as_millis() as u64;
+    result
+}
+
+fn append_bus_violations(
+    schematic: &crate::state::SchematicState,
+    result: &mut DrcResult,
+    severity_overrides: &std::collections::HashMap<DrcViolationType, DrcSeverity>,
+) {
+    use crate::schematic::bus_connectivity::{BusDiagnosticKind, analyze_bus_connectivity};
+
+    let mut next_id = result.total_count();
+    for diagnostic in analyze_bus_connectivity(schematic).diagnostics {
+        let violation_type = match diagnostic.kind {
+            BusDiagnosticKind::MalformedBus => DrcViolationType::MalformedBus,
+            BusDiagnosticKind::UnnamedBus => DrcViolationType::UnnamedBus,
+            BusDiagnosticKind::RangeConflict => DrcViolationType::BusRangeConflict,
+            BusDiagnosticKind::DanglingTap => DrcViolationType::DanglingBusTap,
+            BusDiagnosticKind::MixedTap => DrcViolationType::MixedBusTap,
+        };
+        let location = if let Some(tap_id) = diagnostic.tap_id {
+            DrcLocation::BusTap { id: tap_id }
+        } else if let Some(bus_id) = diagnostic.bus_id {
+            DrcLocation::Bus { id: bus_id }
+        } else {
+            DrcLocation::Point {
+                x: f64::from(diagnostic.point.x),
+                y: f64::from(diagnostic.point.y),
+            }
+        };
+        let mut violation =
+            DrcViolation::new(next_id, violation_type, diagnostic.message, location);
+        if let Some(severity) = severity_overrides.get(&violation_type) {
+            violation.severity = *severity;
+        }
+        result.add_violation(violation);
+        next_id += 1;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, LibraryManager,
-        PortDirection, PortSpec, SchematicState, SymbolDocument, SymbolPin, View, ViewType,
+        Bus, BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, Component,
+        ComponentType, Library, LibraryCellInstance, LibraryManager, NetLabel, Point,
+        PortDirection, PortSpec, SchematicState, SymbolDocument, SymbolPin, View, ViewType, Wire,
     };
     use std::collections::HashMap;
 
@@ -358,5 +444,134 @@ mod tests {
             junctions,
             vec![JunctionInfo::new(40.0, -20.0), JunctionInfo::new(0.0, 0.0)]
         );
+    }
+
+    #[test]
+    fn typed_bus_member_conflict_is_reported_by_drc_and_honors_severity_policy() {
+        let mut schematic = SchematicState::default();
+        let bus_id = schematic
+            .add_bus(
+                vec![Point::new(0, 0), Point::new(20, 0)],
+                Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+            )
+            .unwrap();
+        schematic
+            .wires
+            .push(Wire::segment(100, Point::new(5, 10), Point::new(20, 10)));
+        schematic
+            .place_bus_tap(
+                bus_id,
+                Point::new(5, 0),
+                Point::new(5, 10),
+                BusSlice::parse("DATA[3]").unwrap(),
+                BusTapOrientation::Down,
+            )
+            .unwrap();
+        schematic
+            .net_labels
+            .push(NetLabel::new(101, Point::new(15, 10), "FOO"));
+
+        let mut config = DrcConfig {
+            check_missing_ground: false,
+            check_floating_nodes: false,
+            ..DrcConfig::default()
+        };
+        config
+            .severity_overrides
+            .insert(DrcViolationType::BusRangeConflict, DrcSeverity::Critical);
+
+        let result = run_drc_check_with_config(&schematic, config);
+        let conflict = result
+            .violations()
+            .iter()
+            .find(|violation| violation.violation_type == DrcViolationType::BusRangeConflict)
+            .expect("typed member conflict");
+        assert_eq!(conflict.severity, DrcSeverity::Critical);
+        assert!(conflict.message.contains("DATA[3]"));
+        assert!(conflict.message.contains("FOO"));
+        assert_eq!(
+            conflict.location,
+            DrcLocation::Node {
+                net_name: "DATA[3]".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_authored_cell_outputs_on_bus_member_are_reported_with_policy_severity() {
+        let (libraries, buffers) = library_with_authored_amp_symbol();
+        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+        let mut first = authored_amp_instance();
+        first.id = 10;
+        first.name = "X1".to_owned();
+        let mut second = authored_amp_instance();
+        second.id = 11;
+        second.name = "X2".to_owned();
+        second.pos = Point::new(300, 50);
+
+        let mut schematic = SchematicState::default();
+        schematic.components.extend([first, second]);
+        schematic
+            .wires
+            .push(Wire::segment(20, Point::new(170, 70), Point::new(370, 70)));
+        let bus_id = schematic
+            .add_bus(
+                vec![Point::new(270, 0), Point::new(370, 0)],
+                Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+            )
+            .unwrap();
+        schematic
+            .place_bus_tap(
+                bus_id,
+                Point::new(270, 0),
+                Point::new(270, 70),
+                BusSlice::parse("DATA[3]").unwrap(),
+                BusTapOrientation::Down,
+            )
+            .unwrap();
+
+        let mut config = DrcConfig {
+            check_missing_ground: false,
+            check_floating_nodes: false,
+            ..DrcConfig::default()
+        };
+        config.severity_overrides.insert(
+            DrcViolationType::DuplicateBusMemberDriver,
+            DrcSeverity::Critical,
+        );
+        let result = run_drc_check_with_hierarchy_and_config(&schematic, &hierarchy, config);
+        let violation = result
+            .violations()
+            .iter()
+            .find(|violation| {
+                violation.violation_type == DrcViolationType::DuplicateBusMemberDriver
+            })
+            .expect("duplicate typed output driver");
+
+        assert_eq!(violation.severity, DrcSeverity::Critical);
+        assert!(violation.message.contains("DATA[3]"));
+        assert!(violation.message.contains("X1"));
+        assert!(violation.message.contains("X2"));
+    }
+
+    #[test]
+    fn bus_drc_locations_preserve_full_u64_identity() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .buses
+            .push(Bus::segment(u64::MAX, Point::new(0, 0), Point::new(20, 0), None).unwrap());
+        let result = run_drc_check_with_config(
+            &schematic,
+            DrcConfig {
+                check_missing_ground: false,
+                check_floating_nodes: false,
+                ..DrcConfig::default()
+            },
+        );
+        assert!(result.completed);
+        assert!(result.violations().iter().any(|violation| {
+            violation.violation_type == DrcViolationType::UnnamedBus
+                && violation.location == DrcLocation::Bus { id: u64::MAX }
+        }));
     }
 }

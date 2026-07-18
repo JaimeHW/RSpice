@@ -639,8 +639,9 @@ fn chrono_lite_timestamp() -> String {
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, CellViewRef, Library, LibraryCellInstance, LibraryManager, NetLabel, PortDirection,
-        PortSpec, SymbolDocument, SymbolPin, View, ViewType,
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, CellViewRef, Library,
+        LibraryCellInstance, LibraryManager, NetLabel, PortDirection, PortSpec, SymbolDocument,
+        SymbolPin, View, ViewType,
     };
     use std::collections::HashMap;
 
@@ -832,6 +833,147 @@ mod tests {
             generator.net_at(Point::new(40, 100)).map(|n| n.id),
             "both wires should resolve to the same net id"
         );
+    }
+
+    fn add_scalar_bus_tap(
+        state: &mut SchematicState,
+        bus_id: u64,
+        tap_id: u64,
+        bus_y: i32,
+        wire_id: u64,
+        wire_y: i32,
+        member: &str,
+    ) {
+        let bus = Bus::segment(
+            bus_id,
+            Point::new(0, bus_y),
+            Point::new(40, bus_y),
+            Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+        )
+        .unwrap();
+        let tap = BusTap::new(
+            tap_id,
+            &bus,
+            Point::new(20, bus_y),
+            Point::new(20, wire_y),
+            BusSlice::parse(member).unwrap(),
+            if wire_y < bus_y {
+                BusTapOrientation::Up
+            } else {
+                BusTapOrientation::Down
+            },
+        )
+        .unwrap();
+        state.buses.push(bus);
+        state.bus_taps.push(tap);
+        state.wires.push(Wire::segment(
+            wire_id,
+            Point::new(0, wire_y),
+            Point::new(40, wire_y),
+        ));
+    }
+
+    #[test]
+    fn scalar_bus_tap_applies_exact_member_name_and_accepts_matching_label() {
+        let mut state = SchematicState::default();
+        add_scalar_bus_tap(&mut state, 10, 11, -20, 12, 0, "DATA[3]");
+        state
+            .net_labels
+            .push(NetLabel::new(13, Point::new(30, 0), "DATA[3]"));
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+
+        assert!(generator.errors().is_empty(), "{:?}", generator.errors());
+        assert_eq!(
+            generator
+                .net_at(Point::new(20, 0))
+                .map(|net| net.spice_name()),
+            Some("DATA[3]".to_owned())
+        );
+    }
+
+    #[test]
+    fn scalar_bus_tap_conflicting_free_form_label_is_blocking() {
+        let mut state = SchematicState::default();
+        add_scalar_bus_tap(&mut state, 20, 21, -20, 22, 0, "DATA[3]");
+        state
+            .net_labels
+            .push(NetLabel::new(23, Point::new(30, 0), "FOO"));
+
+        let result = generate_netlist(&state);
+
+        assert!(result.errors.iter().any(|error| {
+            error.contains("FOO") && error.contains("DATA[3]") && error.contains("conflicts")
+        }));
+    }
+
+    #[test]
+    fn identical_scalar_bus_members_merge_disjoint_wire_nets() {
+        let mut state = SchematicState::default();
+        add_scalar_bus_tap(&mut state, 30, 31, -20, 32, 0, "DATA[3]");
+        add_scalar_bus_tap(&mut state, 40, 41, 80, 42, 100, "DATA[3]");
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+
+        assert!(generator.errors().is_empty(), "{:?}", generator.errors());
+        assert_eq!(
+            generator.net_at(Point::new(0, 0)).map(|net| net.id),
+            generator.net_at(Point::new(0, 100)).map(|net| net.id)
+        );
+    }
+
+    #[test]
+    fn different_scalar_bus_members_remain_distinct() {
+        let mut state = SchematicState::default();
+        add_scalar_bus_tap(&mut state, 50, 51, -20, 52, 0, "DATA[3]");
+        add_scalar_bus_tap(&mut state, 60, 61, 80, 62, 100, "DATA[4]");
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+
+        assert!(generator.errors().is_empty(), "{:?}", generator.errors());
+        assert_ne!(
+            generator.net_at(Point::new(0, 0)).map(|net| net.id),
+            generator.net_at(Point::new(0, 100)).map(|net| net.id)
+        );
+    }
+
+    #[test]
+    fn multi_bit_bus_tap_never_enters_scalar_spice_connectivity() {
+        let source = Bus::segment(
+            70,
+            Point::new(0, 0),
+            Point::new(40, 0),
+            Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+        )
+        .unwrap();
+        let destination = Bus::segment(
+            71,
+            Point::new(0, 20),
+            Point::new(40, 20),
+            Some(BusDeclaration::parse("DATA[3:0]").unwrap()),
+        )
+        .unwrap();
+        let tap = BusTap::new(
+            72,
+            &source,
+            Point::new(20, 0),
+            Point::new(20, 20),
+            BusSlice::parse("DATA[3:0]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        let mut state = SchematicState::default();
+        state.buses = vec![source, destination];
+        state.bus_taps.push(tap);
+
+        let result = generate_netlist(&state);
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.nets.keys().all(|name| !name.starts_with("DATA[")));
+        assert!(result.point_to_net.is_empty());
     }
 
     #[test]

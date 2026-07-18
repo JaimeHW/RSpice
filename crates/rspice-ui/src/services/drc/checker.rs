@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 use super::input::{ComponentInfo, JunctionInfo, NetLabelInfo, WireInfo};
 use super::net::{
-    DisjointSet, NetAccumulator, NetInfo, PointKey, ensure_point_id, merge_net_accumulator,
-    point_on_segment, segment_intersection_point,
+    DisjointSet, NetAccumulator, NetInfo, PointKey, ensure_point_id, is_auto_generated_net_name,
+    merge_net_accumulator, point_on_segment, segment_intersection_point,
 };
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 
@@ -17,6 +17,7 @@ pub struct DrcChecker {
     next_id: usize,
     /// Configuration options
     config: DrcConfig,
+    net_naming_policy: crate::state::NetNamingPolicy,
 }
 
 /// DRC configuration options.
@@ -58,12 +59,22 @@ impl DrcChecker {
         Self {
             next_id: 0,
             config: DrcConfig::default(),
+            net_naming_policy: crate::state::NetNamingPolicy::SpiceCompatibleRelaxed,
         }
     }
 
     /// Create with custom configuration
     pub fn with_config(config: DrcConfig) -> Self {
-        Self { next_id: 0, config }
+        Self {
+            next_id: 0,
+            config,
+            net_naming_policy: crate::state::NetNamingPolicy::SpiceCompatibleRelaxed,
+        }
+    }
+
+    /// Bind name comparison to the owning schematic document policy.
+    pub(crate) fn set_net_naming_policy(&mut self, policy: crate::state::NetNamingPolicy) {
+        self.net_naming_policy = policy;
     }
 
     /// Get the next violation ID
@@ -71,6 +82,20 @@ impl DrcChecker {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// Publish one finding through the configured severity policy. Keeping
+    /// this at the checker boundary guarantees every enabled check, including
+    /// typed-bus checks, honors the same project override contract.
+    fn add_violation(&self, result: &mut DrcResult, mut violation: DrcViolation) {
+        if let Some(severity) = self
+            .config
+            .severity_overrides
+            .get(&violation.violation_type)
+        {
+            violation.severity = *severity;
+        }
+        result.add_violation(violation);
     }
 
     /// Run legacy geometry-only DRC checks without explicit junction input.
@@ -104,7 +129,9 @@ impl DrcChecker {
         let mut result = DrcResult::new();
 
         // Build net connectivity map
-        let net_map = self.build_net_map(components, wires, net_labels, junctions);
+        let net_map = self.normalize_net_map_for_policy(
+            self.build_net_map(components, wires, net_labels, junctions),
+        );
 
         // Check for duplicate component names
         if self.config.check_duplicate_names {
@@ -121,9 +148,12 @@ impl DrcChecker {
             self.check_floating_nodes(&net_map, &mut result);
         }
 
+        self.check_bus_member_name_conflicts(&net_map, &mut result);
+
         // Check for shorted outputs (multiple voltage sources on same net)
         if self.config.check_shorted_outputs {
             self.check_shorted_outputs(components, &net_map, &mut result);
+            self.check_duplicate_bus_member_drivers(&net_map, &mut result);
         }
 
         result.completed = true;
@@ -289,6 +319,9 @@ impl DrcChecker {
                     if comp.is_current_source {
                         acc.has_current_source = true;
                     }
+                    if pin.is_output {
+                        acc.output_drivers.insert(comp.name.clone());
+                    }
                 };
 
                 if let (Some(x), Some(y)) = (pin.x, pin.y) {
@@ -343,6 +376,45 @@ impl DrcChecker {
         net_map
     }
 
+    fn normalize_net_map_for_policy(
+        &self,
+        net_map: HashMap<String, NetInfo>,
+    ) -> HashMap<String, NetInfo> {
+        if self.net_naming_policy == crate::state::NetNamingPolicy::StrictCaseSensitive {
+            return net_map;
+        }
+
+        let mut entries: Vec<_> = net_map.into_iter().collect();
+        entries.sort_by(|(left, _), (right, _)| {
+            left.to_ascii_lowercase()
+                .cmp(&right.to_ascii_lowercase())
+                .then_with(|| left.cmp(right))
+        });
+        let mut merged_by_normalized: HashMap<String, (String, NetInfo)> = HashMap::new();
+        for (name, net) in entries {
+            let normalized = name.to_ascii_lowercase();
+            let (_, merged) = merged_by_normalized
+                .entry(normalized)
+                .or_insert_with(|| (name, NetInfo::default()));
+            merged.names.extend(net.names);
+            merged.connection_count = merged.connection_count.saturating_add(net.connection_count);
+            merged.has_voltage_source |= net.has_voltage_source;
+            merged.has_current_source |= net.has_current_source;
+            merged.is_ground |= net.is_ground;
+            merged.connected_components.extend(net.connected_components);
+            merged.output_drivers.extend(net.output_drivers);
+        }
+
+        merged_by_normalized
+            .into_values()
+            .map(|(name, mut net)| {
+                net.connected_components.sort();
+                net.connected_components.dedup();
+                (name, net)
+            })
+            .collect()
+    }
+
     /// Check for duplicate component names
     fn check_duplicate_names(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut names: HashMap<String, Vec<usize>> = HashMap::new();
@@ -354,7 +426,8 @@ impl DrcChecker {
         for (name, indices) in names {
             if indices.len() > 1 {
                 let id = self.next_id();
-                result.add_violation(
+                self.add_violation(
+                    result,
                     DrcViolation::new(
                         id,
                         DrcViolationType::DuplicateName,
@@ -364,7 +437,7 @@ impl DrcChecker {
                             indices.len()
                         ),
                         DrcLocation::Component {
-                            id: indices[0],
+                            id: components[indices[0]].id,
                             name: name.clone(),
                         },
                     )
@@ -381,12 +454,15 @@ impl DrcChecker {
 
         if !has_ground && !has_zero_net {
             let id = self.next_id();
-            result.add_violation(DrcViolation::new(
-                id,
-                DrcViolationType::MissingGround,
-                "Circuit has no ground reference (node 0 or GND)",
-                DrcLocation::Global,
-            ));
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::MissingGround,
+                    "Circuit has no ground reference (node 0 or GND)",
+                    DrcLocation::Global,
+                ),
+            );
         }
     }
 
@@ -398,7 +474,8 @@ impl DrcChecker {
             }
             if net.connection_count < self.config.min_connections && !net.is_ground {
                 let id = self.next_id();
-                result.add_violation(
+                self.add_violation(
+                    result,
                     DrcViolation::new(
                         id,
                         DrcViolationType::FloatingNode,
@@ -443,7 +520,8 @@ impl DrcChecker {
         for (net_name, sources) in voltage_source_nets {
             if sources.len() > 1 {
                 let id = self.next_id();
-                result.add_violation(
+                self.add_violation(
+                    result,
                     DrcViolation::new(
                         id,
                         DrcViolationType::ShortedOutputs,
@@ -462,6 +540,109 @@ impl DrcChecker {
 
         // Suppress unused warning
         let _ = net_map;
+    }
+
+    fn check_duplicate_bus_member_drivers(
+        &mut self,
+        net_map: &HashMap<String, NetInfo>,
+        result: &mut DrcResult,
+    ) {
+        for (net_name, net) in net_map {
+            let is_scalar_bus_member =
+                crate::state::BusSlice::parse(net_name).is_ok_and(|slice| slice.is_scalar());
+            if !is_scalar_bus_member || net.output_drivers.len() <= 1 {
+                continue;
+            }
+            let mut drivers: Vec<_> = net.output_drivers.iter().cloned().collect();
+            drivers.sort();
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::DuplicateBusMemberDriver,
+                    format!(
+                        "Typed bus member '{}' has {} output drivers: {}",
+                        net_name,
+                        drivers.len(),
+                        drivers.join(", ")
+                    ),
+                    DrcLocation::Node {
+                        net_name: net_name.clone(),
+                    },
+                )
+                .with_related(drivers),
+            );
+        }
+    }
+
+    fn check_bus_member_name_conflicts(
+        &mut self,
+        net_map: &HashMap<String, NetInfo>,
+        result: &mut DrcResult,
+    ) {
+        for net in net_map.values() {
+            let mut typed_names: Vec<String> = net
+                .names
+                .iter()
+                .filter(|name| {
+                    crate::state::BusSlice::parse(name).is_ok_and(|slice| slice.is_scalar())
+                })
+                .cloned()
+                .collect();
+            typed_names.sort();
+            typed_names.dedup();
+            let Some(typed_name) = typed_names.first() else {
+                continue;
+            };
+
+            let mut conflicts: Vec<String> = net
+                .names
+                .iter()
+                .filter(|name| {
+                    !is_auto_generated_net_name(name)
+                        && match self.net_naming_policy {
+                            crate::state::NetNamingPolicy::StrictCaseSensitive => {
+                                *name != typed_name
+                            }
+                            crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => {
+                                !name.eq_ignore_ascii_case(typed_name)
+                            }
+                        }
+                })
+                .cloned()
+                .collect();
+            conflicts.sort();
+            conflicts.dedup();
+            if conflicts.is_empty() {
+                continue;
+            }
+
+            let mut related = vec![typed_name.clone()];
+            related.extend(conflicts.iter().cloned());
+            let id = self.next_id();
+            self.add_violation(
+                result,
+                DrcViolation::new(
+                    id,
+                    DrcViolationType::BusRangeConflict,
+                    format!(
+                        "Typed bus member '{}' conflicts with net name{} {}",
+                        typed_name,
+                        if conflicts.len() == 1 { "" } else { "s" },
+                        conflicts
+                            .iter()
+                            .map(|name| format!("'{name}'"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    DrcLocation::Node {
+                        net_name: typed_name.clone(),
+                    },
+                )
+                .with_related(related),
+            );
+        }
     }
 }
 
@@ -496,7 +677,7 @@ mod tests {
         }
     }
 
-    fn resistor(id: usize, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
+    fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
         ComponentInfo {
             id,
             name: name.to_string(),
@@ -507,18 +688,20 @@ mod tests {
         }
     }
 
-    fn vsource(id: usize, name: &str, plus_net: &str, minus_net: &str) -> ComponentInfo {
+    fn vsource(id: u64, name: &str, plus_net: &str, minus_net: &str) -> ComponentInfo {
+        let mut plus = pin("+", plus_net);
+        plus.is_output = true;
         ComponentInfo {
             id,
             name: name.to_string(),
             component_type: "voltage_source".to_string(),
-            pins: vec![pin("+", plus_net), pin("-", minus_net)],
+            pins: vec![plus, pin("-", minus_net)],
             is_voltage_source: true,
             is_current_source: false,
         }
     }
 
-    fn wire(id: usize, x0: f64, y0: f64, x1: f64, y1: f64) -> WireInfo {
+    fn wire(id: u64, x0: f64, y0: f64, x1: f64, y1: f64) -> WireInfo {
         WireInfo {
             id,
             start_x: x0,
@@ -947,5 +1130,47 @@ mod tests {
         assert_eq!(summary.errors, 1);
         assert!(!summary.passed);
         assert!(result.has_errors());
+    }
+
+    #[test]
+    fn configured_severity_override_is_applied_to_checker_findings() {
+        let mut config = DrcConfig::default();
+        config
+            .severity_overrides
+            .insert(DrcViolationType::MissingGround, DrcSeverity::Info);
+        let mut checker = DrcChecker::with_config(config);
+
+        let result = checker.check_connectivity(&[], &[], &[]);
+
+        assert_eq!(result.total_count(), 1);
+        assert_eq!(result.violations()[0].severity, DrcSeverity::Info);
+        assert!(result.passed());
+    }
+
+    #[test]
+    fn relaxed_policy_merges_case_variant_typed_members_before_driver_checks() {
+        let components = vec![
+            vsource(1, "V1", "DATA[3]", "0"),
+            vsource(2, "V2", "data[3]", "0"),
+        ];
+        let config = DrcConfig {
+            check_missing_ground: false,
+            check_floating_nodes: false,
+            ..DrcConfig::default()
+        };
+
+        let mut relaxed = DrcChecker::with_config(config.clone());
+        relaxed.set_net_naming_policy(crate::state::NetNamingPolicy::SpiceCompatibleRelaxed);
+        let relaxed_result = relaxed.check_connectivity(&components, &[], &[]);
+        assert!(relaxed_result.violations().iter().any(|violation| {
+            violation.violation_type == DrcViolationType::DuplicateBusMemberDriver
+        }));
+
+        let mut strict = DrcChecker::with_config(config);
+        strict.set_net_naming_policy(crate::state::NetNamingPolicy::StrictCaseSensitive);
+        let strict_result = strict.check_connectivity(&components, &[], &[]);
+        assert!(!strict_result.violations().iter().any(|violation| {
+            violation.violation_type == DrcViolationType::DuplicateBusMemberDriver
+        }));
     }
 }

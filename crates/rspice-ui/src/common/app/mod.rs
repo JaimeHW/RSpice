@@ -52,6 +52,7 @@ pub use app_confirmation_state::{
 pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
 
 mod app_dialog_state;
+pub(crate) use app_dialog_state::BusTapDialogState;
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
 mod app_preference_runtime;
@@ -72,6 +73,8 @@ mod app_property_edit;
 pub(crate) use app_property_edit::open_property_editor;
 
 mod app_modal_workflows;
+
+mod app_bus_tap_dialog;
 
 mod app_shortcuts;
 pub(crate) use app_shortcuts::{
@@ -837,6 +840,7 @@ impl RSpiceApp {
         self.render_preferences_dialog(ctx);
         self.render_license_dialog(ctx);
         self.render_command_palette(ctx);
+        self.render_bus_tap_dialog(ctx);
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);

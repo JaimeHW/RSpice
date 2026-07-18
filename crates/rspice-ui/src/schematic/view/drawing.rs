@@ -1,7 +1,7 @@
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::common::app::AppState;
-use crate::state::{Component, ComponentType, Point, Wire};
+use crate::state::{Bus, BusTap, Component, ComponentType, Point, Wire};
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::SchematicSymbolContext;
@@ -17,6 +17,11 @@ use super::viewport::Viewport;
 const DEFAULT_WIRE_STROKE_WIDTH: f32 = 1.1;
 const SELECTED_WIRE_STROKE_WIDTH: f32 = 2.0;
 const HIGHLIGHTED_WIRE_STROKE_WIDTH: f32 = 2.0;
+const BUS_CONDUCTOR_OFFSET: f32 = 4.0;
+const DEFAULT_BUS_STROKE_WIDTH: f32 = 1.2;
+const SELECTED_BUS_STROKE_WIDTH: f32 = 1.6;
+const DEFAULT_BUS_TAP_STROKE_WIDTH: f32 = 2.0;
+const SELECTED_BUS_TAP_STROKE_WIDTH: f32 = 2.4;
 
 const _: [(); 1] = [(); (DEFAULT_WIRE_STROKE_WIDTH.to_bits() == 1.1f32.to_bits()) as usize];
 const _: [(); 1] = [(); (SELECTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
@@ -47,6 +52,184 @@ pub(super) fn draw_wire(
         let end = viewport.schematic_to_screen(segment[1]);
         painter.line_segment([start, end], Stroke::new(width * viewport.zoom, color));
     }
+}
+
+/// Draw a typed multi-conductor bus. Buses deliberately use the same
+/// conductor color as scalar nets, with the mockup's three parallel strokes
+/// so type remains legible in monochrome exports and color-vision variants.
+pub(super) fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: bool) {
+    let palette = crate::ui::tokens::active_palette();
+    let color = if selected {
+        palette.accent
+    } else {
+        palette.wire
+    };
+    let width = if selected {
+        SELECTED_BUS_STROKE_WIDTH
+    } else {
+        DEFAULT_BUS_STROKE_WIDTH
+    };
+    let centerline: Vec<Pos2> = bus
+        .points
+        .iter()
+        .map(|point| viewport.schematic_to_screen(*point))
+        .collect();
+    for offset in [-BUS_CONDUCTOR_OFFSET, 0.0, BUS_CONDUCTOR_OFFSET] {
+        painter.add(egui::Shape::line(
+            offset_polyline(&centerline, offset * viewport.zoom),
+            Stroke::new(width * viewport.zoom, color),
+        ));
+    }
+
+    if let (Some(declaration), Some(anchor)) = (&bus.declaration, bus.points.last()) {
+        painter.text(
+            viewport.schematic_to_screen(*anchor) + Vec2::new(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            declaration.to_string(),
+            crate::ui::theme::mono(
+                crate::ui::tokens::FS_0,
+                crate::ui::theme::FontWeight::Medium,
+            ),
+            if selected {
+                palette.accent
+            } else {
+                palette.net_label
+            },
+        );
+    }
+}
+
+/// Draw a typed bus breakout. The selector is part of the durable electrical
+/// intent and therefore appears beside the tap in the canvas and SVG.
+pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, selected: bool) {
+    let palette = crate::ui::tokens::active_palette();
+    let color = if selected {
+        palette.accent
+    } else {
+        palette.wire
+    };
+    let width = if selected {
+        SELECTED_BUS_TAP_STROKE_WIDTH
+    } else {
+        DEFAULT_BUS_TAP_STROKE_WIDTH
+    };
+    let connection = viewport.schematic_to_screen(tap.connection_point);
+    let route: Vec<Pos2> = crate::schematic::bus_geometry::bus_tap_route_points(tap)
+        .into_iter()
+        .map(|point| viewport.schematic_to_screen(point))
+        .collect();
+    painter.add(egui::Shape::line(
+        route,
+        Stroke::new(width * viewport.zoom, color),
+    ));
+
+    painter.text(
+        connection + Vec2::new(5.0, -7.0),
+        egui::Align2::LEFT_BOTTOM,
+        tap.slice.to_string(),
+        crate::ui::theme::mono(
+            crate::ui::tokens::FS_0,
+            crate::ui::theme::FontWeight::Medium,
+        ),
+        if selected {
+            palette.accent
+        } else {
+            palette.net_label
+        },
+    );
+}
+
+fn offset_polyline(points: &[Pos2], offset: f32) -> Vec<Pos2> {
+    if points.len() < 2 || offset == 0.0 {
+        return points.to_vec();
+    }
+    let normal = |start: Pos2, end: Pos2| {
+        let direction = end - start;
+        let length = direction.length().max(f32::EPSILON);
+        Vec2::new(-direction.y / length, direction.x / length)
+    };
+    let mut result = Vec::with_capacity(points.len());
+    for (index, point) in points.iter().copied().enumerate() {
+        let shifted = if index == 0 {
+            point + normal(points[0], points[1]) * offset
+        } else if index + 1 == points.len() {
+            point + normal(points[index - 1], points[index]) * offset
+        } else {
+            let previous = normal(points[index - 1], points[index]);
+            let next = normal(points[index], points[index + 1]);
+            let sum = previous + next;
+            if sum.length_sq() <= f32::EPSILON {
+                point + next * offset
+            } else {
+                let miter = sum.normalized();
+                let scale = offset / miter.dot(next).abs().max(0.25);
+                point + miter * scale
+            }
+        };
+        result.push(shifted);
+    }
+    result
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct BusHit {
+    pub bus_id: u64,
+    pub point: Point,
+    pub segment_start: Point,
+    pub segment_end: Point,
+}
+
+/// Find the nearest bus segment and project the cursor onto it. The search is
+/// deterministic (distance then durable id), so overlapping malformed buses
+/// never cause frame-to-frame target flicker.
+pub(super) fn nearest_bus_hit(buses: &[Bus], requested: Point, radius: i32) -> Option<BusHit> {
+    let radius_sq = i128::from(radius.max(0)).pow(2);
+    buses
+        .iter()
+        .flat_map(|bus| {
+            bus.points.windows(2).filter_map(move |segment| {
+                let point = crate::state::nearest_lattice_point_on_segment(
+                    requested, segment[0], segment[1],
+                );
+                let dx = i128::from(point.x) - i128::from(requested.x);
+                let dy = i128::from(point.y) - i128::from(requested.y);
+                let distance_sq = dx * dx + dy * dy;
+                (distance_sq <= radius_sq).then_some((
+                    distance_sq,
+                    bus.id,
+                    BusHit {
+                        bus_id: bus.id,
+                        point,
+                        segment_start: segment[0],
+                        segment_end: segment[1],
+                    },
+                ))
+            })
+        })
+        .min_by_key(|(distance, bus_id, _)| (*distance, *bus_id))
+        .map(|(_, _, hit)| hit)
+}
+
+pub(super) fn bus_tap_at(taps: &[BusTap], requested: Point, radius: i32) -> Option<u64> {
+    let radius_sq = i128::from(radius.max(0)).pow(2);
+    taps.iter()
+        .filter_map(|tap| {
+            crate::schematic::bus_geometry::bus_tap_route_points(tap)
+                .windows(2)
+                .map(|segment| {
+                    let point = crate::state::nearest_lattice_point_on_segment(
+                        requested, segment[0], segment[1],
+                    );
+                    let dx = i128::from(point.x) - i128::from(requested.x);
+                    let dy = i128::from(point.y) - i128::from(requested.y);
+                    dx * dx + dy * dy
+                })
+                .min()
+                .filter(|distance_sq| *distance_sq <= radius_sq)
+                .map(|distance_sq| (distance_sq, tap.id))
+        })
+        .min()
+        .map(|(_, id)| id)
 }
 
 /// Draw a component on the canvas
@@ -528,8 +711,9 @@ pub(super) fn draw_junction(
     );
 }
 
-fn manhattan_distance(a: Point, b: Point) -> i32 {
-    (a.x - b.x).abs() + (a.y - b.y).abs()
+fn manhattan_distance(a: Point, b: Point) -> u64 {
+    (i64::from(a.x) - i64::from(b.x)).unsigned_abs()
+        + (i64::from(a.y) - i64::from(b.y)).unsigned_abs()
 }
 
 #[inline]
@@ -546,6 +730,7 @@ pub(super) fn nearest_terminal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{BusDeclaration, BusSlice, BusTapOrientation};
     use egui::{Context, Id, LayerId, Order, Shape};
 
     fn wire_stroke_width(selected: bool, highlighted: bool, zoom: f32) -> f32 {
@@ -582,5 +767,76 @@ mod tests {
         assert!((wire_stroke_width(false, false, zoom) - 2.2).abs() < f32::EPSILON);
         assert!((wire_stroke_width(true, false, zoom) - 4.0).abs() < f32::EPSILON);
         assert!((wire_stroke_width(false, true, zoom) - 4.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn nearest_point_handles_extreme_diagonal_coordinates() {
+        assert_eq!(
+            crate::state::nearest_lattice_point_on_segment(
+                Point::origin(),
+                Point::new(i32::MIN, i32::MIN),
+                Point::new(i32::MAX, i32::MAX),
+            ),
+            Point::origin()
+        );
+        assert_eq!(
+            manhattan_distance(
+                Point::new(i32::MIN, i32::MIN),
+                Point::new(i32::MAX, i32::MAX),
+            ),
+            u64::from(u32::MAX) * 2
+        );
+    }
+
+    #[test]
+    fn bus_hit_testing_uses_radius_projection_and_durable_tie_breaking() {
+        let declaration = BusDeclaration::parse("DATA[7:0]").unwrap();
+        let buses = vec![
+            Bus::segment(
+                9,
+                Point::new(0, 0),
+                Point::new(20, 0),
+                Some(declaration.clone()),
+            )
+            .unwrap(),
+            Bus::segment(4, Point::new(0, 0), Point::new(20, 0), Some(declaration)).unwrap(),
+        ];
+
+        assert_eq!(
+            nearest_bus_hit(&buses, Point::new(7, 2), 2),
+            Some(BusHit {
+                bus_id: 4,
+                point: Point::new(7, 0),
+                segment_start: Point::new(0, 0),
+                segment_end: Point::new(20, 0),
+            })
+        );
+        assert!(nearest_bus_hit(&buses, Point::new(7, 2), 1).is_none());
+    }
+
+    #[test]
+    fn bus_tap_hit_testing_covers_the_routed_path_and_breaks_ties_by_id() {
+        let bus = Bus::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(20, 0),
+            Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+        )
+        .unwrap();
+        let make_tap = |id| {
+            BusTap::new(
+                id,
+                &bus,
+                Point::new(10, 0),
+                Point::new(10, 10),
+                BusSlice::parse("DATA[3]").unwrap(),
+                BusTapOrientation::Down,
+            )
+            .unwrap()
+        };
+        let taps = vec![make_tap(8), make_tap(3)];
+
+        assert_eq!(bus_tap_at(&taps, Point::new(11, 6), 1), Some(3));
+        assert_eq!(bus_tap_at(&taps, Point::new(12, 6), 1), None);
     }
 }

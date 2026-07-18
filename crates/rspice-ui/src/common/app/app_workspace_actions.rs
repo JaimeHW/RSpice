@@ -152,8 +152,16 @@ fn push_world_pin_remap(
     new_offset: Point,
     world_remaps: &mut Vec<(Point, Point)>,
 ) {
-    let old_position = component.pos + component.transform_point(old_offset);
-    let new_position = component.pos + component.transform_point(new_offset);
+    let old_offset = component.transform_point(old_offset);
+    let new_offset = component.transform_point(new_offset);
+    let old_position = Point::new(
+        component.pos.x.saturating_add(old_offset.x),
+        component.pos.y.saturating_add(old_offset.y),
+    );
+    let new_position = Point::new(
+        component.pos.x.saturating_add(new_offset.x),
+        component.pos.y.saturating_add(new_offset.y),
+    );
     if old_position != new_position {
         world_remaps.push((old_position, new_position));
     }
@@ -235,13 +243,14 @@ impl AppState {
             };
 
         schematic.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
-        schematic.wire_drawing.set_routing_mode(
+        let routing_mode =
             if schematic.document_policy.wire_junctions == WireJunctionPolicy::AnyAngle {
                 WireRoutingMode::Diagonal
             } else {
                 WireRoutingMode::HorizontalFirst
-            },
-        );
+            };
+        schematic.wire_drawing.set_routing_mode(routing_mode);
+        schematic.bus_drawing.routing_mode = routing_mode;
         schematic
     }
 }
@@ -1333,6 +1342,27 @@ mod tests {
         assert_eq!(
             state.schematic.document_policy.property_commit,
             crate::state::PropertyCommitPolicy::Atomic
+        );
+    }
+
+    #[test]
+    fn any_angle_document_policy_applies_to_wire_and_bus_authoring() {
+        let mut state = AppState::default();
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::WireJunctionBehavior, 2)
+            .unwrap();
+
+        let created = state.new_schematic_document();
+
+        assert_eq!(
+            created.wire_drawing.routing_mode,
+            crate::state::WireRoutingMode::Diagonal
+        );
+        assert_eq!(
+            created.bus_drawing.routing_mode,
+            crate::state::WireRoutingMode::Diagonal
         );
     }
 

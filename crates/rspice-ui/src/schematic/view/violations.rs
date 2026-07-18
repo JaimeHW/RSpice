@@ -95,8 +95,8 @@ pub(crate) fn finding_anchor(
 
     let world = anchor(state, violation)?;
     let (component, wire) = match &violation.location {
-        DrcLocation::Component { id, .. } => (Some(*id as u64), None),
-        DrcLocation::Wire { id } => (None, Some(*id as u64)),
+        DrcLocation::Component { id, .. } => (Some(*id), None),
+        DrcLocation::Wire { id } => (None, Some(*id)),
         _ => (None, None),
     };
     Some(crate::panels::LogAnchor::Schematic {
@@ -167,21 +167,35 @@ fn anchor(state: &AppState, violation: &DrcViolation) -> Option<Point> {
             .schematic
             .components
             .iter()
-            .find(|c| c.id == *id as u64)
+            .find(|c| c.id == *id)
             .map(|c| c.pos),
-        DrcLocation::Wire { id } => state
+        DrcLocation::Wire { id } => {
+            state
+                .schematic
+                .wires
+                .iter()
+                .find(|w| w.id == *id)
+                .and_then(|w| {
+                    let first = w.points.first()?;
+                    let second = w.points.get(1).unwrap_or(first);
+                    Some(Point::new(
+                        ((i64::from(first.x) + i64::from(second.x)) / 2) as i32,
+                        ((i64::from(first.y) + i64::from(second.y)) / 2) as i32,
+                    ))
+                })
+        }
+        DrcLocation::Bus { id } => state
             .schematic
-            .wires
+            .buses
             .iter()
-            .find(|w| w.id == *id as u64)
-            .and_then(|w| {
-                let first = w.points.first()?;
-                let second = w.points.get(1).unwrap_or(first);
-                Some(Point::new(
-                    (first.x + second.x) / 2,
-                    (first.y + second.y) / 2,
-                ))
-            }),
+            .find(|bus| bus.id == *id)
+            .and_then(|bus| bus.points.first().copied()),
+        DrcLocation::BusTap { id } => state
+            .schematic
+            .bus_taps
+            .iter()
+            .find(|tap| tap.id == *id)
+            .map(|tap| tap.connection_point),
         DrcLocation::NetLabel { name } => state
             .schematic
             .net_labels

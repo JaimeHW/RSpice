@@ -29,7 +29,8 @@ use self::controlled_symbols::{
     write_vswitch_symbol,
 };
 use self::geometry::{
-    calculate_bounds, get_rotation_transform, include_junction_bounds, write_junction, write_wire,
+    calculate_bounds, get_rotation_transform, include_bus_bounds, include_junction_bounds,
+    write_bus, write_bus_tap, write_junction, write_wire,
 };
 use self::jfet_symbols::{write_njfet_symbol, write_pjfet_symbol};
 use self::mos_symbols::{write_nmos_symbol, write_pmos_symbol};
@@ -111,6 +112,8 @@ fn export_to_svg_with_resolved_symbol_entries(
 <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"{vx} {vy} {width} {height}\">\n\
 <style>\n\
   .wire {{ stroke: {wire_color}; stroke-width: {wire_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
+  .bus {{ stroke: {wire_color}; stroke-width: {bus_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
+  .bus-tap {{ stroke: {wire_color}; stroke-width: {tap_width}; fill: none; stroke-linecap: round; }}\n\
   .junction {{ fill: {wire_color}; stroke: none; }}\n\
   .component {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
   .text {{ font-family: monospace; font-size: {font_size}px; fill: {text_color}; }}\n\
@@ -120,6 +123,8 @@ fn export_to_svg_with_resolved_symbol_entries(
         vy = min_y - config.margin,
         wire_color = config.wire_color,
         wire_width = config.wire_stroke_width,
+        bus_width = config.wire_stroke_width * 0.6,
+        tap_width = config.wire_stroke_width,
         comp_color = config.component_color,
         comp_width = config.component_stroke_width,
         font_size = config.font_size,
@@ -129,6 +134,14 @@ fn export_to_svg_with_resolved_symbol_entries(
     // Export wires
     for wire in &state.wires {
         write_wire(&mut svg, wire, config);
+    }
+
+    for bus in &state.buses {
+        write_bus(&mut svg, bus, config);
+    }
+
+    for tap in &state.bus_taps {
+        write_bus_tap(&mut svg, tap, config);
     }
 
     // Junction dots encode explicit connectivity and are document content,
@@ -200,6 +213,10 @@ fn calculate_bounds_with_resolved_symbols(
             max_y = max_y.max(y);
         }
     }
+
+    include_bus_bounds(
+        state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+    );
 
     include_junction_bounds(
         state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
@@ -353,8 +370,9 @@ fn escape_xml(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, Junction, Library, LibraryCellInstance, LibraryManager, Point, PortDirection,
-        PortSpec, SymbolDocument, SymbolPin, SymbolResolver, SymbolShape, View, ViewType,
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, Junction, Library,
+        LibraryCellInstance, LibraryManager, Point, PortDirection, PortSpec, SymbolDocument,
+        SymbolPin, SymbolResolver, SymbolShape, View, ViewType,
     };
     use std::collections::HashMap;
 
@@ -542,5 +560,37 @@ mod tests {
         assert!(svg.contains(r#".junction { fill: #00FF00; stroke: none; }"#));
         assert!(svg.contains(r#"<circle class="junction" cx="70" cy="110" r="3"/>"#));
         assert!(svg.contains(r#"width="6" height="6" viewBox="67 107 6 6""#));
+    }
+
+    #[test]
+    fn svg_export_emits_complete_typed_bus_geometry_and_label_bounds() {
+        let declaration = BusDeclaration::parse("DATA[7:0]").unwrap();
+        let bus = Bus::segment(40, Point::new(0, 0), Point::new(20, 0), Some(declaration)).unwrap();
+        let tap = BusTap::new(
+            41,
+            &bus,
+            Point::new(10, 0),
+            Point::new(10, 10),
+            BusSlice::parse("DATA[3]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic.buses.push(bus);
+        schematic.bus_taps.push(tap);
+        let config = SvgExportConfig {
+            margin: 0.0,
+            ..SvgExportConfig::default()
+        };
+
+        let svg = export_to_svg(&schematic, &config);
+        let (min_x, min_y, max_x, max_y) = calculate_bounds(&schematic, &config);
+
+        assert_eq!(svg.matches(r#"<path class="bus""#).count(), 3);
+        assert!(svg.contains(r#"<path class="bus-tap" d="M 100 0 L 100 100"/>"#));
+        assert!(svg.contains(r#">DATA[7:0]</text>"#));
+        assert!(svg.contains(r#">DATA[3]</text>"#));
+        assert!(min_x <= -4.0 && min_y <= -20.0);
+        assert!(max_x > 270.0 && max_y >= 100.0);
     }
 }

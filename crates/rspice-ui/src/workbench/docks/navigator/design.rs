@@ -802,7 +802,7 @@ fn metadata_ports(metadata: &std::collections::HashMap<String, String>) -> Optio
 
 fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
     app.state.schematic.pending_library_cell = None;
-    app.state.schematic.tool = Tool::Place(kind);
+    crate::workbench::commands::arm_schematic_tool(&mut app.state.schematic, Tool::Place(kind));
     app.state.ui.toasts.success(
         ctx,
         "Component placement armed",
@@ -813,7 +813,10 @@ fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) 
 fn arm_cell(app: &mut RSpiceApp, binding: LibraryCellInstance, ctx: &egui::Context) {
     let label = format!("{}/{}", binding.library, binding.cell);
     app.state.schematic.pending_library_cell = Some(binding);
-    app.state.schematic.tool = Tool::Place(ComponentType::CellInstance);
+    crate::workbench::commands::arm_schematic_tool(
+        &mut app.state.schematic,
+        Tool::Place(ComponentType::CellInstance),
+    );
     app.state.ui.toasts.success(
         ctx,
         "Component placement armed",
@@ -880,6 +883,27 @@ mod tests {
     fn shelf_search_matches_labels_case_insensitively() {
         assert!(matches_query("nmos", &["NMOS", "Semiconductors"]));
         assert!(!matches_query("nmos", &["Resistor", "Passives"]));
+    }
+
+    #[test]
+    fn palette_placement_cancels_every_unfinished_conductor_route() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .schematic
+            .start_wire(crate::state::Point::origin());
+        app.state
+            .schematic
+            .start_bus(crate::state::Point::new(2, 3), None)
+            .unwrap();
+
+        arm_primitive(&mut app, ComponentType::Resistor, &egui::Context::default());
+
+        assert_eq!(
+            app.state.schematic.tool,
+            Tool::Place(ComponentType::Resistor)
+        );
+        assert!(!app.state.schematic.wire_drawing.active);
+        assert!(!app.state.schematic.bus_drawing.active);
     }
 
     #[test]

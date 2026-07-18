@@ -24,7 +24,8 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 
 use super::SchematicSymbolContext;
-use super::coordinates::screen_to_grid;
+use super::coordinates::{screen_to_grid, screen_to_schematic};
+use super::drawing::{bus_tap_at, nearest_bus_hit};
 use super::viewport::Viewport;
 
 const DESKTOP_WIDTH: f32 = 286.0;
@@ -166,13 +167,16 @@ pub(super) fn handle_context_menu(
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
-    wire_was_active: bool,
+    routing_was_active: bool,
     symbol_context: &SchematicSymbolContext,
 ) {
     if show_delete_confirmation(&response.ctx, state, symbol_context) {
         return;
     }
-    if wire_was_active || state.schematic.wire_drawing.active {
+    if routing_was_active
+        || state.schematic.wire_drawing.active
+        || state.schematic.bus_drawing.active
+    {
         return;
     }
 
@@ -298,7 +302,9 @@ fn capture_pointer_target(
 ) -> Option<egui::Pos2> {
     let pos = response.interact_pointer_pos()?;
     let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pos);
-    let target = select_pointer_target(state, grid_pos, symbol_context);
+    let hit_pos = screen_to_schematic(viewport, pos);
+    let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+    let target = select_pointer_target(state, grid_pos, hit_pos, hit_radius, symbol_context);
     state.dialogs.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
     Some(pos)
 }
@@ -306,6 +312,8 @@ fn capture_pointer_target(
 fn select_pointer_target(
     state: &mut AppState,
     grid_pos: Point,
+    hit_pos: Point,
+    hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
 ) -> ContextTarget {
     if let Some(id) = symbol_context
@@ -318,6 +326,12 @@ fn select_pointer_target(
             state.schematic.selection.select_component(id);
         }
         ContextTarget::Component(id)
+    } else if let Some(id) = bus_tap_at(&state.schematic.bus_taps, hit_pos, hit_radius) {
+        state.schematic.net_highlight.clear();
+        if !state.schematic.selection.has_bus_tap(id) {
+            state.schematic.selection.select_only_bus_tap(id);
+        }
+        ContextTarget::Canvas
     } else if state.schematic.has_junction(grid_pos) {
         state.schematic.net_highlight.clear();
         if !state.schematic.selection.has_junction(grid_pos) {
@@ -326,6 +340,14 @@ fn select_pointer_target(
         }
         // ContextTarget has no junction variant; the retained selection is
         // authoritative for action availability and deletion review.
+        ContextTarget::Canvas
+    } else if let Some(id) =
+        nearest_bus_hit(&state.schematic.buses, hit_pos, hit_radius).map(|hit| hit.bus_id)
+    {
+        state.schematic.net_highlight.clear();
+        if !state.schematic.selection.has_bus(id) {
+            state.schematic.selection.select_only_bus(id);
+        }
         ContextTarget::Canvas
     } else if let Some(id) = state.schematic.wire_at(grid_pos) {
         state.schematic.net_highlight.clear();
@@ -361,11 +383,29 @@ fn clamp_desktop_surface_origin(
     )
 }
 
+fn point_midpoint(first: Point, last: Point) -> Point {
+    Point::new(
+        ((i64::from(first.x) + i64::from(last.x)) / 2) as i32,
+        ((i64::from(first.y) + i64::from(last.y)) / 2) as i32,
+    )
+}
+
 fn keyboard_target(
     state: &AppState,
     viewport: &Viewport,
     fallback_screen_pos: egui::Pos2,
 ) -> (ContextTarget, Point) {
+    if let Some(id) = state.schematic.selection.single_bus_tap()
+        && let Some(tap) = state.schematic.bus_taps.iter().find(|item| item.id == id)
+    {
+        return (ContextTarget::Canvas, tap.connection_point);
+    }
+    if let Some(id) = state.schematic.selection.single_bus()
+        && let Some(bus) = state.schematic.buses.iter().find(|item| item.id == id)
+        && let (Some(first), Some(last)) = (bus.points.first(), bus.points.last())
+    {
+        return (ContextTarget::Canvas, point_midpoint(*first, *last));
+    }
     if let Some(id) = state.schematic.selection.single_component()
         && let Some(component) = state.schematic.components.iter().find(|item| item.id == id)
     {
@@ -375,10 +415,7 @@ fn keyboard_target(
         && let Some(wire) = state.schematic.wires.iter().find(|item| item.id == id)
         && let (Some(first), Some(last)) = (wire.points.first(), wire.points.last())
     {
-        return (
-            ContextTarget::Wire(id),
-            Point::new((first.x + last.x) / 2, (first.y + last.y) / 2),
-        );
+        return (ContextTarget::Wire(id), point_midpoint(*first, *last));
     }
     if let Some(point) = state.schematic.selection.single_junction() {
         return (ContextTarget::Canvas, point);
@@ -446,10 +483,27 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.wires.len()
         + selection.wire_segments.len()
         + selection.wire_vertices.len()
-        + selection.junctions.len();
+        + selection.junctions.len()
+        + selection.buses.len()
+        + selection.bus_taps.len();
     let path = format!("/{}", state.workspace.active_view.display_path());
     if count > 1 {
         return format!("{count} selected objects · {path}");
+    }
+    if let Some(id) = selection.single_bus_tap()
+        && let Some(tap) = state.schematic.bus_taps.iter().find(|tap| tap.id == id)
+    {
+        return format!("bus tap · {} · {path}", tap.slice);
+    }
+    if let Some(id) = selection.single_bus()
+        && let Some(bus) = state.schematic.buses.iter().find(|bus| bus.id == id)
+    {
+        return format!(
+            "bus · {} · {path}",
+            bus.declaration
+                .as_ref()
+                .map_or_else(|| "unnamed".to_owned(), ToString::to_string)
+        );
     }
     let target = selection
         .single_component()
@@ -727,7 +781,21 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .junctions
         .iter()
         .any(|junction| selection.has_junction(junction.pos));
-    let has_copyable_object = has_live_component || has_live_wire || has_live_junction;
+    let has_live_bus = state
+        .schematic
+        .buses
+        .iter()
+        .any(|bus| selection.has_bus(bus.id));
+    let has_live_bus_tap = state
+        .schematic
+        .bus_taps
+        .iter()
+        .any(|tap| selection.has_bus_tap(tap.id));
+    let has_copyable_object = has_live_component
+        || has_live_wire
+        || has_live_junction
+        || has_live_bus
+        || has_live_bus_tap;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
@@ -737,7 +805,15 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     }) && selection
         .wires
         .iter()
-        .all(|id| state.schematic.wires.iter().any(|wire| wire.id == *id));
+        .all(|id| state.schematic.wires.iter().any(|wire| wire.id == *id))
+        && selection
+            .buses
+            .iter()
+            .all(|id| state.schematic.buses.iter().any(|bus| bus.id == *id))
+        && selection
+            .bus_taps
+            .iter()
+            .all(|id| state.schematic.bus_taps.iter().any(|tap| tap.id == *id));
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
             .schematic
@@ -753,10 +829,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && !has_wire_sub_object;
     // Junction-only paste requires a separately chosen valid intersection, so
     // fixed-offset Duplicate intentionally stays unavailable for that case.
-    let duplicable_objects_only = (has_live_component || has_live_wire)
-        && all_whole_object_ids_are_live
-        && all_junctions_are_live
-        && !has_wire_sub_object;
+    let duplicable_objects_only =
+        (has_live_component || has_live_wire || has_live_bus || has_live_bus_tap)
+            && all_whole_object_ids_are_live
+            && all_junctions_are_live
+            && !has_wire_sub_object;
     let deletable_objects_only = (has_copyable_object || has_live_junction)
         && all_whole_object_ids_are_live
         && all_junctions_are_live
@@ -781,15 +858,15 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Copy => (
             copyable_objects_only,
-            "Select at least one component, complete wire, or junction",
+            "Select at least one component, wire, bus, tap, or junction",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
-            "Select at least one editable component or complete wire",
+            "Select at least one editable component, wire, bus, or tap",
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, complete wire, or junction",
+            "Select at least one editable component, wire, bus, tap, or junction",
         ),
         ContextAction::Probe => (true, ""),
         ContextAction::OperatingPoint => (
@@ -821,7 +898,9 @@ fn execute_context_action(
         ContextAction::Copy => state.schematic.copy_selection(),
         ContextAction::Duplicate => duplicate_selection_at(state, click_pos),
         ContextAction::Delete => request_delete_confirmation(ui.ctx(), state),
-        ContextAction::Probe => state.schematic.tool = Tool::Probe,
+        ContextAction::Probe => {
+            crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::Probe)
+        }
         ContextAction::OperatingPoint => open_operating_point(state),
     }
     ui.close();
@@ -944,6 +1023,21 @@ fn delete_review(
             objects.push(format!("junction ({}, {})", junction.pos.x, junction.pos.y));
         }
     }
+    for bus in &state.schematic.buses {
+        if request.selection.has_bus(bus.id) {
+            objects.push(format!(
+                "bus {}",
+                bus.declaration
+                    .as_ref()
+                    .map_or_else(|| format!("#{} (unnamed)", bus.id), ToString::to_string)
+            ));
+        }
+    }
+    for tap in &state.schematic.bus_taps {
+        if request.selection.has_bus_tap(tap.id) {
+            objects.push(format!("bus tap {}", tap.slice));
+        }
+    }
     let selection = if objects.is_empty() {
         "No live schematic objects".to_owned()
     } else {
@@ -976,6 +1070,15 @@ fn delete_review(
             && let Some(net) = state.simulation.cross_probe.net_at(junction.pos)
         {
             nets.insert(net.clone());
+        }
+    }
+    for tap in &state.schematic.bus_taps {
+        if request.selection.has_bus_tap(tap.id) || request.selection.has_bus(tap.bus_id) {
+            // The review surface describes a vector selector as one typed
+            // object. Expanding a legal wide range into hundreds of thousands
+            // of strings would freeze the modal without adding useful review
+            // information; scalar selectors already format identically.
+            nets.insert(tap.slice.to_string());
         }
     }
     let affected_nets = if nets.is_empty() {
@@ -1047,7 +1150,17 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
             .schematic
             .junctions
             .iter()
-            .any(|junction| request.selection.has_junction(junction.pos));
+            .any(|junction| request.selection.has_junction(junction.pos))
+        || state
+            .schematic
+            .buses
+            .iter()
+            .any(|bus| request.selection.has_bus(bus.id))
+        || state
+            .schematic
+            .bus_taps
+            .iter()
+            .any(|tap| request.selection.has_bus_tap(tap.id));
     if !has_live_object {
         state.push_user_message(ConsoleMessage::warning(
             "The reviewed selection no longer contains deletable objects.".to_owned(),
@@ -1368,7 +1481,7 @@ mod tests {
         state.schematic.junctions = vec![Junction::new(18, point)];
         let symbol_context = SchematicSymbolContext::from_state(&state);
 
-        let target = select_pointer_target(&mut state, point, &symbol_context);
+        let target = select_pointer_target(&mut state, point, point, 1, &symbol_context);
 
         assert!(matches!(target, ContextTarget::Canvas));
         assert_eq!(state.schematic.selection.single_junction(), Some(point));

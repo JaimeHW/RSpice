@@ -1519,6 +1519,8 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
     };
     match command {
         Command::PlaceWire => Icon::Wire,
+        Command::PlaceBus => Icon::Bus,
+        Command::PlaceBusTap => Icon::Bus,
         Command::PlaceJunction => Icon::Grid,
         Command::PlaceLabel => Icon::NetLabel,
         Command::PlaceProbe => Icon::Probe,
@@ -1835,6 +1837,14 @@ mod tests {
             PaletteScope::Design
         );
         assert_eq!(
+            PaletteScope::for_command(Command::PlaceBus),
+            PaletteScope::Design
+        );
+        assert_eq!(
+            PaletteScope::for_command(Command::PlaceBusTap),
+            PaletteScope::Design
+        );
+        assert_eq!(
             PaletteScope::for_command(Command::PlaceJunction),
             PaletteScope::Design
         );
@@ -1848,6 +1858,18 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(help.contains(&Command::KeyboardShortcuts));
         assert!(help.contains(&Command::About));
+    }
+
+    #[test]
+    fn bus_commands_use_the_mockup_palette_glyphs() {
+        assert_eq!(
+            row_icon(&PaletteEntry::Command(Command::PlaceBus)),
+            Icon::Bus
+        );
+        assert_eq!(
+            row_icon(&PaletteEntry::Command(Command::PlaceBusTap)),
+            Icon::Bus
+        );
     }
 
     #[test]

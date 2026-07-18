@@ -76,6 +76,8 @@ pub enum Command {
     SelectTool,
     PlaceInstance,
     PlaceWire,
+    PlaceBus,
+    PlaceBusTap,
     PlaceJunction,
     PlaceLabel,
     PlaceProbe,
@@ -255,6 +257,8 @@ impl Command {
             Self::SelectTool => spec("select-tool", "Select tool", "Design"),
             Self::PlaceInstance => spec("place-instance", "Place instance…", "Design"),
             Self::PlaceWire => spec("place-wire", "Draw wire", "Design"),
+            Self::PlaceBus => spec("place-bus", "Draw bus", "Design"),
+            Self::PlaceBusTap => spec("place-bus-tap", "Place bus tap", "Design"),
             Self::PlaceJunction => spec("place-junction", "Place junction", "Design"),
             Self::PlaceLabel => spec("place-label", "Place net label", "Design"),
             Self::PlaceProbe => spec("place-probe", "Place probe", "Design"),
@@ -602,9 +606,11 @@ impl Command {
             Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
             Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::PlaceWire | Self::PlaceJunction | Self::PlaceProbe => {
-                active_schematic_editor(app) && !state.schematic.read_only
-            }
+            Self::PlaceWire
+            | Self::PlaceBus
+            | Self::PlaceBusTap
+            | Self::PlaceJunction
+            | Self::PlaceProbe => active_schematic_editor(app) && !state.schematic.read_only,
             Self::PlaceInstance | Self::PlaceLabel | Self::Place(_) => {
                 active_schematic_editor(app) && !state.schematic.read_only
             }
@@ -996,6 +1002,11 @@ impl Command {
                 app.state.workbench.focus_placement_search = true;
             }
             Self::PlaceWire => set_tool(app, Tool::Wire),
+            Self::PlaceBus => set_tool(app, Tool::Bus),
+            Self::PlaceBusTap => {
+                activate_workspace(app, Workspace::Design);
+                app.state.dialogs.bus_tap.open();
+            }
             Self::PlaceJunction => set_tool(app, Tool::Junction),
             Self::PlaceLabel => set_tool(app, Tool::Label),
             Self::PlaceProbe => set_tool(app, Tool::Probe),
@@ -1052,8 +1063,7 @@ impl Command {
                 {
                     app.state.ui.results.clear_cursors();
                 } else {
-                    app.state.schematic.tool = Tool::Select;
-                    app.state.schematic.cancel_wire();
+                    cancel_schematic_tool(&mut app.state.schematic);
                     app.state.schematic.selection.clear();
                     app.state.schematic.selection_rect.cancel();
                 }
@@ -1322,7 +1332,28 @@ fn schematic_selection_has_duplicable_object(schematic: &crate::state::Schematic
 
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     activate_workspace(app, Workspace::Design);
-    app.state.schematic.tool = tool;
+    arm_schematic_tool(&mut app.state.schematic, tool);
+}
+
+/// Arm one schematic tool through the single conductor-lifecycle boundary.
+/// Switching tools cancels every incompatible unfinished route, and leaving
+/// bus-tap placement retires its validated runtime configuration.
+pub(crate) fn arm_schematic_tool(schematic: &mut crate::state::SchematicState, tool: Tool) {
+    if schematic.tool != tool {
+        schematic.cancel_routing_gestures();
+    }
+    if tool != Tool::BusTap {
+        schematic.pending_bus_tap = None;
+    }
+    schematic.tool = tool;
+}
+
+/// Escape/cancel is stronger than re-arming Select: it also clears any
+/// inconsistent hidden route restored from legacy or interrupted state.
+pub(crate) fn cancel_schematic_tool(schematic: &mut crate::state::SchematicState) {
+    schematic.cancel_routing_gestures();
+    schematic.pending_bus_tap = None;
+    schematic.tool = Tool::Select;
 }
 
 fn open_recent_projects(workbench: &mut WorkbenchState) {
@@ -1487,6 +1518,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SelectTool,
     Command::PlaceInstance,
     Command::PlaceWire,
+    Command::PlaceBus,
+    Command::PlaceBusTap,
     Command::PlaceJunction,
     Command::PlaceLabel,
     Command::PlaceProbe,
@@ -1579,6 +1612,98 @@ pub fn command_catalog() -> impl Iterator<Item = Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bus_commands_have_stable_mockup_identities() {
+        assert_eq!(Command::PlaceBus.stable_id(), "place-bus");
+        assert_eq!(Command::PlaceBus.spec().label, "Draw bus");
+        assert_eq!(Command::PlaceBusTap.stable_id(), "place-bus-tap");
+        assert_eq!(Command::PlaceBusTap.spec().label, "Place bus tap");
+        assert_eq!(
+            Command::from_stable_id("place-bus"),
+            Some(Command::PlaceBus)
+        );
+        assert_eq!(
+            Command::from_stable_id("place-bus-tap"),
+            Some(Command::PlaceBusTap)
+        );
+    }
+
+    #[test]
+    fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+
+        Command::PlaceBus.execute(&mut app);
+        assert_eq!(app.state.schematic.tool, Tool::Bus);
+
+        app.state.schematic.tool = Tool::Select;
+        Command::PlaceBusTap.execute(&mut app);
+        assert!(app.state.dialogs.bus_tap.open);
+        assert_eq!(app.state.schematic.tool, Tool::Select);
+        assert!(app.state.schematic.pending_bus_tap.is_none());
+    }
+
+    #[test]
+    fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        assert!(Command::PlaceBus.is_enabled(&app));
+        assert!(Command::PlaceBusTap.is_enabled(&app));
+
+        app.state.schematic.read_only = true;
+        assert!(!Command::PlaceBus.is_enabled(&app));
+        assert!(!Command::PlaceBusTap.is_enabled(&app));
+    }
+
+    #[test]
+    fn switching_conductor_tools_cancels_incompatible_routes_and_tap_state() {
+        use crate::state::{BusDeclaration, BusSlice, BusTapOrientation, PendingBusTap, Point};
+
+        let mut schematic = crate::state::SchematicState::default();
+        arm_schematic_tool(&mut schematic, Tool::Wire);
+        schematic.start_wire(Point::origin());
+        assert!(schematic.wire_drawing.active);
+
+        arm_schematic_tool(&mut schematic, Tool::Bus);
+        assert!(!schematic.wire_drawing.active);
+        schematic.start_bus(Point::new(2, 3), None).unwrap();
+        assert!(schematic.bus_drawing.active);
+
+        schematic.pending_bus_tap = Some(
+            PendingBusTap::new(
+                BusDeclaration::parse("DATA[15:0]").unwrap(),
+                BusSlice::parse("DATA[7:0]").unwrap(),
+                BusTapOrientation::Automatic,
+            )
+            .unwrap(),
+        );
+        arm_schematic_tool(&mut schematic, Tool::BusTap);
+        assert!(!schematic.bus_drawing.active);
+        assert!(schematic.pending_bus_tap.is_some());
+
+        arm_schematic_tool(&mut schematic, Tool::Wire);
+        assert!(schematic.pending_bus_tap.is_none());
+    }
+
+    #[test]
+    fn cancel_clears_even_hidden_conductor_routes() {
+        use crate::state::Point;
+
+        let mut schematic = crate::state::SchematicState::default();
+        schematic.tool = Tool::Select;
+        schematic.start_wire(Point::origin());
+        schematic.start_bus(Point::new(4, 5), None).unwrap();
+        assert!(schematic.wire_drawing.active);
+        assert!(schematic.bus_drawing.active);
+
+        cancel_schematic_tool(&mut schematic);
+
+        assert_eq!(schematic.tool, Tool::Select);
+        assert!(!schematic.wire_drawing.active);
+        assert!(!schematic.bus_drawing.active);
+        assert!(schematic.pending_bus_tap.is_none());
+    }
 
     #[test]
     fn edit_specifications_opens_the_real_results_editor() {

@@ -362,12 +362,12 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
         }
         DrcLocation::Component { id, name } => {
             writer.u8(1);
-            writer.usize(*id);
+            writer.u64(*id);
             writer.string(name);
         }
         DrcLocation::Wire { id } => {
             writer.u8(2);
-            writer.usize(*id);
+            writer.u64(*id);
         }
         DrcLocation::NetLabel { name } => {
             writer.u8(3);
@@ -392,6 +392,14 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
                 writer.i32(point.x);
                 writer.i32(point.y);
             });
+        }
+        DrcLocation::Bus { id } => {
+            writer.u8(7);
+            writer.u64(*id);
+        }
+        DrcLocation::BusTap { id } => {
+            writer.u8(8);
+            writer.u64(*id);
         }
     }
 }
@@ -1197,6 +1205,12 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::SymbolUnplacedPin => 14,
         DrcViolationType::SymbolOrphanedPin => 15,
         DrcViolationType::SymbolPinOffGrid => 16,
+        DrcViolationType::MalformedBus => 17,
+        DrcViolationType::UnnamedBus => 18,
+        DrcViolationType::BusRangeConflict => 19,
+        DrcViolationType::DanglingBusTap => 20,
+        DrcViolationType::MixedBusTap => 21,
+        DrcViolationType::DuplicateBusMemberDriver => 22,
     }
 }
 
@@ -1293,6 +1307,50 @@ mod tests {
         assert_eq!(
             drc_receipt_digest(7, &first),
             drc_receipt_digest(7, &second)
+        );
+    }
+
+    #[test]
+    fn drc_receipt_retains_full_durable_bus_identity() {
+        let digest_for = |location| {
+            let mut result = DrcResult::new();
+            result.add_violation(DrcViolation::new(
+                1,
+                DrcViolationType::MalformedBus,
+                "malformed bus",
+                location,
+            ));
+            result.completed = true;
+            drc_receipt_digest(9, &result)
+        };
+
+        assert_ne!(
+            digest_for(DrcLocation::Bus { id: 1 }),
+            digest_for(DrcLocation::Bus {
+                id: 1 + (1_u64 << 32),
+            })
+        );
+        assert_ne!(
+            digest_for(DrcLocation::BusTap { id: 1 }),
+            digest_for(DrcLocation::BusTap {
+                id: 1 + (1_u64 << 32),
+            })
+        );
+        assert_ne!(
+            digest_for(DrcLocation::Component {
+                id: 1,
+                name: "R1".to_owned(),
+            }),
+            digest_for(DrcLocation::Component {
+                id: 1 + (1_u64 << 32),
+                name: "R1".to_owned(),
+            })
+        );
+        assert_ne!(
+            digest_for(DrcLocation::Wire { id: 1 }),
+            digest_for(DrcLocation::Wire {
+                id: 1 + (1_u64 << 32),
+            })
         );
     }
 }

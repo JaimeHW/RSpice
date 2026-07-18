@@ -167,40 +167,85 @@ impl RSpiceApp {
                 self.state.dialogs.shortcuts_help = true;
             }
             ShortcutCommand::SelectTool => {
-                self.state.schematic.tool = Tool::Select;
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Select,
+                );
             }
             ShortcutCommand::PlaceWire => {
-                self.state.schematic.tool = Tool::Wire;
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Wire,
+                );
+            }
+            ShortcutCommand::PlaceBus => {
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Bus,
+                );
+            }
+            ShortcutCommand::PlaceBusTap => {
+                self.state.dialogs.bus_tap.open();
             }
             ShortcutCommand::PlaceJunction => {
-                self.state.schematic.tool = Tool::Junction;
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Junction,
+                );
             }
             ShortcutCommand::Place(ComponentType::Ground) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::Ground);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::Ground),
+                );
             }
             ShortcutCommand::Place(ComponentType::VoltageSource) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::VoltageSource);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::VoltageSource),
+                );
             }
             ShortcutCommand::Place(ComponentType::CurrentSource) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::CurrentSource);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::CurrentSource),
+                );
             }
             ShortcutCommand::Place(ComponentType::Capacitor) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::Capacitor);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::Capacitor),
+                );
             }
             ShortcutCommand::Place(ComponentType::Inductor) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::Inductor);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::Inductor),
+                );
             }
             ShortcutCommand::Place(ComponentType::Diode) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::Diode);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::Diode),
+                );
             }
             ShortcutCommand::Place(ComponentType::Nmos) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::Nmos);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::Nmos),
+                );
             }
             ShortcutCommand::Place(ComponentType::NpnBjt) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::NpnBjt);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::NpnBjt),
+                );
             }
             ShortcutCommand::PlaceProbe => {
-                self.state.schematic.tool = Tool::Probe;
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Probe,
+                );
             }
             ShortcutCommand::SymbolPinTool
             | ShortcutCommand::SymbolPolylineTool
@@ -211,7 +256,10 @@ impl RSpiceApp {
                 command.execute(self);
             }
             ShortcutCommand::Place(ComponentType::Resistor) => {
-                self.state.schematic.tool = Tool::Place(ComponentType::Resistor);
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Place(ComponentType::Resistor),
+                );
             }
             ShortcutCommand::RotateSelection => {
                 self.state.schematic.preview_rotation =
@@ -246,8 +294,7 @@ impl RSpiceApp {
                 {
                     self.state.ui.results.clear_cursors();
                 } else {
-                    self.state.schematic.tool = Tool::Select;
-                    self.state.schematic.cancel_wire();
+                    crate::workbench::commands::cancel_schematic_tool(&mut self.state.schematic);
                     self.state.schematic.selection.clear();
                     self.state.schematic.selection_rect.cancel();
                 }
@@ -300,7 +347,10 @@ impl RSpiceApp {
                 self.state.schematic.zoom = 1.0;
             }
             ShortcutCommand::PlaceLabel => {
-                self.state.schematic.tool = Tool::Label;
+                crate::workbench::commands::arm_schematic_tool(
+                    &mut self.state.schematic,
+                    Tool::Label,
+                );
             }
             ShortcutCommand::PlaceInstance => {
                 self.state
@@ -497,6 +547,8 @@ impl RSpiceApp {
             }
             ShortcutCommand::Place(_)
             | ShortcutCommand::PlaceWire
+            | ShortcutCommand::PlaceBus
+            | ShortcutCommand::PlaceBusTap
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceProbe
             | ShortcutCommand::PlaceLabel
@@ -807,18 +859,7 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_edit_select_all(&mut self) {
-        let schematic = &mut self.state.schematic;
-        let junction_positions: Vec<_> = schematic
-            .junctions
-            .iter()
-            .map(|junction| junction.pos)
-            .collect();
-        schematic.selection.clear();
-        schematic.selection.components = schematic.components.iter().map(|c| c.id).collect();
-        schematic.selection.wires = schematic.wires.iter().map(|w| w.id).collect();
-        for pos in junction_positions {
-            schematic.selection.select_junction(pos);
-        }
+        self.state.schematic.select_all_objects();
     }
 }
 
@@ -834,6 +875,8 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::Cut
             | ShortcutCommand::Delete
             | ShortcutCommand::PlaceWire
+            | ShortcutCommand::PlaceBus
+            | ShortcutCommand::PlaceBusTap
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::Place(_)

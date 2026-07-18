@@ -8,9 +8,22 @@ impl SchematicState {
 
     /// Generate a unique ID
     pub fn next_id(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
+        loop {
+            let id = self.next_id.max(1);
+            self.next_id = id.checked_add(1).unwrap_or(1);
+            if !self.live_id_in_use(id) {
+                return id;
+            }
+        }
+    }
+
+    fn live_id_in_use(&self, id: u64) -> bool {
+        self.components.iter().any(|item| item.id == id)
+            || self.wires.iter().any(|item| item.id == id)
+            || self.junctions.iter().any(|item| item.id == id)
+            || self.net_labels.iter().any(|item| item.id == id)
+            || self.buses.iter().any(|item| item.id == id)
+            || self.bus_taps.iter().any(|item| item.id == id)
     }
 
     /// Get the current topology version
@@ -37,6 +50,7 @@ impl SchematicState {
         let wire_count_before_repair = self.wires.len();
         self.wires.retain(|wire| wire.points.len() >= 2);
         self.clipboard.wires.retain(|wire| wire.points.len() >= 2);
+        self.clipboard.buses.retain(|bus| bus.validate().is_ok());
         if self.wires.len() != wire_count_before_repair {
             self.bump_topology_version();
         }
@@ -48,11 +62,15 @@ impl SchematicState {
         let max_wire_id = self.wires.iter().map(|w| w.id).max().unwrap_or(0);
         let max_junction_id = self.junctions.iter().map(|j| j.id).max().unwrap_or(0);
         let max_label_id = self.net_labels.iter().map(|l| l.id).max().unwrap_or(0);
-        self.next_id = max_component_id
+        let max_bus_id = self.buses.iter().map(|bus| bus.id).max().unwrap_or(0);
+        let max_bus_tap_id = self.bus_taps.iter().map(|tap| tap.id).max().unwrap_or(0);
+        let max_id = max_component_id
             .max(max_wire_id)
             .max(max_junction_id)
             .max(max_label_id)
-            + 1;
+            .max(max_bus_id)
+            .max(max_bus_tap_id);
+        self.next_id = max_id.checked_add(1).unwrap_or(1);
 
         // Repair duplicate component IDs left behind by earlier counter
         // collisions: later duplicates get fresh IDs. Their wire
@@ -113,6 +131,53 @@ impl SchematicState {
             self.bump_topology_version();
         }
 
+        // Bus and tap IDs share the document-wide identity namespace. Repair
+        // collisions with legacy object IDs and update tap ownership when the
+        // first occurrence of a bus ID is reassigned.
+        let mut occupied_ids: HashSet<u64> = self
+            .components
+            .iter()
+            .map(|item| item.id)
+            .chain(self.wires.iter().map(|item| item.id))
+            .chain(self.junctions.iter().map(|item| item.id))
+            .chain(self.net_labels.iter().map(|item| item.id))
+            .collect();
+        let mut seen_bus_ids = HashSet::with_capacity(self.buses.len());
+        let mut bus_id_remap = HashMap::new();
+        let mut bus_ids_repaired = false;
+        for index in 0..self.buses.len() {
+            let old_id = self.buses[index].id;
+            let first_bus_with_id = seen_bus_ids.insert(old_id);
+            if occupied_ids.insert(old_id) {
+                continue;
+            }
+            let replacement = self.next_id();
+            occupied_ids.insert(replacement);
+            self.buses[index].id = replacement;
+            if first_bus_with_id {
+                bus_id_remap.insert(old_id, replacement);
+            }
+            bus_ids_repaired = true;
+        }
+        for tap in &mut self.bus_taps {
+            if let Some(replacement) = bus_id_remap.get(&tap.bus_id) {
+                tap.bus_id = *replacement;
+            }
+        }
+
+        for index in 0..self.bus_taps.len() {
+            let id = self.bus_taps[index].id;
+            if !occupied_ids.insert(id) {
+                let replacement = self.next_id();
+                occupied_ids.insert(replacement);
+                self.bus_taps[index].id = replacement;
+                bus_ids_repaired = true;
+            }
+        }
+        if bus_ids_repaired {
+            self.bump_topology_version();
+        }
+
         // Rebuild component counters from existing component names
         self.component_counters.clear();
         for comp in &self.components {
@@ -144,6 +209,8 @@ impl SchematicState {
             .collect();
         let junction_positions: HashSet<Point> =
             self.junctions.iter().map(|junction| junction.pos).collect();
+        let bus_ids: HashSet<u64> = self.buses.iter().map(|bus| bus.id).collect();
+        let bus_tap_ids: HashSet<u64> = self.bus_taps.iter().map(|tap| tap.id).collect();
 
         self.selection
             .components
@@ -164,6 +231,10 @@ impl SchematicState {
         self.selection
             .junctions
             .retain(|junction| junction_positions.contains(&junction.pos));
+        self.selection.buses.retain(|id| bus_ids.contains(id));
+        self.selection
+            .bus_taps
+            .retain(|id| bus_tap_ids.contains(id));
 
         self.connections.retain(|connection| {
             component_ids.contains(&connection.component_id)
@@ -187,7 +258,11 @@ impl SchematicState {
 
 #[cfg(test)]
 mod tests {
-    use crate::state::{ComponentType, Junction, Point, SchematicState};
+    use crate::state::{
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, ComponentType, Junction, Point,
+        SchematicState,
+    };
+    use std::collections::HashSet;
 
     #[test]
     fn recalculated_schematic_does_not_reuse_component_ids() {
@@ -254,5 +329,100 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn recalculate_repairs_bus_identity_and_preserves_tap_ownership() {
+        let declaration = BusDeclaration::parse("DATA[3:0]").unwrap();
+        let bus = Bus::segment(1, Point::new(0, 0), Point::new(10, 0), Some(declaration)).unwrap();
+        let tap = BusTap::new(
+            1,
+            &bus,
+            Point::new(5, 0),
+            Point::new(5, 5),
+            BusSlice::parse("DATA[1]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic.add_component(ComponentType::Resistor, Point::origin());
+        schematic.buses.push(bus);
+        schematic.bus_taps.push(tap);
+
+        schematic.recalculate_runtime_state();
+
+        assert_ne!(schematic.buses[0].id, schematic.components[0].id);
+        assert_eq!(schematic.bus_taps[0].bus_id, schematic.buses[0].id);
+        assert_ne!(schematic.bus_taps[0].id, schematic.buses[0].id);
+    }
+
+    #[test]
+    fn recalculate_wraps_from_max_id_without_panicking_or_reusing_live_identity() {
+        let mut schematic = SchematicState::default();
+        let mut component =
+            crate::state::Component::new(u64::MAX, ComponentType::Resistor, Point::origin());
+        component.name = "RMAX".to_owned();
+        schematic.components.push(component);
+
+        schematic.recalculate_runtime_state();
+        let new_id = schematic.add_component(ComponentType::Capacitor, Point::new(10, 0));
+
+        assert_ne!(new_id, u64::MAX);
+        assert_eq!(new_id, 1);
+        assert_eq!(
+            schematic
+                .components
+                .iter()
+                .map(|component| component.id)
+                .collect::<HashSet<_>>()
+                .len(),
+            schematic.components.len()
+        );
+    }
+
+    #[test]
+    fn recalculate_preserves_malformed_bus_records_for_recovery_and_drc() {
+        let mut schematic = SchematicState::default();
+        schematic.buses.push(Bus {
+            id: 70,
+            points: vec![Point::new(3, 4)],
+            declaration: None,
+        });
+        schematic.bus_taps.push(BusTap {
+            id: 71,
+            bus_id: 70,
+            bus_point: Point::new(3, 4),
+            connection_point: Point::new(3, 10),
+            slice: BusSlice::parse("DATA[0]").unwrap(),
+            orientation: BusTapOrientation::Down,
+        });
+
+        schematic.recalculate_runtime_state();
+        let analysis = crate::schematic::bus_connectivity::analyze_bus_connectivity(&schematic);
+
+        assert_eq!(schematic.buses.len(), 1);
+        assert_eq!(schematic.bus_taps.len(), 1);
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == crate::schematic::bus_connectivity::BusDiagnosticKind::MalformedBus
+                && diagnostic.bus_id == Some(70)
+        }));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.tap_id == Some(71))
+        );
+    }
+
+    #[test]
+    fn legacy_state_without_bus_fields_migrates_to_empty_collections() {
+        let state = SchematicState::default();
+        let mut value = serde_json::to_value(state).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("buses");
+        object.remove("bus_taps");
+        let migrated: SchematicState = serde_json::from_value(value).unwrap();
+        assert!(migrated.buses.is_empty());
+        assert!(migrated.bus_taps.is_empty());
     }
 }

@@ -31,6 +31,15 @@ const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
 const MENU_RENDER_STATE_ID: &str = "workbench.title_menu.render_state";
 const MENU_RETURN_FOCUS_ID: &str = "workbench.title_menu.return_focus";
 const MENU_TYPEAHEAD_ID: &str = "workbench.title_menu.typeahead";
+const DESIGN_PLACEMENT_COMMANDS: [Command; 7] = [
+    Command::PlaceInstance,
+    Command::PlaceWire,
+    Command::PlaceBus,
+    Command::PlaceBusTap,
+    Command::PlaceJunction,
+    Command::PlaceLabel,
+    Command::PlaceProbe,
+];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
@@ -1161,6 +1170,8 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlaceInstance => WorkbenchIcon::Component,
         Command::Place(_) => WorkbenchIcon::Add,
         Command::PlaceWire => WorkbenchIcon::Wire,
+        Command::PlaceBus => WorkbenchIcon::Bus,
+        Command::PlaceBusTap => WorkbenchIcon::Bus,
         Command::PlaceJunction => WorkbenchIcon::Grid,
         Command::PlaceLabel => WorkbenchIcon::Label,
         Command::PlaceProbe => WorkbenchIcon::Probe,
@@ -1307,13 +1318,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::AscendHierarchy);
     command_item_as(ui, app, Command::DescendHierarchy, DESCEND_MENU_LABEL, None);
     menu_separator(ui);
-    for command in [
-        Command::PlaceInstance,
-        Command::PlaceWire,
-        Command::PlaceJunction,
-        Command::PlaceLabel,
-        Command::PlaceProbe,
-    ] {
+    for command in DESIGN_PLACEMENT_COMMANDS {
         command_item(ui, app, command);
     }
     menu_separator(ui);
@@ -2323,6 +2328,8 @@ mod tests {
             Command::Save,
             Command::Undo,
             Command::PlaceWire,
+            Command::PlaceBus,
+            Command::PlaceBusTap,
             Command::PlaceJunction,
             Command::RunSimulation,
             Command::WaveformCalculator,
@@ -2330,6 +2337,22 @@ mod tests {
             Command::AutomationConsole,
         ];
         assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
+    }
+
+    #[test]
+    fn design_placement_menu_matches_the_mockup_order() {
+        assert_eq!(
+            DESIGN_PLACEMENT_COMMANDS,
+            [
+                Command::PlaceInstance,
+                Command::PlaceWire,
+                Command::PlaceBus,
+                Command::PlaceBusTap,
+                Command::PlaceJunction,
+                Command::PlaceLabel,
+                Command::PlaceProbe,
+            ]
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

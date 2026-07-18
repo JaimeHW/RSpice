@@ -215,7 +215,7 @@ impl JunctionSelection {
 
 /// Selection state for schematic elements
 ///
-/// Tracks which components, wires, segments, vertices, and junctions
+/// Tracks which components, wires, buses, taps, segments, vertices, and junctions
 /// are currently selected. Supports multi-selection for batch operations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Selection {
@@ -234,6 +234,14 @@ pub struct Selection {
 
     /// Selected junctions
     pub junctions: Vec<JunctionSelection>,
+
+    /// Selected bus IDs.
+    #[serde(default)]
+    pub buses: HashSet<u64>,
+
+    /// Selected bus-tap IDs.
+    #[serde(default)]
+    pub bus_taps: HashSet<u64>,
 }
 
 impl Selection {
@@ -249,6 +257,8 @@ impl Selection {
             && self.wire_segments.is_empty()
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
     }
 
     /// Get total number of selected items
@@ -258,6 +268,8 @@ impl Selection {
             + self.wire_segments.len()
             + self.wire_vertices.len()
             + self.junctions.len()
+            + self.buses.len()
+            + self.bus_taps.len()
     }
 
     /// Clear all selections
@@ -267,6 +279,8 @@ impl Selection {
         self.wire_segments.clear();
         self.wire_vertices.clear();
         self.junctions.clear();
+        self.buses.clear();
+        self.bus_taps.clear();
     }
 
     // =========================================================================
@@ -310,6 +324,8 @@ impl Selection {
             && self.wire_segments.is_empty()
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
         {
             self.components.iter().next().copied()
         } else {
@@ -358,6 +374,8 @@ impl Selection {
             && self.wire_segments.is_empty()
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
         {
             self.wires.iter().next().copied()
         } else {
@@ -404,6 +422,8 @@ impl Selection {
             && self.wires.is_empty()
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
         {
             Some(&self.wire_segments[0])
         } else {
@@ -450,6 +470,8 @@ impl Selection {
             && self.wires.is_empty()
             && self.wire_segments.is_empty()
             && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
         {
             Some(&self.wire_vertices[0])
         } else {
@@ -491,11 +513,75 @@ impl Selection {
             && self.wires.is_empty()
             && self.wire_segments.is_empty()
             && self.wire_vertices.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
         {
             Some(self.junctions[0].pos)
         } else {
             None
         }
+    }
+
+    // =========================================================================
+    // Bus and Bus-Tap Selection
+    // =========================================================================
+
+    pub fn has_bus(&self, id: u64) -> bool {
+        self.buses.contains(&id)
+    }
+
+    pub fn select_bus(&mut self, id: u64) {
+        self.buses.insert(id);
+    }
+
+    pub fn deselect_bus(&mut self, id: u64) {
+        self.buses.remove(&id);
+    }
+
+    pub fn toggle_bus(&mut self, id: u64) {
+        if !self.buses.remove(&id) {
+            self.buses.insert(id);
+        }
+    }
+
+    pub fn select_only_bus(&mut self, id: u64) {
+        self.clear();
+        self.buses.insert(id);
+    }
+
+    pub fn single_bus(&self) -> Option<u64> {
+        (self.buses.len() == 1 && self.count() == 1)
+            .then(|| self.buses.iter().next().copied())
+            .flatten()
+    }
+
+    pub fn has_bus_tap(&self, id: u64) -> bool {
+        self.bus_taps.contains(&id)
+    }
+
+    pub fn select_bus_tap(&mut self, id: u64) {
+        self.bus_taps.insert(id);
+    }
+
+    pub fn deselect_bus_tap(&mut self, id: u64) {
+        self.bus_taps.remove(&id);
+    }
+
+    pub fn toggle_bus_tap(&mut self, id: u64) {
+        if !self.bus_taps.remove(&id) {
+            self.bus_taps.insert(id);
+        }
+    }
+
+    pub fn select_only_bus_tap(&mut self, id: u64) {
+        self.clear();
+        self.bus_taps.insert(id);
+    }
+
+    pub fn single_bus_tap(&self) -> Option<u64> {
+        (self.bus_taps.len() == 1 && self.count() == 1)
+            .then(|| self.bus_taps.iter().next().copied())
+            .flatten()
     }
 
     // =========================================================================
@@ -514,6 +600,8 @@ impl Selection {
             && self.wire_segments.is_empty()
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
     }
 
     /// Check if only wires are selected (no components or other items)
@@ -523,11 +611,18 @@ impl Selection {
             && self.wire_segments.is_empty()
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
     }
 
     /// Check if any wire-related items are selected
     pub fn has_any_wire_selection(&self) -> bool {
         !self.wires.is_empty() || !self.wire_segments.is_empty() || !self.wire_vertices.is_empty()
+    }
+
+    /// Check if any bus or bus-tap object is selected.
+    pub fn has_any_bus_selection(&self) -> bool {
+        !self.buses.is_empty() || !self.bus_taps.is_empty()
     }
 
     /// Get all selected wire IDs (including from segments and vertices)
@@ -556,5 +651,18 @@ mod tests {
 
         selection.select_component(9);
         assert_eq!(selection.single_junction(), None);
+    }
+
+    #[test]
+    fn bus_and_tap_selection_participate_in_exclusive_queries_and_clear() {
+        let mut selection = Selection::new();
+        selection.select_only_bus(9);
+        assert_eq!(selection.single_bus(), Some(9));
+        selection.select_bus_tap(10);
+        assert_eq!(selection.single_bus(), None);
+        assert!(selection.has_any_bus_selection());
+        assert_eq!(selection.count(), 2);
+        selection.clear();
+        assert!(selection.is_empty());
     }
 }

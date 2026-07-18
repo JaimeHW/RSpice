@@ -225,6 +225,8 @@ struct SchematicDocumentContent<'a> {
     schema_version: u16,
     components: &'a [crate::state::Component],
     wires: &'a [crate::state::Wire],
+    buses: &'a [crate::state::Bus],
+    bus_taps: &'a [crate::state::BusTap],
     net_labels: &'a [crate::state::NetLabel],
     junctions: &'a [crate::state::Junction],
 }
@@ -232,9 +234,11 @@ struct SchematicDocumentContent<'a> {
 impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a> {
     fn from(schematic: &'a crate::state::SchematicState) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             components: &schematic.components,
             wires: &schematic.wires,
+            buses: &schematic.buses,
+            bus_taps: &schematic.bus_taps,
             net_labels: &schematic.net_labels,
             junctions: &schematic.junctions,
         }
@@ -394,8 +398,9 @@ mod tests {
     use super::*;
     use crate::common::app::AppState;
     use crate::state::{
-        ComponentType, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-        DesignVariableScope, DesignVariableSweepEligibility, Point, SimulationPlanPayloadRecord,
+        BusDeclaration, BusSlice, BusTapOrientation, ComponentType, DesignVariable,
+        DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariableSweepEligibility, Point, SimulationPlanPayloadRecord,
     };
 
     #[test]
@@ -461,6 +466,37 @@ mod tests {
             .expect("rebuild edited registry");
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
+    }
+
+    #[test]
+    fn typed_bus_and_tap_edits_mark_the_schematic_document_dirty() {
+        let mut state = AppState::default();
+        let active = state.workspace.active_view.clone();
+        let empty = super::super::snapshot(&state).expect("empty baseline");
+        let declaration = BusDeclaration::parse("DATA[15:0]").expect("valid declaration");
+        let bus_id = state
+            .schematic
+            .add_bus(vec![Point::new(0, 0), Point::new(10, 0)], Some(declaration))
+            .expect("add bus");
+
+        let with_bus = super::super::snapshot(&state).expect("bus snapshot");
+        let mut registry = DocumentRegistry::default();
+        registry.rebuild(&with_bus, Some(&empty)).unwrap();
+        assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
+
+        state
+            .schematic
+            .place_bus_tap(
+                bus_id,
+                Point::new(5, 0),
+                Point::new(5, 4),
+                BusSlice::parse("DATA[7]").expect("valid scalar tap"),
+                BusTapOrientation::Automatic,
+            )
+            .expect("place tap");
+        let with_tap = super::super::snapshot(&state).expect("tap snapshot");
+        registry.rebuild(&with_tap, Some(&with_bus)).unwrap();
+        assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 
     #[test]

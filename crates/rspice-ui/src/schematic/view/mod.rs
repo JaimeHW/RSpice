@@ -14,6 +14,7 @@ use crate::state::{
 
 use super::symbols::SymbolLibrary;
 
+mod bus_interaction;
 mod context_menu;
 mod coordinates;
 mod drawing;
@@ -130,6 +131,8 @@ impl SchematicSymbolContext {
     ) -> Option<(i32, i32, i32, i32)> {
         if schematic.components.is_empty()
             && schematic.wires.is_empty()
+            && schematic.buses.is_empty()
+            && schematic.bus_taps.is_empty()
             && schematic.junctions.is_empty()
         {
             return None;
@@ -154,6 +157,18 @@ impl SchematicSymbolContext {
         for wire in &schematic.wires {
             for point in &wire.points {
                 include(*point, *point);
+            }
+        }
+
+        for bus in &schematic.buses {
+            for point in &bus.points {
+                include(*point, *point);
+            }
+        }
+
+        for tap in &schematic.bus_taps {
+            for point in crate::schematic::bus_geometry::bus_tap_route_points(tap) {
+                include(point, point);
             }
         }
 
@@ -208,6 +223,39 @@ impl SchematicSymbolContext {
             };
             if wire_in_rect && !schematic.selection.has_wire(wire.id) {
                 schematic.selection.select_wire(wire.id);
+                count += 1;
+            }
+        }
+
+        for bus in &schematic.buses {
+            let bus_in_rect = if enclosed_only {
+                bus.points
+                    .iter()
+                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
+            } else {
+                bus.points.windows(2).any(|points| {
+                    segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
+                })
+            };
+            if bus_in_rect && !schematic.selection.has_bus(bus.id) {
+                schematic.selection.select_bus(bus.id);
+                count += 1;
+            }
+        }
+
+        for tap in &schematic.bus_taps {
+            let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
+            let tap_in_rect = if enclosed_only {
+                route
+                    .iter()
+                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
+            } else {
+                route.windows(2).any(|segment| {
+                    segment_intersects_rect(segment[0], segment[1], min_x, min_y, max_x, max_y)
+                })
+            };
+            if tap_in_rect && !schematic.selection.has_bus_tap(tap.id) {
+                schematic.selection.select_bus_tap(tap.id);
                 count += 1;
             }
         }
@@ -285,15 +333,15 @@ fn segment_intersects_rect(
         return true;
     }
 
-    let dx = f64::from(end.x - start.x);
-    let dy = f64::from(end.y - start.y);
+    let dx = f64::from(end.x) - f64::from(start.x);
+    let dy = f64::from(end.y) - f64::from(start.y);
     let mut enter = 0.0_f64;
     let mut leave = 1.0_f64;
     for (p, q) in [
-        (-dx, f64::from(start.x - min_x)),
-        (dx, f64::from(max_x - start.x)),
-        (-dy, f64::from(start.y - min_y)),
-        (dy, f64::from(max_y - start.y)),
+        (-dx, f64::from(start.x) - f64::from(min_x)),
+        (dx, f64::from(max_x) - f64::from(start.x)),
+        (-dy, f64::from(start.y) - f64::from(min_y)),
+        (dy, f64::from(max_y) - f64::from(start.y)),
     ] {
         if p == 0.0 {
             if q < 0.0 {
@@ -346,6 +394,8 @@ fn schematic_accessibility_label(
         &[
             Command::SelectTool,
             Command::PlaceWire,
+            Command::PlaceBus,
+            Command::PlaceBusTap,
             Command::PlaceJunction,
             Command::PlaceProbe,
             Command::ZoomFit,
@@ -353,9 +403,11 @@ fn schematic_accessibility_label(
         ],
     );
     format!(
-        "Schematic canvas. {}, {}, {}, {}; {}. Active tool: {}.{shortcuts}",
+        "Schematic canvas. {}, {}, {}, {}, {}, {}; {}. Active tool: {}.{shortcuts}",
         counted(schematic.components.len(), "component", "components"),
         counted(schematic.wires.len(), "wire", "wires"),
+        counted(schematic.buses.len(), "bus", "buses"),
+        counted(schematic.bus_taps.len(), "bus tap", "bus taps"),
         counted(schematic.junctions.len(), "junction", "junctions"),
         counted(schematic.net_labels.len(), "net label", "net labels"),
         counted(
@@ -606,7 +658,7 @@ mod tests {
         );
 
         assert!(label.starts_with(
-            "Schematic canvas. 1 component, 1 wire, 1 junction, 1 net label; 1 item selected."
+            "Schematic canvas. 1 component, 1 wire, 0 buses, 0 bus taps, 1 junction, 1 net label; 1 item selected."
         ));
         assert!(label.contains("Active tool: Wire."));
         assert!(label.contains("Escape: Cancel active command"));
@@ -658,7 +710,8 @@ pub fn render_schematic_view(
     // tool handler) and the context menu (here). Capture whether a run was
     // live before the tool handler so the click that finishes a wire can
     // never also open the menu.
-    let wire_was_active = state.schematic.wire_drawing.active;
+    let routing_was_active =
+        state.schematic.wire_drawing.active || state.schematic.bus_drawing.active;
     handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
     refresh_symbol_context_after_interactions(
         state,
@@ -670,7 +723,7 @@ pub fn render_schematic_view(
         &response,
         state,
         &viewport,
-        wire_was_active,
+        routing_was_active,
         &symbol_context,
     );
     refresh_symbol_context_after_interactions(

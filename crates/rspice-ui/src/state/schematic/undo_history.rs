@@ -33,6 +33,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use super::bus::{Bus, BusTap};
 use super::component::Component;
 use super::net_label::{Junction, NetLabel};
 use super::wire::{Wire, WireConnection};
@@ -59,6 +60,10 @@ pub struct SchematicSnapshot {
     pub components: Vec<Component>,
     /// All wires
     pub wires: Vec<Wire>,
+    /// Durable bus polylines.
+    pub buses: Vec<Bus>,
+    /// Typed bus taps.
+    pub bus_taps: Vec<BusTap>,
     /// Explicit wire junctions
     pub junctions: Vec<Junction>,
     /// Net labels for naming nodes
@@ -73,6 +78,8 @@ impl SchematicSnapshot {
         Self {
             components: state.components.clone(),
             wires: state.wires.clone(),
+            buses: state.buses.clone(),
+            bus_taps: state.bus_taps.clone(),
             junctions: state.junctions.clone(),
             net_labels: state.net_labels.clone(),
             connections: state.connections.clone(),
@@ -85,6 +92,8 @@ impl SchematicSnapshot {
     pub fn apply(&self, state: &mut super::state::SchematicState) {
         state.components = self.components.clone();
         state.wires = self.wires.clone();
+        state.buses = self.buses.clone();
+        state.bus_taps = self.bus_taps.clone();
         state.junctions = self.junctions.clone();
         state.net_labels = self.net_labels.clone();
         state.connections = self.connections.clone();
@@ -106,6 +115,8 @@ impl SchematicSnapshot {
         // Quick length checks first
         if self.components.len() != other.components.len()
             || self.wires.len() != other.wires.len()
+            || self.buses.len() != other.buses.len()
+            || self.bus_taps.len() != other.bus_taps.len()
             || self.junctions.len() != other.junctions.len()
             || self.net_labels.len() != other.net_labels.len()
         {
@@ -130,6 +141,10 @@ impl SchematicSnapshot {
             if a.id != b.id || a.points != b.points {
                 return false;
             }
+        }
+
+        if self.buses != other.buses || self.bus_taps != other.bus_taps {
+            return false;
         }
 
         // Junction comparison
@@ -429,6 +444,8 @@ mod tests {
                 .map(|i| Component::new(i as u64, ComponentType::Resistor, Point::new(i as i32, 0)))
                 .collect(),
             wires: Vec::new(),
+            buses: Vec::new(),
+            bus_taps: Vec::new(),
             junctions: Vec::new(),
             net_labels: Vec::new(),
             connections: Vec::new(),

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::bus::{Bus, BusDrawing, BusTap, PendingBusTap};
 use super::clipboard::ClipboardData;
 use super::component::{Component, LibraryCellInstance};
 use super::component_type::ComponentType;
@@ -55,6 +56,14 @@ pub struct SchematicState {
     /// All wires
     pub wires: Vec<Wire>,
 
+    /// Durable multi-conductor bus polylines.
+    #[serde(default)]
+    pub buses: Vec<Bus>,
+
+    /// Typed scalar and slice taps attached to declared buses.
+    #[serde(default)]
+    pub bus_taps: Vec<BusTap>,
+
     /// Current selection
     pub selection: Selection,
 
@@ -64,6 +73,10 @@ pub struct SchematicState {
 
     /// Wire drawing state
     pub wire_drawing: WireDrawing,
+
+    /// Bus drawing state (runtime only; unfinished gestures never persist).
+    #[serde(skip)]
+    pub bus_drawing: BusDrawing,
 
     /// Grid size in pixels
     pub grid_size: i32,
@@ -112,6 +125,10 @@ pub struct SchematicState {
     /// Runtime interaction state only and never persisted to schematic files.
     #[serde(skip)]
     pub pending_library_cell: Option<LibraryCellInstance>,
+
+    /// Validated configuration used while `Tool::BusTap` is armed.
+    #[serde(skip)]
+    pub pending_bus_tap: Option<PendingBusTap>,
 
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
@@ -183,9 +200,12 @@ impl Default for SchematicState {
         Self {
             components: Vec::new(),
             wires: Vec::new(),
+            buses: Vec::new(),
+            bus_taps: Vec::new(),
             selection: Selection::default(),
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
+            bus_drawing: BusDrawing::default(),
             grid_size: 10,
             document_policy: SchematicDocumentPolicy::default(),
             zoom: 1.0,
@@ -198,6 +218,7 @@ impl Default for SchematicState {
             junctions: Vec::new(),
             preview_rotation: Rotation::default(),
             pending_library_cell: None,
+            pending_bus_tap: None,
             connections: Vec::new(),
             net_mapping: HashMap::new(),
             is_dirty: false,
