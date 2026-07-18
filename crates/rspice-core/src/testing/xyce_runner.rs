@@ -3605,6 +3605,13 @@ impl XyceStaticTranComparisonMode {
 
 impl XyceStaticTranPlan {
     fn result_contract(&self) -> &'static str {
+        if !self.steps.is_empty() {
+            // Comparison mode is an implementation detail of the upstream
+            // verifier. Preserve the established stepped-output contract name
+            // so callers can identify the deck/output shape independently of
+            // whether its values use pointwise or integrated-RMS comparison.
+            return self.contract.result_contract(true);
+        }
         match self.comparison_mode {
             XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
                 "static_xyce_verify_prn_tran"
@@ -25579,15 +25586,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         for (step_index, (run, reference)) in
             step_runs.iter().zip(step_references.iter()).enumerate()
         {
-            let max_step =
+            let max_step = if uses_integrated_rms {
+                Self::transient_max_step_for_static_plan(plan, &run.netlist, &plan.tran, reference)
+            } else {
                 Self::transient_max_step_for_reference(&run.netlist, &plan.tran, reference)
-                    .map_err(|err| {
-                        if err.contains("transient harness execution envelope") {
-                            format!("UNSUPPORTED: {err}")
-                        } else {
-                            format!("reference time-grid error: step {}: {err}", step_index + 1)
-                        }
-                    })?;
+            }
+            .map_err(|err| {
+                if err.contains("transient harness execution envelope") {
+                    format!("UNSUPPORTED: {err}")
+                } else {
+                    format!("reference time-grid error: step {}: {err}", step_index + 1)
+                }
+            })?;
             let engine = if uses_integrated_rms {
                 self.create_xyce_static_tran_engine(
                     None,
@@ -78768,17 +78778,25 @@ R1 in 0 1k
         };
 
         let default_plan = make_plan(source);
+        let default_mode = XyceTestRunner::select_static_tran_comparison_mode(
+            &default_plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("default-precision stepped selector evaluates");
         assert_eq!(
-            XyceTestRunner::select_static_tran_comparison_mode(
-                &default_plan,
-                &netlist,
-                XyceStaticTranPlanPurpose::AbsoluteOracle,
-                false,
-            )
-            .expect("default-precision stepped selector evaluates"),
+            default_mode,
             XyceStaticTranComparisonMode::Release710IntegratedRms {
                 scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
             }
+        );
+        let mut integrated_plan = default_plan.clone();
+        integrated_plan.comparison_mode = default_mode;
+        assert_eq!(
+            integrated_plan.result_contract(),
+            "static_prn_step_tran",
+            "comparison mode must not change the public stepped-output contract"
         );
 
         let comp_source = source.replace(
