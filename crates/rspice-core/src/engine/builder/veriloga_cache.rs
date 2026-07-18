@@ -379,7 +379,7 @@ fn fingerprint_paths_with_limits(
     Ok(fingerprints)
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn fingerprint_paths(
     paths: &[PathBuf],
 ) -> Result<Vec<VerilogADependencyFingerprint>, SimulationError> {
@@ -943,6 +943,7 @@ fn persist_model_to_disk_with_limits(
     {
         let _ = source_path;
         let _ = entry.canonical_ir.as_ref();
+        let _ = limits;
         Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -1092,7 +1093,12 @@ pub fn veriloga_cache_entries() -> Result<Vec<VerilogACacheEntry>, String> {
             let record = match read_cache_record_with_limits(&file.path, ResourceLimits::default())
             {
                 Ok(record) => record,
-                Err(VerilogACacheRecordReadError::Invalid(_)) => {
+                Err(VerilogACacheRecordReadError::Invalid(error)) => {
+                    log::debug!(
+                        "discarding invalid Verilog-A cache record '{}': {}",
+                        file.path.display(),
+                        error
+                    );
                     remove_cache_file(&file.path);
                     continue;
                 }
