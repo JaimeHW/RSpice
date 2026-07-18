@@ -869,6 +869,7 @@ impl Engine {
             ElementKind::Mosfet { .. } => ElementType::Mosfet,
             ElementKind::Jfet { .. } => ElementType::Jfet,
             ElementKind::Mesfet { .. } => ElementType::Mesfet,
+            ElementKind::XyceMemristor { .. } => ElementType::Other,
             ElementKind::Vccs { .. } => ElementType::Transconductance,
             ElementKind::Ccvs { .. } => ElementType::Transresistance,
             ElementKind::Vcvs { .. } | ElementKind::Cccs { .. } => ElementType::Other,
@@ -2163,6 +2164,26 @@ impl Engine {
         )
     }
 
+    fn validate_complete_dc_sensitivity_coverage(netlist: &Netlist) -> Result<(), SimulationError> {
+        let unsupported = netlist
+            .elements
+            .iter()
+            .filter_map(|element| {
+                matches!(&element.kind, ElementKind::XyceMemristor { .. })
+                    .then_some(element.name.as_str())
+            })
+            .collect::<Vec<_>>();
+        if unsupported.is_empty() {
+            return Ok(());
+        }
+
+        Err(SimulationError::Circuit(format!(
+            "Complete DC sensitivity does not yet support native TEAM memristor instance/model parameters (device{}: {}). The analysis was rejected to avoid returning an incomplete sensitivity result.",
+            if unsupported.len() == 1 { "" } else { "s" },
+            unsupported.join(", ")
+        )))
+    }
+
     /// Run complete netlist-wide DC sensitivity for every eligible real
     /// parameter in the flattened circuit. Unlike the legacy adjoint helper,
     /// this covers nonlinear devices, models, hierarchy, branch-current
@@ -2204,6 +2225,7 @@ impl Engine {
         }
 
         let flat = Self::flattened_sensitivity_netlist(netlist)?;
+        Self::validate_complete_dc_sensitivity_coverage(&flat)?;
         let nominal_result = self.run_dc_op_with_abort(&flat, abort)?;
         let nominal_output = Self::dc_sensitivity_output_value(&nominal_result, &output)?;
         let targets = Self::collect_ac_sensitivity_targets(&flat)?
@@ -2650,6 +2672,69 @@ RBOT output 0 1k\n\
                 .ends_with("RTOP")
         );
         assert!((result.sensitivities[0].absolute + 2.5e-3).abs() < 1e-8);
+    }
+
+    #[test]
+    fn complete_dc_sensitivity_rejects_team_memristor_instead_of_omitting_it() {
+        let netlist = Netlist::parse(
+            "TEAM DC sensitivity coverage\n\
+V1 out 0 0.1\n\
+.model team_model memristor level=2 ron=50 roff=1k xon=0 xoff=1\n\
+YMEMRISTOR mr1 out 0 team_model ivrelation=0\n\
+.end\n",
+        )
+        .expect("TEAM sensitivity deck parses");
+
+        let message = Engine::default()
+            .run_sensitivity_dc_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 1,
+                    negative: None,
+                },
+                &[],
+            )
+            .expect_err("complete DC sensitivity must fail closed for TEAM")
+            .to_string();
+
+        assert!(message.contains("Complete DC sensitivity"), "{message}");
+        assert!(message.contains("TEAM memristor"), "{message}");
+        assert!(message.contains("YMEMRISTOR!MR1"), "{message}");
+        assert!(
+            message.contains("incomplete sensitivity result"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn complete_dc_sensitivity_detects_flattened_team_memristor_with_filters() {
+        let netlist = Netlist::parse(
+            "Hierarchical TEAM DC sensitivity coverage\n\
+V1 in 0 0.1\n\
+R1 in out 1k\n\
+XMEM out 0 CELL\n\
+.subckt CELL p n\n\
+.model local_team memristor level=2 ron=50 roff=1k xon=0 xoff=1\n\
+YMEMRISTOR state p n local_team ivrelation=0\n\
+.ends\n\
+.end\n",
+        )
+        .expect("hierarchical TEAM sensitivity deck parses");
+
+        let message = Engine::default()
+            .run_sensitivity_dc_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 2,
+                    negative: None,
+                },
+                &["R1".to_string()],
+            )
+            .expect_err("filters must not permit a partially covered TEAM analysis")
+            .to_string();
+
+        assert!(message.contains("XMEM.YMEMRISTOR!STATE"), "{message}");
+        assert!(message.contains("rejected"), "{message}");
     }
 
     #[test]

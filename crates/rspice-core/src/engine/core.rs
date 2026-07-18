@@ -175,7 +175,8 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         Self::ensure_supported_bsim4_dynamic_charges(circuit, analysis)?;
         Self::ensure_supported_b3soi_dynamic_charges(circuit, analysis)?;
-        Self::ensure_supported_ekv3_dynamic_charges(circuit, analysis)
+        Self::ensure_supported_ekv3_dynamic_charges(circuit, analysis)?;
+        Self::ensure_supported_xyce_team_small_signal(circuit, analysis)
     }
 
     pub(crate) fn ensure_supported_ac_dynamic_charges(
@@ -183,7 +184,8 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         Self::ensure_supported_bsim4_dynamic_charges(circuit, "AC")?;
         Self::ensure_supported_b3soi_dynamic_charges(circuit, "AC")?;
-        Self::ensure_supported_ekv3_dynamic_charges(circuit, "AC")
+        Self::ensure_supported_ekv3_dynamic_charges(circuit, "AC")?;
+        Self::ensure_supported_xyce_team_small_signal(circuit, "AC")
     }
 
     pub(crate) fn ensure_supported_transient_dynamic_charges(
@@ -192,6 +194,24 @@ impl Engine {
         Self::ensure_supported_bsim4_dynamic_charges(circuit, "Transient")?;
         Self::ensure_supported_b3soi_dynamic_charges(circuit, "Transient")?;
         Self::ensure_supported_ekv3_dynamic_charges(circuit, "Transient")
+    }
+
+    pub(in crate::engine) fn ensure_supported_xyce_team_small_signal(
+        circuit: &crate::CircuitData,
+        analysis: &str,
+    ) -> Result<(), SimulationError> {
+        if let Some(device) = circuit.xyce_team_memristors.first() {
+            let contract = if analysis.eq_ignore_ascii_case("PSS") {
+                "periodic dynamic-state formulation"
+            } else {
+                "small-signal dynamic-state linearization"
+            };
+            return Err(SimulationError::Circuit(format!(
+                "{analysis} analysis for native Xyce TEAM memristor '{}' remains fail-closed until its {contract} is validated against an authoritative oracle; DC and transient are supported",
+                device.name
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) fn node_lookup_candidates(netlist: &Netlist, node_name: &str) -> Vec<String> {

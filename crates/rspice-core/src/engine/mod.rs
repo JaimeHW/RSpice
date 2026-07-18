@@ -21,7 +21,7 @@
 mod ac;
 mod advanced;
 mod builder;
-pub(crate) use builder::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
+pub(crate) use builder::{XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_xyce_team_memristor};
 mod config;
 mod config_resolver;
 mod convergence;
@@ -64,7 +64,7 @@ pub use error::SimulationError;
 pub use hb::{HbAnalysisResult, PacAnalysisResult, PnoiseAnalysisResult};
 pub use pss::{PssAnalysisResult, PssError};
 pub use pss_noise::OscPnoiseResult;
-pub use result::TransientResult;
+pub use result::{TransientResult, TransientStoreTrace};
 pub use stb::StbAnalysisResult;
 pub use transient::{TransientCheckpoint, netlist_fingerprint};
 

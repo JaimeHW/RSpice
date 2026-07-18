@@ -356,6 +356,7 @@ impl WaveformRecorder {
             voltages: self.values.clone(),
             num_nodes: self.num_channels,
             node_names: (1..=self.num_channels).map(|i| i.to_string()).collect(),
+            store_traces: Vec::new(),
             compression_ratio: self.compression_ratio(),
             input_points: self.input_count,
         }
@@ -380,6 +381,9 @@ pub struct TransientResultCompressed {
 
     /// Node names aligned with `voltages`
     pub node_names: Vec<String>,
+
+    /// Typed non-solution device store waveforms.
+    pub store_traces: Vec<crate::engine::TransientStoreTrace>,
 
     /// Compression ratio achieved
     pub compression_ratio: Value,
@@ -564,6 +568,7 @@ mod tests {
             voltages,
             num_nodes: 1,
             node_names: vec!["out".to_string()],
+            store_traces: Vec::new(),
             compression_ratio: 1.0,
             input_points: 3,
         }

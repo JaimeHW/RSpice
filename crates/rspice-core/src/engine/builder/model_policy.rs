@@ -740,6 +740,35 @@ pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
 pub(super) const GENERIC_SWITCH_MODEL_PARAMS: &[&str] =
     &["ON", "OFF", "ONH", "OFFH", "RON", "ROFF"];
 
+pub(super) const XYCE_TEAM_MODEL_PARAMS: &[&str] = &[
+    "LEVEL",
+    "KON",
+    "KOFF",
+    "ALPHAON",
+    "ALPHAOFF",
+    "XON",
+    "XOFF",
+    "RON",
+    "ROFF",
+    "ION",
+    "IOFF",
+    "XSCALING",
+    "D",
+    "P",
+    "J",
+    "AON",
+    "AOFF",
+    "WC",
+    "WT",
+    "RESNOISE",
+    "RESSEED",
+    "RESLAMBDA",
+    "RESTD",
+    "RESEPTD",
+    "RESDELTA",
+    "RESDELTAGRAD",
+];
+
 pub(super) fn native_mos_instance_multiplier(
     element_name: &str,
     family: &str,

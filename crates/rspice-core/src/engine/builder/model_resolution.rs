@@ -191,7 +191,7 @@ pub(super) fn resolve_supported_model_params_upper_map(
         if let Some(param) = canonical_supported_model_param(name, supported) {
             if !value.is_finite() {
                 return Err(SimulationError::Circuit(format!(
-                    "{} '{}' model '{}' uses non-finite switch parameter {}={}",
+                    "{} '{}' model '{}' uses non-finite model parameter {}={}",
                     element_kind, element_name, model_name, param, value
                 )));
             }
@@ -202,7 +202,7 @@ pub(super) fn resolve_supported_model_params_upper_map(
     for (name, value) in &model_def.string_params {
         if let Some(param) = canonical_supported_model_param(name, supported) {
             return Err(SimulationError::Circuit(format!(
-                "{} '{}' model '{}' uses non-numeric switch parameter {}=\"{}\"; switch parameters must be finite numeric values",
+                "{} '{}' model '{}' uses non-numeric model parameter {}=\"{}\"; model parameters must be finite scalar numeric values",
                 element_kind, element_name, model_name, param, value
             )));
         }
@@ -211,7 +211,34 @@ pub(super) fn resolve_supported_model_params_upper_map(
     for (name, values) in &model_def.string_vector_params {
         if let Some(param) = canonical_supported_model_param(name, supported) {
             return Err(SimulationError::Circuit(format!(
-                "{} '{}' model '{}' uses non-numeric switch parameter {}={:?}; switch parameters must be finite numeric values",
+                "{} '{}' model '{}' uses non-numeric model parameter {}={:?}; model parameters must be finite scalar numeric values",
+                element_kind, element_name, model_name, param, values
+            )));
+        }
+    }
+
+    for (name, values) in &model_def.real_vector_params {
+        if let Some(param) = canonical_supported_model_param(name, supported) {
+            return Err(SimulationError::Circuit(format!(
+                "{} '{}' model '{}' uses vector-valued model parameter {}={:?}; model parameters must be finite scalar numeric values",
+                element_kind, element_name, model_name, param, values
+            )));
+        }
+    }
+
+    for (name, values) in &model_def.real_vector_expr_params {
+        if let Some(param) = canonical_supported_model_param(name, supported) {
+            return Err(SimulationError::Circuit(format!(
+                "{} '{}' model '{}' uses vector-valued model parameter {}={:?}; model parameters must be finite scalar numeric values",
+                element_kind, element_name, model_name, param, values
+            )));
+        }
+    }
+
+    for (name, values) in &model_def.integer_vector_params {
+        if let Some(param) = canonical_supported_model_param(name, supported) {
+            return Err(SimulationError::Circuit(format!(
+                "{} '{}' model '{}' uses vector-valued model parameter {}={:?}; model parameters must be finite scalar numeric values",
                 element_kind, element_name, model_name, param, values
             )));
         }
@@ -221,13 +248,13 @@ pub(super) fn resolve_supported_model_params_upper_map(
         if let Some(param) = canonical_supported_model_param(name, supported) {
             let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
                 SimulationError::Circuit(format!(
-                    "{} '{}' model '{}' switch parameter {} could not be resolved: {}",
+                    "{} '{}' model '{}' parameter {} could not be resolved: {}",
                     element_kind, element_name, model_name, param, err
                 ))
             })?;
             if !value.is_finite() {
                 return Err(SimulationError::Circuit(format!(
-                    "{} '{}' model '{}' uses non-finite switch parameter {}={}",
+                    "{} '{}' model '{}' uses non-finite model parameter {}={}",
                     element_kind, element_name, model_name, param, value
                 )));
             }

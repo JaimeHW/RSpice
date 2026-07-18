@@ -105,11 +105,7 @@ impl Engine {
         rhs.fill(0.0);
 
         let diag_gmin = ctx.baseline_diag_gmin.max(0.0) + extra_diag_gmin;
-        if diag_gmin > 0.0 {
-            for i in 0..num_nodes {
-                matrix.add(i, i, diag_gmin);
-            }
-        }
+        Self::stamp_nodal_gmin(circuit, matrix, diag_gmin);
 
         // Stamp linear devices (R, V, I) for transient; tline transient
         // behavior is stamped separately via companions.
@@ -121,6 +117,7 @@ impl Engine {
 
         circuit.refresh_jiles_atherton_inductances(solution);
         circuit.set_b3soi_operating_point_mode(false);
+        circuit.set_xyce_team_operating_point_mode(false);
         if refresh_nonlinear && circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(solution);
         }

@@ -33,6 +33,9 @@ impl CircuitData {
             ekv3s: Ekv3Mosfets::new(),
             vdmoses: Vdmoses::new(),
             jfets: Vec::new(),
+            xyce_team_memristors: Vec::new(),
+            non_electrical_state_nodes: HashSet::new(),
+            xyce_team_operating_point_mode: false,
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),
             cccs: Cccs::new(),
@@ -355,6 +358,17 @@ impl CircuitData {
             binding.device.node_pos = Self::remap_node_id(binding.device.node_pos, old_node_id);
             binding.device.node_neg = Self::remap_node_id(binding.device.node_neg, old_node_id);
         }
+        for binding in &mut self.xyce_team_memristors {
+            binding.node_pos = Self::remap_node_id(binding.node_pos, old_node_id);
+            binding.node_neg = Self::remap_node_id(binding.node_neg, old_node_id);
+            binding.node_x = Self::remap_node_id(binding.node_x, old_node_id);
+        }
+        self.non_electrical_state_nodes = self
+            .xyce_team_memristors
+            .iter()
+            .map(|binding| binding.node_x)
+            .filter(|node| *node > 0)
+            .collect();
 
         // Behavioral sources
         for source in &mut self.behavioral_sources.voltage_sources {

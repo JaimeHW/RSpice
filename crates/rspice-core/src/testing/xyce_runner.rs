@@ -3584,7 +3584,7 @@ enum XyceStaticTranComparisonMode {
 }
 
 impl XyceStaticTranComparisonMode {
-    fn uses_adaptive_grid_only(self) -> bool {
+    fn uses_integrated_rms_verifier(self) -> bool {
         matches!(
             self,
             Self::Release710IntegratedRms { .. } | Self::Release710IntegratedRmsComp { .. }
@@ -5210,6 +5210,7 @@ struct XyceVerifyTransientTolerance {
     absolute: Value,
     zero: Value,
     absolute_difference: Value,
+    offset: Value,
 }
 
 impl XyceVerifyTransientTolerance {
@@ -5219,6 +5220,7 @@ impl XyceVerifyTransientTolerance {
             absolute: XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE,
             zero: XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
             absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+            offset: 0.0,
         }
     }
 
@@ -5231,9 +5233,10 @@ impl XyceVerifyTransientTolerance {
             || self.zero < 0.0
             || !self.absolute_difference.is_finite()
             || self.absolute_difference < 0.0
+            || !self.offset.is_finite()
         {
             return Err(format!(
-                "xyce_verify transient tolerances must have positive finite RELTOL/ABSTOL and nonnegative finite ZEROTOL/ABSDIFFTOL, got {self:?}"
+                "xyce_verify transient tolerances must have positive finite RELTOL/ABSTOL, nonnegative finite ZEROTOL/ABSDIFFTOL, and finite OFFSET, got {self:?}"
             ));
         }
         Ok(self)
@@ -8257,6 +8260,7 @@ impl XyceTestRunner {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         })
     }
 
@@ -24821,7 +24825,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if !plan.steps.is_empty() {
             return self.run_static_prn_step_tran_plan(deck, plan, netlist, reference, start);
         }
-        let reference_time_grid = match Self::reference_time_grid(&reference) {
+        let reference_time_grid_result = match plan.comparison_mode {
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision,
+            }
+            | XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                scientific_precision,
+            } => Self::xyce_verify_reference_time_grid(&plan, &reference, scientific_precision),
+            XyceStaticTranComparisonMode::Pointwise => Self::reference_time_grid(&reference),
+        };
+        let reference_time_grid = match reference_time_grid_result {
             Ok(grid) => grid,
             Err(err) => {
                 return self.failure_result(
@@ -24843,7 +24856,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             match Self::transient_max_step_for_static_plan(&plan, &netlist, &tran, &reference) {
                 Ok(max_step) => max_step,
                 Err(err)
-                    if !plan.comparison_mode.uses_adaptive_grid_only()
+                    if !plan.comparison_mode.uses_integrated_rms_verifier()
                         && err.contains("transient harness execution envelope") =>
                 {
                     return self.expected_unsupported_result(
@@ -24885,23 +24898,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         );
                     }
                 };
-
                 if mismatches.is_empty() {
                     return self.passed_or_tran_side_output_failure(
                         deck, start, contract, &plan, &netlist, &result,
-                    );
-                }
-
-                if plan.comparison_mode.uses_adaptive_grid_only() {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!(
-                            "{} Xyce integrated-RMS transient reference mismatch(es)",
-                            mismatches.len()
-                        ),
-                        mismatches,
                     );
                 }
 
@@ -24920,7 +24919,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 );
             }
             Err(err)
-                if !plan.comparison_mode.uses_adaptive_grid_only()
+                if !plan.comparison_mode.uses_integrated_rms_verifier()
                     && Self::is_expected_unsupported_runtime_error(&err) =>
             {
                 return self.expected_unsupported_result(
@@ -24935,14 +24934,71 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
 
-        if plan.comparison_mode.uses_adaptive_grid_only() {
+        if plan.comparison_mode.uses_integrated_rms_verifier() {
+            let mut locked_error = None;
+            let locked_engine = self
+                .create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
+            match locked_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
+                Ok(locked_result) => {
+                    match self.compare_static_tran_reference_grid_fallback(
+                        &reference,
+                        &plan,
+                        &netlist,
+                        &locked_result,
+                    ) {
+                        Ok(locked_mismatches) => {
+                            if locked_mismatches.is_empty() {
+                                return self.passed_or_tran_side_output_failure(
+                                    deck,
+                                    start,
+                                    contract,
+                                    &plan,
+                                    &netlist,
+                                    &locked_result,
+                                );
+                            }
+                            if Self::candidate_mismatches_are_better(
+                                best_mismatches.as_deref(),
+                                &locked_mismatches,
+                            ) {
+                                best_mismatches = Some(locked_mismatches);
+                            }
+                        }
+                        Err(err) => {
+                            locked_error = Some(format!(
+                                "locked time-grid integrated-RMS comparison error: {err}"
+                            ));
+                        }
+                    }
+                }
+                Err(SimulationError::Aborted) => {
+                    locked_error = Some(format!(
+                        "locked time-grid simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ));
+                }
+                Err(err) => {
+                    locked_error = Some(format!("locked time-grid simulation error: {err}"));
+                }
+            }
+            if let Some(mismatches) = best_mismatches {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce integrated-RMS transient reference mismatch(es)",
+                        mismatches.len()
+                    ),
+                    mismatches,
+                );
+            }
             return self.failure_result(
                 deck,
                 start,
                 contract,
-                simulation_error.unwrap_or_else(|| {
-                    "adaptive integrated-RMS transient execution produced no comparable result"
-                        .to_string()
+                simulation_error.or(locked_error).unwrap_or_else(|| {
+                    "integrated-RMS transient execution produced no comparable result".to_string()
                 }),
                 Vec::new(),
             );
@@ -31779,8 +31835,114 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         result: &TransientResult,
     ) -> Result<XycePrnTable, String> {
         Self::validate_transient_result_time_grid(result)?;
-        let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
         let output_times = Self::xyce_verify_transient_output_times(plan, result)?;
+        Self::transient_family_result_to_prn_table_at_times(plan, netlist, result, &output_times)
+    }
+
+    fn xyce_verify_reference_time_grid(
+        plan: &XyceStaticTranPlan,
+        reference: &XycePrnTable,
+        scientific_precision: usize,
+    ) -> Result<Vec<Value>, String> {
+        let layout = Self::transient_reference_layout(reference)?;
+        let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
+        if !time_scale.is_finite() || time_scale == 0.0 {
+            return Err(format!(
+                "transient print time scale must be finite and nonzero, got {time_scale}"
+            ));
+        }
+        let mut output_times = Vec::with_capacity(reference.rows.len());
+        for (row_index, row) in reference.rows.iter().enumerate() {
+            let Some(&raw_printed_time) = row.get(layout.time_column) else {
+                return Err(format!(
+                    "Xyce integrated-RMS reference row {row_index} has no TIME column"
+                ));
+            };
+            let serialized_time = Self::xyce_prn_scientific_roundtrip(
+                raw_printed_time,
+                scientific_precision,
+            )
+            .map_err(|err| {
+                format!(
+                    "could not serialize Xyce integrated-RMS reference TIME at row {row_index}: {err}"
+                )
+            })?;
+            let printed_time = if serialized_time.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                0.0
+            } else {
+                serialized_time
+            };
+            let time = printed_time / time_scale;
+            if !time.is_finite() {
+                return Err(format!(
+                    "Xyce integrated-RMS reference row {row_index} has invalid TIME {printed_time} after applying time scale {time_scale}"
+                ));
+            }
+            if output_times
+                .last()
+                .is_some_and(|previous| *previous == time)
+            {
+                // Match Release 7.10 ReadDataFile: retain the first printed
+                // row and discard immediately following duplicate times.
+                continue;
+            }
+            if output_times.last().is_some_and(|previous| *previous > time) {
+                return Err(format!(
+                    "Xyce integrated-RMS reference times decrease at row {row_index}: {time}"
+                ));
+            }
+            output_times.push(time);
+        }
+        if output_times.len() < 2 {
+            return Err(format!(
+                "Xyce integrated-RMS reference requires at least two output times, found {}",
+                output_times.len()
+            ));
+        }
+        Ok(output_times)
+    }
+
+    /// Serialize an adaptive native result on the checked-in Xyce oracle's
+    /// time grid. The Release 7.10 verifier linearly interpolates the reference
+    /// onto the candidate grid; doing that across unresolved curvature or a
+    /// derivative discontinuity makes the score depend on which simulator
+    /// happened to accept an intermediate step. Sampling both engines at the
+    /// oracle's accepted times preserves the exact integrated-RMS value
+    /// contract while removing that unrelated adaptive-cadence dependency.
+    fn transient_family_result_to_prn_table_on_reference_grid(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+        reference: &XycePrnTable,
+        scientific_precision: usize,
+    ) -> Result<XycePrnTable, String> {
+        Self::validate_transient_result_time_grid(result)?;
+        let output_times =
+            Self::xyce_verify_reference_time_grid(plan, reference, scientific_precision)?;
+        let result_first = result.time.first().copied().unwrap_or(Value::INFINITY);
+        let result_last = result.time.last().copied().unwrap_or(Value::NEG_INFINITY);
+        let time_tolerance = Self::default_prn_time_quantization_tolerance(
+            output_times.last().copied().unwrap_or(0.0),
+        );
+        if output_times[0] < result_first - time_tolerance
+            || output_times[output_times.len() - 1] > result_last + time_tolerance
+        {
+            return Err(format!(
+                "native transient result [{result_first}, {result_last}] does not cover Xyce reference grid [{}, {}]",
+                output_times[0],
+                output_times[output_times.len() - 1]
+            ));
+        }
+        Self::transient_family_result_to_prn_table_at_times(plan, netlist, result, &output_times)
+    }
+
+    fn transient_family_result_to_prn_table_at_times(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+        output_times: &[Value],
+    ) -> Result<XycePrnTable, String> {
+        let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
         let columns = Self::transient_prn_header_columns(&plan.print, true);
         let mut stateful_expressions = plan
             .print
@@ -31804,7 +31966,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         )?;
 
         let mut rows = Vec::with_capacity(output_times.len());
-        for (index, time) in output_times.into_iter().enumerate() {
+        for (index, &time) in output_times.iter().enumerate() {
             let mut row = Vec::with_capacity(columns.len());
             row.push(index as Value);
             row.push(time * time_scale);
@@ -41905,17 +42067,24 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             );
             let mut values = Vec::with_capacity(row.len() - 2);
             for (column_index, &value) in row[2..].iter().enumerate() {
-                values.push(zero_small(
-                    Self::xyce_prn_scientific_roundtrip(value, scientific_precision).map_err(
-                        |err| {
-                            format!(
-                                "could not serialize {role} {} at row {row_index}: {err}",
-                                table.columns[column_index + 2]
-                            )
-                        },
-                    )?,
-                    tolerances[column_index].zero,
-                ));
+                let serialized = Self::xyce_prn_scientific_roundtrip(value, scientific_precision)
+                    .map_err(|err| {
+                    format!(
+                        "could not serialize {role} {} at row {row_index}: {err}",
+                        table.columns[column_index + 2]
+                    )
+                })?;
+                // Release 7.10 ReadDataFile applies *COMP OFFSET to both the
+                // good and test series before ZEROTOL normalization.
+                let shifted = serialized + tolerances[column_index].offset;
+                if !shifted.is_finite() {
+                    return Err(format!(
+                        "{role} {} at row {row_index} became non-finite after applying OFFSET={}",
+                        table.columns[column_index + 2],
+                        tolerances[column_index].offset
+                    ));
+                }
+                values.push(zero_small(shifted, tolerances[column_index].zero));
             }
             if normalized
                 .last()
@@ -42228,48 +42397,62 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 {
                     let numerator_tolerance = tolerances[numerator_index];
                     let divisor_tolerance = tolerances[divisor_index];
-                    let numerator_error = Self::xyce_verify_normalized_error_with_tolerance(
-                        good_values[numerator_index],
-                        test_values[numerator_index],
-                        numerator_tolerance,
-                    );
-                    let divisor_error = Self::xyce_verify_normalized_error_with_tolerance(
-                        good_values[divisor_index],
-                        test_values[divisor_index],
-                        divisor_tolerance,
-                    );
-                    let operand_error = numerator_error.abs().max(divisor_error.abs());
-                    let one_sided_conditioning_floor = (divisor_tolerance.absolute
-                        / divisor_tolerance.relative)
-                        .min(Value::MAX / 2.0);
-                    let divisor_conditioning_floor = divisor_tolerance
-                        .zero
-                        .max(2.0 * one_sided_conditioning_floor);
-                    let divisor_is_conditioned = test_values[divisor_index]
-                        .abs()
-                        .min(good_values[divisor_index].abs())
-                        > divisor_conditioning_floor;
-                    let interpolated_reference_quotient =
-                        good_values[numerator_index] / good_values[divisor_index];
-                    let reference_consistency_scale = expected
-                        .abs()
-                        .max(interpolated_reference_quotient.abs())
-                        .max(probe_tolerance.absolute);
-                    let reference_consistency_error = (expected - interpolated_reference_quotient)
-                        .abs()
-                        / reference_consistency_scale;
-                    let reference_quotient_is_consistent = interpolated_reference_quotient
-                        .is_finite()
-                        && reference_consistency_error.is_finite()
-                        && reference_consistency_error <= serialization_relative_tolerance;
-                    if divisor_is_conditioned && reference_quotient_is_consistent {
+                    if probe_tolerance.offset != 0.0
+                        || numerator_tolerance.offset != 0.0
+                        || divisor_tolerance.offset != 0.0
+                    {
+                        // OFFSET destroys the algebraic identity between the
+                        // independently shifted quotient and operand traces.
+                        // In that case use the official trace-local metric.
                         Self::xyce_verify_normalized_error_with_tolerance(
                             expected,
                             actual,
                             probe_tolerance,
                         )
                     } else {
-                        operand_error
+                        let numerator_error = Self::xyce_verify_normalized_error_with_tolerance(
+                            good_values[numerator_index],
+                            test_values[numerator_index],
+                            numerator_tolerance,
+                        );
+                        let divisor_error = Self::xyce_verify_normalized_error_with_tolerance(
+                            good_values[divisor_index],
+                            test_values[divisor_index],
+                            divisor_tolerance,
+                        );
+                        let operand_error = numerator_error.abs().max(divisor_error.abs());
+                        let one_sided_conditioning_floor = (divisor_tolerance.absolute
+                            / divisor_tolerance.relative)
+                            .min(Value::MAX / 2.0);
+                        let divisor_conditioning_floor = divisor_tolerance
+                            .zero
+                            .max(2.0 * one_sided_conditioning_floor);
+                        let divisor_is_conditioned = test_values[divisor_index]
+                            .abs()
+                            .min(good_values[divisor_index].abs())
+                            > divisor_conditioning_floor;
+                        let interpolated_reference_quotient =
+                            good_values[numerator_index] / good_values[divisor_index];
+                        let reference_consistency_scale = expected
+                            .abs()
+                            .max(interpolated_reference_quotient.abs())
+                            .max(probe_tolerance.absolute);
+                        let reference_consistency_error =
+                            (expected - interpolated_reference_quotient).abs()
+                                / reference_consistency_scale;
+                        let reference_quotient_is_consistent = interpolated_reference_quotient
+                            .is_finite()
+                            && reference_consistency_error.is_finite()
+                            && reference_consistency_error <= serialization_relative_tolerance;
+                        if divisor_is_conditioned && reference_quotient_is_consistent {
+                            Self::xyce_verify_normalized_error_with_tolerance(
+                                expected,
+                                actual,
+                                probe_tolerance,
+                            )
+                        } else {
+                            operand_error
+                        }
                     }
                 } else {
                     Self::xyce_verify_normalized_error_with_tolerance(
@@ -44323,6 +44506,57 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    fn compare_static_tran_reference_grid_fallback(
+        &self,
+        reference: &XycePrnTable,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        match plan.comparison_mode {
+            XyceStaticTranComparisonMode::Pointwise => Err(
+                "reference-grid integrated-RMS fallback requires an integrated verifier mode"
+                    .to_string(),
+            ),
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision,
+            } => {
+                let actual = Self::transient_family_result_to_prn_table_on_reference_grid(
+                    plan,
+                    netlist,
+                    result,
+                    reference,
+                    scientific_precision,
+                )?;
+                self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+                    reference,
+                    &actual,
+                    XyceVerifyTransientTolerance::release_7_10_default(),
+                    scientific_precision,
+                )
+            }
+            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                scientific_precision,
+            } => {
+                let actual = Self::transient_family_result_to_prn_table_on_reference_grid(
+                    plan,
+                    netlist,
+                    result,
+                    reference,
+                    scientific_precision,
+                )?;
+                let tolerances =
+                    Self::xyce_verify_comp_tolerances(&plan.source, &reference.columns[2..])?;
+                self.compare_xyce_verify_transient_tables_with_probe_tolerances(
+                    reference,
+                    &actual,
+                    &tolerances,
+                    scientific_precision,
+                )
+            }
+        }
+    }
+
     fn compare_tran_prn_reference(
         &self,
         reference: &XycePrnTable,
@@ -46351,9 +46585,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 "abstol" => tolerance.absolute = parsed,
                 "zerotol" => tolerance.zero = parsed,
                 "absdifftol" => tolerance.absolute_difference = parsed,
-                "offset" if parsed == 0.0 => {}
+                "offset" => tolerance.offset = parsed,
                 "numfail" if parsed == 0.0 => {}
-                "offset" | "numfail" => {
+                "numfail" => {
                     return Err(format!(
                         "Xyce integrated-RMS *COMP option {key}={value} requires a broader comparison contract"
                     ));
@@ -47520,6 +47754,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     ) => {}
                 ElementKind::Jfet { .. }
                     if Self::netlist_device_is_native_classic_jfet(netlist, &element.name) => {}
+                ElementKind::XyceMemristor { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_native_xyce_team_memristor(
+                            netlist, element,
+                        ) => {}
                 ElementKind::Diode { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_absolute_transient_exact_is_diode(
@@ -48144,6 +48383,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
+        if let Some((element_name, parameter)) =
+            Self::parse_device_operating_point_probe(normalized)
+            && parameter.eq_ignore_ascii_case("R")
+            && Self::find_native_xyce_team_memristor_element(netlist, &element_name).is_some()
+        {
+            return Ok(());
+        }
         if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
             if !voltage_probe.node_pos.is_empty()
                 && voltage_probe
@@ -48177,7 +48423,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             match parameter.as_str() {
-                "r" if Self::find_resistor_element(netlist, &element_name).is_some() => {
+                "r" if Self::find_resistor_element(netlist, &element_name).is_some()
+                    || Self::find_native_xyce_team_memristor_element(netlist, &element_name)
+                        .is_some() =>
+                {
                     return Ok(());
                 }
                 "c" if Self::find_capacitor_element(netlist, &element_name).is_some() => {
@@ -48743,6 +48992,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if let Some((element_name, parameter)) =
             Self::parse_device_operating_point_probe(normalized)
         {
+            if parameter.eq_ignore_ascii_case("R")
+                && Self::find_native_xyce_team_memristor_element(netlist, &element_name).is_some()
+            {
+                return Ok(());
+            }
             if !Self::netlist_has_device_op_instance(netlist, &element_name) {
                 return Err(format!(
                     "device operating-point probe '{}' targets an unknown reported device",
@@ -48791,7 +49045,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Ok(());
                 }
                 "r" => {
-                    if Self::find_resistor_element(netlist, &element_name).is_some() {
+                    if Self::find_resistor_element(netlist, &element_name).is_some()
+                        || Self::find_native_xyce_team_memristor_element(netlist, &element_name)
+                            .is_some()
+                    {
                         return Ok(());
                     }
                 }
@@ -48869,6 +49126,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         }
         if let Some(element_name) = Self::parse_power_probe(normalized) {
+            if Self::find_native_xyce_team_memristor_element(netlist, &element_name).is_some() {
+                return Ok(());
+            }
             if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)? {
                 if resistance.is_finite()
                     || (resistance.is_infinite() && resistance.is_sign_positive())
@@ -48979,6 +49239,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if let Some((element_name, parameter)) =
             Self::parse_device_operating_point_probe(normalized)
         {
+            if parameter.eq_ignore_ascii_case("R")
+                && let Some(store_name) =
+                    Self::xyce_team_resistance_store_name(netlist, &element_name)
+            {
+                let observable = format!("N({store_name})");
+                return result.try_dc_observable_named(&observable).ok_or_else(|| {
+                    format!("TEAM resistance store '{store_name}' not found in DC result")
+                });
+            }
+            if let Some(value) = result.try_dc_observable_named(normalized) {
+                return Ok(value);
+            }
             return Self::evaluate_device_operating_point_probe(
                 op_report,
                 &element_name,
@@ -49002,6 +49274,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
+            if parameter.eq_ignore_ascii_case("R")
+                && let Some(store_name) =
+                    Self::xyce_team_resistance_store_name(netlist, &element_name)
+            {
+                return result
+                    .try_dc_observable_named(&format!("N({store_name})"))
+                    .ok_or_else(|| {
+                        format!("TEAM resistance store '{store_name}' not found in DC result")
+                    });
+            }
             return Self::evaluate_device_parameter_probe(
                 netlist,
                 dc,
@@ -49229,6 +49511,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         }
     }
 
@@ -49796,6 +50079,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Ok(time);
         }
 
+        if let Some((element_name, parameter)) =
+            Self::parse_device_operating_point_probe(normalized)
+            && parameter.eq_ignore_ascii_case("R")
+            && let Some(store_name) = Self::xyce_team_resistance_store_name(netlist, &element_name)
+        {
+            return Self::transient_store_named(result, &store_name, time);
+        }
+
         if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
             let pos =
                 Self::transient_voltage_named(result, netlist, &voltage_probe.node_pos, time)?;
@@ -49881,6 +50172,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Self::transient_branch_current_waveform_named(result, branch_name).and_then(|waveform| {
             Self::interpolate_transient_waveform_at(&result.time, waveform, time).ok()
         })
+    }
+
+    fn transient_store_named(
+        result: &TransientResult,
+        store_name: &str,
+        time: Value,
+    ) -> Result<Value, String> {
+        let waveform = result
+            .try_store_waveform_named(store_name)
+            .ok_or_else(|| format!("device store '{store_name}' not found in transient result"))?;
+        Self::interpolate_transient_waveform_at(&result.time, waveform, time)
     }
 
     fn transient_branch_current_waveform_named<'a>(
@@ -51122,6 +51424,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         element_name: &str,
         parameter: &str,
     ) -> Result<f64, String> {
+        if parameter == "r"
+            && let Some(store_name) = Self::xyce_team_resistance_store_name(netlist, element_name)
+        {
+            return Self::transient_store_named(result, &store_name, time);
+        }
         match parameter {
             "r" => Self::evaluate_transient_resistor_parameter_r_value(
                 netlist,
@@ -52761,6 +53068,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 | ElementKind::Capacitor { .. }
                 | ElementKind::Inductor { .. }
                 | ElementKind::JilesAthertonInductor { .. }
+                | ElementKind::XyceMemristor { .. }
                 | ElementKind::Vcvs { .. }
                 | ElementKind::Ccvs { .. }
                 | ElementKind::VSwitch { .. }
@@ -53295,6 +53603,71 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 Self::device_instance_names_match(&element.name, name)
                     && matches!(&element.kind, ElementKind::Resistor { .. })
             })
+    }
+
+    fn find_native_xyce_team_memristor_element(
+        netlist: &Netlist,
+        name: &str,
+    ) -> Option<crate::netlist::Element> {
+        if let Some(element) = netlist.elements.iter().find(|element| {
+            Self::device_instance_names_match(&element.name, name)
+                && matches!(&element.kind, ElementKind::XyceMemristor { .. })
+                && Self::netlist_element_is_native_xyce_team_memristor(netlist, element)
+        }) {
+            return Some(element.clone());
+        }
+
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist).ok()?;
+        let mut flat_netlist = netlist.clone();
+        flat_netlist.elements = flattened.elements;
+        flat_netlist.models.extend(flattened.scoped_models);
+        flat_netlist.subcircuits.clear();
+        flat_netlist
+            .elements
+            .iter()
+            .find(|element| {
+                Self::device_instance_names_match(&element.name, name)
+                    && matches!(&element.kind, ElementKind::XyceMemristor { .. })
+                    && Self::netlist_element_is_native_xyce_team_memristor(&flat_netlist, element)
+            })
+            .cloned()
+    }
+
+    /// Admit only the exact native TEAM subset that circuit construction can
+    /// validate and instantiate. `YMEMRISTOR` is shared by several Xyce model
+    /// levels, so syntax alone must never claim PEM or other model families.
+    fn netlist_element_is_native_xyce_team_memristor(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::XyceMemristor {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return false;
+        };
+        if !deferred_params.is_empty() {
+            return false;
+        }
+        let Some(model_def) = Self::find_model(&netlist.models, model) else {
+            return false;
+        };
+        crate::engine::build_xyce_team_memristor(
+            netlist,
+            model_def,
+            &element.name,
+            model,
+            instance_params,
+            SimulationConfig::default().temperature,
+        )
+        .is_ok()
+    }
+
+    fn xyce_team_resistance_store_name(netlist: &Netlist, name: &str) -> Option<String> {
+        Self::find_native_xyce_team_memristor_element(netlist, name)
+            .map(|element| format!("{}:R", element.name))
     }
 
     fn find_capacitor_element(netlist: &Netlist, name: &str) -> Option<crate::netlist::Element> {
@@ -60117,6 +60490,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 absolute: Value::from_bits(source_contract.verify_abstol_bits),
                 zero: XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
                 absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+                offset: 0.0,
             }
             .validate()?;
             Ok(XyceAnalyticSinusoidalRcContract {
@@ -64615,6 +64989,68 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
 mod tests {
     use super::*;
 
+    #[test]
+    fn hierarchical_team_resistance_probes_resolve_xyce_colon_aliases() {
+        let netlist = Netlist::parse(
+            "hierarchical TEAM store alias\n\
+             X1 in 0 cell\n\
+             .subckt cell p n\n\
+             .model local_team memristor level=2\n\
+             YMEMRISTOR state p n local_team\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("hierarchical TEAM alias fixture parses");
+        let probe = "N(X1:YMEMRISTOR!STATE:R)";
+        let canonical_store = "X1.YMEMRISTOR!STATE:R";
+
+        let transient = TransientResult {
+            time: vec![0.0, 1.0],
+            voltages: Vec::new(),
+            branch_currents: Vec::new(),
+            num_nodes: 0,
+            node_names: Vec::new(),
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: vec![crate::engine::TransientStoreTrace {
+                name: canonical_store.to_string(),
+                values: vec![50.0, 100.0],
+            }],
+        };
+        let tran_value =
+            XyceTestRunner::evaluate_atomic_tran_probe(probe, &netlist, &transient, 0.5)
+                .expect("Xyce hierarchy alias resolves the canonical transient store");
+        assert_eq!(tran_value.to_bits(), 75.0f64.to_bits());
+
+        let mut dc_result = crate::SimulationResult::new(0, 0);
+        dc_result
+            .dc_observables
+            .push((format!("N({canonical_store})"), 75.0));
+        let dc = XyceDcSweep {
+            source: "V1".to_string(),
+            start: 0.0,
+            stop: 0.0,
+            step: 1.0,
+            mode: crate::netlist::DcSweepMode::Linear,
+            sweep2: None,
+        };
+        let dc_value = XyceTestRunner::evaluate_atomic_dc_probe(
+            probe,
+            &netlist,
+            &dc,
+            XyceDcSweepPoint {
+                primary: 0.0,
+                secondary: None,
+            },
+            &dc_result,
+            &crate::circuit::DeviceOpReport::default(),
+        )
+        .expect("Xyce hierarchy alias resolves the canonical DC store");
+        assert_eq!(dc_value.to_bits(), 75.0f64.to_bits());
+    }
+
     fn addresistors_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
         let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
         let root = std::env::temp_dir().join(format!(
@@ -67762,6 +68198,7 @@ M1 d g s b nmod W=1u L=0.18u
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
 
         let initial = XyceTestRunner::evaluate_tran_probe("i(i1)", &netlist, &result, 0.0)
@@ -67792,6 +68229,7 @@ M1 d g s b nmod W=1u L=0.18u
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
 
         XyceTestRunner::validate_tran_probe("P(R1)", &netlist)
@@ -67821,6 +68259,7 @@ M1 d g s b nmod W=1u L=0.18u
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
 
         XyceTestRunner::validate_tran_probe("P(V1)", &netlist)
@@ -68064,6 +68503,7 @@ M1 d g s b nmod W=1u L=0.18u
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
         let tolerance = runner.default_comparison_tolerance("v(1)");
         let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(2.99999996);
@@ -68099,6 +68539,7 @@ M1 d g s b nmod W=1u L=0.18u
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
         let tolerance = runner
             .default_comparison_tolerance("v(3)")
@@ -68379,6 +68820,7 @@ default output
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
         let tolerance = runner.default_comparison_tolerance("v(1)");
 
@@ -72825,6 +73267,7 @@ Cload out 0 2u\n\
             absolute: XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE,
             zero: XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
             absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+            offset: 0.0,
         };
         let raw_time = 1.000000004e-5;
         let printed_time = XyceTestRunner::xyce_default_prn_roundtrip(raw_time)
@@ -72925,7 +73368,7 @@ Cload out 0 2u\n\
         let columns = vec!["{V(4)+1}".to_string(), "{V(11)-0.5}".to_string()];
         let source = "\
 *COMP V(11) reltol=0.02
-*COMP {V(4)+1} reltol=0.02 abstol=2e-12 zerotol=3e-12 absdifftol=4e-12
+*COMP {V(4)+1} reltol=0.02 abstol=2e-12 zerotol=3e-12 absdifftol=4e-12 offset=-0.25
 ";
         let tolerances = XyceTestRunner::xyce_verify_comp_tolerances(source, &columns)
             .expect("canonical Release 7.10 *COMP metadata parses");
@@ -72937,13 +73380,14 @@ Cload out 0 2u\n\
             tolerances[0].absolute_difference.to_bits(),
             4.0e-12f64.to_bits()
         );
+        assert_eq!(tolerances[0].offset.to_bits(), (-0.25f64).to_bits());
         assert_eq!(
             tolerances[1],
             XyceVerifyTransientTolerance::release_7_10_default(),
             "an unprinted *COMP probe remains harmless and does not retarget an affine expression"
         );
         let continued = XyceTestRunner::xyce_verify_comp_tolerances(
-            "*COMP {V(4)+1} reltol=0.02\n+ abstol=2e-12 zerotol=3e-12 absdifftol=4e-12",
+            "*COMP {V(4)+1} reltol=0.02\n+ abstol=2e-12 zerotol=3e-12 absdifftol=4e-12 offset=-0.25",
             &columns,
         )
         .expect("Release 7.10 *COMP continuation lines are joined before parsing");
@@ -72957,7 +73401,6 @@ Cload out 0 2u\n\
         for malformed in [
             "*COMP {V(4)+1} reltol=0.02 reltol=0.03",
             "*COMP {V(4)+1} unknown=1",
-            "*COMP {V(4)+1} offset=1",
             "*COMP {V(4)+1} numfail=1",
             "*COMP",
         ] {
@@ -73064,12 +73507,30 @@ Cload out 0 2u\n\
             absolute: 1.0,
             zero: 0.0,
             absolute_difference: 1.0,
+            offset: 0.0,
         };
         assert_eq!(
             XyceTestRunner::xyce_verify_normalized_error_with_tolerance(0.0, 1.0, tolerance,)
                 .to_bits(),
             (-1.0f64).to_bits(),
             "difference exactly equal to ABSDIFFTOL is not suppressed"
+        );
+        let offset_tolerance = XyceVerifyTransientTolerance {
+            relative: 0.25,
+            absolute: 0.0,
+            zero: 0.0,
+            absolute_difference: 0.0,
+            offset: 2.0,
+        };
+        assert_eq!(
+            XyceTestRunner::xyce_verify_normalized_error_with_tolerance(
+                2.0,
+                2.25,
+                offset_tolerance,
+            )
+            .to_bits(),
+            (-0.5f64).to_bits(),
+            "normalized error receives both series after OFFSET has shifted them"
         );
         let good = XycePrnTable {
             columns: columns.clone(),
@@ -73105,6 +73566,7 @@ Cload out 0 2u\n\
             absolute: 1.0e-4,
             zero: 1.0e-3,
             absolute_difference: 1.0e-12,
+            offset: 0.0,
         };
         let zero_good = XycePrnTable {
             columns: columns.clone(),
@@ -73134,11 +73596,39 @@ Cload out 0 2u\n\
             "ZEROTOL equality zeroes the first values and duplicate rounded TIME keeps the first row"
         );
 
+        let shifted_zero_tolerance = XyceVerifyTransientTolerance {
+            relative: 1.0,
+            absolute: 1.0e-12,
+            zero: 1.0,
+            absolute_difference: 0.0,
+            offset: 1.0,
+        };
+        let shifted_zero_good = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![vec![0.0, 0.0, -1.5], vec![1.0, 1.0, -1.5]],
+        };
+        let shifted_zero_test = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![vec![0.0, 0.0, -0.5], vec![1.0, 1.0, -0.5]],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_tolerance(
+                    &shifted_zero_good,
+                    &shifted_zero_test,
+                    shifted_zero_tolerance,
+                )
+                .expect("OFFSET/ZEROTOL crossing tables compare")
+                .is_empty(),
+            "Release 7.10 applies OFFSET to both series before ZEROTOL"
+        );
+
         let interpolation_tolerance = XyceVerifyTransientTolerance {
             relative: 1.0,
             absolute: 1.0,
             zero: 0.0,
             absolute_difference: 0.0,
+            offset: 0.0,
         };
         let interpolation_good = XycePrnTable {
             columns: columns.clone(),
@@ -73220,6 +73710,7 @@ Cload out 0 2u\n\
             absolute: 1.0,
             zero: 0.0,
             absolute_difference: 0.0,
+            offset: 0.0,
         };
 
         assert!(
@@ -74838,6 +75329,109 @@ VBIAS bias 0 0\n\
                 .is_err(),
             "ordered output columns are part of the verifier contract"
         );
+    }
+
+    #[test]
+    fn integrated_rms_dispatch_samples_the_native_result_on_the_normalized_reference_grid() {
+        let source = "reference-grid policy\n\
+                      R1 out 0 1\n\
+                      .tran 0 1\n\
+                      .print tran V(out)\n\
+                      .end\n";
+        let netlist = Netlist::parse_validated(source).expect("reference-grid fixture validates");
+        let plan = XyceStaticTranPlan {
+            deck_path: PathBuf::from("reference-grid.cir"),
+            reference_path: PathBuf::from("reference-grid.prn"),
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: vec!["V(out)".to_string()],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 0.0,
+                stop: 1.0,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::WrapperStatic,
+            wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            },
+        };
+        let result = TransientResult {
+            time: vec![0.0, 0.5, 1.0],
+            voltages: vec![vec![0.0, 1.0, 0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+        let reference = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(out)".to_string(),
+            ],
+            rows: vec![
+                vec![0.0, 0.0, 0.0],
+                vec![1.0, 0.25, 0.5],
+                vec![2.0, 0.2500000004, 999.0],
+                vec![3.0, 1.0, 0.0],
+            ],
+        };
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+
+        let adaptive =
+            XyceTestRunner::transient_family_result_to_prn_table(&plan, &netlist, &result)
+                .expect("adaptive table serializes");
+        assert!(
+            !runner
+                .compare_xyce_verify_transient_tables(&reference, &adaptive)
+                .expect("adaptive-grid comparison is structurally valid")
+                .is_empty(),
+            "the fixture must expose reference interpolation across the unmatched native knot"
+        );
+        assert!(
+            runner
+                .compare_static_tran_reference_grid_fallback(&reference, &plan, &netlist, &result)
+                .expect("reference-grid comparison succeeds structurally")
+                .is_empty(),
+            "integrated-RMS comparison must use the first distinct oracle time rows"
+        );
+
+        let metadata_reference = XycePrnTable {
+            columns: vec![
+                "STEPNUM".to_string(),
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(out)".to_string(),
+            ],
+            rows: vec![
+                vec![0.0, 0.0, 0.0, 0.0],
+                vec![0.0, 1.0, 0.25, 0.5],
+                vec![0.0, 2.0, 0.2500000004, 999.0],
+                vec![0.0, 3.0, 1.0, 0.0],
+            ],
+        };
+        let sampled = XyceTestRunner::transient_family_result_to_prn_table_on_reference_grid(
+            &plan,
+            &netlist,
+            &result,
+            &metadata_reference,
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        )
+        .expect("optional metadata layout samples its TIME column");
+        assert_eq!(sampled.rows.len(), 3);
+        assert_eq!(sampled.rows[1][1].to_bits(), 0.25f64.to_bits());
+        assert_eq!(sampled.rows[1][2].to_bits(), 0.5f64.to_bits());
     }
 
     #[test]
@@ -77800,7 +78394,7 @@ C1 out 0 10f
                 scientific_precision: 12
             }
         );
-        assert!(selected.uses_adaptive_grid_only());
+        assert!(selected.uses_integrated_rms_verifier());
         let mut selected_plan = plan.clone();
         selected_plan.comparison_mode = selected;
         assert_eq!(

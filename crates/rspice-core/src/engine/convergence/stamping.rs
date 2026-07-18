@@ -103,6 +103,7 @@ impl Engine {
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
         circuit.set_b3soi_operating_point_mode(true);
+        circuit.set_xyce_team_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.update_bjt_static_linearizations(solution);
@@ -132,6 +133,7 @@ impl Engine {
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
         circuit.set_b3soi_operating_point_mode(true);
+        circuit.set_xyce_team_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.stamp_generic_switches(matrix, rhs, time);
@@ -183,6 +185,7 @@ impl Engine {
         junction_gmin: Value,
     ) {
         circuit.set_b3soi_operating_point_mode(true);
+        circuit.set_xyce_team_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         if circuit.has_xspice_devices() {
@@ -218,10 +221,7 @@ impl Engine {
         gmin: Value,
         stamp_generic_switches: bool,
     ) {
-        let node_count = circuit.num_nodes().min(rhs.len());
-        for i in 0..node_count {
-            matrix.add(i, i, gmin);
-        }
+        Self::stamp_nodal_gmin(circuit, matrix, gmin);
 
         circuit.stamp_transient_operating_point_direct(matrix, rhs);
         let num_nodes = circuit.num_nodes();
@@ -242,10 +242,7 @@ impl Engine {
         time: Value,
         gmin: Value,
     ) {
-        let node_count = circuit.num_nodes().min(rhs.len());
-        for i in 0..node_count {
-            matrix.add(i, i, gmin);
-        }
+        Self::stamp_nodal_gmin(circuit, matrix, gmin);
 
         circuit.stamp_transient_current_seed_direct(matrix, rhs);
         let num_nodes = circuit.num_nodes();

@@ -5,6 +5,7 @@ use super::*;
 impl Engine {
     #[inline]
     pub(in crate::engine::convergence) fn has_clamped_values(
+        circuit: &CircuitData,
         solution: &[Value],
         node_count: usize,
     ) -> bool {
@@ -12,7 +13,10 @@ impl Engine {
             || solution
                 .iter()
                 .take(node_count.min(solution.len()))
-                .any(|&v| v.abs() >= 999.0)
+                .enumerate()
+                .any(|(index, &v)| {
+                    !circuit.is_non_electrical_state_matrix_index(index) && v.abs() >= 999.0
+                })
     }
 
     #[inline]
@@ -50,11 +54,12 @@ impl Engine {
 
     #[inline]
     pub(in crate::engine::convergence) fn is_suspicious_solution(
+        circuit: &CircuitData,
         solution: &[Value],
         node_count: usize,
     ) -> bool {
         let node_limit = node_count.min(solution.len());
-        Self::has_clamped_values(solution, node_limit)
+        Self::has_clamped_values(circuit, solution, node_limit)
             || Self::has_suspicious_uniformity(&solution[..node_limit])
     }
 
@@ -81,14 +86,23 @@ impl Engine {
             .collect()
     }
 
-    pub(in crate::engine::convergence) fn limit_step_delta(
+    pub(in crate::engine::convergence) fn limit_step_delta_with_state_mask(
+        non_electrical_state_mask: &[bool],
         old: &[Value],
         proposal: &[Value],
         max_delta: Value,
     ) -> Vec<Value> {
         old.iter()
             .zip(proposal.iter())
-            .map(|(&old_v, &new_v)| {
+            .enumerate()
+            .map(|(index, (&old_v, &new_v))| {
+                if non_electrical_state_mask
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    return new_v;
+                }
                 let delta = new_v - old_v;
                 if delta.abs() > max_delta {
                     old_v + delta.signum() * max_delta
@@ -214,11 +228,12 @@ impl Engine {
     pub(in crate::engine::convergence) fn apply_damping_strategy_for_circuit<F>(
         &self,
         has_b3soi_devices: bool,
+        non_electrical_state_mask: &[bool],
         old: &[Value],
         proposal: &[Value],
         damping_state: &mut NewtonDampingState,
         junction_owns_steps: bool,
-        merit: F,
+        mut merit: F,
     ) -> Vec<Value>
     where
         F: FnMut(&[Value]) -> Option<Value>,
@@ -232,26 +247,23 @@ impl Engine {
                 DampingStrategy::VoltageLimiting
             )
         {
-            return Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT);
+            return Self::limit_step_delta_with_state_mask(
+                non_electrical_state_mask,
+                old,
+                proposal,
+                Self::MAX_DELTA_VOLTAGE_LIMIT,
+            );
         }
-        self.apply_damping_strategy(old, proposal, damping_state, merit)
-    }
-
-    pub(in crate::engine::convergence) fn apply_damping_strategy<F>(
-        &self,
-        old: &[Value],
-        proposal: &[Value],
-        damping_state: &mut NewtonDampingState,
-        mut merit: F,
-    ) -> Vec<Value>
-    where
-        F: FnMut(&[Value]) -> Option<Value>,
-    {
         match self.config.convergence_config.damping_strategy {
             DampingStrategy::None => proposal.to_vec(),
             DampingStrategy::LineSearch => Self::line_search_step(old, proposal, &mut merit),
             DampingStrategy::VoltageLimiting => {
-                let limited = Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT);
+                let limited = Self::limit_step_delta_with_state_mask(
+                    non_electrical_state_mask,
+                    old,
+                    proposal,
+                    Self::MAX_DELTA_VOLTAGE_LIMIT,
+                );
                 Self::line_search_step(old, &limited, &mut merit)
             }
             DampingStrategy::BankRose => {
@@ -260,7 +272,12 @@ impl Engine {
                 Self::interpolate_solution(old, proposal, damping_state.bank_rose_alpha)
             }
             DampingStrategy::Combined => {
-                let limited = Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT);
+                let limited = Self::limit_step_delta_with_state_mask(
+                    non_electrical_state_mask,
+                    old,
+                    proposal,
+                    Self::MAX_DELTA_VOLTAGE_LIMIT,
+                );
                 let step_norm = Self::step_l2_norm(old, &limited);
                 Self::update_bank_rose_alpha(damping_state, step_norm);
                 let bank_rose_step =
@@ -271,6 +288,7 @@ impl Engine {
     }
 
     pub(in crate::engine::convergence) fn clamp_solution_to_physical_bounds(
+        circuit: &CircuitData,
         solution: &mut [Value],
         node_count: usize,
     ) {
@@ -281,7 +299,10 @@ impl Engine {
         }
 
         let node_limit = node_count.min(solution.len());
-        for v in solution.iter_mut().take(node_limit) {
+        for (index, v) in solution.iter_mut().take(node_limit).enumerate() {
+            if circuit.is_non_electrical_state_matrix_index(index) {
+                continue;
+            }
             if v.abs() > Self::MAX_NODE_VOLTAGE {
                 *v = v.signum() * Self::MAX_NODE_VOLTAGE;
             }
@@ -402,11 +423,8 @@ impl Engine {
         // used to protect Newton steps while finding them.
         let snapshot = circuit.nonlinear_state_snapshot();
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
-        let node_count = circuit.num_nodes().min(size);
         let verdict = matrix.with_probe_values(|probe, rhs| {
-            for i in 0..node_count {
-                probe.add(i, i, gmin_floor);
-            }
+            Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
             circuit.stamp_dc_direct(probe, rhs);
             if self
                 .try_stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution)
@@ -451,7 +469,7 @@ mod tests {
     fn physical_clamp_only_limits_node_voltage_unknowns() {
         let mut solution = vec![1500.0, -1500.0, 2500.0, -2500.0];
 
-        Engine::clamp_solution_to_physical_bounds(&mut solution, 2);
+        Engine::clamp_solution_to_physical_bounds(&CircuitData::new(), &mut solution, 2);
 
         assert_eq!(solution[0], Engine::MAX_NODE_VOLTAGE);
         assert_eq!(solution[1], -Engine::MAX_NODE_VOLTAGE);
@@ -463,7 +481,7 @@ mod tests {
     fn physical_clamp_replaces_non_finite_unknowns_everywhere() {
         let mut solution = vec![0.0, Value::NAN, Value::INFINITY];
 
-        Engine::clamp_solution_to_physical_bounds(&mut solution, 1);
+        Engine::clamp_solution_to_physical_bounds(&CircuitData::new(), &mut solution, 1);
 
         assert_eq!(solution, vec![0.0, 0.0, 0.0]);
     }

@@ -321,6 +321,21 @@ pub enum ElementKind {
         deferred_params: Vec<(String, String)>,
     },
 
+    /// Xyce memristor lexical form (`YMEMRISTOR`).
+    ///
+    /// The model level selects the concrete family when the circuit is built,
+    /// so model-card scoping and subcircuit flattening remain independent of
+    /// declaration order. Assignments are retained syntactically for the
+    /// selected device builder's fail-closed validation.
+    XyceMemristor {
+        model: String,
+        /// Instance parameters resolved while parsing the current scope.
+        instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured inside subcircuit bodies and resolved
+        /// against the concrete instance scope during flattening.
+        deferred_params: Vec<(String, String)>,
+    },
+
     //-------------------------------------------------------------------------
     // Controlled Sources
     //-------------------------------------------------------------------------

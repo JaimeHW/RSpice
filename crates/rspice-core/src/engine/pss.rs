@@ -234,6 +234,7 @@ impl Engine {
 
         // Build and prepare circuit
         let mut circuit = self.build_circuit(netlist)?;
+        Self::ensure_supported_xyce_team_small_signal(&circuit, "PSS")?;
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -561,6 +562,7 @@ impl Engine {
                 digital_traces: Vec::new(),
                 real_traces: Vec::new(),
                 device_op_traces: Vec::new(),
+                store_traces: Vec::new(),
             };
 
             Ok((waveform, initial_state))
@@ -1210,6 +1212,7 @@ impl Engine {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
 
         let mut t = 0.0;

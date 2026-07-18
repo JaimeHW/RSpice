@@ -103,6 +103,250 @@ fn validate_source_file_inputs(
     }
 }
 
+pub(crate) fn build_xyce_team_memristor(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    element_name: &str,
+    model_name: &str,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<crate::device::XyceTeamMemristor, SimulationError> {
+    ensure_model_type(
+        "TEAM memristor",
+        element_name,
+        model_name,
+        model_def,
+        &["MEMRISTOR"],
+    )?;
+
+    // `YMEMRISTOR` is the common Xyce lexical form for multiple model
+    // families. Resolve the family selector before validating TEAM-specific
+    // parameters so a PEM model fails at the capability boundary instead of
+    // being misdiagnosed as a malformed TEAM model.
+    let level = resolve_supported_model_params_upper_map(
+        netlist,
+        model_def,
+        "TEAM memristor",
+        element_name,
+        model_name,
+        &["LEVEL"],
+        temperature_kelvin,
+    )?
+    .get("LEVEL")
+    .copied()
+    .unwrap_or(1.0);
+    if !level.is_finite() || (level - 2.0).abs() > 1.0e-12 {
+        return Err(SimulationError::Circuit(format!(
+            "TEAM memristor '{}' model '{}' requires MEMRISTOR LEVEL=2, got LEVEL={level}",
+            element_name, model_name
+        )));
+    }
+
+    let supported = |name: &str| {
+        XYCE_TEAM_MODEL_PARAMS
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    };
+    for name in model_def
+        .params
+        .iter()
+        .map(|(name, _)| name)
+        .chain(model_def.expr_params.iter().map(|(name, _)| name))
+        .chain(model_def.string_params.iter().map(|(name, _)| name))
+        .chain(model_def.string_vector_params.iter().map(|(name, _)| name))
+        .chain(model_def.real_vector_params.iter().map(|(name, _)| name))
+        .chain(
+            model_def
+                .real_vector_expr_params
+                .iter()
+                .map(|(name, _)| name),
+        )
+        .chain(model_def.integer_vector_params.iter().map(|(name, _)| name))
+    {
+        if !supported(name) {
+            return Err(SimulationError::Circuit(format!(
+                "TEAM memristor '{}' model '{}' has unsupported parameter '{}'",
+                element_name, model_name, name
+            )));
+        }
+    }
+
+    let params = resolve_supported_model_params_upper_map(
+        netlist,
+        model_def,
+        "TEAM memristor",
+        element_name,
+        model_name,
+        XYCE_TEAM_MODEL_PARAMS,
+        temperature_kelvin,
+    )?;
+
+    for (name, default) in [
+        ("RESNOISE", 0.0),
+        ("RESSEED", 0.0),
+        ("RESLAMBDA", 0.0),
+        ("RESTD", 0.0),
+        ("RESEPTD", 1.0e-10),
+        ("RESDELTA", 0.0),
+        ("RESDELTAGRAD", 0.0),
+    ] {
+        if let Some(value) = params.get(name)
+            && *value != default
+        {
+            return Err(SimulationError::Circuit(format!(
+                "TEAM memristor '{}' model '{}' requests {name}={value}; stochastic resistance noise remains unsupported until its accepted-step RNG and checkpoint contract is available",
+                element_name, model_name
+            )));
+        }
+    }
+
+    let mut model = crate::device::XyceTeamModelParams::default();
+    macro_rules! assign {
+        ($field:ident, $name:literal) => {
+            if let Some(value) = params.get($name) {
+                model.$field = *value;
+            }
+        };
+    }
+    assign!(k_on, "KON");
+    assign!(k_off, "KOFF");
+    assign!(alpha_on, "ALPHAON");
+    assign!(alpha_off, "ALPHAOFF");
+    assign!(x_on, "XON");
+    assign!(x_off, "XOFF");
+    assign!(r_on, "RON");
+    assign!(r_off, "ROFF");
+    assign!(i_on, "ION");
+    assign!(i_off, "IOFF");
+    assign!(x_scaling, "XSCALING");
+    assign!(d, "D");
+    assign!(p, "P");
+    assign!(j, "J");
+    assign!(a_on, "AON");
+    assign!(a_off, "AOFF");
+    assign!(wc, "WC");
+    if let Some(value) = params.get("WT") {
+        if (*value - value.round()).abs() > 1.0e-12 {
+            return Err(SimulationError::Circuit(format!(
+                "TEAM memristor '{}' model '{}' requires integer WT, got {value}",
+                element_name, model_name
+            )));
+        }
+        model.window_type = value.round() as i32;
+    }
+
+    let mut instance = crate::device::XyceTeamInstanceParams::default();
+    for (name, value) in instance_params {
+        if !name.eq_ignore_ascii_case("IVRELATION") {
+            return Err(SimulationError::Circuit(format!(
+                "TEAM memristor '{}' has unsupported instance parameter '{}'",
+                element_name, name
+            )));
+        }
+        if !value.is_finite() || (*value - value.round()).abs() > 1.0e-12 {
+            return Err(SimulationError::Circuit(format!(
+                "TEAM memristor '{}' requires integer IVRELATION, got {value}",
+                element_name
+            )));
+        }
+        instance.iv_relation = value.round() as i32;
+    }
+
+    crate::device::XyceTeamMemristor::new(model, instance).map_err(|error| {
+        SimulationError::Circuit(format!(
+            "TEAM memristor '{}' model '{}': {error}",
+            element_name, model_name
+        ))
+    })
+}
+
+fn xyce_team_namespace_key(name: &str) -> String {
+    name.to_ascii_uppercase().replace(':', ".")
+}
+
+/// Reject authored electrical nodes that would alias a generated TEAM state
+/// node or typed store output. The complete flattened element list is scanned
+/// before construction so the result cannot depend on netlist element order.
+/// The neutral Xyce memristor syntax is filtered through the canonical builder
+/// so other model families never reserve TEAM-only generated names.
+fn validate_xyce_team_generated_namespaces(
+    netlist: &Netlist,
+    elements: &[Element],
+    temperature_kelvin: f64,
+) -> Result<(), SimulationError> {
+    let mut authored_nodes = BTreeMap::new();
+    for node in elements.iter().flat_map(|element| element.nodes.iter()) {
+        authored_nodes
+            .entry(xyce_team_namespace_key(node))
+            .or_insert_with(|| node.clone());
+    }
+    let authored_devices = elements
+        .iter()
+        .map(|element| (xyce_team_namespace_key(&element.name), element.name.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut generated_names = BTreeMap::<String, (String, &'static str, String)>::new();
+
+    for element in elements {
+        let ElementKind::XyceMemristor {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            continue;
+        };
+        let Some(model_def) = find_model_def(netlist, model) else {
+            continue;
+        };
+        if !deferred_params.is_empty()
+            || build_xyce_team_memristor(
+                netlist,
+                model_def,
+                &element.name,
+                model,
+                instance_params,
+                temperature_kelvin,
+            )
+            .is_err()
+        {
+            continue;
+        }
+
+        for (namespace_kind, generated_name) in [
+            ("state", format!("{}_X", element.name)),
+            ("store", format!("{}:R", element.name)),
+        ] {
+            let namespace_key = xyce_team_namespace_key(&generated_name);
+            if let Some(authored_node) = authored_nodes.get(&namespace_key) {
+                return Err(SimulationError::Circuit(format!(
+                    "TEAM memristor '{}' generated {namespace_kind} name '{}' collides with authored node '{}'; generated TEAM state/store names are reserved case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
+                    element.name, generated_name, authored_node
+                )));
+            }
+            if let Some(authored_device) = authored_devices.get(&namespace_key) {
+                return Err(SimulationError::Circuit(format!(
+                    "TEAM memristor '{}' generated {namespace_kind} name '{}' collides with authored device '{}'; generated TEAM state/store names are reserved case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
+                    element.name, generated_name, authored_device
+                )));
+            }
+            if let Some((other_element, other_kind, other_name)) =
+                generated_names.get(&namespace_key)
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "TEAM memristors '{}' and '{}' generate aliased {other_kind}/{} names '{}' and '{}'; generated TEAM state/store names must be globally unique case-insensitively, with hierarchical ':' and '.' spellings treated as aliases",
+                    other_element, element.name, namespace_kind, other_name, generated_name
+                )));
+            }
+            generated_names.insert(
+                namespace_key,
+                (element.name.clone(), namespace_kind, generated_name),
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn parse_direct_branch_current_control(expression: &str) -> Option<String> {
     let normalized: String = expression
         .chars()
@@ -3196,6 +3440,7 @@ impl Engine {
             );
             flat_elements = reduction.elements;
         }
+        validate_xyce_team_generated_namespaces(netlist, &flat_elements, self.config.temperature)?;
 
         // Debug: log all elements
         log::info!("Building circuit with {} elements:", flat_elements.len());
@@ -4615,6 +4860,57 @@ impl Engine {
                     }
 
                     circuit.jfets.push(jfet);
+                }
+                ElementKind::XyceMemristor {
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    if !deferred_params.is_empty() {
+                        return Err(SimulationError::Circuit(format!(
+                            "TEAM memristor '{}' retains unresolved instance parameter expression(s) after flattening",
+                            element.name
+                        )));
+                    }
+                    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "TEAM memristor '{}' references unknown model '{}'",
+                            element.name, model
+                        ))
+                    })?;
+                    let device = build_xyce_team_memristor(
+                        netlist,
+                        model_def,
+                        &element.name,
+                        model,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    let node_pos = circuit.get_or_create_node(&element.nodes[0]);
+                    let node_neg = circuit.get_or_create_node(&element.nodes[1]);
+                    let node_x = circuit.get_or_create_node(&format!("{}_X", element.name));
+
+                    // Qx=x is exactly a unit capacitor from the hidden state
+                    // unknown to ground. Reusing the canonical capacitor
+                    // pipeline gives TEAM the engine's accepted-step history,
+                    // variable-step BE/Trap/Gear companions, LTE control, and
+                    // checkpoint behavior without a second integration stack.
+                    circuit.capacitors.add_internal(
+                        format!("__RSPICE_TEAM_Q!{}", element.name),
+                        node_x,
+                        0,
+                        1.0,
+                    );
+                    circuit.non_electrical_state_nodes.insert(node_x);
+                    circuit
+                        .xyce_team_memristors
+                        .push(crate::circuit::XyceTeamMemristorBinding {
+                            name: element.name.clone(),
+                            node_pos,
+                            node_neg,
+                            node_x,
+                            device,
+                        });
                 }
                 // MESFET (GaAs FET) families share the JFET device container,
                 // with model selection below preserving the ngspice equations.

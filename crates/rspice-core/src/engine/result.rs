@@ -52,6 +52,17 @@ pub struct TransientDeviceOpTrace {
     pub values: Vec<Value>,
 }
 
+/// One typed non-solution device store waveform, such as a compact-model
+/// internal resistance. Store traces are deliberately separate from voltage
+/// nodes so units, matrix topology, compression, and UI labeling remain sound.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientStoreTrace {
+    /// Canonical Xyce store name, for example `YMEMRISTOR!MR1:R`.
+    pub name: String,
+    /// One value per accepted transient sample.
+    pub values: Vec<Value>,
+}
+
 /// Result of transient analysis - time-domain waveforms
 #[derive(Debug, Clone)]
 pub struct TransientResult {
@@ -74,6 +85,8 @@ pub struct TransientResult {
     pub real_traces: Vec<RealTrace>,
     /// Device operating-point values captured at accepted transient points.
     pub device_op_traces: Vec<TransientDeviceOpTrace>,
+    /// Typed device store outputs captured at accepted transient points.
+    pub store_traces: Vec<TransientStoreTrace>,
 }
 
 impl TransientResult {
@@ -347,6 +360,14 @@ impl TransientResult {
             .map(|trace| trace.values.as_slice())
     }
 
+    /// Get a typed device-store waveform by its canonical store name.
+    pub fn try_store_waveform_named(&self, name: &str) -> Option<&[Value]> {
+        self.store_traces
+            .iter()
+            .find(|trace| trace.name.eq_ignore_ascii_case(name))
+            .map(|trace| trace.values.as_slice())
+    }
+
     /// Get voltage at a named node and time index, returning `None` when the
     /// name or time index is invalid.
     pub fn try_voltage_at_named(&self, name: &str, time_index: usize) -> Option<Value> {
@@ -384,6 +405,7 @@ impl From<TransientResultCompressed> for TransientResult {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: compressed.store_traces,
         }
     }
 }

@@ -495,6 +495,12 @@ impl Engine {
         if !circuit.b3soi_pd.is_empty() {
             kinds.push(describe("native B3SOI PD", circuit.b3soi_pd.len()));
         }
+        if !circuit.xyce_team_memristors.is_empty() {
+            kinds.push(describe(
+                "native Xyce TEAM memristor",
+                circuit.xyce_team_memristors.len(),
+            ));
+        }
 
         let unsupported_iswitch = circuit
             .iswitches
