@@ -77,15 +77,17 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let error_format = cli.error_format;
 
-    // Initialize logging based on verbosity
-    let log_level = if cli.verbose {
-        "debug"
-    } else if cli.quiet {
-        "error"
-    } else {
-        cli.log_level.as_deref().unwrap_or("warn")
-    };
-    observability::init(log_level, cli.log_format);
+    // Quiet execution has no observable log records, so avoid constructing
+    // env_logger's filters and formatter on the latency-sensitive batch path.
+    // Machine-readable fatal diagnostics still obtain their run ID lazily.
+    if !cli.quiet {
+        let log_level = if cli.verbose {
+            "debug"
+        } else {
+            cli.log_level.as_deref().unwrap_or("warn")
+        };
+        observability::init(log_level, cli.log_format);
+    }
 
     // Load configuration
     let config = if let Some(ref config_path) = cli.config {

@@ -81,6 +81,7 @@ impl AbortSignal for ProgressAbort<'_> {
 /// Install the Ctrl-C handler. Safe to call once per process; errors are
 /// ignored (the default handler then terminates the process, which is the
 /// pre-existing behavior).
+#[cfg(not(windows))]
 pub fn install_interrupt_handler() {
     let _ = ctrlc::set_handler(|| {
         if reason().is_some() {
@@ -90,6 +91,35 @@ pub fn install_interrupt_handler() {
         eprintln!("\nInterrupted — stopping at the next safe point (Ctrl-C again to force quit)");
         request(AbortReason::Interrupt);
     });
+}
+
+/// Windows already dispatches console-control callbacks on a system-managed
+/// thread. Register directly instead of asking `ctrlc` to allocate a
+/// semaphore and permanently spawn another waiter thread for every short CLI
+/// invocation.
+#[cfg(windows)]
+pub fn install_interrupt_handler() {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+
+    // SAFETY: `windows_console_control_handler` has the required static
+    // `PHANDLER_ROUTINE` ABI and accesses only process-lifetime atomics.
+    unsafe {
+        let _ = SetConsoleCtrlHandler(Some(windows_console_control_handler), 1);
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn windows_console_control_handler(control_type: u32) -> i32 {
+    use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
+
+    if !matches!(control_type, CTRL_C_EVENT | CTRL_BREAK_EVENT) {
+        return 0;
+    }
+    if reason().is_some() {
+        std::process::exit(130);
+    }
+    request(AbortReason::Interrupt);
+    1
 }
 
 /// Arm the run timeout: after `seconds`, long-running analyses stop at the
