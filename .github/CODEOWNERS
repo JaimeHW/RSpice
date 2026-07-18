@@ -1,0 +1,12 @@
+* @JaimeHW
+
+# Release, dependency, and vulnerability controls require explicit owner review.
+/.github/workflows/ @JaimeHW
+/.github/dependabot.yml @JaimeHW
+/Cargo.lock @JaimeHW
+/deny.toml @JaimeHW
+/.cargo/audit.toml @JaimeHW
+/SECURITY.md @JaimeHW
+/security/advisory-exceptions.toml @JaimeHW
+/tools/security/ @JaimeHW
+/tools/release/ @JaimeHW

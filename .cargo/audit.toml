@@ -1,8 +1,12 @@
 [advisories]
-# quick-xml is pulled only through wayland-scanner 0.31, whose latest stable
-# release still depends on quick-xml 0.39. This path is build-time codegen over
-# trusted Wayland protocol XML, not runtime untrusted XML parsing.
+# Every accepted advisory is documented with an owner, mitigation, exit
+# criterion, and expiring review date in security/advisory-exceptions.toml.
+# tools/security/check_advisory_exceptions.py keeps this list synchronized
+# with cargo-deny's policy and fails CI when a review expires.
 ignore = [
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0192",
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0206",
 ]

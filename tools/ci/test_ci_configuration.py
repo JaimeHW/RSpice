@@ -1,5 +1,6 @@
 import re
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -266,6 +267,9 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo deny check advisories bans licenses sources", security)
         self.assertIn("cargo audit", security)
         self.assertIn("cargo cyclonedx --format json --target all", security)
+        self.assertIn(
+            "python3 tools/security/check_advisory_exceptions.py", security
+        )
         self.assertIn("if-no-files-found: error", security)
         self.assertIn("cargo llvm-cov --locked --workspace", coverage)
         self.assertIn("mkdir -p target/coverage", coverage)
@@ -283,6 +287,25 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("package-ecosystem: \"cargo\"", dependabot)
         self.assertIn("package-ecosystem: \"github-actions\"", dependabot)
         self.assertIn("package-ecosystem: \"pip\"", dependabot)
+
+    def test_security_exceptions_are_owned_scoped_and_unexpired(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "tools/security/check_advisory_exceptions.py"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"advisory exception policy failed:\n{result.stdout}\n{result.stderr}",
+        )
+
+        security_policy = read_text("SECURITY.md")
+        codeowners = read_text(".github/CODEOWNERS")
+        self.assertIn("security/advisory-exceptions.toml", security_policy)
+        self.assertIn("security/advisory-exceptions.toml", codeowners)
+        self.assertIn("tools/security/", codeowners)
 
     def test_python_ci_matches_supported_abi_and_smokes_built_wheels(self) -> None:
         workflow = read_text(".github/workflows/python.yml")

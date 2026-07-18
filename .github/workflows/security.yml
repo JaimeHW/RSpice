@@ -6,6 +6,10 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
+      - ".cargo/audit.toml"
+      - "security/**"
+      - "tools/security/**"
+      - "SECURITY.md"
       - "crates/**"
       - ".github/workflows/security.yml"
   push:
@@ -14,6 +18,10 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
+      - ".cargo/audit.toml"
+      - "security/**"
+      - "tools/security/**"
+      - "SECURITY.md"
       - "crates/**"
       - ".github/workflows/security.yml"
   schedule:
@@ -59,6 +67,8 @@ jobs:
           cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
           cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
           cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked
+      - name: Validate expiring advisory exceptions
+        run: python3 tools/security/check_advisory_exceptions.py
       - name: Cargo deny policy
         run: cargo deny check advisories bans licenses sources
       - name: RustSec audit

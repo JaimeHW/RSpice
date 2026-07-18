@@ -1,0 +1,50 @@
+schema_version = 1
+
+# Accepted advisories are temporary risk decisions, not permanent allowlists.
+# The checker fails on the day after `review_after` and requires this inventory
+# to exactly match both deny.toml and .cargo/audit.toml.
+
+[[exceptions]]
+id = "RUSTSEC-2024-0436"
+dependency = "faer -> gemm -> paste"
+owner = "@JaimeHW"
+review_after = "2026-10-17"
+reason = "paste is unmaintained and the compatible faer 0.23 solver graph has no maintained drop-in replacement."
+mitigations = "The crate is a build-time procedural macro from the checksum-locked crates.io graph; it does not parse circuit or runtime input. Locked builds, cargo-deny source policy, and release provenance constrain substitution risk."
+exit_criteria = "Remove this exception when faer/gemm removes paste or a compatible maintained solver release becomes available."
+
+[[exceptions]]
+id = "RUSTSEC-2026-0192"
+dependency = "winit -> sctk-adwaita -> ab_glyph -> ttf-parser"
+owner = "@JaimeHW"
+review_after = "2026-10-17"
+reason = "The current winit Wayland decoration stack has no compatible maintained replacement for this transitive parser."
+mitigations = "This path is confined to the desktop UI font stack; backend CLI and library deployments do not link it. Release builds remain checksum-locked and are exercised on Linux, macOS, and Windows."
+exit_criteria = "Upgrade the winit/sctk-adwaita font stack as soon as an upstream release removes the unmaintained ttf-parser version."
+
+[[exceptions]]
+id = "RUSTSEC-2026-0194"
+dependency = "wayland-scanner -> quick-xml"
+owner = "@JaimeHW"
+review_after = "2026-10-17"
+reason = "The latest compatible wayland-scanner release still uses the affected quick-xml line."
+mitigations = "quick-xml is used at build time on trusted, dependency-supplied Wayland protocol XML and is not reachable from netlists, result files, or runtime network input."
+exit_criteria = "Upgrade wayland-scanner when its stable dependency graph moves to a fixed quick-xml release."
+
+[[exceptions]]
+id = "RUSTSEC-2026-0195"
+dependency = "wayland-scanner -> quick-xml"
+owner = "@JaimeHW"
+review_after = "2026-10-17"
+reason = "The latest compatible wayland-scanner release still uses the affected quick-xml line."
+mitigations = "quick-xml is used at build time on trusted, dependency-supplied Wayland protocol XML and is not reachable from netlists, result files, or runtime network input."
+exit_criteria = "Upgrade wayland-scanner when its stable dependency graph moves to a fixed quick-xml release."
+
+[[exceptions]]
+id = "RUSTSEC-2026-0206"
+dependency = "krilla -> rustybuzz"
+owner = "@JaimeHW"
+review_after = "2026-10-17"
+reason = "rustybuzz became unmaintained and krilla 0.8.2 has no maintained release or compatible shaping-backend migration yet."
+mitigations = "RSpice's two krilla exporters shape only three repository-embedded IBM Plex font files. They expose no user-supplied font loading path, and PDF source text, cells, raster pixels, and output bytes are independently bounded."
+exit_criteria = "Move to a krilla release backed by harfrust, or replace the simple-text path, as soon as a compatible maintained implementation is available."

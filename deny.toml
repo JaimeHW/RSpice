@@ -9,6 +9,7 @@ ignore = [
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive through winit 0.30.13 -> sctk-adwaita -> ab_glyph on Wayland; replacing it requires an upstream font-stack migration." },
     { id = "RUSTSEC-2026-0194", reason = "quick-xml is pulled only through wayland-scanner 0.31, whose latest release still depends on quick-xml 0.39; this is a build-time code generator for trusted Wayland protocol XML, not runtime untrusted XML parsing." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml is pulled only through wayland-scanner 0.31, whose latest release still depends on quick-xml 0.39; this is a build-time code generator for trusted Wayland protocol XML, not runtime untrusted XML parsing." },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through krilla 0.8.2 simple-text; RSpice PDF exporters shape only repository-embedded IBM Plex fonts, and no maintained krilla release or compatible drop-in exists yet." },
 ]
 
 [licenses]
