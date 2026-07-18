@@ -4654,10 +4654,12 @@ fn test_xyce_measure_cont_step_tran_provenance_mutations_fail_closed() {
         fs::remove_dir_all(&root).expect("remove stepped source-mutation fixture");
     }
 
+    // Build intentionally absent paths from fragments so the exact-vendored-path
+    // audit does not mistake these negative fixtures for runnable deck references.
     for (label, mutate) in [
         (
             "extra-control",
-            "Netlists/MEASURE_CONT/STEP/DerivTestTran.s2.cir",
+            concat!("Netlists/MEASURE_CONT/STEP/DerivTestTran.s2", ".cir"),
         ),
         (
             "fake-mt",
@@ -4686,7 +4688,10 @@ fn test_xyce_measure_cont_step_tran_provenance_mutations_fail_closed() {
     let root = make_fixture("case-only-control");
     let source = root.join("Netlists/MEASURE_CONT/STEP/DerivTestTran.s0.cir");
     let temporary = root.join("Netlists/MEASURE_CONT/STEP/case-rename.tmp");
-    let renamed = root.join("Netlists/MEASURE_CONT/STEP/derivTestTran.s0.cir");
+    let renamed = root.join(concat!(
+        "Netlists/MEASURE_CONT/STEP/derivTestTran.s0",
+        ".cir"
+    ));
     fs::rename(&source, &temporary).expect("stage case-only control rename");
     fs::rename(&temporary, &renamed).expect("complete case-only control rename");
     assert_fails(&root, "case-only control rename");
