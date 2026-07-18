@@ -1915,12 +1915,12 @@ fn test_xyce_independent_voltage_source_transient_cases_run() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/VSIN/vsin.cir",
-        "Netlists/VSIN/bug510.cir",
-        "Netlists/VSIN/bug1679.cir",
-        "Netlists/VPULSE/vpulse.cir",
-        "Netlists/VEXP/vexp.cir",
+    for (relative, expected_contract) in [
+        ("Netlists/VSIN/vsin.cir", "static_prn_tran"),
+        ("Netlists/VSIN/bug510.cir", "static_xyce_verify_prn_tran"),
+        ("Netlists/VSIN/bug1679.cir", "static_prn_tran"),
+        ("Netlists/VPULSE/vpulse.cir", "static_prn_tran"),
+        ("Netlists/VEXP/vexp.cir", "static_prn_tran"),
     ] {
         assert!(
             !runner.requires_upstream_wrapper(relative),
@@ -1936,8 +1936,8 @@ fn test_xyce_independent_voltage_source_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should use the standard native transient .prn contract"
+            result.contract, expected_contract,
+            "{relative} should report its canonical native transient .prn contract"
         );
     }
 }
@@ -3023,8 +3023,8 @@ fn test_xyce_bug_1173_1176_certification_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, "static_xyce_verify_prn_tran",
+            "{relative} should report the Release 7.10 integrated-RMS transient contract"
         );
     }
 }
@@ -3668,8 +3668,8 @@ fn test_xyce_behavioral_file_table_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, "static_xyce_verify_prn_tran",
+            "{relative} should report the Release 7.10 integrated-RMS transient contract"
         );
     }
 }
@@ -3702,9 +3702,12 @@ fn test_xyce_static_inductor_transient_cases_run() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/BUG_458/bug458.cir",
-        "Netlists/INDUCTOR/inductor.cir",
+    for (relative, expected_contract) in [
+        ("Netlists/BUG_458/bug458.cir", "static_prn_tran"),
+        (
+            "Netlists/INDUCTOR/inductor.cir",
+            "static_xyce_verify_prn_tran",
+        ),
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
@@ -3716,8 +3719,8 @@ fn test_xyce_static_inductor_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, expected_contract,
+            "{relative} should report its canonical native transient .prn contract"
         );
     }
 }
@@ -5727,8 +5730,8 @@ fn test_xyce_subckt_controlled_source_parameter_gain_case_runs() {
         "{relative} should match the checked-in Xyce .prn oracle"
     );
     assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the Release 7.10 integrated-RMS transient contract"
     );
 }
 
@@ -5845,8 +5848,8 @@ fn test_xyce_rf_port_transient_case_runs() {
         "{relative} should match the checked-in Xyce .prn oracle"
     );
     assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the Release 7.10 integrated-RMS transient contract"
     );
 }
 
@@ -5958,8 +5961,8 @@ fn test_xyce_behavioral_cubic_file_spline_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, "static_xyce_verify_prn_tran",
+            "{relative} should report the Release 7.10 integrated-RMS transient contract"
         );
     }
 }
@@ -5984,8 +5987,8 @@ fn test_xyce_behavioral_akima_file_spline_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, "static_xyce_verify_prn_tran",
+            "{relative} should report the Release 7.10 integrated-RMS transient contract"
         );
     }
 }
@@ -6010,8 +6013,8 @@ fn test_xyce_behavioral_wodicka_file_spline_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, "static_xyce_verify_prn_tran",
+            "{relative} should report the Release 7.10 integrated-RMS transient contract"
         );
     }
 }
@@ -6036,8 +6039,8 @@ fn test_xyce_behavioral_barycentric_file_interpolation_transient_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
         assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
+            result.contract, "static_xyce_verify_prn_tran",
+            "{relative} should report the Release 7.10 integrated-RMS transient contract"
         );
     }
 }
