@@ -64,3 +64,29 @@ fn main() -> ExitCode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn regression_policy_flags_require_a_baseline() {
+        let error = Cli::try_parse_from(["rspice-bench", "run", "--max-regression-percent", "5"])
+            .expect_err("a threshold without a baseline is meaningless");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+    }
+
+    #[test]
+    fn baseline_uses_the_runtime_default_threshold() {
+        let cli = Cli::try_parse_from(["rspice-bench", "run", "--baseline", "baseline.json"])
+            .expect("baseline arguments parse");
+        let BenchCommand::Run(args) = cli.command else {
+            panic!("run command expected");
+        };
+        assert_eq!(args.max_regression_percent, None);
+        assert!(!args.allow_host_mismatch);
+    }
+}

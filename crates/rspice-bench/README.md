@@ -11,8 +11,9 @@ the regression yardstick for performance work — the convention is that no
 optimization claim lands without a before/after scoreboard from this rig.
 
 It is **not** a Criterion/Divan harness and has no `[[bench]]` targets;
-timing is `std::time::Instant` around child-process spawn/wait. For
-isolated solver-kernel numbers, use rspice-core's
+timing is `std::time::Instant` around child-process spawn and an OS-backed
+timed wait, without polling-interval quantization. For isolated solver-kernel
+numbers, use rspice-core's
 `cargo run --release -p rspice-core --example klu_bench` instead.
 
 ## Layout
@@ -38,6 +39,11 @@ cargo build --release -p rspice-cli -p rspice-bench
 # Run the suite (writes benchmarks/scoreboards/scoreboard.json)
 target/release/rspice-bench run
 
+# Gate a candidate on the same host and with the same repeat count/deck set
+target/release/rspice-bench run \
+  --baseline benchmarks/scoreboards/reference.json \
+  --out benchmarks/scoreboards/candidate.json
+
 # Run the native Verilog-A JIT gate
 target/release/rspice-bench native-jit
 
@@ -53,6 +59,9 @@ target/release/rspice-bench gen
 | `--out <PATH>` | `benchmarks/scoreboards/scoreboard.json` | Scoreboard destination. The rig never date-stamps; archive a run by passing an explicit dated path |
 | `--circuits <DIR>` | `benchmarks/circuits` | Deck directory (non-recursive scan for `*.cir`) |
 | `--timeout-secs <N>` | 120 (min 1) | Per-run wall-clock cap; an exceeded run is killed and marked failed |
+| `--baseline <PATH>` | unset | Same-host scoreboard used to gate every RSpice deck median |
+| `--max-regression-percent <PERCENT>` | 10 | Largest allowed per-deck median slowdown versus `--baseline` |
+| `--allow-host-mismatch` | false | Permit exploratory cross-host comparisons; unsafe for release gates |
 
 Environment variables:
 
@@ -61,8 +70,11 @@ Environment variables:
 | `RSPICE_BENCH_RSPICE` | RSpice executable override. Default: the `rspice` binary next to `rspice-bench` in `target/release/` |
 | `RSPICE_BENCH_NGSPICE` | ngspice executable for the comparison column. Unset = the ngspice column is skipped (noted in the scoreboard, not a failure). Use a release/console build — a debug ngspice makes RSpice look artificially fast |
 
-The process exits non-zero if any simulator run failed, so CI can gate on
-deck health even when timings are not being compared.
+The process exits non-zero if any simulator run or baseline comparison fails.
+Baseline comparison requires the same repeat count, exact deck set, and
+methodology and, by default, the same OS/architecture and logical CPU count.
+The scoreboard is still written on a regression and carries a machine-readable
+`regression_gate` report with every median, delta, and verdict.
 
 ### `rspice-bench native-jit`
 

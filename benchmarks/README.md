@@ -14,6 +14,16 @@ cargo build --release -p rspice-cli -p rspice-bench
 target/release/rspice-bench run
 ```
 
+Create and enforce a same-machine baseline:
+
+```text
+target/release/rspice-bench run --out benchmarks/scoreboards/reference.json
+target/release/rspice-bench run \
+  --baseline benchmarks/scoreboards/reference.json \
+  --max-regression-percent 10 \
+  --out benchmarks/scoreboards/candidate.json
+```
+
 - `RSPICE_BENCH_NGSPICE=<path>` — ngspice executable for the comparison
   column. Unset = the ngspice column is skipped (noted in the scoreboard).
   Use a **release/console** build (`ngspice_con.exe` on Windows); a debug
@@ -26,24 +36,35 @@ target/release/rspice-bench run
   `benchmarks/scoreboards/scoreboard.json`). The rig never date-stamps the
   file itself; archive a run by passing an explicit dated path, e.g.
   `--out benchmarks/scoreboards/2026-06-11-baseline.json`.
+- `--baseline PATH` — compare every RSpice median against an existing
+  same-host scoreboard and fail if any deck exceeds the allowed regression.
+- `--max-regression-percent PERCENT` — per-deck median budget used with
+  `--baseline` (default 10). The repeat count, deck sets, and timing
+  methodology must match.
+- `--allow-host-mismatch` — opt out of the OS/architecture and logical-CPU
+  identity check for exploratory comparisons; never use this for release gates.
 
-The process exits non-zero if any simulator run failed, so the rig can gate
-deck health in CI even when timings are not being compared.
+The process exits non-zero if any simulator run failed or any baseline gate
+failed. The current scoreboard is still written and includes the complete
+`regression_gate` report so CI can retain evidence for a failed run.
 
 ## Methodology
 
-Wall-clock of the full child process, `std::time::Instant` around
-spawn/wait, stdin/stdout/stderr attached to the null device. One untimed
-warmup precedes the timed repeats for each deck/simulator pair. Cold OS
-file-cache effects are not controlled. **Median** is the headline number;
-min and mean are recorded alongside. The methodology string is embedded in
-every scoreboard so archived numbers stay self-describing.
+Wall-clock of the full child process, `std::time::Instant` around spawn and
+an OS-backed timed child wait (no polling interval), with stdin/stdout/stderr
+attached to the null device. One untimed warmup precedes the timed repeats for
+each deck/simulator pair. Cold OS file-cache effects are not controlled.
+**Median** is the headline number; min and mean are recorded alongside. The
+methodology string is embedded in every scoreboard so archived numbers stay
+self-describing and older polling-based scoreboards cannot silently become
+gate inputs.
 
 Comparability rules:
 
 - Same machine, same power profile, nothing heavy running concurrently
   (notably: not while another agent session is compiling).
-- RSpice from `--release` (fat LTO); ngspice from a release build.
+- RSpice from the workspace's measured `--release` profile; ngspice from a
+  release build. Do not mix Cargo profiles across baseline/current runs.
 - Quote medians, and quote the scoreboard file, not memory.
 
 ## Deck set
@@ -77,4 +98,6 @@ technologies, a sky130 op-amp tran/AC/noise trio, a buck converter, a
 
 A scoreboard records host info, repeat count, the methodology string, both
 executable paths, and per-deck min/median/mean plus the median speedup
-(`ngspice / rspice`; >1.0 means RSpice is faster).
+(`ngspice / rspice`; >1.0 means RSpice is faster). Baseline-gated runs also
+record baseline/current medians, percent changes, the threshold, host match,
+and per-deck plus aggregate verdicts.
