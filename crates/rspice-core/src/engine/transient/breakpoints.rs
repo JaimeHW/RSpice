@@ -70,9 +70,28 @@ impl Engine {
         breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
     }
 
+    #[cfg(test)]
     pub(super) fn add_source_spec_breakpoints(
         breakpoints: &mut BreakpointManager,
         spec: &crate::netlist::SourceSpec,
+        tstop: Value,
+        tstep_hint: Value,
+        dialect: crate::engine::SpiceDialect,
+    ) {
+        Self::add_source_spec_breakpoints_with_pwl(
+            breakpoints,
+            spec,
+            None,
+            tstop,
+            tstep_hint,
+            dialect,
+        );
+    }
+
+    fn add_source_spec_breakpoints_with_pwl(
+        breakpoints: &mut BreakpointManager,
+        spec: &crate::netlist::SourceSpec,
+        pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
         tstop: Value,
         tstep_hint: Value,
         dialect: crate::engine::SpiceDialect,
@@ -81,10 +100,24 @@ impl Engine {
 
         match spec {
             SourceSpec::Distortion { inner, .. } => {
-                Self::add_source_spec_breakpoints(breakpoints, inner, tstop, tstep_hint, dialect);
+                Self::add_source_spec_breakpoints_with_pwl(
+                    breakpoints,
+                    inner,
+                    pwl_waveform,
+                    tstop,
+                    tstep_hint,
+                    dialect,
+                );
             }
             SourceSpec::RfPort { inner, .. } => {
-                Self::add_source_spec_breakpoints(breakpoints, inner, tstop, tstep_hint, dialect);
+                Self::add_source_spec_breakpoints_with_pwl(
+                    breakpoints,
+                    inner,
+                    pwl_waveform,
+                    tstop,
+                    tstep_hint,
+                    dialect,
+                );
             }
             // TRNOISE breakpoints come from its expanded PWL sample train;
             // the unexpanded spec itself schedules none.
@@ -94,9 +127,10 @@ impl Engine {
             | SourceSpec::TrNoise { .. } => {}
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
-                Self::add_source_spec_breakpoints(
+                Self::add_source_spec_breakpoints_with_pwl(
                     breakpoints,
                     transient,
+                    pwl_waveform,
                     tstop,
                     tstep_hint,
                     dialect,
@@ -197,10 +231,8 @@ impl Engine {
                 value_offset,
                 delay,
                 repeat_from,
-            } => match crate::device::pwl_file::load_pwl_file(path) {
-                Ok(wf) => {
-                    let wf =
-                        wf.with_scaling(*time_scale, *value_scale, *time_offset, *value_offset);
+            } => match pwl_waveform {
+                Some(wf) => {
                     Self::add_repeating_pwl_breakpoints(
                         breakpoints,
                         wf.scaled_knot_times().map(|time| time + *delay),
@@ -209,13 +241,26 @@ impl Engine {
                         tstop,
                     );
                 }
-                Err(err) => {
-                    log::warn!(
-                        "Failed to load PWL file '{}' for breakpoint extraction: {}",
-                        path,
-                        err
-                    );
-                }
+                None => match crate::device::pwl_file::load_pwl_file(path) {
+                    Ok(wf) => {
+                        let wf =
+                            wf.with_scaling(*time_scale, *value_scale, *time_offset, *value_offset);
+                        Self::add_repeating_pwl_breakpoints(
+                            breakpoints,
+                            wf.scaled_knot_times().map(|time| time + *delay),
+                            repeat_from.map(|value| value * *time_scale),
+                            *delay + *time_offset,
+                            tstop,
+                        );
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "Failed to load PWL file '{}' for breakpoint extraction: {}",
+                            path,
+                            err
+                        );
+                    }
+                },
             },
             SourceSpec::Pat {
                 vhi,
@@ -403,14 +448,19 @@ impl Engine {
         dialect: crate::engine::SpiceDialect,
         breakpoints: &mut BreakpointManager,
     ) {
-        for spec in circuit
+        for (spec, pwl_waveform) in circuit
             .voltage_sources
-            .source_specs
-            .iter()
-            .chain(circuit.current_sources.source_specs.iter())
-            .filter_map(|spec| spec.as_ref())
+            .transient_specs_with_pwl()
+            .chain(circuit.current_sources.transient_specs_with_pwl())
         {
-            Self::add_source_spec_breakpoints(breakpoints, spec, tstop, tstep_hint, dialect);
+            Self::add_source_spec_breakpoints_with_pwl(
+                breakpoints,
+                spec,
+                pwl_waveform,
+                tstop,
+                tstep_hint,
+                dialect,
+            );
         }
 
         for switch in &circuit.generic_switches {
@@ -689,6 +739,34 @@ mod tests {
             );
             assert!(xyce_breakpoints.times().is_empty());
         }
+    }
+
+    #[test]
+    fn external_pwl_breakpoints_use_the_circuit_owned_snapshot() {
+        let spec = crate::netlist::SourceSpec::PwlFile {
+            path: "this-file-must-not-be-opened-for-breakpoints.pwl".to_string(),
+            time_scale: 2.0,
+            value_scale: 1.0,
+            time_offset: 1.0,
+            value_offset: 0.0,
+            delay: 3.0,
+            repeat_from: None,
+        };
+        let waveform = crate::device::pwl_file::PwlWaveform::new(vec![(0.0, 0.0), (2.0, 1.0)])
+            .expect("valid waveform")
+            .with_scaling(2.0, 1.0, 1.0, 0.0);
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-12);
+
+        Engine::add_source_spec_breakpoints_with_pwl(
+            &mut breakpoints,
+            &spec,
+            Some(&waveform),
+            10.0,
+            0.1,
+            crate::engine::SpiceDialect::Xyce,
+        );
+
+        assert_delays_close(breakpoints.times(), &[4.0, 8.0]);
     }
 
     #[test]

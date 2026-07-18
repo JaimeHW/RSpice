@@ -13,6 +13,12 @@ pub struct VoltageSources {
     pub ac_phases: Vec<Value>,
     /// Full source specification for transient waveform evaluation
     pub source_specs: Vec<Option<crate::netlist::SourceSpec>>,
+    /// Circuit-owned external PWL snapshots aligned with `source_specs`.
+    ///
+    /// External files are resolved once while the circuit is built. Keeping the
+    /// loaded waveform here makes a simulation deterministic if the file later
+    /// changes and avoids filesystem/cache work in the transient hot path.
+    pwl_waveforms: Vec<Option<Arc<crate::device::pwl_file::PwlWaveform>>>,
     /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br] per source
     csc_indices: Vec<[Option<CscIndex>; 4]>,
     /// Optional transient context used to resolve source defaults.
@@ -113,6 +119,7 @@ impl VoltageSources {
         self.ac_magnitudes.push(0.0);
         self.ac_phases.push(0.0);
         self.source_specs.push(None);
+        self.pwl_waveforms.push(None);
         self.csc_indices.push([None; 4]);
     }
 
@@ -128,6 +135,31 @@ impl VoltageSources {
         ac_phase: Value,
         source_spec: Option<crate::netlist::SourceSpec>,
     ) {
+        self.add_with_ac_spec_and_pwl_waveform(
+            name,
+            node_pos,
+            node_neg,
+            branch_idx,
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            source_spec,
+            None,
+        );
+    }
+
+    pub(crate) fn add_with_ac_spec_and_pwl_waveform(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch_idx: NodeId,
+        dc_value: Value,
+        ac_magnitude: Value,
+        ac_phase: Value,
+        source_spec: Option<crate::netlist::SourceSpec>,
+        pwl_waveform: Option<Arc<crate::device::pwl_file::PwlWaveform>>,
+    ) {
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -136,6 +168,7 @@ impl VoltageSources {
         self.ac_magnitudes.push(ac_magnitude);
         self.ac_phases.push(ac_phase);
         self.source_specs.push(source_spec);
+        self.pwl_waveforms.push(pwl_waveform);
         self.csc_indices.push([None; 4]);
     }
 
@@ -199,6 +232,20 @@ impl VoltageSources {
 
     pub fn is_empty(&self) -> bool {
         self.names.is_empty()
+    }
+
+    pub(crate) fn transient_specs_with_pwl(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &crate::netlist::SourceSpec,
+            Option<&crate::device::pwl_file::PwlWaveform>,
+        ),
+    > {
+        self.source_specs
+            .iter()
+            .zip(&self.pwl_waveforms)
+            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform.as_deref())))
     }
 
     /// Link indices to StaticMatrix for O(1) stamping
@@ -321,7 +368,12 @@ impl VoltageSources {
             let br = get_branch_idx(self.branch_indices[i]);
 
             let v = match &self.source_specs[i] {
-                Some(spec) => Self::evaluate_source_at_time_with_context(spec, time, context),
+                Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    time,
+                    context,
+                    self.pwl_waveforms[i].as_deref(),
+                ),
                 None => self.dc_values[i], // DC only
             };
 
@@ -335,10 +387,20 @@ impl VoltageSources {
         let context = self.transient_context;
         self.source_specs
             .iter()
-            .filter_map(|spec| spec.as_ref())
-            .map(|spec| {
-                (Self::evaluate_source_at_time_with_context(spec, t1, context)
-                    - Self::evaluate_source_at_time_with_context(spec, t0, context))
+            .zip(&self.pwl_waveforms)
+            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform)))
+            .map(|(spec, waveform)| {
+                (Self::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    t1,
+                    context,
+                    waveform.as_deref(),
+                ) - Self::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    t0,
+                    context,
+                    waveform.as_deref(),
+                ))
                 .abs()
             })
             .fold(0.0, Value::max)
@@ -413,8 +475,12 @@ impl VoltageSources {
             .enumerate()
             .filter_map(|(idx, spec)| spec.as_ref().map(|spec| (idx, spec)))
             .map(|(idx, spec)| {
-                (Self::evaluate_source_at_time_with_context(spec, time, context)
-                    - self.dc_values[idx])
+                (Self::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    time,
+                    context,
+                    self.pwl_waveforms[idx].as_deref(),
+                ) - self.dc_values[idx])
                     .abs()
             })
             .fold(0.0, Value::max)
@@ -720,16 +786,34 @@ impl VoltageSources {
         time: Value,
         context: Option<TransientSourceContext>,
     ) -> Value {
+        Self::evaluate_source_at_time_with_context_and_pwl(spec, time, context, None)
+    }
+
+    #[inline]
+    fn evaluate_source_at_time_with_context_and_pwl(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        context: Option<TransientSourceContext>,
+        pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
+    ) -> Value {
         use crate::netlist::SourceSpec;
         use std::f64::consts::PI;
 
         match spec {
             SourceSpec::Distortion { inner, .. } => {
-                Self::evaluate_source_at_time_with_context(inner, time, context)
+                Self::evaluate_source_at_time_with_context_and_pwl(
+                    inner,
+                    time,
+                    context,
+                    pwl_waveform,
+                )
             }
-            SourceSpec::RfPort { inner, .. } => {
-                Self::evaluate_source_at_time_with_context(inner, time, context)
-            }
+            SourceSpec::RfPort { inner, .. } => Self::evaluate_source_at_time_with_context_and_pwl(
+                inner,
+                time,
+                context,
+                pwl_waveform,
+            ),
             SourceSpec::Dc(v) => *v,
             SourceSpec::Ac { .. } => 0.0, // AC sources are DC=0 in transient
             // TRNOISE expands into a PWL sample train before circuit
@@ -737,10 +821,20 @@ impl VoltageSources {
             SourceSpec::TrNoise { .. } => 0.0,
             SourceSpec::DcAc { dc_value, .. } => *dc_value,
             SourceSpec::DcTransient { transient, .. } => {
-                Self::evaluate_source_at_time_with_context(transient, time, context)
+                Self::evaluate_source_at_time_with_context_and_pwl(
+                    transient,
+                    time,
+                    context,
+                    pwl_waveform,
+                )
             }
             SourceSpec::DcAcTransient { transient, .. } => {
-                Self::evaluate_source_at_time_with_context(transient, time, context)
+                Self::evaluate_source_at_time_with_context_and_pwl(
+                    transient,
+                    time,
+                    context,
+                    pwl_waveform,
+                )
             }
             SourceSpec::Pulse {
                 v1,
@@ -828,6 +922,13 @@ impl VoltageSources {
                 delay,
                 repeat_from,
             } => {
+                if let Some(waveform) = pwl_waveform {
+                    return if time < *delay {
+                        0.0
+                    } else {
+                        waveform.value_at_repeating(time - *delay, *repeat_from)
+                    };
+                }
                 let key =
                     PwlCacheKey::new(path, *time_scale, *value_scale, *time_offset, *value_offset);
                 let resource_limits = context
@@ -1012,9 +1113,12 @@ impl VoltageSources {
 
             // Get the source value at this time
             let v_source = match &self.source_specs[i] {
-                Some(spec) => {
-                    Self::evaluate_source_at_time_with_context(spec, time, self.transient_context)
-                }
+                Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    time,
+                    self.transient_context,
+                    self.pwl_waveforms[i].as_deref(),
+                ),
                 None => self.dc_values[i],
             };
             changed |= project_two_terminal_voltage(solution, np, nn, v_source);
@@ -1346,6 +1450,8 @@ pub struct CurrentSources {
     pub ac_phases: Vec<Value>,
     /// Full source specification for transient waveform evaluation
     pub source_specs: Vec<Option<crate::netlist::SourceSpec>>,
+    /// Circuit-owned external PWL snapshots aligned with `source_specs`.
+    pwl_waveforms: Vec<Option<Arc<crate::device::pwl_file::PwlWaveform>>>,
     /// Optional transient context used to resolve source defaults.
     transient_context: Option<TransientSourceContext>,
 }
@@ -1369,10 +1475,11 @@ impl CurrentSources {
         };
         let dc_value = if dc_value.is_finite() { dc_value } else { 0.0 };
         match self.source_specs.get(index).and_then(Option::as_ref) {
-            Some(spec) => VoltageSources::evaluate_source_at_time_with_context(
+            Some(spec) => VoltageSources::evaluate_source_at_time_with_context_and_pwl(
                 spec,
                 time,
                 self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
             ),
             None => dc_value,
         }
@@ -1396,6 +1503,7 @@ impl CurrentSources {
         self.ac_magnitudes.push(0.0);
         self.ac_phases.push(0.0);
         self.source_specs.push(None);
+        self.pwl_waveforms.push(None);
     }
 
     /// Add current source with AC parameters
@@ -1415,6 +1523,7 @@ impl CurrentSources {
         self.ac_magnitudes.push(ac_magnitude);
         self.ac_phases.push(ac_phase);
         self.source_specs.push(None);
+        self.pwl_waveforms.push(None);
     }
 
     /// Add current source with AC and transient specification.
@@ -1428,6 +1537,29 @@ impl CurrentSources {
         ac_phase: Value,
         source_spec: Option<crate::netlist::SourceSpec>,
     ) {
+        self.add_with_ac_spec_and_pwl_waveform(
+            name,
+            node_pos,
+            node_neg,
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            source_spec,
+            None,
+        );
+    }
+
+    pub(crate) fn add_with_ac_spec_and_pwl_waveform(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        dc_value: Value,
+        ac_magnitude: Value,
+        ac_phase: Value,
+        source_spec: Option<crate::netlist::SourceSpec>,
+        pwl_waveform: Option<Arc<crate::device::pwl_file::PwlWaveform>>,
+    ) {
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -1435,6 +1567,7 @@ impl CurrentSources {
         self.ac_magnitudes.push(ac_magnitude);
         self.ac_phases.push(ac_phase);
         self.source_specs.push(source_spec);
+        self.pwl_waveforms.push(pwl_waveform);
     }
 
     /// Set transient context used to resolve waveform defaults.
@@ -1507,6 +1640,20 @@ impl CurrentSources {
         self.names.is_empty()
     }
 
+    pub(crate) fn transient_specs_with_pwl(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &crate::netlist::SourceSpec,
+            Option<&crate::device::pwl_file::PwlWaveform>,
+        ),
+    > {
+        self.source_specs
+            .iter()
+            .zip(&self.pwl_waveforms)
+            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform.as_deref())))
+    }
+
     /// Stamp all current sources
     #[inline]
     pub fn stamp_all(&self, rhs: &mut [Value]) {
@@ -1552,10 +1699,11 @@ impl CurrentSources {
                 continue;
             };
 
-            let value = VoltageSources::evaluate_source_at_time_with_context(
+            let value = VoltageSources::evaluate_source_at_time_with_context_and_pwl(
                 spec,
                 time,
                 self.transient_context,
+                self.pwl_waveforms[i].as_deref(),
             );
             let delta = value - self.finite_dc_value(i);
             if !delta.is_finite() || delta == 0.0 {
@@ -1579,10 +1727,20 @@ impl CurrentSources {
         let context = self.transient_context;
         self.source_specs
             .iter()
-            .filter_map(|spec| spec.as_ref())
-            .map(|spec| {
-                (VoltageSources::evaluate_source_at_time_with_context(spec, t1, context)
-                    - VoltageSources::evaluate_source_at_time_with_context(spec, t0, context))
+            .zip(&self.pwl_waveforms)
+            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform)))
+            .map(|(spec, waveform)| {
+                (VoltageSources::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    t1,
+                    context,
+                    waveform.as_deref(),
+                ) - VoltageSources::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    t0,
+                    context,
+                    waveform.as_deref(),
+                ))
                 .abs()
             })
             .fold(0.0, Value::max)
@@ -1596,8 +1754,12 @@ impl CurrentSources {
             .enumerate()
             .filter_map(|(idx, spec)| spec.as_ref().map(|spec| (idx, spec)))
             .map(|(idx, spec)| {
-                (VoltageSources::evaluate_source_at_time_with_context(spec, time, context)
-                    - self.finite_dc_value(idx))
+                (VoltageSources::evaluate_source_at_time_with_context_and_pwl(
+                    spec,
+                    time,
+                    context,
+                    self.pwl_waveforms[idx].as_deref(),
+                ) - self.finite_dc_value(idx))
                 .abs()
             })
             .fold(0.0, Value::max)
@@ -1616,6 +1778,38 @@ mod tests {
             (actual - expected).abs() <= tolerance,
             "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
         );
+    }
+
+    #[test]
+    fn circuit_owned_external_pwl_snapshot_does_not_reopen_the_source_file() {
+        let waveform = Arc::new(
+            crate::device::pwl_file::PwlWaveform::new(vec![(0.0, 1.0), (1.0, 3.0)])
+                .expect("valid waveform"),
+        );
+        let spec = SourceSpec::PwlFile {
+            path: "this-file-must-not-be-opened-during-evaluation.pwl".to_string(),
+            time_scale: 1.0,
+            value_scale: 1.0,
+            time_offset: 0.0,
+            value_offset: 0.0,
+            delay: 0.0,
+            repeat_from: None,
+        };
+        let mut sources = CurrentSources::new();
+        sources.add_with_ac_spec_and_pwl_waveform(
+            "I1".to_string(),
+            1,
+            0,
+            1.0,
+            0.0,
+            0.0,
+            Some(spec),
+            Some(waveform),
+        );
+
+        assert_close(sources.value_at_time(0, 0.5), 2.0);
+        assert_close(sources.max_expected_delta(0.25, 0.75), 1.0);
+        assert_close(sources.max_dc_to_transient_delta(0.5), 1.0);
     }
 
     #[test]

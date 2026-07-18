@@ -139,7 +139,7 @@ fn validate_source_file_inputs(
     source_name: &str,
     spec: &crate::netlist::SourceSpec,
     resource_limits: ResourceLimits,
-) -> Result<(), SimulationError> {
+) -> Result<Option<std::sync::Arc<crate::device::pwl_file::PwlWaveform>>, SimulationError> {
     use crate::netlist::SourceSpec;
 
     match spec {
@@ -178,12 +178,12 @@ fn validate_source_file_inputs(
                     "source '{source_name}': PWL R must be less than the final PWL time"
                 )));
             }
-            Ok(())
+            Ok(Some(waveform))
         }
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
             validate_source_file_inputs(source_name, transient, resource_limits)
         }
-        _ => Ok(()),
+        _ => Ok(None),
     }
 }
 
@@ -4432,7 +4432,11 @@ impl Engine {
                     )?;
                 }
                 ElementKind::VoltageSource(spec) => {
-                    validate_source_file_inputs(&element.name, spec, self.config.resource_limits)?;
+                    let pwl_waveform = validate_source_file_inputs(
+                        &element.name,
+                        spec,
+                        self.config.resource_limits,
+                    )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
@@ -4462,7 +4466,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Am { .. } => Some(spec.clone()),
                         _ => None,
                     };
-                    circuit.voltage_sources.add_with_ac_and_spec(
+                    circuit.voltage_sources.add_with_ac_spec_and_pwl_waveform(
                         element.name.clone(),
                         np,
                         nn,
@@ -4471,10 +4475,15 @@ impl Engine {
                         ac_mag,
                         ac_phase,
                         transient_spec,
+                        pwl_waveform,
                     );
                 }
                 ElementKind::CurrentSource(spec) => {
-                    validate_source_file_inputs(&element.name, spec, self.config.resource_limits)?;
+                    let pwl_waveform = validate_source_file_inputs(
+                        &element.name,
+                        spec,
+                        self.config.resource_limits,
+                    )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let dc_value = extract_dc_value_with_limits(spec, self.config.resource_limits);
@@ -4494,7 +4503,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Am { .. } => Some(spec.clone()),
                         _ => None,
                     };
-                    circuit.current_sources.add_with_ac_and_spec(
+                    circuit.current_sources.add_with_ac_spec_and_pwl_waveform(
                         element.name.clone(),
                         np,
                         nn,
@@ -4502,6 +4511,7 @@ impl Engine {
                         ac_mag,
                         ac_phase,
                         transient_spec,
+                        pwl_waveform,
                     );
                 }
                 ElementKind::VoltageSourceDeferred(_) | ElementKind::CurrentSourceDeferred(_) => {
