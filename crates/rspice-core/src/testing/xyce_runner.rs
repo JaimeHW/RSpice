@@ -4128,6 +4128,14 @@ enum XyceStaticNoiseContract {
     GnuplotPrn,
     SplotPrn,
     Csv,
+    Tecplot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticNoiseOutputFamily {
+    Prn,
+    Csv,
+    Tecplot,
 }
 
 impl XyceStaticNoiseContract {
@@ -4144,21 +4152,26 @@ impl XyceStaticNoiseContract {
             "GNUPLOT" => Ok(Self::GnuplotPrn),
             "SPLOT" => Ok(Self::SplotPrn),
             "CSV" => Ok(Self::Csv),
+            "TECPLOT" => Ok(Self::Tecplot),
             _ => Err(format!(
                 "native NOISE oracle does not cover FORMAT={normalized}"
             )),
         }
     }
 
-    fn is_csv(self) -> bool {
-        matches!(self, Self::Csv)
+    fn output_family(self) -> XyceStaticNoiseOutputFamily {
+        match self {
+            Self::Csv => XyceStaticNoiseOutputFamily::Csv,
+            Self::Tecplot => XyceStaticNoiseOutputFamily::Tecplot,
+            _ => XyceStaticNoiseOutputFamily::Prn,
+        }
     }
 
     fn reference_extension(self) -> &'static str {
-        if self.is_csv() {
-            "NOISE.csv"
-        } else {
-            "NOISE.prn"
+        match self {
+            Self::Csv => "NOISE.csv",
+            Self::Tecplot => "NOISE.dat",
+            _ => "NOISE.prn",
         }
     }
 
@@ -4170,6 +4183,8 @@ impl XyceStaticNoiseContract {
             (Self::NoIndexPrn, true) => "static_noindex_prn_step_noise",
             (Self::GnuplotPrn | Self::SplotPrn, false) => "static_gnuplot_prn_noise",
             (Self::GnuplotPrn | Self::SplotPrn, true) => "static_gnuplot_prn_step_noise",
+            (Self::Tecplot, false) => "static_tecplot_noise",
+            (Self::Tecplot, true) => "static_tecplot_step_noise",
             (
                 Self::StdPrn
                 | Self::ProbeFallbackPrn
@@ -5710,6 +5725,26 @@ impl XyceLeadCurrentTerminal {
 struct XycePrnTable {
     columns: Vec<String>,
     rows: Vec<Vec<f64>>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceTecplotReference {
+    table: XycePrnTable,
+    zones: Vec<XyceTecplotZone>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceTecplotZone {
+    title: String,
+    auxdata: BTreeMap<String, XyceTecplotBinding>,
+    row_start: usize,
+    row_count: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceTecplotBinding {
+    value: Value,
+    quantization: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20681,7 +20716,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ));
             }
             let side_contract = XyceStaticNoiseContract::for_format(request.format.as_deref())?;
-            if side_contract.is_csv() != primary_contract.is_csv() {
+            if side_contract.output_family() != primary_contract.output_family() {
                 return Err(format!(
                     "native NOISE output contract does not mix primary {:?} output with FILE='{file}' {:?} output",
                     primary_contract, side_contract
@@ -23885,9 +23920,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             );
         }
 
-        let waveform_reference = match plan.reference_path.as_deref() {
+        let (waveform_reference, tecplot_zones) = match plan.reference_path.as_deref() {
+            Some(path) if plan.contract == XyceStaticNoiseContract::Tecplot => {
+                match Self::parse_tecplot_reference_file(path) {
+                    Ok(reference) => (Some(reference.table), Some(reference.zones)),
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("failed to parse stepped Xyce NOISE oracle: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                }
+            }
             Some(path) => match Self::parse_noise_reference_file(plan.contract, path) {
-                Ok(reference) => Some(reference),
+                Ok(reference) => (Some(reference), None),
                 Err(err) => {
                     return self.failure_result(
                         deck,
@@ -23898,7 +23947,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     );
                 }
             },
-            None => None,
+            None => (None, None),
         };
         let waveform_print = match (waveform_reference.as_ref(), plan.print.as_ref()) {
             (Some(_), Some(print)) => Some(print),
@@ -23988,6 +24037,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ),
                 Vec::new(),
             );
+        }
+        if let Some(zones) = tecplot_zones.as_deref()
+            && let Err(err) = Self::validate_tecplot_step_bindings(zones, &plan.steps, &step_runs)
+        {
+            return self.failure_result(deck, start, contract, err, Vec::new());
         }
 
         let gs_rows = match plan.gs_reference_path.as_deref() {
@@ -24084,6 +24138,26 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     );
                 }
             };
+            if let Some(zones) = tecplot_zones.as_deref() {
+                let zone = &zones[step_index];
+                if zone.row_start != waveform_offset || zone.row_count != results.len() {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "TECPLOT zone {} row range is {}..{}, expected {}..{} for NOISE step {}",
+                            step_index + 1,
+                            zone.row_start,
+                            zone.row_start + zone.row_count,
+                            waveform_offset,
+                            waveform_offset + results.len(),
+                            step_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
             let mut mismatches = Vec::new();
             if let (Some(reference), Some(print)) = (waveform_reference.as_ref(), waveform_print) {
                 let (step_reference, end) = match Self::noise_step_reference_batch(
@@ -44692,6 +44766,63 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         ))
     }
 
+    fn validate_tecplot_step_bindings(
+        zones: &[XyceTecplotZone],
+        steps: &[StepCommand],
+        runs: &[XyceStepRun],
+    ) -> Result<(), String> {
+        if zones.len() != runs.len() {
+            return Err(format!(
+                "TECPLOT oracle has {} zones, but .STEP expansion produced {} runs",
+                zones.len(),
+                runs.len()
+            ));
+        }
+        for (step_index, (zone, run)) in zones.iter().zip(runs).enumerate() {
+            if run.step_values.len() != steps.len() {
+                return Err(format!(
+                    ".STEP run {} has {} values for {} commands",
+                    step_index + 1,
+                    run.step_values.len(),
+                    steps.len()
+                ));
+            }
+            if zone.auxdata.len() != steps.len() {
+                return Err(format!(
+                    "TECPLOT zone {} has {} AUXDATA bindings for {} .STEP commands",
+                    step_index + 1,
+                    zone.auxdata.len(),
+                    steps.len()
+                ));
+            }
+            for (command, actual) in steps.iter().zip(&run.step_values) {
+                let expected = zone
+                    .auxdata
+                    .iter()
+                    .find_map(|(name, binding)| {
+                        name.eq_ignore_ascii_case(&command.name).then_some(*binding)
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "TECPLOT zone {} has no AUXDATA binding for .STEP '{}'",
+                            step_index + 1,
+                            command.name
+                        )
+                    })?;
+                if !Self::tecplot_binding_matches(expected, *actual) {
+                    return Err(format!(
+                        "TECPLOT zone {} binds {}={}, but expanded .STEP value is {}",
+                        step_index + 1,
+                        command.name,
+                        expected.value,
+                        actual
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn compare_noise_prn_reference(
         &self,
         reference: &XycePrnTable,
@@ -56793,11 +56924,284 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         contract: XyceStaticNoiseContract,
         path: &Path,
     ) -> Result<XycePrnTable, String> {
-        if contract.is_csv() {
-            Self::parse_csv_file(path)
-        } else {
-            Self::parse_prn_file(path)
+        match contract {
+            XyceStaticNoiseContract::Csv => Self::parse_csv_file(path),
+            XyceStaticNoiseContract::Tecplot => Self::parse_tecplot_file(path),
+            _ => Self::parse_prn_file(path),
         }
+    }
+
+    fn parse_tecplot_file(path: &Path) -> Result<XycePrnTable, String> {
+        Ok(Self::parse_tecplot_reference_file(path)?.table)
+    }
+
+    fn parse_tecplot_reference_file(path: &Path) -> Result<XyceTecplotReference, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_tecplot_reference_table(&content)
+    }
+
+    #[cfg(test)]
+    fn parse_tecplot_table(content: &str) -> Result<XycePrnTable, String> {
+        Ok(Self::parse_tecplot_reference_table(content)?.table)
+    }
+
+    fn parse_tecplot_reference_table(content: &str) -> Result<XyceTecplotReference, String> {
+        let lines = content
+            .lines()
+            .enumerate()
+            .map(|(index, line)| (index + 1, line.trim()))
+            .filter(|(_, line)| !line.is_empty())
+            .collect::<Vec<_>>();
+        let Some(&(title_line_number, title)) = lines.first() else {
+            return Err("empty Xyce TECPLOT table".to_string());
+        };
+        if !title.to_ascii_uppercase().starts_with("TITLE =") {
+            return Err(format!(
+                "Xyce TECPLOT table must begin with TITLE metadata at line {title_line_number}"
+            ));
+        }
+
+        let variables_index = lines
+            .iter()
+            .position(|(_, line)| line.to_ascii_uppercase().starts_with("VARIABLES ="))
+            .ok_or_else(|| "Xyce TECPLOT table has no VARIABLES declaration".to_string())?;
+        let mut columns = Vec::new();
+        let mut cursor = variables_index;
+        while let Some(&(line_number, line)) = lines.get(cursor) {
+            let variable_text = if cursor == variables_index {
+                line.split_once('=')
+                    .map(|(_, value)| value.trim())
+                    .ok_or_else(|| {
+                        format!("invalid Xyce TECPLOT VARIABLES declaration at line {line_number}")
+                    })?
+            } else if line.starts_with('"') {
+                line
+            } else {
+                break;
+            };
+            let Some(quoted) = variable_text
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+            else {
+                return Err(format!(
+                    "Xyce TECPLOT variable at line {line_number} must be one quoted name"
+                ));
+            };
+            let column = quoted.trim();
+            if column.is_empty() {
+                return Err(format!(
+                    "Xyce TECPLOT variable at line {line_number} is empty"
+                ));
+            }
+            columns.push(column.to_string());
+            cursor += 1;
+        }
+        if columns.is_empty() {
+            return Err("Xyce TECPLOT table has no variables".to_string());
+        }
+
+        let mut rows = Vec::new();
+        let mut zones = Vec::new();
+        let mut current_zone: Option<XyceTecplotZone> = None;
+        let mut footer_seen = false;
+        for (line_number, line) in lines.iter().skip(cursor).copied() {
+            let upper = line.to_ascii_uppercase();
+            if upper.starts_with("DATASETAUXDATA ") {
+                continue;
+            }
+            if upper.starts_with("ZONE ") {
+                if let Some(mut zone) = current_zone.take() {
+                    zone.row_count = rows.len() - zone.row_start;
+                    if zone.row_count == 0 {
+                        return Err(format!(
+                            "Xyce TECPLOT zone '{}' has no data rows",
+                            zone.title
+                        ));
+                    }
+                    zones.push(zone);
+                }
+                let title = Self::parse_tecplot_zone_title(line).map_err(|error| {
+                    format!("invalid Xyce TECPLOT ZONE at line {line_number}: {error}")
+                })?;
+                current_zone = Some(XyceTecplotZone {
+                    title,
+                    auxdata: BTreeMap::new(),
+                    row_start: rows.len(),
+                    row_count: 0,
+                });
+                continue;
+            }
+            if upper.starts_with("AUXDATA ") {
+                let Some(zone) = current_zone.as_mut() else {
+                    return Err(format!(
+                        "Xyce TECPLOT AUXDATA appears before the first ZONE at line {line_number}"
+                    ));
+                };
+                if rows.len() != zone.row_start {
+                    return Err(format!(
+                        "Xyce TECPLOT AUXDATA appears after zone data at line {line_number}"
+                    ));
+                }
+                let (name, value) = Self::parse_tecplot_auxdata(line).map_err(|error| {
+                    format!("invalid Xyce TECPLOT AUXDATA at line {line_number}: {error}")
+                })?;
+                if zone.auxdata.insert(name.clone(), value).is_some() {
+                    return Err(format!(
+                        "Xyce TECPLOT zone '{}' repeats AUXDATA '{name}'",
+                        zone.title
+                    ));
+                }
+                continue;
+            }
+            if line == "End of Xyce(TM) Parameter Sweep" || line == "End of Xyce(TM) Simulation" {
+                footer_seen = true;
+                continue;
+            }
+            if footer_seen {
+                return Err(format!(
+                    "Xyce TECPLOT table has content after its completion footer at line {line_number}"
+                ));
+            }
+            if current_zone.is_none() {
+                return Err(format!(
+                    "Xyce TECPLOT data appears before the first ZONE at line {line_number}"
+                ));
+            }
+            let values = line
+                .split_whitespace()
+                .map(|token| {
+                    Self::parse_xyce_numeric_token(token).map_err(|err| {
+                        format!(
+                            "invalid Xyce TECPLOT numeric token '{token}' at line {line_number}: {err}"
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if values.len() != columns.len() {
+                return Err(format!(
+                    "Xyce TECPLOT data line {line_number} has {} values, expected {}",
+                    values.len(),
+                    columns.len()
+                ));
+            }
+            rows.push(values);
+        }
+        if let Some(mut zone) = current_zone.take() {
+            zone.row_count = rows.len() - zone.row_start;
+            if zone.row_count == 0 {
+                return Err(format!(
+                    "Xyce TECPLOT zone '{}' has no data rows",
+                    zone.title
+                ));
+            }
+            zones.push(zone);
+        }
+        if zones.is_empty() {
+            return Err("Xyce TECPLOT table has no ZONE".to_string());
+        }
+        if rows.is_empty() {
+            return Err("Xyce TECPLOT table has no data rows".to_string());
+        }
+        if !footer_seen {
+            return Err("Xyce TECPLOT table has no exact Xyce completion footer".to_string());
+        }
+        for zone in &zones {
+            if zone.auxdata.is_empty() {
+                return Err(format!(
+                    "Xyce TECPLOT zone '{}' has no AUXDATA step bindings",
+                    zone.title
+                ));
+            }
+            for (name, expected) in &zone.auxdata {
+                let actual =
+                    Self::tecplot_zone_title_binding(&zone.title, name).ok_or_else(|| {
+                        format!(
+                            "Xyce TECPLOT zone title '{}' has no binding for AUXDATA '{name}'",
+                            zone.title
+                        )
+                    })?;
+                if !Self::tecplot_binding_matches(*expected, actual.value) {
+                    return Err(format!(
+                        "Xyce TECPLOT zone title '{}' binds {name}={}, but AUXDATA binds {}",
+                        zone.title, actual.value, expected.value
+                    ));
+                }
+            }
+        }
+        Ok(XyceTecplotReference {
+            table: XycePrnTable { columns, rows },
+            zones,
+        })
+    }
+
+    fn parse_tecplot_zone_title(line: &str) -> Result<String, String> {
+        let upper = line.to_ascii_uppercase();
+        let title_index = upper
+            .find("T=")
+            .ok_or_else(|| "ZONE has no T= title".to_string())?;
+        let quoted = line[title_index + 2..].trim();
+        let title = quoted
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .ok_or_else(|| "ZONE T= title must be quoted".to_string())?
+            .trim();
+        if title.is_empty() {
+            return Err("ZONE T= title is empty".to_string());
+        }
+        Ok(title.to_string())
+    }
+
+    fn parse_tecplot_auxdata(line: &str) -> Result<(String, XyceTecplotBinding), String> {
+        let assignment = line
+            .get("AUXDATA".len()..)
+            .ok_or_else(|| "missing AUXDATA assignment".to_string())?
+            .trim();
+        let (name, raw_value) = assignment
+            .split_once('=')
+            .ok_or_else(|| "AUXDATA assignment has no '='".to_string())?;
+        let name = name.trim();
+        if name.is_empty() || name.chars().any(char::is_whitespace) {
+            return Err("AUXDATA name must be one nonempty token".to_string());
+        }
+        let raw_value = raw_value.trim();
+        let value = raw_value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .ok_or_else(|| "AUXDATA value must be quoted".to_string())?
+            .trim();
+        let parsed = Self::parse_xyce_numeric_token(value)
+            .map_err(|error| format!("AUXDATA value '{value}' is invalid: {error}"))?;
+        Ok((
+            name.to_string(),
+            XyceTecplotBinding {
+                value: parsed,
+                quantization: Self::measurement_literal_quantization(value),
+            },
+        ))
+    }
+
+    fn tecplot_zone_title_binding(title: &str, name: &str) -> Option<XyceTecplotBinding> {
+        let tokens = title.split_whitespace().collect::<Vec<_>>();
+        tokens.windows(3).find_map(|window| {
+            (window[0].eq_ignore_ascii_case(name) && window[1] == "=")
+                .then(|| {
+                    Self::parse_xyce_numeric_token(window[2])
+                        .ok()
+                        .map(|value| XyceTecplotBinding {
+                            value,
+                            quantization: Self::measurement_literal_quantization(window[2]),
+                        })
+                })
+                .flatten()
+        })
+    }
+
+    fn tecplot_binding_matches(expected: XyceTecplotBinding, actual: Value) -> bool {
+        expected.value == actual
+            || expected
+                .quantization
+                .is_some_and(|unit| (expected.value - actual).abs() <= unit * 0.5)
     }
 
     fn parse_tran_reference_file(
@@ -67980,13 +68384,61 @@ mod tests {
             let contract = XyceStaticNoiseContract::for_format(format)
                 .expect("Xyce NOISE PRN-compatible format is typed");
             assert_eq!(contract.reference_extension(), "NOISE.prn");
-            assert!(!contract.is_csv());
+            assert_eq!(contract.output_family(), XyceStaticNoiseOutputFamily::Prn);
         }
         let csv = XyceStaticNoiseContract::for_format(Some("CSV"))
             .expect("Xyce NOISE CSV format is typed");
         assert_eq!(csv.reference_extension(), "NOISE.csv");
-        assert!(csv.is_csv());
-        assert!(XyceStaticNoiseContract::for_format(Some("TECPLOT")).is_err());
+        assert_eq!(csv.output_family(), XyceStaticNoiseOutputFamily::Csv);
+        let tecplot = XyceStaticNoiseContract::for_format(Some("TECPLOT"))
+            .expect("Xyce NOISE TECPLOT format is typed");
+        assert_eq!(tecplot.reference_extension(), "NOISE.dat");
+        assert_eq!(
+            tecplot.output_family(),
+            XyceStaticNoiseOutputFamily::Tecplot
+        );
+        assert_eq!(tecplot.result_contract(true), "static_tecplot_step_noise");
+    }
+
+    #[test]
+    fn static_noise_tecplot_parser_preserves_zoned_rows_and_rejects_truncation() {
+        let reference = XyceTestRunner::parse_tecplot_reference_table(
+            "TITLE = \"fixture\",\n\
+             VARIABLES = \" FREQ\"\n\
+             \" Re(V(out))\"\n\
+             DATASETAUXDATA TEMP = \"2.70e+01\"\n\
+             ZONE F=POINT T=\"R1 = 1e3\"\n\
+             AUXDATA R1 = \"1e3\"\n\
+             1.0 2.0\n\
+             ZONE F=POINT T=\"R1 = 2e3\"\n\
+             AUXDATA R1 = \"2e3\"\n\
+             1.0 3.0\n\
+             End of Xyce(TM) Parameter Sweep\n",
+        )
+        .expect("valid zoned TECPLOT table");
+
+        assert_eq!(reference.table.columns, vec!["FREQ", "Re(V(out))"]);
+        assert_eq!(reference.table.rows, vec![vec![1.0, 2.0], vec![1.0, 3.0]]);
+        assert_eq!(reference.zones.len(), 2);
+        assert_eq!(reference.zones[0].row_start, 0);
+        assert_eq!(reference.zones[0].row_count, 1);
+        assert_eq!(reference.zones[1].row_start, 1);
+        assert_eq!(reference.zones[1].row_count, 1);
+        assert_eq!(reference.zones[1].auxdata["R1"].value, 2.0e3);
+        assert!(
+            XyceTestRunner::parse_tecplot_table(
+                "TITLE = \"fixture\"\nVARIABLES = \"FREQ\"\nZONE F=POINT T=\"R1 = 1e3\"\nAUXDATA R1 = \"1e3\"\n1.0\n"
+            )
+            .expect_err("truncated TECPLOT table must fail")
+            .contains("completion footer")
+        );
+        assert!(
+            XyceTestRunner::parse_tecplot_reference_table(
+                "TITLE = \"fixture\"\nVARIABLES = \"FREQ\"\nZONE F=POINT T=\"R1 = 2e3\"\nAUXDATA R1 = \"1e3\"\n1.0\nEnd of Xyce(TM) Parameter Sweep\n"
+            )
+            .expect_err("inconsistent zone metadata must fail")
+            .contains("AUXDATA binds")
+        );
     }
 
     #[test]
