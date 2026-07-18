@@ -24,12 +24,58 @@ mod abort;
 mod cli;
 mod commands;
 mod hdf5;
+mod observability;
 mod report;
 
 use cli::{Cli, Commands, Config};
 
+fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
+    match format {
+        cli::ErrorFormat::Text => {
+            eprintln!("Error: {error}");
+            if let Some(suggestion) = error.suggestion() {
+                eprintln!("Suggestion: {suggestion}");
+            }
+        }
+        cli::ErrorFormat::Json => {
+            let details = error.details();
+            let payload = serde_json::json!({
+                "schema_version": 1,
+                "tool": {
+                    "name": "rspice",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+                "run_id": observability::run_id(),
+                "error": {
+                    "message": error.to_string(),
+                    "code": details.code,
+                    "category": details.category,
+                    "retryable": details.retryable,
+                    "exit_code": error.exit_code() as u8,
+                    "suggestion": error.suggestion(),
+                    "analysis": details.analysis,
+                    "iterations": details.iterations,
+                    "resource": details.resource,
+                    "requested": details.requested,
+                    "limit": details.limit,
+                },
+            });
+            match serde_json::to_string(&payload) {
+                Ok(json) => eprintln!("{json}"),
+                Err(serialization_error) => {
+                    eprintln!("Error: {error}");
+                    eprintln!(
+                        "Error: failed to serialize the machine-readable diagnostic: {serialization_error}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let error_format = cli.error_format;
 
     // Initialize logging based on verbosity
     let log_level = if cli.verbose {
@@ -39,7 +85,7 @@ fn main() -> ExitCode {
     } else {
         cli.log_level.as_deref().unwrap_or("warn")
     };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
+    observability::init(log_level, cli.log_format);
 
     // Load configuration
     let config = if let Some(ref config_path) = cli.config {
@@ -49,7 +95,7 @@ fn main() -> ExitCode {
                 let err = cli::CliError::ConfigError {
                     message: e.to_string(),
                 };
-                eprintln!("Error: {}", err);
+                print_cli_error(&err, error_format);
                 return err.exit_code().into();
             }
         }
@@ -60,7 +106,7 @@ fn main() -> ExitCode {
                 let err = cli::CliError::ConfigError {
                     message: e.to_string(),
                 };
-                eprintln!("Error: {}", err);
+                print_cli_error(&err, error_format);
                 return err.exit_code().into();
             }
         }
@@ -108,10 +154,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(ref e) => {
-            eprintln!("Error: {}", e);
-            if let Some(suggestion) = e.suggestion() {
-                eprintln!("Suggestion: {}", suggestion);
-            }
+            print_cli_error(e, error_format);
             e.exit_code().into()
         }
     }

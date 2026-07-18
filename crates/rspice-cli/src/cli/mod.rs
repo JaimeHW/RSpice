@@ -11,4 +11,4 @@ pub mod error;
 
 pub use args::*;
 pub use config::Config;
-pub use error::CliError;
+pub use error::{CliError, ErrorDetails};

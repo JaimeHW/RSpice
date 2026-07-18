@@ -565,6 +565,8 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             duration,
             passed,
             abort_reason,
+            resource_limits,
+            workers,
         )?;
     }
 
@@ -897,15 +899,53 @@ fn write_run_summary(
     duration: f64,
     passed: bool,
     abort_reason: Option<crate::abort::AbortReason>,
+    resource_limits: rspice_core::ResourceLimits,
+    workers: usize,
 ) -> Result<(), CliError> {
+    let status = match abort_reason {
+        Some(crate::abort::AbortReason::Interrupt) => "interrupted",
+        Some(crate::abort::AbortReason::Timeout) => "timed_out",
+        None if passed => "passed",
+        None => "failed",
+    };
+    let passed_runs = reports.iter().filter(|report| report.passed).count();
+    let measurement_count = reports
+        .iter()
+        .map(|report| report.measurements.len())
+        .sum::<usize>();
+    let passed_measurements = reports
+        .iter()
+        .flat_map(|report| &report.measurements)
+        .filter(|measurement| measurement.passed)
+        .count();
     let json = serde_json::json!({
+        "schema_version": 1,
         "tool": {
             "name": "rspice",
             "version": env!("CARGO_PKG_VERSION"),
+            "target": env!("RSPICE_BUILD_TARGET"),
+            "profile": env!("RSPICE_BUILD_PROFILE"),
         },
+        "run_id": crate::observability::run_id(),
         "netlist": args.input.display().to_string(),
+        "status": status,
         "duration_secs": duration,
         "passed": passed,
+        "execution": {
+            "requested_jobs": args.jobs,
+            "workers": workers,
+            "parallel": workers > 1,
+        },
+        "counts": {
+            "runs": reports.len(),
+            "passed_runs": passed_runs,
+            "failed_runs": reports.len().saturating_sub(passed_runs),
+            "measurements": measurement_count,
+            "passed_measurements": passed_measurements,
+            "failed_measurements": measurement_count.saturating_sub(passed_measurements),
+            "outputs": outputs.len(),
+        },
+        "resource_limits": resource_limits_summary(resource_limits),
         "outputs": outputs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "aborted": abort_reason.map(|reason| match reason {
             crate::abort::AbortReason::Interrupt => "interrupt",
@@ -916,11 +956,14 @@ fn write_run_summary(
                 "name": report.name,
                 "passed": report.passed,
                 "error": report.error,
+                "error_details": report.error_details,
                 "duration_secs": report.duration_secs,
                 "measurements": report.measurements.iter().map(|meas| {
                     serde_json::json!({
                         "name": meas.name,
                         "value": meas.value,
+                        "expected": meas.expected,
+                        "tolerance": meas.tolerance,
                         "passed": meas.passed,
                         "error": meas.error,
                     })
@@ -941,6 +984,26 @@ fn write_run_summary(
         serde_json::to_string_pretty(&json).map_err(|e| CliError::output_json_error(path, e))?;
     std::fs::write(path, text + "\n").map_err(|e| CliError::output_error(path, e))?;
     Ok(())
+}
+
+fn resource_limits_summary(limits: rspice_core::ResourceLimits) -> serde_json::Value {
+    serde_json::json!({
+        "max_netlist_bytes": limits.max_netlist_bytes,
+        "max_netlist_lines": limits.max_netlist_lines,
+        "max_expanded_source_bytes": limits.max_expanded_source_bytes,
+        "max_dependency_source_bytes": limits.max_dependency_source_bytes,
+        "max_external_data_bytes": limits.max_external_data_bytes,
+        "max_external_data_values": limits.max_external_data_values,
+        "max_shared_cache_bytes": limits.max_shared_cache_bytes,
+        "max_include_depth": limits.max_include_depth,
+        "max_hierarchy_depth": limits.max_hierarchy_depth,
+        "max_flattened_elements": limits.max_flattened_elements,
+        "max_circuit_nodes": limits.max_circuit_nodes,
+        "max_matrix_unknowns": limits.max_matrix_unknowns,
+        "max_analysis_points": limits.max_analysis_points,
+        "max_result_values": limits.max_result_values,
+        "max_batch_runs": limits.max_batch_runs,
+    })
 }
 
 /// Run one concrete deck (all of its analyses) and assemble its report.
@@ -992,6 +1055,7 @@ fn run_deck(
                 passed,
                 duration_secs: start_time.elapsed().as_secs_f64(),
                 error: None,
+                error_details: None,
                 measurements,
             },
             ctx.outputs.into_inner(),
@@ -1000,6 +1064,7 @@ fn run_deck(
 
     let mut ran_analysis = false;
     let mut simulation_error: Option<String> = None;
+    let mut simulation_error_details: Option<crate::cli::ErrorDetails> = None;
 
     for (idx, analysis) in netlist.analyses.iter().enumerate() {
         if verbose {
@@ -1016,6 +1081,7 @@ fn run_deck(
             if is_run_setup_or_output_error(&e) {
                 return Err(e);
             }
+            simulation_error_details = Some(e.details());
             simulation_error = Some(simulation_error_message(&e));
             break;
         }
@@ -1029,6 +1095,7 @@ fn run_deck(
             if is_run_setup_or_output_error(&e) {
                 return Err(e);
             }
+            simulation_error_details = Some(e.details());
             simulation_error = Some(simulation_error_message(&e));
         }
     }
@@ -1049,6 +1116,7 @@ fn run_deck(
             passed,
             duration_secs: duration,
             error: simulation_error,
+            error_details: simulation_error_details,
             measurements,
         },
         ctx.outputs.into_inner(),
@@ -1061,6 +1129,7 @@ fn run_deck(
 fn simulation_error_message(e: &CliError) -> String {
     match e {
         CliError::SimulationError { message, .. } => message.clone(),
+        CliError::CoreSimulationError { source, .. } => source.to_string(),
         other => other.to_string(),
     }
 }

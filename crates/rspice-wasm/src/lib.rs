@@ -169,8 +169,12 @@ pub struct WasmStartupDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WasmError {
     pub message: String,
+    /// Cross-interface stable error code. `kind` remains as a compatibility
+    /// alias for existing browser consumers.
+    pub code: String,
     pub kind: String,
     pub category: String,
+    pub retryable: bool,
     pub primary_source: Option<String>,
     pub primary_line: Option<usize>,
     #[serde(default)]
@@ -208,8 +212,10 @@ pub struct WasmUnresolvedOutputSymbol {
 #[serde(rename_all = "camelCase")]
 struct JsWasmErrorDetails<'a> {
     message: &'a str,
+    code: &'a str,
     kind: &'a str,
     category: &'a str,
+    retryable: bool,
     primary_source: Option<&'a str>,
     primary_line: Option<usize>,
     related_source: Option<&'a str>,
@@ -268,8 +274,10 @@ impl WasmError {
     fn new(message: String, kind: &str, category: &str) -> Self {
         Self {
             message,
+            code: kind.to_string(),
             kind: kind.to_string(),
             category: category.to_string(),
+            retryable: false,
             primary_source: None,
             primary_line: None,
             related_source: None,
@@ -297,25 +305,23 @@ impl WasmError {
     }
 
     fn from_simulation_error(error: rspice_core::engine::SimulationError) -> Self {
-        use rspice_core::engine::{SimulationConfigError, SimulationError};
-
+        let descriptor = error.descriptor();
         let message = error.to_string();
-        match error {
-            SimulationError::Configuration(SimulationConfigError::ResourceLimit(error))
-            | SimulationError::ResourceLimit(error) => Self::resource_limit(message, error),
-            SimulationError::Configuration(_) => {
-                Self::new(message, "invalid_configuration", "configuration")
-            }
-            SimulationError::Circuit(_) => Self::new(message, "circuit_error", "simulation"),
-            SimulationError::Solver(_) => Self::new(message, "solver_error", "solver"),
-            SimulationError::Netlist(_) => Self::new(message, "netlist_error", "netlist"),
-            SimulationError::ConvergenceFailed(iterations) => {
-                let mut structured = Self::new(message, "convergence_error", "convergence");
-                structured.iterations = Some(iterations);
-                structured
-            }
-            SimulationError::Aborted => Self::new(message, "aborted", "cancellation"),
-        }
+        let mut structured = if let Some(resource) = descriptor.resource_limit {
+            Self::resource_limit(message, resource)
+        } else {
+            Self::new(
+                message,
+                descriptor.code.as_str(),
+                descriptor.category.as_str(),
+            )
+        };
+        structured.code = descriptor.code.as_str().to_string();
+        structured.kind = structured.code.clone();
+        structured.category = descriptor.category.as_str().to_string();
+        structured.retryable = descriptor.retryable;
+        structured.iterations = descriptor.iterations;
+        structured
     }
 
     fn from_parse_error(error: rspice_core::netlist::ParseError) -> Self {
@@ -341,8 +347,10 @@ impl WasmError {
 
                 Self {
                     message,
+                    code: "undefined_output_symbols".to_string(),
                     kind: "undefined_output_symbols".to_string(),
                     category: "output_symbol_validation".to_string(),
+                    retryable: false,
                     primary_source: primary.and_then(source_path),
                     primary_line: primary.map(|origin| origin.line),
                     related_source: None,
@@ -358,8 +366,10 @@ impl WasmError {
             }
             rspice_core::netlist::ParseError::StartupDirectiveConflict(error) => Self {
                 message,
+                code: "conflicting_startup_directives".to_string(),
                 kind: "conflicting_startup_directives".to_string(),
                 category: "startup_directive_validation".to_string(),
+                retryable: false,
                 primary_source: source_path(&error.first),
                 primary_line: Some(error.first.line),
                 related_source: source_path(&error.conflicting),
@@ -470,8 +480,10 @@ fn wasm_error_to_js(error: WasmError) -> JsValue {
 
     let details = JsWasmErrorDetails {
         message: &error.message,
+        code: &error.code,
         kind: &error.kind,
         category: &error.category,
+        retryable: error.retryable,
         primary_source: error.primary_source.as_deref(),
         primary_line: error.primary_line,
         related_source: error.related_source.as_deref(),
@@ -497,8 +509,10 @@ fn wasm_error_to_js(error: WasmError) -> JsValue {
     };
     if let Ok(details) = serde_wasm_bindgen::to_value(&details) {
         for field in [
+            "code",
             "kind",
             "category",
+            "retryable",
             "primarySource",
             "primaryLine",
             "relatedSource",
@@ -931,7 +945,9 @@ mod tests {
         )
         .expect_err("source must exceed the explicit browser byte ceiling");
         assert_eq!(parse_error.kind, "resource_limit");
+        assert_eq!(parse_error.code, "resource_limit");
         assert_eq!(parse_error.category, "resource_limit");
+        assert!(!parse_error.retryable);
         assert_eq!(parse_error.resource.as_deref(), Some("netlist_bytes"));
         assert_eq!(parse_error.limit, Some(8));
 
@@ -947,6 +963,23 @@ mod tests {
         assert_eq!(analysis_error.resource.as_deref(), Some("analysis_points"));
         assert_eq!(analysis_error.requested, Some(3));
         assert_eq!(analysis_error.limit, Some(2));
+    }
+
+    #[test]
+    fn simulation_errors_share_core_codes_and_retry_policy() {
+        let cancelled =
+            WasmError::from_simulation_error(rspice_core::engine::SimulationError::Aborted);
+        assert_eq!(cancelled.kind, "aborted");
+        assert_eq!(cancelled.code, "aborted");
+        assert_eq!(cancelled.category, "cancellation");
+        assert!(cancelled.retryable);
+
+        let convergence = WasmError::from_simulation_error(
+            rspice_core::engine::SimulationError::ConvergenceFailed(37),
+        );
+        assert_eq!(convergence.code, "convergence_error");
+        assert_eq!(convergence.iterations, Some(37));
+        assert!(!convergence.retryable);
     }
 
     #[test]

@@ -23,6 +23,8 @@ pub struct SimulationReport {
     pub duration_secs: f64,
     /// Error message if failed
     pub error: Option<String>,
+    /// Stable error metadata if the simulation failed.
+    pub error_details: Option<crate::cli::ErrorDetails>,
     /// Measurements (name, value, passed)
     pub measurements: Vec<MeasurementReport>,
 }
@@ -417,6 +419,7 @@ mod tests {
             passed: true,
             duration_secs: 0.01,
             error: None,
+            error_details: None,
             measurements: vec![MeasurementReport {
                 name: "risetime".into(),
                 value,

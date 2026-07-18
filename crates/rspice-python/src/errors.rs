@@ -597,30 +597,59 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
     error
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct SimulationErrorAttributes {
+    kind: &'static str,
+    code: &'static str,
+    category: &'static str,
+    retryable: bool,
+    iterations: Option<usize>,
+    resource: Option<&'static str>,
+    requested: Option<usize>,
+    limit: Option<usize>,
+}
+
+fn simulation_error_attributes(
+    error: &rspice_core::engine::SimulationError,
+) -> SimulationErrorAttributes {
+    let descriptor = error.descriptor();
+    // Preserve the original Python `kind` vocabulary while publishing the
+    // shared cross-interface `code` alongside it.
+    let kind = match descriptor.code.as_str() {
+        "invalid_configuration" => "configuration",
+        "circuit_error" => "circuit",
+        "solver_error" => "solver",
+        "netlist_error" => "netlist",
+        "convergence_error" => "convergence",
+        other => other,
+    };
+    let (resource, requested, limit) =
+        descriptor
+            .resource_limit
+            .map_or((None, None, None), |error| {
+                (
+                    Some(error.resource.as_str()),
+                    Some(error.requested),
+                    Some(error.limit),
+                )
+            });
+    SimulationErrorAttributes {
+        kind,
+        code: descriptor.code.as_str(),
+        category: descriptor.category.as_str(),
+        retryable: descriptor.retryable,
+        iterations: descriptor.iterations,
+        resource,
+        requested,
+        limit,
+    }
+}
+
 /// Convert a simulation error to PyErr
 pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> PyErr {
     use rspice_core::engine::SimulationError as CoreSimulationError;
 
-    let (kind, iterations, resource, requested, limit) = match &err {
-        CoreSimulationError::Configuration(rspice_core::SimulationConfigError::ResourceLimit(
-            error,
-        ))
-        | CoreSimulationError::ResourceLimit(error) => (
-            "resource_limit",
-            None,
-            Some(error.resource.as_str()),
-            Some(error.requested),
-            Some(error.limit),
-        ),
-        CoreSimulationError::Configuration(_) => ("configuration", None, None, None, None),
-        CoreSimulationError::Circuit(_) => ("circuit", None, None, None, None),
-        CoreSimulationError::Solver(_) => ("solver", None, None, None, None),
-        CoreSimulationError::Netlist(_) => ("netlist", None, None, None, None),
-        CoreSimulationError::ConvergenceFailed(iterations) => {
-            ("convergence", Some(*iterations), None, None, None)
-        }
-        CoreSimulationError::Aborted => ("aborted", None, None, None, None),
-    };
+    let attributes = simulation_error_attributes(&err);
     let error = match &err {
         CoreSimulationError::ConvergenceFailed(_) => ConvergenceError::new_err(err.to_string()),
         CoreSimulationError::Aborted => CancelledError::new_err(err.to_string()),
@@ -628,11 +657,14 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
     };
     let _attribute_result = Python::attach(|py| {
         let value = error.value(py);
-        value.setattr("kind", kind)?;
-        value.setattr("iterations", iterations)?;
-        value.setattr("resource", resource)?;
-        value.setattr("requested", requested)?;
-        value.setattr("limit", limit)?;
+        value.setattr("kind", attributes.kind)?;
+        value.setattr("code", attributes.code)?;
+        value.setattr("category", attributes.category)?;
+        value.setattr("retryable", attributes.retryable)?;
+        value.setattr("iterations", attributes.iterations)?;
+        value.setattr("resource", attributes.resource)?;
+        value.setattr("requested", attributes.requested)?;
+        value.setattr("limit", attributes.limit)?;
         Ok::<_, PyErr>(())
     });
     error
@@ -795,5 +827,18 @@ mod tests {
             attributes.conflicting_startup_kind.as_deref(),
             Some("nodeset")
         );
+    }
+
+    #[test]
+    fn simulation_exceptions_publish_shared_error_contract() {
+        let attributes = simulation_error_attributes(
+            &rspice_core::engine::SimulationError::ConvergenceFailed(19),
+        );
+        assert_eq!(attributes.kind, "convergence");
+        assert_eq!(attributes.code, "convergence_error");
+        assert_eq!(attributes.category, "convergence");
+        assert!(!attributes.retryable);
+        assert_eq!(attributes.iterations, Some(19));
+        assert_eq!(attributes.resource, None);
     }
 }

@@ -16,6 +16,7 @@ fn run_rspice(args: &[&str]) -> std::process::Output {
         .args(args)
         .env_remove("RSPICE_OUTPUT_FORMAT")
         .env_remove("RSPICE_TEMPERATURE")
+        .env_remove("RUST_LOG")
         .output()
         .expect("run rspice")
 }
@@ -883,6 +884,77 @@ fn missing_input_exits_sixty_six() {
     assert_eq!(output.status.code(), Some(66));
 }
 
+#[test]
+fn json_errors_publish_stable_automation_contract() {
+    let output = run_rspice(&[
+        "--quiet",
+        "--error-format",
+        "json",
+        "run",
+        "definitely_missing_json_error_deck.sp",
+    ]);
+    assert_eq!(output.status.code(), Some(66));
+    assert!(output.stdout.is_empty(), "fatal JSON belongs on stderr");
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap_or_else(|error| {
+        panic!(
+            "stderr must be exactly one JSON document: {error}; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["tool"]["name"], "rspice");
+    assert_eq!(json["error"]["code"], "input_not_found");
+    assert_eq!(json["error"]["category"], "input");
+    assert_eq!(json["error"]["retryable"], false);
+    assert_eq!(json["error"]["exit_code"], 66);
+}
+
+#[test]
+fn json_logs_are_correlated_newline_delimited_records() {
+    let dir = test_dir("json_logs");
+    let deck = dir.join("op.sp");
+    std::fs::write(
+        &deck,
+        "* observable run\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&[
+        "--log-level",
+        "info",
+        "--log-format",
+        "json",
+        "run",
+        deck.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let records = String::from_utf8(output.stderr)
+        .expect("UTF-8 logs")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("one JSON log record"))
+        .collect::<Vec<_>>();
+    assert!(
+        !records.is_empty(),
+        "info-level run must emit diagnostic logs"
+    );
+    assert!(records.iter().all(|record| record["run_id"].is_string()));
+    assert!(records.iter().all(|record| record["timestamp"].is_string()));
+    assert!(records.iter().any(|record| {
+        record["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Loading netlist"))
+    }));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// --timeout stops a long transient at the next safe point and exits with
 /// the GNU timeout convention (124).
 #[test]
@@ -963,6 +1035,12 @@ fn summary_json_carries_the_verdict() {
         "per-run verdict must match failed measurement"
     );
     assert_eq!(json["tool"]["name"], "rspice");
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["status"], "failed");
+    assert_eq!(json["counts"]["runs"], 1);
+    assert_eq!(json["counts"]["failed_measurements"], 1);
+    assert_eq!(json["execution"]["workers"], 1);
+    assert!(json["resource_limits"]["max_result_values"].is_number());
     assert_eq!(
         json["runs"][0]["measurements"][0]["passed"], false,
         "failed measurement recorded: {json}"

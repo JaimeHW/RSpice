@@ -3,8 +3,42 @@
 //! Professional error handling with structured error types,
 //! exit codes following GNU conventions, and helpful diagnostics.
 
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+/// Stable machine-readable metadata attached to CLI failures and run reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ErrorDetails {
+    pub code: &'static str,
+    pub category: &'static str,
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iterations: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+impl ErrorDetails {
+    fn new(code: &'static str, category: &'static str, retryable: bool) -> Self {
+        Self {
+            code,
+            category,
+            retryable,
+            analysis: None,
+            iterations: None,
+            resource: None,
+            requested: None,
+            limit: None,
+        }
+    }
+}
 
 /// Exit codes following GNU conventions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +105,13 @@ pub enum CliError {
         analysis: Option<String>,
     },
 
+    #[error("Simulation failed: {source}")]
+    CoreSimulationError {
+        #[source]
+        source: rspice_core::SimulationError,
+        analysis: Option<String>,
+    },
+
     #[error("Verification failed: {message}")]
     VerificationFailed { message: String },
 
@@ -116,6 +157,12 @@ pub enum CliError {
     #[error("Configuration error: {message}")]
     ConfigError { message: String },
 
+    #[error("Configuration error: {source}")]
+    CoreConfigError {
+        #[source]
+        source: rspice_core::SimulationConfigError,
+    },
+
     #[error("Verilog-A compilation failed: {message}")]
     VerilogAError { message: String },
 
@@ -134,6 +181,7 @@ impl CliError {
             CliError::InputReadError { .. } => ExitCode::IoError,
             CliError::ParseError { .. } => ExitCode::InputError,
             CliError::SimulationError { .. } => ExitCode::GeneralError,
+            CliError::CoreSimulationError { .. } => ExitCode::GeneralError,
             CliError::VerificationFailed { .. } => ExitCode::VerificationFailed,
             CliError::TimedOut { .. } => ExitCode::TimedOut,
             CliError::Interrupted => ExitCode::Interrupted,
@@ -143,6 +191,7 @@ impl CliError {
             CliError::OutputSerializationError { .. } => ExitCode::InternalError,
             CliError::InvalidArgument { .. } => ExitCode::MisuseOfCommand,
             CliError::ConfigError { .. } => ExitCode::ConfigError,
+            CliError::CoreConfigError { .. } => ExitCode::ConfigError,
             CliError::VerilogAError { .. } => ExitCode::GeneralError,
             CliError::ConversionError { .. } => ExitCode::GeneralError,
             CliError::InternalError { .. } => ExitCode::InternalError,
@@ -155,6 +204,71 @@ impl CliError {
             CliError::ParseError { suggestion, .. } => suggestion.as_deref(),
             CliError::InvalidArgument { suggestion, .. } => suggestion.as_deref(),
             _ => None,
+        }
+    }
+
+    /// Stable metadata suitable for JSON logs, automation, and run reports.
+    pub fn details(&self) -> ErrorDetails {
+        match self {
+            Self::CoreSimulationError { source, analysis } => {
+                let descriptor = source.descriptor();
+                let mut details = ErrorDetails::new(
+                    descriptor.code.as_str(),
+                    descriptor.category.as_str(),
+                    descriptor.retryable,
+                );
+                details.analysis = analysis.clone();
+                details.iterations = descriptor.iterations;
+                if let Some(limit) = descriptor.resource_limit {
+                    details.resource = Some(limit.resource.as_str());
+                    details.requested = Some(limit.requested);
+                    details.limit = Some(limit.limit);
+                }
+                details
+            }
+            Self::SimulationError { analysis, .. } => {
+                let mut details = ErrorDetails::new("simulation_error", "simulation", false);
+                details.analysis = analysis.clone();
+                details
+            }
+            Self::InputNotFound { .. } => ErrorDetails::new("input_not_found", "input", false),
+            Self::InputReadError { .. } => ErrorDetails::new("input_read_error", "io", true),
+            Self::ParseError { .. } => ErrorDetails::new("parse_error", "netlist", false),
+            Self::VerificationFailed { .. } => {
+                ErrorDetails::new("verification_failed", "verification", false)
+            }
+            Self::TimedOut { .. } => ErrorDetails::new("timed_out", "cancellation", false),
+            Self::Interrupted => ErrorDetails::new("interrupted", "cancellation", true),
+            Self::OutputError { .. } | Self::AddResistorsArtifactIo { .. } => {
+                ErrorDetails::new("output_error", "io", true)
+            }
+            Self::AddResistorsMaterialization { .. } => {
+                ErrorDetails::new("addresistors_materialization", "netlist", false)
+            }
+            Self::OutputSerializationError { .. } => {
+                ErrorDetails::new("output_serialization", "internal", false)
+            }
+            Self::InvalidArgument { .. } => {
+                ErrorDetails::new("invalid_argument", "input_validation", false)
+            }
+            Self::ConfigError { .. } => {
+                ErrorDetails::new("invalid_configuration", "configuration", false)
+            }
+            Self::CoreConfigError { source } => match source {
+                rspice_core::SimulationConfigError::ResourceLimit(limit) => {
+                    let mut details = ErrorDetails::new("resource_limit", "resource_limit", false);
+                    details.resource = Some(limit.resource.as_str());
+                    details.requested = Some(limit.requested);
+                    details.limit = Some(limit.limit);
+                    details
+                }
+                _ => ErrorDetails::new("invalid_configuration", "configuration", false),
+            },
+            Self::VerilogAError { .. } => ErrorDetails::new("veriloga_error", "compilation", false),
+            Self::ConversionError { .. } => {
+                ErrorDetails::new("conversion_error", "conversion", false)
+            }
+            Self::InternalError { .. } => ErrorDetails::new("internal_error", "internal", false),
         }
     }
 
@@ -226,8 +340,8 @@ impl From<rspice_core::SimulationError> for CliError {
     fn from(err: rspice_core::SimulationError) -> Self {
         match err {
             rspice_core::SimulationError::Configuration(error) => error.into(),
-            other => CliError::SimulationError {
-                message: other.to_string(),
+            other => CliError::CoreSimulationError {
+                source: other,
                 analysis: None,
             },
         }
@@ -236,9 +350,7 @@ impl From<rspice_core::SimulationError> for CliError {
 
 impl From<rspice_core::SimulationConfigError> for CliError {
     fn from(err: rspice_core::SimulationConfigError) -> Self {
-        CliError::ConfigError {
-            message: err.to_string(),
-        }
+        CliError::CoreConfigError { source: err }
     }
 }
 
@@ -263,5 +375,33 @@ mod tests {
             },
         ));
         assert_eq!(wrapped.exit_code(), ExitCode::ConfigError);
+    }
+
+    #[test]
+    fn resource_configuration_errors_keep_numeric_limit_details() {
+        let error = CliError::from(rspice_core::SimulationConfigError::ResourceLimit(
+            rspice_core::ResourceLimitError {
+                resource: rspice_core::ResourceKind::MatrixUnknowns,
+                requested: 12,
+                limit: 10,
+            },
+        ));
+        let details = error.details();
+        assert_eq!(error.exit_code(), ExitCode::ConfigError);
+        assert_eq!(details.code, "resource_limit");
+        assert_eq!(details.resource, Some("matrix_unknowns"));
+        assert_eq!(details.requested, Some(12));
+        assert_eq!(details.limit, Some(10));
+    }
+
+    #[test]
+    fn engine_errors_preserve_shared_machine_metadata() {
+        let error = CliError::from(rspice_core::SimulationError::ConvergenceFailed(31));
+        assert_eq!(error.exit_code(), ExitCode::GeneralError);
+        let details = error.details();
+        assert_eq!(details.code, "convergence_error");
+        assert_eq!(details.category, "convergence");
+        assert_eq!(details.iterations, Some(31));
+        assert!(!details.retryable);
     }
 }

@@ -11,6 +11,26 @@ pub fn spice_value(s: &str) -> Result<f64, String> {
     rspice_core::netlist::lexer::parse_spice_value(s).map_err(|e| e.to_string())
 }
 
+/// Format used for fatal diagnostics written to stderr.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum ErrorFormat {
+    /// Human-readable diagnostics with a separate suggestion line.
+    #[default]
+    Text,
+    /// One machine-readable JSON document.
+    Json,
+}
+
+/// Format used for diagnostic log records.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum LogFormat {
+    /// Standard `env_logger` text records.
+    #[default]
+    Text,
+    /// Newline-delimited JSON records with source and process context.
+    Json,
+}
+
 /// Version string with build metadata for `--version`.
 const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -51,6 +71,14 @@ pub struct Cli {
         value_parser = ["off", "error", "warn", "info", "debug", "trace"]
     )]
     pub log_level: Option<String>,
+
+    /// Format diagnostic log records on stderr
+    #[arg(long, global = true, value_enum, default_value_t = LogFormat::Text)]
+    pub log_format: LogFormat,
+
+    /// Format fatal diagnostics on stderr for automation
+    #[arg(long, global = true, value_enum, default_value_t = ErrorFormat::Text)]
+    pub error_format: ErrorFormat,
 }
 
 /// Available CLI subcommands

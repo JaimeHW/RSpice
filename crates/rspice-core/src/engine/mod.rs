@@ -61,7 +61,9 @@ pub use config_resolver::{
 };
 pub use core::Engine;
 pub use dc::DcSweepPointResult;
-pub use error::SimulationError;
+pub use error::{
+    SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
+};
 pub use hb::{HbAnalysisResult, PacAnalysisResult, PnoiseAnalysisResult};
 pub use pss::{PssAnalysisResult, PssError};
 pub use pss_noise::OscPnoiseResult;
