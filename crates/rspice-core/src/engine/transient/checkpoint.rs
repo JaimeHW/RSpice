@@ -571,12 +571,17 @@ pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(super) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-resolved-config-v1\0");
+    hasher.update(b"rspice-transient-resolved-config-v2\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
     hash_field(&mut hasher, "integration_method", config.integration_method);
     hash_field(&mut hasher, "spice_dialect", config.spice_dialect);
+    hash_field(
+        &mut hasher,
+        "xyce_tra_interpolation",
+        config.xyce_tra_interpolation,
+    );
     hash_field(
         &mut hasher,
         "jfet_level2_model",
@@ -3012,6 +3017,13 @@ mod tests {
         checkpoint
             .validate_for_with_config(&netlist, &changed_dialect)
             .expect_err("dialect mismatch must reject state");
+
+        let mut changed_tra_interpolation = base.clone();
+        changed_tra_interpolation.xyce_tra_interpolation =
+            crate::engine::XyceTraInterpolation::LegacyQuadratic;
+        checkpoint
+            .validate_for_with_config(&netlist, &changed_tra_interpolation)
+            .expect_err("TRA interpolation mismatch must reject state");
 
         let mut changed_nonlin_budget = base.clone();
         changed_nonlin_budget.transient_nonlinear_max_iterations = Some(21);

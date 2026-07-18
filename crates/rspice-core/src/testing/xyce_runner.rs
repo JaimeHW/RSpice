@@ -13,7 +13,7 @@ use crate::analysis::AcResult;
 use crate::analysis::ac::ac_sweep_frequencies;
 use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
-    StepPlanLimits, TransientResult, extract_ac_value, extract_dc_value,
+    StepPlanLimits, TransientResult, XyceTraInterpolation, extract_ac_value, extract_dc_value,
 };
 use crate::expr::{BinaryOp, CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict};
 use crate::netlist::expr::ComplexValue as ExprComplexValue;
@@ -2447,6 +2447,9 @@ pub struct XyceRunnerConfig {
     pub max_time_per_test_ms: u128,
     /// Print per-deck execution details.
     pub verbose: bool,
+    /// Lossless TRA history interpolation for the Xyce version represented by
+    /// the selected corpus oracle.
+    pub xyce_tra_interpolation: XyceTraInterpolation,
 }
 
 impl Default for XyceRunnerConfig {
@@ -2459,6 +2462,7 @@ impl Default for XyceRunnerConfig {
             max_mismatches: 20,
             max_time_per_test_ms: 180_000,
             verbose: false,
+            xyce_tra_interpolation: XyceTraInterpolation::default(),
         }
     }
 }
@@ -3606,23 +3610,11 @@ impl XyceStaticTranComparisonMode {
 impl XyceStaticTranPlan {
     fn result_contract(&self) -> &'static str {
         match self.comparison_mode {
-            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
+            | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
                 "static_xyce_verify_prn_tran"
             }
-            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
-                error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
-                ..
-            } => "static_xyce_verify_prn_tran",
-            // An affine-only `*COMP` policy still uses Xyce's integrated-RMS
-            // comparator, but retains Release 7.10's default error bounds.
-            // The established public result label therefore remains tied to
-            // the deck's native output artifact; comparison mode is modeled
-            // independently above instead of being inferred from that label.
-            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
-                error_bounds: XyceVerifyCompErrorBounds::Release710Default,
-                ..
-            }
-            | XyceStaticTranComparisonMode::Pointwise => {
+            XyceStaticTranComparisonMode::Pointwise => {
                 self.contract.result_contract(!self.steps.is_empty())
             }
         }
@@ -43185,6 +43177,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             max_iterations: defaults.max_iterations.max(1200),
             convergence_config,
             spice_dialect: SpiceDialect::Xyce,
+            xyce_tra_interpolation: self.config.xyce_tra_interpolation,
             // Xyce and ngspice regression decks use 27 C unless overridden.
             temperature: 300.15,
             locked_time_grid: locked_time_grid.map(Arc::new),

@@ -6449,7 +6449,10 @@ impl Engine {
                         tline.freq = freq_eff;
                         tline.nl = nl_eff;
                         tline.set_dc_series_resistance(dc_series_resistance);
-                        if self.config.spice_dialect == SpiceDialect::Xyce {
+                        if self.config.spice_dialect == SpiceDialect::Xyce
+                            && self.config.xyce_tra_interpolation
+                                == crate::engine::XyceTraInterpolation::DerivativeGuarded
+                        {
                             tline.set_xyce_tra_interpolation();
                         }
                         if let Some(params) = model_params {

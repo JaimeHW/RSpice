@@ -6387,7 +6387,7 @@ fn test_xyce_lossless_transmission_line_frequency_default_length_oracle() {
 }
 
 #[test]
-fn test_xyce_stepped_lossless_transmission_line_oracles() {
+fn test_xyce_stepped_lossless_transmission_line_parameter_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let config = XyceRunnerConfig {
@@ -6395,18 +6395,37 @@ fn test_xyce_stepped_lossless_transmission_line_oracles() {
         ..Default::default()
     };
     let runner = XyceTestRunner::new(&root, config);
+    let relative = "Netlists/TRANSLINE/transline_step.cir";
 
-    for relative in [
-        "Netlists/TRANSLINE/transline_step.cir",
-        "Netlists/Certification_Tests/BUG_568/bug_568.cir",
-    ] {
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should rebuild lossless-line parameters and delay history per step, got {result:?}"
-        );
-        assert!(result.mismatches.is_empty());
-    }
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should rebuild lossless-line parameters and delay history per step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn test_xyce_bug_568_stepped_lossless_transmission_line_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let config = XyceRunnerConfig {
+        max_time_per_test_ms: 180_000,
+        // This certification oracle records Xyce Release 2.1 in its README,
+        // before derivative-guarded TRA interpolation replaced the legacy
+        // three-point quadratic behavior.
+        xyce_tra_interpolation: rspice_core::XyceTraInterpolation::LegacyQuadratic,
+        ..Default::default()
+    };
+    let runner = XyceTestRunner::new(&root, config);
+    let relative = "Netlists/Certification_Tests/BUG_568/bug_568.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should rebuild lossless-line parameters and delay history per step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
 }
 
 #[test]

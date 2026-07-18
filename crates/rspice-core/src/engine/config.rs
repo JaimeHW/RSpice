@@ -102,6 +102,22 @@ pub enum SpiceDialect {
     Xyce,
 }
 
+/// Interpolation policy for lossless Xyce `TRA` delay history.
+///
+/// Modern Xyce detects derivative corners and replaces the three-point
+/// quadratic with a guarded linear segment. Historical Xyce releases used the
+/// quadratic unconditionally, and some archived certification waveforms retain
+/// the resulting post-edge ringing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum XyceTraInterpolation {
+    /// Match current Xyce's derivative-change and flat-segment guards.
+    #[default]
+    DerivativeGuarded,
+    /// Reproduce the unconditional quadratic interpolation used by legacy
+    /// Xyce certification references.
+    LegacyQuadratic,
+}
+
 impl SpiceDialect {
     /// Default evaluator for `NJF`/`PJF LEVEL=2` under this dialect.
     pub fn default_jfet_level2_model(self) -> JfetLevel2Model {
@@ -177,6 +193,9 @@ pub struct SimulationConfig {
     pub integration_method: crate::analysis::IntegrationMethod,
     /// Broad SPICE compatibility policy used by config resolution.
     pub spice_dialect: SpiceDialect,
+    /// Lossless transmission-line delay interpolation used in Xyce mode.
+    /// Other dialects retain their native interpolation policy.
+    pub xyce_tra_interpolation: XyceTraInterpolation,
     /// Internal evaluator used for `NJF`/`PJF LEVEL=2`.
     pub jfet_level2_model: JfetLevel2Model,
     /// Xyce BSIMSOI3 terminal-GMIN policy. When true, B3SOI devices receive
@@ -598,6 +617,7 @@ impl Default for SimulationConfig {
             digital_delay_type: None,
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
             spice_dialect: SpiceDialect::BestAvailable,
+            xyce_tra_interpolation: XyceTraInterpolation::default(),
             jfet_level2_model: JfetLevel2Model::DialectDefault,
             b3soi_gmin_scaling: true,
             transient_trtol: crate::constants::TRTOL,
