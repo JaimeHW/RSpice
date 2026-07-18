@@ -1077,7 +1077,7 @@ fn materialize_measure_expression_signals(
     };
     for statement in statements {
         match &statement.measure_type {
-            MeasureType::Delay { trig, targ } => {
+            MeasureType::Delay { trig, targ, .. } => {
                 for clause in [trig, targ] {
                     if let TriggerEvent::When(condition) = &clause.event {
                         add(&condition.left);
@@ -1162,7 +1162,7 @@ fn materialize_differential_voltage_signals(
     };
     for statement in statements {
         match &statement.measure_type {
-            MeasureType::Delay { trig, targ } => {
+            MeasureType::Delay { trig, targ, .. } => {
                 for clause in [trig, targ] {
                     if let TriggerEvent::When(condition) = &clause.event {
                         add(&condition.left);

@@ -77,6 +77,9 @@ pub enum MeasureOperand {
     Waveform(String),
 }
 
+/// Xyce's default absolute equality tolerance for conditional measurements.
+pub const XYCE_DEFAULT_MEASURE_MINVAL: Value = 1.0e-12;
+
 /// Selects a particular conditional crossing in accepted-point order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventOccurrence {
@@ -158,7 +161,11 @@ impl TrigSpec {
 pub enum MeasureType {
     /// Delay measurement: time between trigger and target events
     /// .MEAS TRAN name TRIG ... TARG ...
-    Delay { trig: TrigSpec, targ: TrigSpec },
+    Delay {
+        trig: TrigSpec,
+        targ: TrigSpec,
+        minval: Value,
+    },
 
     /// Find value at specific time or when condition is met
     /// .MEAS TRAN name FIND V(out) AT=time
@@ -169,6 +176,8 @@ pub enum MeasureType {
         when: Option<WhenCondition>,
         from: Option<Value>,
         to: Option<Value>,
+        td: Option<Value>,
+        minval: Value,
     },
 
     /// Independent-axis value where a conditional event is first met.
@@ -177,6 +186,8 @@ pub enum MeasureType {
         condition: WhenCondition,
         from: Option<Value>,
         to: Option<Value>,
+        td: Option<Value>,
+        minval: Value,
     },
 
     /// Time-derivative of a signal at a point
@@ -187,6 +198,8 @@ pub enum MeasureType {
         when: Option<WhenCondition>,
         from: Option<Value>,
         to: Option<Value>,
+        td: Option<Value>,
+        minval: Value,
     },
 
     /// Expression over previously evaluated measurement results
@@ -356,7 +369,7 @@ impl MeasureStatement {
         }
 
         match &mut self.measure_type {
-            MeasureType::Delay { trig, targ } => {
+            MeasureType::Delay { trig, targ, .. } => {
                 rewrite_trigger(trig, policy);
                 rewrite_trigger(targ, policy);
             }
@@ -912,11 +925,16 @@ impl MeasureEngine {
                 condition,
                 from,
                 to,
+                td,
+                minval,
             } => continuous_when(
                 &statement.name,
+                &statement.analysis,
                 condition,
                 *from,
                 *to,
+                *td,
+                *minval,
                 axis,
                 signals,
                 segment_starts,
@@ -927,13 +945,18 @@ impl MeasureEngine {
                 when,
                 from,
                 to,
+                td,
+                minval,
             } => continuous_find(
                 &statement.name,
+                &statement.analysis,
                 signal,
                 *at,
                 when.as_ref(),
                 *from,
                 *to,
+                *td,
+                *minval,
                 axis,
                 signals,
                 segment_starts,
@@ -944,20 +967,31 @@ impl MeasureEngine {
                 when,
                 from,
                 to,
+                td,
+                minval,
             } => continuous_derivative(
                 &statement.name,
+                &statement.analysis,
                 signal,
                 *at,
                 when.as_ref(),
                 *from,
                 *to,
+                *td,
+                *minval,
                 axis,
                 signals,
                 segment_starts,
             ),
-            MeasureType::Delay { trig, targ } => {
-                continuous_delay(&statement.name, trig, targ, axis, signals, segment_starts)
-            }
+            MeasureType::Delay { trig, targ, minval } => continuous_delay(
+                &statement.name,
+                trig,
+                targ,
+                *minval,
+                axis,
+                signals,
+                segment_starts,
+            ),
             _ => ContinuousMeasureResult::failed(
                 &statement.name,
                 "continuous measures support only WHEN, FIND, DERIV, and TRIG/TARG",
@@ -1086,22 +1120,33 @@ impl MeasureEngine {
         segment_starts: &[usize],
     ) -> MeasureResult {
         match &measurement.measure_type {
-            MeasureType::Delay { trig, targ } => {
-                self.eval_delay(&measurement.name, trig, targ, time, signals, segment_starts)
-            }
+            MeasureType::Delay { trig, targ, minval } => self.eval_delay(
+                &measurement.name,
+                trig,
+                targ,
+                *minval,
+                time,
+                signals,
+                segment_starts,
+            ),
             MeasureType::Derivative {
                 signal,
                 at,
                 when,
                 from,
                 to,
+                td,
+                minval,
             } => self.eval_derivative(
                 &measurement.name,
+                &measurement.analysis,
                 signal,
                 *at,
                 when.as_ref(),
                 *from,
                 *to,
+                *td,
+                *minval,
                 time,
                 signals,
                 segment_starts,
@@ -1230,13 +1275,18 @@ impl MeasureEngine {
                 when,
                 from,
                 to,
+                td,
+                minval,
             } => self.eval_find(
                 &measurement.name,
+                &measurement.analysis,
                 signal,
                 *at,
                 when.as_ref(),
                 *from,
                 *to,
+                *td,
+                *minval,
                 time,
                 signals,
                 segment_starts,
@@ -1245,11 +1295,16 @@ impl MeasureEngine {
                 condition,
                 from,
                 to,
+                td,
+                minval,
             } => self.eval_when(
                 &measurement.name,
+                &measurement.analysis,
                 condition,
                 *from,
                 *to,
+                *td,
+                *minval,
                 time,
                 signals,
                 segment_starts,
@@ -1456,21 +1511,24 @@ impl MeasureEngine {
         name: &str,
         trig: &TrigSpec,
         targ: &TrigSpec,
+        minval: Value,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
         segment_starts: &[usize],
     ) -> MeasureResult {
         let target_td = targ.td.or(trig.td);
-        let t_trig = match delay_clause_event(trig, trig.td, time, signals, segment_starts) {
+        let t_trig = match delay_clause_event(trig, trig.td, minval, time, signals, segment_starts)
+        {
             Ok(Some(value)) => value,
             Ok(None) => return MeasureResult::failed(name, "Trigger condition not found"),
             Err(error) => return MeasureResult::failed(name, &error),
         };
-        let t_targ = match delay_clause_event(targ, target_td, time, signals, segment_starts) {
-            Ok(Some(value)) => value,
-            Ok(None) => return MeasureResult::failed(name, "Target condition not found"),
-            Err(error) => return MeasureResult::failed(name, &error),
-        };
+        let t_targ =
+            match delay_clause_event(targ, target_td, minval, time, signals, segment_starts) {
+                Ok(Some(value)) => value,
+                Ok(None) => return MeasureResult::failed(name, "Target condition not found"),
+                Err(error) => return MeasureResult::failed(name, &error),
+            };
 
         MeasureResult::success(name, t_targ - t_trig)
     }
@@ -1495,17 +1553,47 @@ impl MeasureEngine {
     }
 
     fn axis_in_measurement_window(axis: Value, lower: Value, upper: Value) -> bool {
+        Self::axis_in_measurement_window_with_minval(
+            axis,
+            lower,
+            upper,
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        )
+    }
+
+    fn axis_in_measurement_window_with_minval(
+        axis: Value,
+        lower: Value,
+        upper: Value,
+        minval: Value,
+    ) -> bool {
         let lower_tolerance = if lower.is_finite() {
-            lower.abs() * 1.0e-12
+            lower.abs() * minval
         } else {
             0.0
         };
         let upper_tolerance = if upper.is_finite() {
-            upper.abs() * 1.0e-12
+            upper.abs() * minval
         } else {
             0.0
         };
         axis >= lower - lower_tolerance && axis <= upper + upper_tolerance
+    }
+
+    fn point_measurement_window_bounds(
+        axis: &[Value],
+        analysis: &str,
+        from: Option<Value>,
+        to: Option<Value>,
+        td: Option<Value>,
+    ) -> (Value, Value) {
+        let (mut lower, upper) = Self::measurement_window_bounds(axis, from, to);
+        if matches!(analysis.to_ascii_uppercase().as_str(), "TRAN" | "TRAN_CONT")
+            && let Some(td) = td
+        {
+            lower = lower.max(td);
+        }
+        (lower, upper)
     }
 
     fn eval_min_max(
@@ -1837,11 +1925,14 @@ impl MeasureEngine {
     fn eval_derivative(
         &self,
         name: &str,
+        analysis: &str,
         signal_name: &str,
         at: Option<Value>,
         when: Option<&WhenCondition>,
         from: Option<Value>,
         to: Option<Value>,
+        td: Option<Value>,
+        minval: Value,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
         segment_starts: &[usize],
@@ -1855,10 +1946,10 @@ impl MeasureEngine {
         if time.len() < 2 {
             return MeasureResult::failed(name, "Not enough points for a derivative");
         }
-        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
+        let (lower, upper) = Self::point_measurement_window_bounds(time, analysis, from, to, td);
 
         if let Some(target) = at {
-            if !Self::axis_in_measurement_window(target, lower, upper) {
+            if !Self::axis_in_measurement_window_with_minval(target, lower, upper, minval) {
                 return MeasureResult::failed(name, "AT point is outside the measurement window")
                     .with_event_axis(target);
             }
@@ -1872,8 +1963,15 @@ impl MeasureEngine {
         let Some(condition) = when else {
             return MeasureResult::failed(name, "DERIV requires AT=time or WHEN signal=value");
         };
-        match first_measure_condition_event(condition, time, signals, lower, upper, segment_starts)
-        {
+        match first_measure_condition_event(
+            condition,
+            minval,
+            time,
+            signals,
+            lower,
+            upper,
+            segment_starts,
+        ) {
             Ok(Some((segment, _, event_axis))) => {
                 return measurement_segment_slope(name, time, signal, segment)
                     .with_event_axis(event_axis);
@@ -1922,11 +2020,14 @@ impl MeasureEngine {
     fn eval_find(
         &self,
         name: &str,
+        analysis: &str,
         signal_name: &str,
         at: Option<Value>,
         when: Option<&WhenCondition>,
         from: Option<Value>,
         to: Option<Value>,
+        td: Option<Value>,
+        minval: Value,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
         segment_starts: &[usize],
@@ -1938,10 +2039,10 @@ impl MeasureEngine {
             }
         };
 
-        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
+        let (lower, upper) = Self::point_measurement_window_bounds(time, analysis, from, to, td);
         if let Some(t_at) = at {
             // FIND ... AT=time
-            if !Self::axis_in_measurement_window(t_at, lower, upper) {
+            if !Self::axis_in_measurement_window_with_minval(t_at, lower, upper, minval) {
                 return MeasureResult::failed(name, "AT point is outside the measurement window");
             }
             if let Some(value) =
@@ -1955,6 +2056,7 @@ impl MeasureEngine {
         if let Some(condition) = when {
             match first_measure_condition_event(
                 condition,
+                minval,
                 time,
                 signals,
                 lower,
@@ -1981,16 +2083,26 @@ impl MeasureEngine {
     fn eval_when(
         &self,
         name: &str,
+        analysis: &str,
         condition: &WhenCondition,
         from: Option<Value>,
         to: Option<Value>,
+        td: Option<Value>,
+        minval: Value,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
         segment_starts: &[usize],
     ) -> MeasureResult {
-        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
-        match first_measure_condition_event(condition, time, signals, lower, upper, segment_starts)
-        {
+        let (lower, upper) = Self::point_measurement_window_bounds(time, analysis, from, to, td);
+        match first_measure_condition_event(
+            condition,
+            minval,
+            time,
+            signals,
+            lower,
+            upper,
+            segment_starts,
+        ) {
             Ok(Some((_, _, axis))) => MeasureResult::success(name, axis),
             Ok(None) => {
                 MeasureResult::failed(name, "WHEN condition not found in the measurement window")
@@ -2100,6 +2212,7 @@ fn resolve_measure_operand<'a>(
 fn delay_clause_event(
     clause: &TrigSpec,
     effective_td: Option<Value>,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     segment_starts: &[usize],
@@ -2127,6 +2240,7 @@ fn delay_clause_event(
                 axis.len(),
                 segment_starts,
                 condition.occurrence.edge,
+                minval,
             )
             .into_iter()
             .filter_map(|(segment, fraction)| {
@@ -2142,7 +2256,6 @@ fn delay_clause_event(
 }
 
 fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) -> bool {
-    const XYCE_DEFAULT_MINVAL: Value = 1.0e-12;
     let Some((&minimum, &maximum)) = axis
         .iter()
         .min_by(|left, right| left.total_cmp(right))
@@ -2150,7 +2263,9 @@ fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) 
     else {
         return false;
     };
-    if target < minimum - XYCE_DEFAULT_MINVAL || target > maximum + XYCE_DEFAULT_MINVAL {
+    if target < minimum - XYCE_DEFAULT_MEASURE_MINVAL
+        || target > maximum + XYCE_DEFAULT_MEASURE_MINVAL
+    {
         return false;
     }
     let ascending = axis
@@ -2163,9 +2278,9 @@ fn delay_at_is_reached(axis: &[Value], target: Value, segment_starts: &[usize]) 
         .unwrap_or(true);
     axis.iter().any(|sample| {
         if ascending {
-            sample - XYCE_DEFAULT_MINVAL >= target
+            sample - XYCE_DEFAULT_MEASURE_MINVAL >= target
         } else {
-            sample - XYCE_DEFAULT_MINVAL <= target
+            sample - XYCE_DEFAULT_MEASURE_MINVAL <= target
         }
     })
 }
@@ -2191,6 +2306,7 @@ fn axis_in_error_window(axis: Value, lower: Value, upper: Value, minval: Value) 
 
 fn first_measure_condition_event(
     condition: &WhenCondition,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     lower: Value,
@@ -2206,11 +2322,12 @@ fn first_measure_condition_event(
         axis.len(),
         segment_starts,
         condition.occurrence.edge,
+        minval,
     )
     .into_iter()
     .filter_map(|(segment, fraction)| {
         let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
-        MeasureEngine::axis_in_measurement_window(event_axis, lower, upper)
+        MeasureEngine::axis_in_measurement_window_with_minval(event_axis, lower, upper, minval)
             .then_some((segment, fraction, event_axis))
     });
     Ok(select_measure_occurrence(
@@ -2223,6 +2340,7 @@ type MeasureEvent = (usize, Value, Value);
 
 fn continuous_condition_events(
     condition: &WhenCondition,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     lower: Value,
@@ -2238,11 +2356,12 @@ fn continuous_condition_events(
         axis.len(),
         segment_starts,
         condition.occurrence.edge,
+        minval,
     )
     .into_iter()
     .filter_map(|(segment, fraction)| {
         let event_axis = axis[segment] + fraction * (axis[segment + 1] - axis[segment]);
-        MeasureEngine::axis_in_measurement_window(event_axis, lower, upper)
+        MeasureEngine::axis_in_measurement_window_with_minval(event_axis, lower, upper, minval)
             .then_some((segment, fraction, event_axis))
     })
     .collect::<Vec<_>>();
@@ -2277,15 +2396,27 @@ fn select_continuous_occurrences<T>(mut events: Vec<T>, number: isize) -> Vec<T>
 
 fn continuous_when(
     name: &str,
+    analysis: &str,
     condition: &WhenCondition,
     from: Option<Value>,
     to: Option<Value>,
+    td: Option<Value>,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     segment_starts: &[usize],
 ) -> ContinuousMeasureResult {
-    let (lower, upper) = MeasureEngine::measurement_window_bounds(axis, from, to);
-    match continuous_condition_events(condition, axis, signals, lower, upper, segment_starts) {
+    let (lower, upper) =
+        MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
+    match continuous_condition_events(
+        condition,
+        minval,
+        axis,
+        signals,
+        lower,
+        upper,
+        segment_starts,
+    ) {
         Ok(events) if !events.is_empty() => ContinuousMeasureResult::success(
             name,
             events
@@ -2303,11 +2434,14 @@ fn continuous_when(
 
 fn continuous_find(
     name: &str,
+    analysis: &str,
     signal_name: &str,
     at: Option<Value>,
     when: Option<&WhenCondition>,
     from: Option<Value>,
     to: Option<Value>,
+    td: Option<Value>,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     segment_starts: &[usize],
@@ -2315,9 +2449,10 @@ fn continuous_find(
     let Some(signal) = lookup_signal(signals, signal_name) else {
         return ContinuousMeasureResult::failed(name, format!("Signal '{signal_name}' not found"));
     };
-    let (lower, upper) = MeasureEngine::measurement_window_bounds(axis, from, to);
+    let (lower, upper) =
+        MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
     if let Some(target) = at {
-        if !MeasureEngine::axis_in_measurement_window(target, lower, upper) {
+        if !MeasureEngine::axis_in_measurement_window_with_minval(target, lower, upper, minval) {
             return ContinuousMeasureResult::failed(
                 name,
                 "AT point is outside the measurement window",
@@ -2337,7 +2472,15 @@ fn continuous_find(
     let Some(condition) = when else {
         return ContinuousMeasureResult::failed(name, "FIND requires AT= or WHEN condition");
     };
-    match continuous_condition_events(condition, axis, signals, lower, upper, segment_starts) {
+    match continuous_condition_events(
+        condition,
+        minval,
+        axis,
+        signals,
+        lower,
+        upper,
+        segment_starts,
+    ) {
         Ok(events) if !events.is_empty() => ContinuousMeasureResult::success(
             name,
             events
@@ -2359,11 +2502,14 @@ fn continuous_find(
 
 fn continuous_derivative(
     name: &str,
+    analysis: &str,
     signal_name: &str,
     at: Option<Value>,
     when: Option<&WhenCondition>,
     from: Option<Value>,
     to: Option<Value>,
+    td: Option<Value>,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     segment_starts: &[usize],
@@ -2371,7 +2517,8 @@ fn continuous_derivative(
     let Some(signal) = lookup_signal(signals, signal_name) else {
         return ContinuousMeasureResult::failed(name, format!("Signal '{signal_name}' not found"));
     };
-    let (lower, upper) = MeasureEngine::measurement_window_bounds(axis, from, to);
+    let (lower, upper) =
+        MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
     let make_record = |segment: usize, event_axis: Value| {
         let width = axis[segment + 1] - axis[segment];
         if width == 0.0 || !width.is_finite() {
@@ -2384,7 +2531,7 @@ fn continuous_derivative(
         }
     };
     if let Some(target) = at {
-        if !MeasureEngine::axis_in_measurement_window(target, lower, upper) {
+        if !MeasureEngine::axis_in_measurement_window_with_minval(target, lower, upper, minval) {
             return ContinuousMeasureResult::failed(
                 name,
                 "AT point is outside the measurement window",
@@ -2408,7 +2555,15 @@ fn continuous_derivative(
             "DERIV requires AT=time or WHEN signal=value",
         );
     };
-    match continuous_condition_events(condition, axis, signals, lower, upper, segment_starts) {
+    match continuous_condition_events(
+        condition,
+        minval,
+        axis,
+        signals,
+        lower,
+        upper,
+        segment_starts,
+    ) {
         Ok(events) if !events.is_empty() => {
             let records = events
                 .into_iter()
@@ -2434,6 +2589,7 @@ fn continuous_derivative(
 fn continuous_delay_clause_events(
     clause: &TrigSpec,
     effective_td: Option<Value>,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     segment_starts: &[usize],
@@ -2462,6 +2618,7 @@ fn continuous_delay_clause_events(
                 axis.len(),
                 segment_starts,
                 condition.occurrence.edge,
+                minval,
             )
             .into_iter()
             .filter_map(|(segment, fraction)| {
@@ -2481,21 +2638,34 @@ fn continuous_delay(
     name: &str,
     trig: &TrigSpec,
     targ: &TrigSpec,
+    minval: Value,
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     segment_starts: &[usize],
 ) -> ContinuousMeasureResult {
     let target_td = targ.td.or(trig.td);
-    let triggers =
-        match continuous_delay_clause_events(trig, trig.td, axis, signals, segment_starts) {
-            Ok(events) => events,
-            Err(error) => return ContinuousMeasureResult::failed(name, error),
-        };
-    let targets =
-        match continuous_delay_clause_events(targ, target_td, axis, signals, segment_starts) {
-            Ok(events) => events,
-            Err(error) => return ContinuousMeasureResult::failed(name, error),
-        };
+    let triggers = match continuous_delay_clause_events(
+        trig,
+        trig.td,
+        minval,
+        axis,
+        signals,
+        segment_starts,
+    ) {
+        Ok(events) => events,
+        Err(error) => return ContinuousMeasureResult::failed(name, error),
+    };
+    let targets = match continuous_delay_clause_events(
+        targ,
+        target_td,
+        minval,
+        axis,
+        signals,
+        segment_starts,
+    ) {
+        Ok(events) => events,
+        Err(error) => return ContinuousMeasureResult::failed(name, error),
+    };
     let partial_trigger = triggers.first().copied();
     let partial_target = targets.first().copied();
     let records = triggers
@@ -2538,9 +2708,10 @@ fn measurement_condition_crossings(
     point_count: usize,
     segment_starts: &[usize],
     edge: EdgeType,
+    minval: Value,
 ) -> Vec<(usize, Value)> {
-    const XYCE_WHEN_ABSOLUTE_TOLERANCE: Value = 1.0e-12;
-    if left.len() != point_count || point_count < 2 {
+    const FLAT_LEFT_NUMERIC_TOLERANCE: Value = 1.0e-12;
+    if left.len() != point_count || point_count < 2 || !minval.is_finite() || minval < 0.0 {
         return Vec::new();
     }
 
@@ -2552,7 +2723,9 @@ fn measurement_condition_crossings(
         let left_previous = left[segment];
         let left_current = left[segment + 1];
         let left_scale = left_previous.abs().max(left_current.abs()).max(1.0);
-        if (left_current - left_previous).abs() <= XYCE_WHEN_ABSOLUTE_TOLERANCE * left_scale {
+        // MINVAL applies to equality with the target, not to Xyce's
+        // independent requirement that the left operand itself move.
+        if (left_current - left_previous).abs() <= FLAT_LEFT_NUMERIC_TOLERANCE * left_scale {
             continue;
         }
         let Some(right_previous) = right.value_at(segment) else {
@@ -2563,8 +2736,8 @@ fn measurement_condition_crossings(
         };
         let previous_difference = left_previous - right_previous;
         let current_difference = left_current - right_current;
-        let previous_equal = previous_difference.abs() < XYCE_WHEN_ABSOLUTE_TOLERANCE;
-        let current_equal = current_difference.abs() < XYCE_WHEN_ABSOLUTE_TOLERANCE;
+        let previous_equal = previous_difference.abs() < minval;
+        let current_equal = current_difference.abs() < minval;
         // Entering Xyce's MINVAL equality band is the crossing.  Normalize
         // that state before the next strict-sign test so leaving the band
         // cannot emit the same physical root a second time.
@@ -3063,6 +3236,8 @@ mod tests {
                 when,
                 from,
                 to,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
             analysis: "DC".to_string(),
             goal: None,
@@ -3228,6 +3403,8 @@ mod tests {
                 },
                 from,
                 to,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
             analysis: "DC".to_string(),
             goal: None,
@@ -3272,6 +3449,8 @@ mod tests {
                 condition: when.clone(),
                 from: None,
                 to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
             analysis: "DC".to_string(),
             goal: None,
@@ -3287,6 +3466,8 @@ mod tests {
                 when: Some(when),
                 from: None,
                 to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
             analysis: "DC".to_string(),
             goal: None,
@@ -3319,6 +3500,8 @@ mod tests {
                         },
                         from,
                         to: None,
+                        td: None,
+                        minval: XYCE_DEFAULT_MEASURE_MINVAL,
                     },
                     analysis: "DC".to_string(),
                     goal: None,
@@ -3345,6 +3528,83 @@ mod tests {
     }
 
     #[test]
+    fn transient_td_gates_interpolated_events_before_occurrence_counting() {
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let alternating = [-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let mut signals = HashMap::new();
+        signals.insert("ALT".to_string(), alternating.as_slice());
+        let statement =
+            |name: &str, analysis: &str, from: Option<Value>, td: Option<Value>, minval: Value| {
+                MeasureStatement {
+                    default_value: None,
+                    print_policy: MeasurePrintPolicy::All,
+                    name: name.to_string(),
+                    measure_type: MeasureType::When {
+                        condition: WhenCondition {
+                            left: "ALT".to_string(),
+                            right: MeasureOperand::Constant(0.0),
+                            occurrence: EventOccurrence::default(),
+                        },
+                        from,
+                        to: None,
+                        td,
+                        minval,
+                    },
+                    analysis: analysis.to_string(),
+                    goal: None,
+                    tolerance: None,
+                }
+            };
+        let mut engine = MeasureEngine::new();
+        engine.add(statement(
+            "td",
+            "TRAN",
+            None,
+            Some(2.0),
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ));
+        engine.add(statement(
+            "from_and_td",
+            "TRAN",
+            Some(4.0),
+            Some(2.0),
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ));
+        engine.add(statement(
+            "default_boundary",
+            "TRAN",
+            None,
+            Some(0.55),
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ));
+        engine.add(statement("custom_boundary", "TRAN", None, Some(0.55), 0.1));
+        engine.add(statement(
+            "negative_td",
+            "TRAN",
+            None,
+            Some(-1.0),
+            XYCE_DEFAULT_MEASURE_MINVAL,
+        ));
+        for analysis in ["AC", "DC", "NOISE"] {
+            engine.add(statement(
+                &format!("ignored_{analysis}"),
+                analysis,
+                None,
+                Some(10.0),
+                XYCE_DEFAULT_MEASURE_MINVAL,
+            ));
+        }
+
+        let results = engine.evaluate(&axis, &signals);
+        assert_eq!(results[0].value, Some(2.5));
+        assert_eq!(results[1].value, Some(4.5));
+        assert_eq!(results[2].value, Some(1.5));
+        assert_eq!(results[3].value, Some(0.5));
+        assert_eq!(results[4].value, Some(0.5));
+        assert!(results[5..].iter().all(|result| result.value == Some(0.5)));
+    }
+
+    #[test]
     fn minval_endpoint_equality_pins_crossing_inside_segment() {
         let nearly_equal = [-1.0, -1.0e-14];
         assert_eq!(
@@ -3354,6 +3614,7 @@ mod tests {
                 nearly_equal.len(),
                 &[],
                 EdgeType::Cross,
+                XYCE_DEFAULT_MEASURE_MINVAL,
             ),
             vec![(0, 1.0)]
         );
@@ -3369,6 +3630,34 @@ mod tests {
                 enters_then_leaves.len(),
                 &[],
                 EdgeType::Cross,
+                XYCE_DEFAULT_MEASURE_MINVAL,
+            ),
+            vec![(0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn custom_minval_controls_endpoint_equality_band() {
+        let nearly_equal = [-1.0, -1.0e-14];
+        assert!(
+            measurement_condition_crossings(
+                &nearly_equal,
+                ResolvedMeasureOperand::Constant(0.0),
+                nearly_equal.len(),
+                &[],
+                EdgeType::Cross,
+                1.0e-16,
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            measurement_condition_crossings(
+                &nearly_equal,
+                ResolvedMeasureOperand::Constant(0.0),
+                nearly_equal.len(),
+                &[],
+                EdgeType::Cross,
+                1.0e-13,
             ),
             vec![(0, 1.0)]
         );
@@ -3402,6 +3691,7 @@ mod tests {
                     event: TriggerEvent::When(condition(1)),
                     td: None,
                 },
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
             analysis: "DC".to_string(),
             goal: None,
@@ -3420,6 +3710,7 @@ mod tests {
                     event: TriggerEvent::At(1.0),
                     td: None,
                 },
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
             analysis: "DC".to_string(),
             goal: None,
@@ -3438,6 +3729,7 @@ mod tests {
                     event: TriggerEvent::At(1.0),
                     td: None,
                 },
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
             analysis: "DC".to_string(),
             goal: None,
@@ -3532,6 +3824,8 @@ mod tests {
                 condition: alternating_condition(2),
                 from: Some(2.0),
                 to: Some(5.0),
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         ));
         engine.add(continuous_statement(
@@ -3540,6 +3834,8 @@ mod tests {
                 condition: alternating_condition(-2),
                 from: None,
                 to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         ));
 
@@ -3555,6 +3851,51 @@ mod tests {
         );
         assert_eq!(results[1].records.len(), 1);
         assert_eq!(results[1].records[0].value, 4.5);
+    }
+
+    #[test]
+    fn continuous_td_applies_only_to_transient_event_streams() {
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let alternating = [-1.0, 1.0, -1.0, 1.0, -1.0];
+        let mut signals = HashMap::new();
+        signals.insert("ALT".to_string(), alternating.as_slice());
+        let point_measure = |name: &str, td: Value| {
+            continuous_statement(
+                name,
+                MeasureType::When {
+                    condition: alternating_condition(1),
+                    from: None,
+                    to: None,
+                    td: Some(td),
+                    minval: XYCE_DEFAULT_MEASURE_MINVAL,
+                },
+            )
+        };
+        let mut transient = point_measure("transient", 2.0);
+        transient.analysis = "TRAN_CONT".to_string();
+        let mut ac = point_measure("ac", 10.0);
+        ac.analysis = "AC_CONT".to_string();
+        let mut engine = MeasureEngine::new();
+        engine.add(transient);
+        engine.add(ac);
+
+        let results = engine.evaluate_continuous(&axis, &signals, &[]);
+        assert_eq!(
+            results[0]
+                .records
+                .iter()
+                .filter_map(|record| record.event_axis)
+                .collect::<Vec<_>>(),
+            vec![2.5, 3.5]
+        );
+        assert_eq!(
+            results[1]
+                .records
+                .iter()
+                .filter_map(|record| record.event_axis)
+                .collect::<Vec<_>>(),
+            vec![0.5, 1.5, 2.5, 3.5]
+        );
     }
 
     #[test]
@@ -3574,6 +3915,8 @@ mod tests {
                 when: Some(alternating_condition(1)),
                 from: None,
                 to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         ));
         engine.add(continuous_statement(
@@ -3584,6 +3927,8 @@ mod tests {
                 when: Some(alternating_condition(1)),
                 from: None,
                 to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         ));
 
@@ -3632,6 +3977,7 @@ mod tests {
                     }),
                     td: None,
                 },
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         ));
 
@@ -3663,6 +4009,7 @@ mod tests {
             MeasureType::Delay {
                 trig: found.clone(),
                 targ: missing.clone(),
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         ));
         engine.add(continuous_statement(
@@ -3670,6 +4017,7 @@ mod tests {
             MeasureType::Delay {
                 trig: missing,
                 targ: found,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         ));
 
@@ -3722,6 +4070,8 @@ mod tests {
                 },
                 from: None,
                 to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
             },
         );
         scalar.analysis = "NOISE".to_string();

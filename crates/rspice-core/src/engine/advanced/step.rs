@@ -674,7 +674,7 @@ impl Engine {
             }
             ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {
                 alias!(&["DC", "VALUE"], "DC")
-                    .or_else(|| alias!(&["VO", "OFFSET"], "VO"))
+                    .or_else(|| alias!(&["V0", "VO", "OFFSET"], "V0"))
                     .or_else(|| alias!(&["VA", "AMPLITUDE"], "VA"))
                     .or_else(|| alias!(&["F", "FREQ", "FREQUENCY"], "FREQ"))
                     .or_else(|| alias!(&["THETA", "DAMPING"], "THETA"))
@@ -1783,7 +1783,7 @@ impl Engine {
         match param_name {
             None | Some("DC") | Some("VALUE") => Self::set_source_dc_value(spec, value),
             Some(
-                "VO" | "OFFSET" | "VA" | "AMPLITUDE" | "F" | "FREQ" | "FREQUENCY" | "THETA"
+                "V0" | "VO" | "OFFSET" | "VA" | "AMPLITUDE" | "F" | "FREQ" | "FREQUENCY" | "THETA"
                 | "DAMPING" | "PHASE",
             ) => Self::set_sin_source_parameter(spec, param_name.unwrap(), value),
             Some("TD") => Self::set_transient_delay_source_parameter(spec, value),
@@ -1791,7 +1791,7 @@ impl Engine {
                 Self::set_pat_source_parameter(spec, param_name.unwrap(), value)
             }
             Some(other) => Err(SimulationError::Circuit(format!(
-                "Unsupported source step parameter '{other}'; use DC, VALUE, SIN parameters VO, VA, FREQ, TD, THETA, PHASE, or PAT parameters VHI, VLO, TD, TR, TF, TSAMPLE"
+                "Unsupported source step parameter '{other}'; use DC, VALUE, SIN parameters V0, VO, VA, FREQ, TD, THETA, PHASE, or PAT parameters VHI, VLO, TD, TR, TF, TSAMPLE"
             ))),
         }
     }
@@ -1836,7 +1836,7 @@ impl Engine {
                 phase,
             } => {
                 match param_name {
-                    "VO" | "OFFSET" => *offset = value,
+                    "V0" | "VO" | "OFFSET" => *offset = value,
                     "VA" | "AMPLITUDE" => *amplitude = value,
                     "F" | "FREQ" | "FREQUENCY" => *frequency = value,
                     "TD" => *delay = value,
@@ -2532,6 +2532,41 @@ VS1 out 0 SIN(0 1 1k 0 0)
         match &source.kind {
             ElementKind::VoltageSource(SourceSpec::Sin { amplitude, .. }) => {
                 assert!((*amplitude - 2.0).abs() < 1.0e-15);
+            }
+            other => panic!("unexpected stepped source kind: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn device_step_accepts_xyce_v0_alias_for_sin_source_offset() {
+        let netlist = Netlist::parse(
+            "\
+sin offset source step
+VS1 out 0 SIN(0 1 1k 0 0)
+.STEP VS1:V0 -0.25 -0.25 -0.25
+.END
+",
+        )
+        .expect("deck parses");
+        let step = first_step_command(&netlist);
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+
+        let stepped = engine
+            .step_netlists_for_command(&netlist, step, &[-0.25])
+            .expect("Xyce V0 SIN offset step materializes");
+        let source = stepped[0]
+            .1
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("VS1"))
+            .expect("stepped source exists");
+
+        match &source.kind {
+            ElementKind::VoltageSource(SourceSpec::Sin { offset, .. }) => {
+                assert!((*offset + 0.25).abs() < 1.0e-15);
             }
             other => panic!("unexpected stepped source kind: {other:?}"),
         }

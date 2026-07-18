@@ -976,7 +976,7 @@ fn collect_measure_sources<'a>(statement: &'a MeasureStatement, output: &mut Vec
         }
     }
     match &statement.measure_type {
-        MeasureType::Delay { trig, targ } => {
+        MeasureType::Delay { trig, targ, .. } => {
             trigger(trig, output);
             trigger(targ, output);
         }

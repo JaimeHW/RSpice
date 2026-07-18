@@ -3297,6 +3297,105 @@ impl XyceMeasureContStepTranMember {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceMeasureStepFindWhenRole {
+    Owner,
+    Control0,
+    Control1,
+    Control2,
+    Control3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceMeasureStepFindWhenMember {
+    role: XyceMeasureStepFindWhenRole,
+}
+
+impl XyceMeasureStepFindWhenMember {
+    const ALL: [Self; 5] = [
+        Self::new(XyceMeasureStepFindWhenRole::Owner),
+        Self::new(XyceMeasureStepFindWhenRole::Control0),
+        Self::new(XyceMeasureStepFindWhenRole::Control1),
+        Self::new(XyceMeasureStepFindWhenRole::Control2),
+        Self::new(XyceMeasureStepFindWhenRole::Control3),
+    ];
+
+    const fn new(role: XyceMeasureStepFindWhenRole) -> Self {
+        Self { role }
+    }
+
+    fn for_record(relative_path: &str) -> Option<Self> {
+        let record = XyceTestRunner::normalize_manifest_key(relative_path);
+        Self::ALL
+            .into_iter()
+            .find(|member| member.record() == record)
+    }
+
+    fn owner() -> Self {
+        Self::new(XyceMeasureStepFindWhenRole::Owner)
+    }
+
+    fn control(index: usize) -> Option<Self> {
+        let role = match index {
+            0 => XyceMeasureStepFindWhenRole::Control0,
+            1 => XyceMeasureStepFindWhenRole::Control1,
+            2 => XyceMeasureStepFindWhenRole::Control2,
+            3 => XyceMeasureStepFindWhenRole::Control3,
+            _ => return None,
+        };
+        Some(Self::new(role))
+    }
+
+    fn is_owner(self) -> bool {
+        self.role == XyceMeasureStepFindWhenRole::Owner
+    }
+
+    fn record(self) -> &'static str {
+        match self.role {
+            XyceMeasureStepFindWhenRole::Owner => "netlists/measure/step/findwhentest.cir",
+            XyceMeasureStepFindWhenRole::Control0 => "netlists/measure/step/findwhentest.s0.cir",
+            XyceMeasureStepFindWhenRole::Control1 => "netlists/measure/step/findwhentest.s1.cir",
+            XyceMeasureStepFindWhenRole::Control2 => "netlists/measure/step/findwhentest.s2.cir",
+            XyceMeasureStepFindWhenRole::Control3 => "netlists/measure/step/findwhentest.s3.cir",
+        }
+    }
+
+    fn source_relative_path(self) -> &'static str {
+        match self.role {
+            XyceMeasureStepFindWhenRole::Owner => "Netlists/MEASURE/STEP/FindWhenTest.cir",
+            XyceMeasureStepFindWhenRole::Control0 => "Netlists/MEASURE/STEP/FindWhenTest.s0.cir",
+            XyceMeasureStepFindWhenRole::Control1 => "Netlists/MEASURE/STEP/FindWhenTest.s1.cir",
+            XyceMeasureStepFindWhenRole::Control2 => "Netlists/MEASURE/STEP/FindWhenTest.s2.cir",
+            XyceMeasureStepFindWhenRole::Control3 => "Netlists/MEASURE/STEP/FindWhenTest.s3.cir",
+        }
+    }
+
+    fn source_identity(self) -> (usize, &'static str) {
+        match self.role {
+            XyceMeasureStepFindWhenRole::Owner => (
+                3388,
+                "91b974929771cd6ba2f57d87868664153e8fe47e42146a4bbcced087141da3c6",
+            ),
+            XyceMeasureStepFindWhenRole::Control0 => (
+                3465,
+                "39c7e32b64ba2305f105885ddc156c79c204ffd5a7ab5e41f8bd8bf988c5a6f7",
+            ),
+            XyceMeasureStepFindWhenRole::Control1 => (
+                3465,
+                "5f2c494542bf786f8672f9f031192c17d84da2059b0b2e598cca6528c8dd3198",
+            ),
+            XyceMeasureStepFindWhenRole::Control2 => (
+                3478,
+                "75e76a60a08d70f86979e16d31417b614e1693b2de21fe6384bdc64830da2be6",
+            ),
+            XyceMeasureStepFindWhenRole::Control3 => (
+                3463,
+                "0323c7eb942e8bad81072c853dc4eb95fad95ef326924a9fa517a1065ad9f156",
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceRemoveUnusedKind {
     ReplaceGround,
     LiteralGroundNames,
@@ -6154,6 +6253,27 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(member) = XyceMeasureStepFindWhenMember::for_record(&deck.relative_path) {
+            let contract = if member.is_owner() {
+                "measure_step_find_when_relational_wrapper"
+            } else {
+                "measure_step_find_when_relational_control"
+            };
+            let result = match self.validate_measure_step_find_when_oracle(deck, member, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(member) = XyceMeasureContStepTranMember::for_record(&deck.relative_path) {
             let contract = match member.role {
                 XyceMeasureContStepTranRole::Main => "measure_cont_step_tran_relational_wrapper",
@@ -6892,6 +7012,311 @@ impl XyceTestRunner {
             start,
             "stepped execution, relational comparison, and remeasure",
         )
+    }
+
+    fn validate_measure_step_find_when_oracle(
+        &self,
+        deck: &XyceDeck,
+        member: XyceMeasureStepFindWhenMember,
+        start: Instant,
+    ) -> Result<(), String> {
+        let sources = self.validate_measure_step_find_when_provenance(deck, member)?;
+        self.check_measure_cont_tran_deadline(start, "FIND/WHEN stepped provenance")?;
+
+        let mut parsed = Vec::with_capacity(sources.len());
+        for (candidate, bytes) in sources {
+            let source = std::str::from_utf8(&bytes)
+                .map_err(|error| format!("MEASURE STEP FIND/WHEN source is not UTF-8: {error}"))?
+                .to_string();
+            let path = self.root.join(candidate.source_relative_path());
+            let netlist = Self::parse_xyce_netlist(&source, &path).map_err(|error| {
+                format!(
+                    "MEASURE STEP FIND/WHEN parse failed for {}: {error}",
+                    candidate.source_relative_path()
+                )
+            })?;
+            let output = Self::single_tran_print_output_request(&source)?;
+            if output.file.is_some()
+                || output
+                    .format
+                    .as_deref()
+                    .is_some_and(|format| !Self::tran_print_format_is_prn_compatible(format))
+            {
+                return Err(format!(
+                    "{} requires one ordinary PRN-compatible .PRINT TRAN",
+                    candidate.source_relative_path()
+                ));
+            }
+            let print = XycePrintRequest {
+                probes: output.probes,
+            };
+            let tran = Self::single_tran_analysis(&netlist)?;
+            Self::validate_measure_step_find_when_plan(&netlist, &print, &tran, candidate)?;
+            parsed.push((candidate, netlist, tran));
+        }
+
+        let owner_member = XyceMeasureStepFindWhenMember::owner();
+        let owner_index = parsed
+            .iter()
+            .position(|(candidate, ..)| *candidate == owner_member)
+            .ok_or_else(|| "MEASURE STEP FIND/WHEN family omitted its owner".to_string())?;
+        let owner_measurements = format!("{:#?}", parsed[owner_index].1.measurements);
+        for index in 0..4 {
+            let control = XyceMeasureStepFindWhenMember::control(index)
+                .ok_or_else(|| "invalid MEASURE STEP FIND/WHEN control index".to_string())?;
+            let control_netlist = &parsed
+                .iter()
+                .find(|(candidate, ..)| *candidate == control)
+                .ok_or_else(|| format!("MEASURE STEP FIND/WHEN omitted control {index}"))?
+                .1;
+            if format!("{:#?}", control_netlist.measurements) != owner_measurements {
+                return Err(format!(
+                    "MEASURE STEP FIND/WHEN control {index} measurement AST/order differs from its owner"
+                ));
+            }
+        }
+
+        let (_, owner_netlist, owner_tran) = &parsed[owner_index];
+        let engine = self
+            .create_xyce_static_tran_engine(None, Self::xyce_initial_timestep_for_tran(owner_tran));
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let steps = Self::step_commands(owner_netlist)?;
+        let materialized = Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &engine,
+            owner_netlist,
+            &steps,
+            xyce_step_plan_limits(),
+            &abort,
+        )
+        .map_err(|error| format!("MEASURE STEP FIND/WHEN expansion failed: {error}"))?;
+        let expected_step_values = [[1.0, -0.25], [2.0, -0.25], [1.0, -0.5], [2.0, -0.5]];
+        if materialized.len() != expected_step_values.len()
+            || materialized
+                .iter()
+                .zip(expected_step_values)
+                .any(|(run, expected)| run.step_values != expected)
+        {
+            return Err(format!(
+                "MEASURE STEP FIND/WHEN owner produced unexpected ordered step values: {:?}",
+                materialized
+                    .iter()
+                    .map(|run| &run.step_values)
+                    .collect::<Vec<_>>()
+            ));
+        }
+
+        let mut owner_runs = Vec::with_capacity(4);
+        for run in materialized {
+            let tran = Self::single_tran_analysis(&run.netlist)?;
+            owner_runs.push(self.evaluate_measure_cont_step_tran_run(
+                run.netlist,
+                run.step_values,
+                &tran,
+                start,
+            )?);
+        }
+
+        for (index, (owner, expected)) in owner_runs.iter().zip(expected_step_values).enumerate() {
+            let control_member = XyceMeasureStepFindWhenMember::control(index)
+                .ok_or_else(|| "invalid MEASURE STEP FIND/WHEN control index".to_string())?;
+            let (_, control_netlist, control_tran) = parsed
+                .iter()
+                .find(|(candidate, ..)| *candidate == control_member)
+                .ok_or_else(|| format!("MEASURE STEP FIND/WHEN omitted control {index}"))?;
+            let control = self.evaluate_measure_cont_step_tran_run(
+                control_netlist.clone(),
+                expected.to_vec(),
+                control_tran,
+                start,
+            )?;
+            Self::compare_measure_cont_step_waveforms(index, owner, &control)?;
+            Self::compare_measure_cont_step_measurements(index, owner, &control)?;
+            Self::validate_measure_cont_remeasure(
+                &owner.netlist,
+                &owner.transient,
+                None,
+                XyceFileCompareTolerance::MEASURE_CONT_STEP_REMEASURE,
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            )?;
+        }
+
+        self.check_measure_cont_tran_deadline(
+            start,
+            "FIND/WHEN stepped execution, relational comparison, and remeasure",
+        )
+    }
+
+    fn validate_measure_step_find_when_provenance(
+        &self,
+        deck: &XyceDeck,
+        member: XyceMeasureStepFindWhenMember,
+    ) -> Result<Vec<(XyceMeasureStepFindWhenMember, Vec<u8>)>, String> {
+        let expected_record = member.record();
+        if deck.section != XyceDeckSection::Netlists
+            || Self::normalize_manifest_key(&deck.relative_path) != expected_record
+            || self.requires_upstream_wrapper(&deck.relative_path) != member.is_owner()
+        {
+            return Err(format!(
+                "MEASURE STEP FIND/WHEN record '{expected_record}' lost exact owner/control ownership"
+            ));
+        }
+        let canonical_deck = deck.path.canonicalize().map_err(|error| {
+            format!("failed to canonicalize MEASURE STEP FIND/WHEN record: {error}")
+        })?;
+        let canonical_expected = self
+            .root
+            .join(member.source_relative_path())
+            .canonicalize()
+            .map_err(|error| {
+                format!("canonical MEASURE STEP FIND/WHEN record is missing: {error}")
+            })?;
+        if canonical_deck != canonical_expected {
+            return Err(
+                "MEASURE STEP FIND/WHEN record resolved outside its canonical corpus path".into(),
+            );
+        }
+
+        let base = self.root.join("Netlists/MEASURE/STEP");
+        let mut family_names = Vec::new();
+        for entry in fs::read_dir(&base)
+            .map_err(|error| format!("failed to read {}: {error}", base.display()))?
+        {
+            let path = entry
+                .map_err(|error| format!("failed to inspect {}: {error}", base.display()))?
+                .path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return Err("MEASURE STEP FIND/WHEN member name is not UTF-8".to_string());
+            };
+            if name.starts_with("FindWhenTest") {
+                let metadata = fs::symlink_metadata(&path)
+                    .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+                if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                    return Err(format!(
+                        "MEASURE STEP FIND/WHEN member {} must be a regular non-symlink file",
+                        path.display()
+                    ));
+                }
+                family_names.push(name.to_string());
+            }
+        }
+        family_names.sort();
+        let expected_names = [
+            "FindWhenTest.cir",
+            "FindWhenTest.s0.cir",
+            "FindWhenTest.s1.cir",
+            "FindWhenTest.s2.cir",
+            "FindWhenTest.s3.cir",
+        ];
+        if family_names != expected_names {
+            return Err(format!(
+                "MEASURE STEP FIND/WHEN case-sensitive family census changed: {family_names:?}"
+            ));
+        }
+
+        let manifest_path = self.root.join(HARNESS_MANIFEST_FILE);
+        let manifest_bytes = fs::read(&manifest_path)
+            .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+        let canonical_manifest =
+            Self::canonical_lf_text_identity("MEASURE STEP FIND/WHEN manifest", &manifest_bytes)?;
+        let manifest_text = std::str::from_utf8(&canonical_manifest)
+            .map_err(|error| format!("MEASURE STEP FIND/WHEN manifest is not UTF-8: {error}"))?;
+        let manifest_rows = manifest_text
+            .lines()
+            .filter(|line| line.starts_with("Netlists/MEASURE/STEP/FindWhenTest"))
+            .collect::<Vec<_>>();
+        if manifest_rows != ["Netlists/MEASURE/STEP/FindWhenTest.cir\trequires_upstream_wrapper"] {
+            return Err(format!(
+                "MEASURE STEP FIND/WHEN manifest ownership changed: {manifest_rows:?}"
+            ));
+        }
+
+        let mut sources = Vec::with_capacity(XyceMeasureStepFindWhenMember::ALL.len());
+        for candidate in XyceMeasureStepFindWhenMember::ALL {
+            let bytes = Self::validate_measure_cont_regular_text_identity(
+                &self.root.join(candidate.source_relative_path()),
+                candidate.source_identity(),
+                "MEASURE STEP FIND/WHEN source",
+            )?;
+            sources.push((candidate, bytes));
+        }
+        Ok(sources)
+    }
+
+    fn validate_measure_step_find_when_plan(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        tran: &XyceTranAnalysis,
+        member: XyceMeasureStepFindWhenMember,
+    ) -> Result<(), String> {
+        let steps = Self::step_commands(netlist)?;
+        let exact_owner_steps = matches!(steps.as_slice(), [
+            StepCommand {
+                target: StepTarget::Device,
+                name: first_name,
+                param_name: Some(first_param),
+                sweep: StepSweep::Linear {
+                    start: first_start,
+                    stop: first_stop,
+                    step: first_step,
+                },
+            },
+            StepCommand {
+                target: StepTarget::Device,
+                name: second_name,
+                param_name: Some(second_param),
+                sweep: StepSweep::Linear {
+                    start: second_start,
+                    stop: second_stop,
+                    step: second_step,
+                },
+            },
+        ] if first_name.eq_ignore_ascii_case("VS1")
+            && first_param.eq_ignore_ascii_case("VA")
+            && first_start.to_bits() == 1.0f64.to_bits()
+            && first_stop.to_bits() == 2.0f64.to_bits()
+            && first_step.to_bits() == 1.0f64.to_bits()
+            && second_name.eq_ignore_ascii_case("VS4")
+            && second_param.eq_ignore_ascii_case("V0")
+            && second_start.to_bits() == (-0.25f64).to_bits()
+            && second_stop.to_bits() == (-0.5f64).to_bits()
+            && second_step.to_bits() == (-0.25f64).to_bits());
+        if (member.is_owner() && !exact_owner_steps) || (!member.is_owner() && !steps.is_empty()) {
+            return Err(format!(
+                "MEASURE STEP FIND/WHEN exact owner/control .STEP contract changed: {steps:?}"
+            ));
+        }
+
+        let probes = print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let expected_analyses = if member.is_owner() { 3 } else { 1 };
+        if tran.step.to_bits() != 0.0f64.to_bits()
+            || tran.stop.to_bits() != 0.005f64.to_bits()
+            || tran.start.map(Value::to_bits) != Some(0.0f64.to_bits())
+            || tran.max_step.map(Value::to_bits) != Some(1.0e-5f64.to_bits())
+            || tran.uic
+            || probes != ["v(1)", "v(2)", "v(3)", "v(4)", "v(5)"]
+            || netlist.analyses.len() != expected_analyses
+            || netlist.output_requests.len() != netlist.measurements.len() + 1
+            || netlist.measurements.len() != 43
+            || netlist.measurements.iter().any(|statement| {
+                !statement.analysis.eq_ignore_ascii_case("TRAN")
+                    || statement.print_policy != crate::analysis::MeasurePrintPolicy::All
+            })
+            || !netlist.diagnostics.is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || netlist.elements.len() != 10
+        {
+            return Err(format!(
+                "MEASURE STEP FIND/WHEN exact TRAN/PRINT/topology contract changed for {}",
+                member.source_relative_path()
+            ));
+        }
+        Ok(())
     }
 
     fn validate_measure_cont_step_tran_provenance(
