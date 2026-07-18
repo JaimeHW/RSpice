@@ -64,7 +64,6 @@ class TestSimulationConfig:
         "kwargs",
         [
             {"min_timestep": 1e-6, "max_timestep": 1e-9},
-            {"min_timestep": 1.0},
             {"max_timestep": 1e-15},
         ],
     )
@@ -83,6 +82,16 @@ class TestSimulationConfig:
         else:
             with pytest.raises(ValueError, match="min_timestep|max_timestep"):
                 config.max_timestep = kwargs["max_timestep"]
+
+    def test_unbounded_default_accepts_large_preferred_minimum(self):
+        config = rspice.SimulationConfig(min_timestep=1.0)
+        assert config.min_timestep == 1.0
+        assert math.isinf(config.max_timestep)
+
+        config = rspice.SimulationConfig()
+        config.min_timestep = 1.0
+        assert config.min_timestep == 1.0
+        assert math.isinf(config.max_timestep)
 
     def test_nested_assignment_works(self):
         config = rspice.SimulationConfig()

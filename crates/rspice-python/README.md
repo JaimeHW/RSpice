@@ -228,6 +228,8 @@ stepping, pseudo-transient, arc-length continuation, damping strategies,
 tolerance knobs including `charge_abstol`); `BypassConfig` controls
 latent-device bypass; `SimulationConfig` adds `transient_max_iterations`
 (ITL4), `transient_trtol`, the integration method, and `ResourceLimits`.
+Its transient timestep ceiling is unbounded by default; set a finite
+`max_timestep` when the embedding application requires one.
 
 ### Analyses
 

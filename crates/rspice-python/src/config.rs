@@ -767,6 +767,9 @@ impl PyResourceLimits {
 /// return copies.
 /// `config.convergence.verbose = True` mutates a temporary and is silently
 /// lost — assign a whole ConvergenceConfig instead.
+///
+/// The default transient timestep ceiling is unbounded. Pass a finite
+/// `max_timestep` when the application requires a product-level ceiling.
 #[pyclass(name = "SimulationConfig", module = "rspice", from_py_object)]
 #[derive(Clone)]
 pub struct PySimulationConfig {
@@ -785,7 +788,7 @@ impl PySimulationConfig {
     ///     max_iterations: Maximum DC Newton-Raphson iterations
     ///     transient_max_iterations: Newton budget per transient step (ITL4)
     ///     min_timestep: Preferred minimum transient timestep (seconds)
-    ///     max_timestep: Maximum transient timestep (seconds)
+    ///     max_timestep: Maximum transient timestep (seconds); None is unbounded
     ///     temperature: Simulation temperature in Kelvin
     ///     integration_method: Transient integration scheme
     ///     transient_trtol: Truncation-error tolerance factor (TRTOL)
