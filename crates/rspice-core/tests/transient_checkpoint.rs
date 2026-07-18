@@ -247,10 +247,28 @@ fn checkpoint_file_round_trip_resumes_identically() {
         .run_tran_checkpointed(&netlist, 1e-6, TAU_STEP)
         .expect("segment completes");
 
-    let path = std::env::temp_dir().join("rspice_checkpoint_roundtrip_test.ckpt");
-    checkpoint.save(&path).expect("checkpoint saves");
+    let directory = std::env::temp_dir().join(format!(
+        "rspice-checkpoint-roundtrip-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir(&directory).expect("checkpoint directory");
+    let path = directory.join("state.ckpt");
+    std::fs::write(&path, b"obsolete partial checkpoint").expect("seed old checkpoint");
+    checkpoint
+        .save(&path)
+        .expect("checkpoint atomically replaces old state");
     let loaded = TransientCheckpoint::load(&path).expect("checkpoint loads");
-    let _ = std::fs::remove_file(&path);
+    assert_eq!(
+        std::fs::read_dir(&directory)
+            .expect("read checkpoint directory")
+            .count(),
+        1,
+        "committed checkpoint must not leave a temporary sibling"
+    );
     assert_eq!(checkpoint, loaded, "file round-trip is exact");
 
     let (from_memory, _) = engine
@@ -269,6 +287,7 @@ fn checkpoint_file_round_trip_resumes_identically() {
             .all(|(a, b)| a.to_bits() == b.to_bits()),
         "file-loaded checkpoint resumes bit-identically"
     );
+    std::fs::remove_dir_all(directory).expect("remove checkpoint directory");
 }
 
 #[test]

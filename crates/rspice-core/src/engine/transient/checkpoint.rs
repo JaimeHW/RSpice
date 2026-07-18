@@ -1602,7 +1602,7 @@ impl TransientCheckpoint {
     /// Write the checkpoint to a file.
     pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
         self.validate_numeric_state()?;
-        std::fs::write(path, self.to_text())
+        atomic_write_checkpoint(path, self.to_text().as_bytes())
             .map_err(|e| format!("cannot write checkpoint '{}': {e}", path.display()))
     }
 
@@ -1611,6 +1611,144 @@ impl TransientCheckpoint {
         let text = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read checkpoint '{}': {e}", path.display()))?;
         Self::from_text(&text)
+    }
+}
+
+struct TemporaryCheckpoint {
+    path: std::path::PathBuf,
+    armed: bool,
+}
+
+impl Drop for TemporaryCheckpoint {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+
+    reject_checkpoint_destination(path)?;
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "checkpoint path has no file name",
+        )
+    })?;
+
+    let mut opened = None;
+    for _ in 0..128 {
+        let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = file_name.to_os_string();
+        temporary_name.push(format!(
+            ".rspice-checkpoint.tmp.{}.{sequence}",
+            std::process::id()
+        ));
+        let temporary_path = parent.join(temporary_name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => {
+                opened = Some((temporary_path, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let (temporary_path, mut file) = opened.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique checkpoint temporary file",
+        )
+    })?;
+    let mut guard = TemporaryCheckpoint {
+        path: temporary_path.clone(),
+        armed: true,
+    };
+
+    file.write_all(bytes)?;
+    file.flush()?;
+    file.sync_all()?;
+    drop(file);
+
+    // Recheck immediately before replacing the namespace entry. Rename and
+    // MoveFileEx replace a racing symlink itself; checkpoint bytes are never
+    // opened through the destination.
+    reject_checkpoint_destination(path)?;
+    replace_checkpoint_atomically(&temporary_path, path)?;
+    guard.armed = false;
+    Ok(())
+}
+
+fn reject_checkpoint_destination(path: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "refusing to replace checkpoint symlink '{}'",
+                path.display()
+            ),
+        )),
+        Ok(metadata) if metadata.is_dir() => Err(std::io::Error::new(
+            std::io::ErrorKind::IsADirectory,
+            format!("checkpoint destination '{}' is a directory", path.display()),
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_checkpoint_atomically(
+    from: &std::path::Path,
+    to: &std::path::Path,
+) -> std::io::Result<()> {
+    std::fs::rename(from, to)?;
+    std::fs::File::open(to.parent().unwrap_or_else(|| std::path::Path::new(".")))?.sync_all()
+}
+
+#[cfg(windows)]
+fn replace_checkpoint_atomically(
+    from: &std::path::Path,
+    to: &std::path::Path,
+) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let from_wide = from
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let to_wide = to
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both paths are NUL-terminated for the duration of the call.
+    let result = unsafe {
+        MoveFileExW(
+            from_wide.as_ptr(),
+            to_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -1728,6 +1866,62 @@ mod tests {
         {
             assert_eq!(a.to_bits(), b.to_bits());
         }
+    }
+
+    #[test]
+    fn checkpoint_save_durably_replaces_an_existing_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-checkpoint-save-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("create checkpoint test directory");
+        let path = directory.join("state.chk");
+        std::fs::write(&path, b"obsolete partial checkpoint").expect("seed old checkpoint");
+
+        let expected = sample();
+        expected.save(&path).expect("atomically save checkpoint");
+        let actual = TransientCheckpoint::load(&path).expect("load replaced checkpoint");
+
+        assert_eq!(actual, expected);
+        assert_eq!(
+            std::fs::read_dir(&directory)
+                .expect("read checkpoint test directory")
+                .count(),
+            1,
+            "temporary checkpoint must not remain after commit"
+        );
+        std::fs::remove_dir_all(directory).expect("remove checkpoint test directory");
+    }
+
+    #[test]
+    fn invalid_checkpoint_never_truncates_the_last_good_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-checkpoint-invalid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("create checkpoint test directory");
+        let path = directory.join("state.chk");
+        std::fs::write(&path, b"last known good checkpoint").expect("seed old checkpoint");
+        let mut invalid = sample();
+        invalid.solution[0] = Value::NAN;
+
+        invalid
+            .save(&path)
+            .expect_err("invalid state must fail before I/O");
+
+        assert_eq!(
+            std::fs::read(&path).expect("read preserved checkpoint"),
+            b"last known good checkpoint"
+        );
+        std::fs::remove_dir_all(directory).expect("remove checkpoint test directory");
     }
 
     #[test]

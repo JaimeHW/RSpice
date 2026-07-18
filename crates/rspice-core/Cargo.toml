@@ -67,6 +67,9 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", optional = t
 # SIMD acceleration (optional)
 wide = { version = "1.5", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
 [[bin]]
 name = "rspice-ngspice-case-runner"
 path = "src/bin/ngspice_case_runner.rs"
