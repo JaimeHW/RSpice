@@ -3609,6 +3609,13 @@ impl XyceStaticTranComparisonMode {
 
 impl XyceStaticTranPlan {
     fn result_contract(&self) -> &'static str {
+        if !self.steps.is_empty() {
+            // Comparison mode is an implementation detail of the upstream
+            // verifier. Preserve the established stepped-output contract name
+            // so callers can identify the deck/output shape independently of
+            // whether its values use pointwise or integrated-RMS comparison.
+            return self.contract.result_contract(true);
+        }
         match self.comparison_mode {
             XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
             | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
@@ -18923,10 +18930,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         };
         plan.comparison_mode =
             Self::select_static_tran_comparison_mode(&plan, &netlist, purpose, requires_wrapper)?;
-        let validation_purpose = if matches!(
-            plan.comparison_mode,
-            XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
-        ) {
+        let validation_purpose = if plan.steps.is_empty()
+            && matches!(
+                plan.comparison_mode,
+                XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
+            ) {
             XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle
         } else {
             purpose
@@ -19011,6 +19019,51 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 "the default LEVEL=9 xyce_verify purpose is derived internally only after the strict integrated-RMS selector succeeds"
                     .to_string(),
             );
+        }
+        if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
+            && !requires_wrapper
+            && plan.contract == XyceStaticTranContract::PlainStatic
+            && !plan.output_override
+            && !plan.timeint_conststep
+            && !plan.steps.is_empty()
+            && plan.wrapper_tolerance.is_none()
+            && plan.reference_path.is_file()
+            && Self::native_transient_uses_standard_startup(netlist)
+            && netlist.diagnostics.is_empty()
+        {
+            let scientific_precision =
+                Self::xyce_verify_step_tran_scientific_precision(&plan.source)?;
+            if Self::source_has_comp_directive(&plan.source) {
+                match Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes) {
+                    Ok(tolerances) => {
+                        return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                            scientific_precision,
+                            error_bounds: if tolerances
+                                .into_iter()
+                                .any(XyceVerifyTransientTolerance::has_nondefault_error_bounds)
+                            {
+                                XyceVerifyCompErrorBounds::DeckOverrides
+                            } else {
+                                XyceVerifyCompErrorBounds::Release710Default
+                            },
+                        });
+                    }
+                    Err(error) if error == XYCE_VERIFY_COMP_NO_PRINTED_PROBE => {
+                        // Release 7.10 stores valid *COMP entries for TIME,
+                        // Index, and other unprinted probes without applying
+                        // them to a dependent column. The transient waveform
+                        // therefore retains the default integrated-RMS bounds.
+                        return Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
+                            scientific_precision,
+                        });
+                    }
+                    Err(_) => {}
+                }
+            } else {
+                return Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
+                    scientific_precision,
+                });
+            }
         }
         if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
             && !requires_wrapper
@@ -19110,6 +19163,105 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         };
         Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
             scientific_precision,
+        })
+    }
+
+    /// Resolve the precision used by Xyce's primary indexed STD transient
+    /// output for a stepped run. `xyce_verify.pl` compares each sweep using
+    /// the values serialized at this precision, so the verifier boundary must
+    /// not be evaluated with the in-memory `f64` values.
+    fn xyce_verify_step_tran_scientific_precision(source: &str) -> Result<usize, String> {
+        let mut primary_precision = None;
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            if stripped.is_empty() {
+                continue;
+            }
+            let fields = Self::split_print_fields(stripped)?;
+            if fields.len() < 2
+                || !fields[0].eq_ignore_ascii_case(".PRINT")
+                || !fields[1].eq_ignore_ascii_case("TRAN")
+            {
+                continue;
+            }
+
+            let field_refs = fields.iter().map(String::as_str).collect::<Vec<_>>();
+            let mut precision = XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION;
+            let mut format = "STD";
+            let mut has_file = false;
+            let mut has_probe = false;
+            let mut index = 2usize;
+            while index < fields.len() {
+                if let Some((raw_key, raw_value, consumed)) =
+                    Self::print_option_assignment(&field_refs, index)
+                {
+                    let key = raw_key.trim().to_ascii_lowercase();
+                    let value = raw_value.trim().trim_matches(['"', '\'']);
+                    match key.as_str() {
+                        "file" => has_file = true,
+                        "format" => format = value,
+                        "precision" => {
+                            let parsed = crate::netlist::lexer::parse_spice_value(value).map_err(
+                                |err| {
+                                    format!(
+                                        "stepped xyce_verify .PRINT TRAN PRECISION must be numeric: '{value}': {err}"
+                                    )
+                                },
+                            )?;
+                            if !parsed.is_finite()
+                                || parsed < f64::from(i32::MIN)
+                                || parsed > f64::from(i32::MAX)
+                            {
+                                return Err(format!(
+                                    "stepped xyce_verify .PRINT TRAN PRECISION must be a finite Xyce integer value, got {parsed}"
+                                ));
+                            }
+                            let effective = parsed as i32;
+                            if !(1..=XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION as i32)
+                                .contains(&effective)
+                            {
+                                return Err(format!(
+                                    "stepped xyce_verify .PRINT TRAN PRECISION must resolve from 1 through {XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION}, got {effective}"
+                                ));
+                            }
+                            precision = effective as usize;
+                        }
+                        _ => {}
+                    }
+                    index += consumed;
+                    continue;
+                }
+
+                let normalized = field_refs[index].to_ascii_lowercase();
+                if normalized == "noindex" {
+                    return Err(
+                        "stepped xyce_verify primary .PRINT TRAN must retain its Index column"
+                            .to_string(),
+                    );
+                }
+                if !Self::is_print_option_token(&normalized) {
+                    has_probe = true;
+                }
+                index += 1;
+            }
+            if has_file || !has_probe {
+                continue;
+            }
+            if !format.eq_ignore_ascii_case("STD") {
+                return Err(format!(
+                    "stepped xyce_verify primary .PRINT TRAN requires indexed FORMAT=STD, got FORMAT={format}"
+                ));
+            }
+            if primary_precision.replace(precision).is_some() {
+                return Err(
+                    "stepped xyce_verify requires exactly one primary .PRINT TRAN output"
+                        .to_string(),
+                );
+            }
+        }
+
+        primary_precision.ok_or_else(|| {
+            "stepped xyce_verify requires one primary indexed .PRINT TRAN output".to_string()
         })
     }
 
@@ -25269,6 +25421,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.result_contract();
+        let uses_integrated_rms = plan.comparison_mode.uses_integrated_rms_verifier();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let expansion_engine = self.create_xyce_engine();
         let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
@@ -25332,6 +25485,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             deck, start, contract, &plan, &step_runs, &abort, false,
                         );
                     }
+                    if uses_integrated_rms {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "{} Xyce integrated-RMS stepped transient reference mismatch(es)",
+                                mismatches.len()
+                            ),
+                            mismatches,
+                        );
+                    }
                     Some(mismatches)
                 }
                 Err(err) if err.starts_with("UNSUPPORTED:") => {
@@ -25343,6 +25508,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     );
                 }
                 Err(err) => {
+                    if uses_integrated_rms {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "integrated-RMS stepped transient reference comparison error: {err}"
+                            ),
+                            Vec::new(),
+                        );
+                    }
                     let locked_result = self.compare_step_tran_runs(
                         &plan,
                         &step_runs,
@@ -25463,6 +25639,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             step_references,
             abort,
             locked_time_grid,
+            true,
         )
     }
 
@@ -25474,22 +25651,39 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         step_references: &[XycePrnTable],
         abort: &dyn AbortSignal,
         locked_time_grid: bool,
+        use_plan_comparison_mode: bool,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let uses_integrated_rms =
+            use_plan_comparison_mode && plan.comparison_mode.uses_integrated_rms_verifier();
+        if uses_integrated_rms && locked_time_grid {
+            return Err(
+                "integrated-RMS stepped transient verification does not admit a locked-grid retry"
+                    .to_string(),
+            );
+        }
         let mut mismatches = Vec::new();
         let mut row_offset = 0usize;
         for (step_index, (run, reference)) in
             step_runs.iter().zip(step_references.iter()).enumerate()
         {
-            let max_step =
+            let max_step = if uses_integrated_rms {
+                Self::transient_max_step_for_static_plan(plan, &run.netlist, &plan.tran, reference)
+            } else {
                 Self::transient_max_step_for_reference(&run.netlist, &plan.tran, reference)
-                    .map_err(|err| {
-                        if err.contains("transient harness execution envelope") {
-                            format!("UNSUPPORTED: {err}")
-                        } else {
-                            format!("reference time-grid error: step {}: {err}", step_index + 1)
-                        }
-                    })?;
-            let engine = if locked_time_grid {
+            }
+            .map_err(|err| {
+                if err.contains("transient harness execution envelope") {
+                    format!("UNSUPPORTED: {err}")
+                } else {
+                    format!("reference time-grid error: step {}: {err}", step_index + 1)
+                }
+            })?;
+            let engine = if uses_integrated_rms {
+                self.create_xyce_static_tran_engine(
+                    None,
+                    Self::xyce_initial_timestep_for_tran(&plan.tran),
+                )
+            } else if locked_time_grid {
                 self.create_xyce_engine_with_locked_time_grid(Some(Self::reference_time_grid(
                     reference,
                 )?))
@@ -25519,8 +25713,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 }
             };
 
-            let mut step_mismatches = self
-                .compare_tran_prn_reference(
+            let mut step_mismatches = if uses_integrated_rms {
+                self.compare_static_tran_primary_reference(reference, plan, &run.netlist, &result)
+            } else {
+                self.compare_tran_prn_reference(
                     reference,
                     print,
                     &run.netlist,
@@ -25528,9 +25724,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     &result,
                     plan.wrapper_tolerance,
                 )
-                .map_err(|err| {
-                    format!("reference comparison error: step {}: {err}", step_index + 1)
-                })?;
+            }
+            .map_err(|err| format!("reference comparison error: step {}: {err}", step_index + 1))?;
             for mismatch in &mut step_mismatches {
                 mismatch.row += row_offset;
             }
@@ -25689,6 +25884,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 &step_references,
                 abort,
                 locked_time_grid,
+                false,
             )?;
             for mismatch in &mut mismatches {
                 mismatch.probe = format!("{file}:{}", mismatch.probe);
@@ -78668,6 +78864,116 @@ R1 out 0 1k
     }
 
     #[test]
+    fn stepped_xyce_verify_selector_preserves_primary_prn_precision_and_comp() {
+        let source = "\
+validated stepped transient verifier
+V1 in 0 PULSE(0 1 1n .1n .1n 2n 5n)
+R1 in 0 1k
+.TRAN .1n 10n
+.PRINT TRAN V(in)
+.END
+";
+        let netlist = Netlist::parse(source).expect("stepped selector fixture parses");
+        let reference_path = std::env::current_exe().expect("test executable is an existing file");
+        let step = StepCommand {
+            target: StepTarget::Device,
+            name: "R1".to_string(),
+            param_name: Some("R".to_string()),
+            sweep: StepSweep::Linear {
+                start: 1.0e3,
+                stop: 2.0e3,
+                step: 1.0e3,
+            },
+        };
+        let make_plan = |source: &str| XyceStaticTranPlan {
+            deck_path: PathBuf::from("renamed-step-tran.cir"),
+            reference_path: reference_path.clone(),
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: vec!["V(in)".to_string()],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 1.0e-10,
+                stop: 10.0e-9,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            steps: vec![step.clone()],
+            contract: XyceStaticTranContract::PlainStatic,
+            wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+        };
+
+        let default_plan = make_plan(source);
+        let default_mode = XyceTestRunner::select_static_tran_comparison_mode(
+            &default_plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("default-precision stepped selector evaluates");
+        assert_eq!(
+            default_mode,
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            }
+        );
+        let mut integrated_plan = default_plan.clone();
+        integrated_plan.comparison_mode = default_mode;
+        assert_eq!(
+            integrated_plan.result_contract(),
+            "static_prn_step_tran",
+            "comparison mode must not change the public stepped-output contract"
+        );
+
+        let comp_source = source.replace(
+            ".PRINT TRAN V(in)",
+            ".PRINT TRAN PRECISION=12 WIDTH=21 V(in)\n*COMP TIME ZEROTOL=0",
+        );
+        let comp_plan = make_plan(&comp_source);
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &comp_plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("authored-precision stepped *COMP selector evaluates"),
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: 12,
+            }
+        );
+
+        let probe_comp_source =
+            comp_source.replace("*COMP TIME ZEROTOL=0", "*COMP V(in) RELTOL=1e-3");
+        let probe_comp_plan = make_plan(&probe_comp_source);
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &probe_comp_plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("printed-probe stepped *COMP selector evaluates"),
+            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                scientific_precision: 12,
+                error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
+            }
+        );
+
+        assert!(
+            XyceTestRunner::xyce_verify_step_tran_scientific_precision(
+                &source.replace(".PRINT TRAN", ".PRINT TRAN FORMAT=NOINDEX")
+            )
+            .is_err(),
+            "the integrated verifier must fail closed for non-indexed primary output"
+        );
+    }
+
+    #[test]
     fn level9_xyce_verify_comparison_selector_fails_closed() {
         let source = absolute_level9_bsim3_test_source();
         let netlist = absolute_level9_bsim3_test_netlist();
@@ -78692,6 +78998,15 @@ R1 out 0 1k
         assert_eq!(
             selected_plan.result_contract(),
             "static_xyce_verify_prn_tran"
+        );
+        selected_plan.comparison_mode = XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+            scientific_precision: 12,
+            error_bounds: XyceVerifyCompErrorBounds::Release710Default,
+        };
+        assert_eq!(
+            selected_plan.result_contract(),
+            "static_xyce_verify_prn_tran",
+            "non-stepped *COMP runs retain the integrated-verifier contract even with default error bounds"
         );
         let coarse_reference = XycePrnTable {
             columns: vec![

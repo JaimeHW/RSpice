@@ -67,6 +67,42 @@ impl CircuitData {
         }
     }
 
+    /// Replace inductive branch entries in `b - A*x` with DAE residuals
+    /// evaluated from current differences. This is the correction-form
+    /// counterpart to the absolute companion stamps above.
+    pub fn stabilize_inductor_transient_correction_rhs(
+        &self,
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        self.inductors.overwrite_transient_correction_rhs(
+            correction_rhs,
+            iterate,
+            dt,
+            coeff,
+            self.num_nodes,
+        );
+        for binding in &self.coupled_inductor_pairs {
+            let branch1 = self.num_nodes + binding.branch1_ordinal;
+            let branch2 = self.num_nodes + binding.branch2_ordinal;
+            binding.device.add_transient_mutual_correction_rhs(
+                branch1,
+                branch2,
+                correction_rhs,
+                iterate,
+                dt,
+                coeff,
+            );
+        }
+        for binding in &self.multi_winding_transformers {
+            binding
+                .device
+                .overwrite_transient_correction_rhs(correction_rhs, iterate, dt, coeff);
+        }
+    }
+
     /// Update coupled inductor transient history from an accepted solution.
     pub fn update_coupled_inductor_pair_state(&mut self, solution: &[Value]) {
         let num_nodes = self.num_nodes;

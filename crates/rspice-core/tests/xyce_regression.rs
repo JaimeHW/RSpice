@@ -1361,8 +1361,8 @@ fn test_xyce_bug_629_power_alias_transient_case_runs() {
         "{relative} should match the checked-in Xyce .prn oracle"
     );
     assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
+        result.contract, "static_xyce_verify_prn_tran",
+        "{relative} should report the Release 7.10 integrated-RMS transient contract"
     );
 }
 

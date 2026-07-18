@@ -265,6 +265,60 @@ impl Inductors {
         }
     }
 
+    /// Replace native inductor branch entries in a Newton correction RHS with
+    /// a cancellation-resistant constitutive residual.
+    ///
+    /// The absolute companion source contains terms such as
+    /// `2*L*i_prev/dt + v_prev`. On a current plateau the voltage history can
+    /// be many orders of magnitude smaller than the first term and is rounded
+    /// away before a linear solve begins. Evaluating the DAE residual from
+    /// current differences is algebraically identical while retaining the
+    /// small physical voltage that drives the Newton correction.
+    pub fn overwrite_transient_correction_rhs(
+        &self,
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+    ) {
+        debug_assert!(dt.is_finite() && dt > 0.0);
+        for index in 0..self.names.len() {
+            let np = self.node_pos[index];
+            let nn = self.node_neg[index];
+            let branch = num_nodes + self.branch_indices[index];
+            let Some(rhs_slot) = correction_rhs.get_mut(branch - 1) else {
+                continue;
+            };
+            let Some(&current) = iterate.get(branch - 1) else {
+                continue;
+            };
+            let voltage = if np == 0 {
+                0.0
+            } else {
+                iterate.get(np - 1).copied().unwrap_or(0.0)
+            } - if nn == 0 {
+                0.0
+            } else {
+                iterate.get(nn - 1).copied().unwrap_or(0.0)
+            };
+
+            let derivative = coeff.inductor_charge_derivative_correction(
+                self.inductances[index],
+                dt,
+                current,
+                self.i_prev[index],
+                self.i_prev_prev[index],
+            );
+            let history_voltage = if coeff.needs_current_history {
+                self.v_prev[index]
+            } else {
+                0.0
+            };
+            *rhs_slot = derivative - voltage - history_voltage;
+        }
+    }
+
     /// Update inductor state after a successful timestep
     pub fn update_state(
         &mut self,
@@ -352,6 +406,72 @@ impl Inductors {
             {
                 self.i_prev[i] = i_br;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod transient_correction_tests {
+    use super::*;
+
+    #[test]
+    fn inductor_correction_rhs_preserves_small_plateau_voltage_history() {
+        let mut inductors = Inductors::new();
+        inductors.add("L1".to_string(), 1, 0, 1, 1.0);
+        inductors.i_prev[0] = 5.0;
+        inductors.i_prev_prev[0] = 5.0;
+        inductors.v_prev[0] = 3.0e-10;
+        let iterate = [2.0e-10, 5.0];
+        let mut correction_rhs = [Value::NAN, Value::NAN];
+
+        inductors.overwrite_transient_correction_rhs(
+            &mut correction_rhs,
+            &iterate,
+            1.0e-12,
+            &CompanionCoefficients::trapezoidal(),
+            1,
+        );
+
+        assert_eq!(correction_rhs[1].to_bits(), (-5.0e-10_f64).to_bits());
+    }
+
+    #[test]
+    fn inductor_correction_rhs_matches_each_companion_polynomial() {
+        let mut inductors = Inductors::new();
+        inductors.add("L1".to_string(), 1, 0, 1, 0.25);
+        inductors.i_prev[0] = 3.0;
+        inductors.i_prev_prev[0] = 2.5;
+        inductors.v_prev[0] = -0.125;
+        let iterate = [0.75, 3.25];
+        let dt = 0.5;
+
+        for coeff in [
+            CompanionCoefficients::backward_euler(),
+            CompanionCoefficients::trapezoidal(),
+            CompanionCoefficients::gear2_variable_step(dt, 0.25),
+        ] {
+            let mut correction_rhs = [0.0, 0.0];
+            inductors.overwrite_transient_correction_rhs(
+                &mut correction_rhs,
+                &iterate,
+                dt,
+                &coeff,
+                1,
+            );
+            let req = coeff.inductor_req(inductors.inductances[0], dt);
+            let veq = coeff.inductor_veq(
+                inductors.inductances[0],
+                dt,
+                inductors.i_prev[0],
+                inductors.i_prev_prev[0],
+                inductors.v_prev[0],
+            );
+            let absolute_residual = -veq - iterate[0] + req * iterate[1];
+            assert!(
+                (correction_rhs[1] - absolute_residual).abs() <= 16.0 * Value::EPSILON,
+                "coeff={coeff:?} stable={} absolute={absolute_residual}",
+                correction_rhs[1]
+            );
         }
     }
 }
