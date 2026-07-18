@@ -495,27 +495,6 @@ impl Capacitors {
         }
     }
 
-    /// Stamp the unit coefficient for a Xyce capacitor lead-current
-    /// observation branch outside operating-point mode. The companion stamp
-    /// supplies the branch-row voltage terms and history RHS.
-    #[inline]
-    pub fn stamp_ic_observation_branch_diagonal_direct(
-        &self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        num_nodes: usize,
-    ) {
-        for (index, branch_ordinal) in self.ic_branch_indices.iter().enumerate() {
-            let Some(branch_ordinal) = branch_ordinal else {
-                continue;
-            };
-            if let Some(entry) = self.ic_branch_csc_indices[index][4] {
-                matrix.stamp_direct(entry, 1.0);
-            }
-            rhs[num_nodes + branch_ordinal - 1] = 0.0;
-        }
-    }
-
     /// Triplet-matrix form of the Xyce operating-point IC constraint.
     #[inline]
     pub fn stamp_ic_operating_point(
@@ -596,38 +575,103 @@ impl Capacitors {
         for (i, stamp) in self.stamps.iter().enumerate() {
             // geq = coeff_g * C / dt
             let geq = coeff.capacitor_geq(self.capacitances[i], dt);
-            stamp.stamp_direct(matrix, geq);
 
-            // Compute equivalent current source based on history
-            let i_eq = coeff.capacitor_ieq(
-                self.capacitances[i],
-                dt,
-                self.v_prev[i],
-                self.v_prev_prev[i],
-                self.i_prev[i],
-            );
-
-            if stamp.pp.row != 0 {
-                rhs[stamp.pp.row - 1] += i_eq;
-            }
-            if stamp.nn.row != 0 {
-                rhs[stamp.nn.row - 1] -= i_eq;
-            }
-
-            // Outside the operating point, an IC capacitor's extra unknown
-            // is a physical lead-current observation equation rather than a
-            // voltage constraint: Ibranch = geq*(Vpos-Vneg) - i_eq. This
-            // keeps every in-circuit I(C) consumer analysis-correct while the
-            // ordinary companion stamp above remains the sole terminal KCL.
             if let Some(branch_ordinal) = self.ic_branch_indices[i] {
+                // The Xyce IC branch is the capacitor's physical lead current,
+                // so make it the terminal-KCL current instead of recovering an
+                // observer from `geq*V - i_eq`.  The latter subtracts two very
+                // large, nearly equal values at small timesteps and can lose
+                // every useful digit of a modest lead current.
+                //
+                // For finite nonzero geq, scale the companion equation
+                //
+                //     I = geq*V - i_eq
+                //
+                // into `V - I/geq = i_eq/geq`.  This is algebraically
+                // identical to the Norton companion but keeps both its matrix
+                // coefficients and RHS well conditioned.  If reciprocal
+                // scaling would overflow, retain the unscaled equation while
+                // still using the branch current directly in KCL.
                 let entries = self.ic_branch_csc_indices[i];
-                if let Some(entry) = entries[0] {
-                    matrix.stamp_direct(entry, -geq);
+                if let Some(entry) = entries[1] {
+                    matrix.stamp_direct(entry, 1.0);
                 }
-                if let Some(entry) = entries[2] {
-                    matrix.stamp_direct(entry, geq);
+                if let Some(entry) = entries[3] {
+                    matrix.stamp_direct(entry, -1.0);
                 }
-                rhs[num_nodes + branch_ordinal - 1] = -i_eq;
+
+                // Scale only when the Norton conductance exceeds unity. For a
+                // small conductance, `I - geq*V = -i_eq` is already the
+                // better-conditioned row and avoids manufacturing a huge
+                // `1/geq` coefficient.
+                let use_scaled_row = geq.is_finite() && geq.abs() > 1.0 && coeff.coeff_g != 0.0;
+                let scaled_rhs = if use_scaled_row {
+                    // Form i_eq/geq directly. Cancelling C/dt analytically
+                    // prevents an overflowing intermediate i_eq even when the
+                    // normalized history is perfectly representable.
+                    let mut history = (coeff.coeff_v_n / coeff.coeff_g) * self.v_prev[i];
+                    if coeff.needs_two_history {
+                        history += (coeff.coeff_v_n_minus_1 / coeff.coeff_g) * self.v_prev_prev[i];
+                    }
+                    if coeff.needs_current_history {
+                        history += self.i_prev[i] / geq;
+                    }
+                    history
+                } else {
+                    Value::NAN
+                };
+                if use_scaled_row && scaled_rhs.is_finite() {
+                    let reciprocal_geq = 1.0 / geq;
+                    if let Some(entry) = entries[0] {
+                        matrix.stamp_direct(entry, 1.0);
+                    }
+                    if let Some(entry) = entries[2] {
+                        matrix.stamp_direct(entry, -1.0);
+                    }
+                    if let Some(entry) = entries[4] {
+                        matrix.stamp_direct(entry, -reciprocal_geq);
+                    }
+                    rhs[num_nodes + branch_ordinal - 1] = scaled_rhs;
+                } else {
+                    let i_eq = coeff.capacitor_ieq(
+                        self.capacitances[i],
+                        dt,
+                        self.v_prev[i],
+                        self.v_prev_prev[i],
+                        self.i_prev[i],
+                    );
+                    // This also gives a zero-capacitance device the exact
+                    // `I = -i_eq` identity without dividing by zero. Invalid
+                    // non-finite device data remains non-finite here and is
+                    // rejected by the normal matrix-solve validation.
+                    if let Some(entry) = entries[0] {
+                        matrix.stamp_direct(entry, -geq);
+                    }
+                    if let Some(entry) = entries[2] {
+                        matrix.stamp_direct(entry, geq);
+                    }
+                    if let Some(entry) = entries[4] {
+                        matrix.stamp_direct(entry, 1.0);
+                    }
+                    rhs[num_nodes + branch_ordinal - 1] = -i_eq;
+                }
+            } else {
+                // Compute the Norton history source only when this capacitor
+                // actually uses the Norton terminal stamp.
+                let i_eq = coeff.capacitor_ieq(
+                    self.capacitances[i],
+                    dt,
+                    self.v_prev[i],
+                    self.v_prev_prev[i],
+                    self.i_prev[i],
+                );
+                stamp.stamp_direct(matrix, geq);
+                if stamp.pp.row != 0 {
+                    rhs[stamp.pp.row - 1] += i_eq;
+                }
+                if stamp.nn.row != 0 {
+                    rhs[stamp.nn.row - 1] -= i_eq;
+                }
             }
         }
     }
@@ -638,6 +682,9 @@ impl Capacitors {
     /// Adaptive integrators should prefer this entry point so the committed
     /// current history cannot be reconstructed with a different timestep
     /// ratio or integration order than the accepted linear system.
+    /// Whole-circuit callers with explicit IC-current branches must instead
+    /// commit those solved branch unknowns; this container-only helper has no
+    /// node-count offset with which to locate them.
     pub fn update_state_with_coefficients(
         &mut self,
         solution: &[Value],
@@ -829,5 +876,39 @@ mod capacitor_state_tests {
         capacitors.update_state_equal_step(&[current_voltage], dt, IntegrationMethod::Gear2);
 
         assert_close(capacitors.i_prev[0], capacitance * slope);
+    }
+
+    #[test]
+    fn ic_branch_companion_uses_physical_current_in_terminal_kcl() {
+        let mut capacitors = Capacitors::new();
+        capacitors.add_with_ic_branch("C1".to_string(), 1, 0, 1.0, 1.0, 1);
+
+        // One node plus one capacitor-current branch, with every location
+        // reserved just as Engine::build_matrix does for an IC capacitor.
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .expect("test matrix builds");
+        capacitors.link_indices(&matrix, |branch_ordinal| 1 + branch_ordinal);
+
+        // A one-ohm shunt makes KCL V + I(C1) = 0.  The tiny timestep
+        // deliberately makes geq and i_eq about 1e10, the regime where an
+        // observer equation would lose current precision by cancellation.
+        matrix.add(0, 0, 1.0);
+        let mut rhs = vec![0.0; 2];
+        capacitors.stamp_transient_companion(
+            &mut matrix,
+            &mut rhs,
+            1.0e-10,
+            &CompanionCoefficients::backward_euler(),
+            1,
+        );
+        let solution = matrix.solve(&rhs).expect("companion system solves");
+
+        assert_close(solution[0] + solution[1], 0.0);
+        assert!((solution[0] - 1.0).abs() < 2.0e-10);
+        assert!((solution[1] + 1.0).abs() < 2.0e-10);
     }
 }

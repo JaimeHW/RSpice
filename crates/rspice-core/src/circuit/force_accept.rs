@@ -349,7 +349,7 @@ impl CircuitData {
         let mut mask = vec![false; self.num_nodes()];
         let ground_reachable = self.force_accept_ground_reachable_nodes();
 
-        for binding in &self.xyce_team_memristors {
+        for binding in &self.xyce_memristors {
             Self::mark_force_accept_protected_node(&mut mask, binding.node_x);
         }
 

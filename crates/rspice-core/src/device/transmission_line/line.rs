@@ -14,6 +14,8 @@ enum DelayedInterpolationMode {
     Linear,
     Quadratic,
     Mixed,
+    /// Xyce TRA's quadratic interpolation with its per-wave derivative guard.
+    XyceTra,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +75,8 @@ pub struct TransmissionLine {
     distributed_rlc_cache: Cell<Option<(Value, TlineTransientResponse)>>,
     /// Interpolation mode selected by ngspice LTRA model flags.
     ltra_interpolation_mode: DelayedInterpolationMode,
+    /// Interpolation policy for an ordinary lossless transmission line.
+    lossless_interpolation_mode: DelayedInterpolationMode,
     /// Relative derivative tolerance for ngspice-style LTRA breakpoints.
     ltra_breakpoint_reltol: Value,
     /// Absolute derivative tolerance for ngspice-style LTRA breakpoints.
@@ -204,6 +208,40 @@ impl TransmissionLine {
                 }
                 linear()
             }
+            DelayedInterpolationMode::XyceTra => {
+                let Some(previous) = prev2 else {
+                    return linear();
+                };
+                let previous_dt = prev.time - previous.time;
+                let next_dt = next.time - prev.time;
+                if !(previous_dt.is_finite()
+                    && previous_dt > 0.0
+                    && next_dt.is_finite()
+                    && next_dt > 0.0)
+                {
+                    return linear();
+                }
+
+                let previous_value = selector(previous);
+                let current_value = selector(prev);
+                let next_value = selector(next);
+                let previous_slope = (current_value - previous_value) / previous_dt;
+                let next_slope = (next_value - current_value) / next_dt;
+                let derivative_changed = (next_slope - previous_slope).abs()
+                    >= 0.99 * next_slope.abs().max(previous_slope.abs()) + 1.0;
+                if derivative_changed {
+                    // Match Xyce TRA's pathological-flat-segment guard before
+                    // applying its linear interpolation from t2 to t3.
+                    if (next_value - current_value).abs() < Value::EPSILON {
+                        0.5 * (next_value + current_value)
+                    } else {
+                        current_value + next_slope * (target - prev.time)
+                    }
+                } else {
+                    Self::quadratic_interpolate(Some(previous), prev, next, target, selector)
+                        .unwrap_or_else(linear)
+                }
+            }
         }
     }
 
@@ -242,6 +280,7 @@ impl TransmissionLine {
             distributed_rlc: None,
             distributed_rlc_cache: Cell::new(None),
             ltra_interpolation_mode: DelayedInterpolationMode::Quadratic,
+            lossless_interpolation_mode: DelayedInterpolationMode::Quadratic,
             ltra_breakpoint_reltol: 1.0,
             ltra_breakpoint_abstol: 1.0,
             txl: None,
@@ -547,6 +586,16 @@ impl TransmissionLine {
         };
     }
 
+    /// Select Xyce's lossless TRA interpolation policy.
+    ///
+    /// Xyce normally uses three-point quadratic interpolation, but switches
+    /// each launched traveling wave to linear interpolation when consecutive
+    /// derivatives indicate a discontinuity. This prevents quadratic ringing
+    /// immediately after a propagated source edge.
+    pub(crate) fn set_xyce_tra_interpolation(&mut self) {
+        self.lossless_interpolation_mode = DelayedInterpolationMode::XyceTra;
+    }
+
     #[inline]
     fn ltra_wave(sample: &TlineStateSample, z0: Value, attenuation: Value, forward: bool) -> Value {
         if forward {
@@ -808,6 +857,55 @@ impl TransmissionLine {
         self.state_history.back().copied().unwrap_or(initial)
     }
 
+    /// Interpolate one launched lossless-line wave from accepted port history.
+    ///
+    /// TRA stores and interpolates `V + Z0*I`, not voltage and current as
+    /// independent signals. Keeping the derivative decision on that combined
+    /// wave is necessary because different fallback decisions for V and I are
+    /// not algebraically equivalent to the canonical device equation.
+    fn lossless_delayed_wave(&self, time: Value, forward: bool) -> Value {
+        let target = time - self.td;
+        let initial = self.initial_state();
+        let wave = |sample: &TlineStateSample| {
+            if forward {
+                sample.v1 + self.z0 * sample.i1
+            } else {
+                sample.v2 + self.z0 * sample.i2
+            }
+        };
+        if self.state_history.is_empty() || target <= initial.time {
+            return wave(&initial);
+        }
+
+        let mut prev2: Option<&TlineStateSample> = None;
+        let mut prev: Option<&TlineStateSample> = None;
+        for sample in &self.state_history {
+            if sample.time >= target {
+                if let Some(prev_sample) = prev {
+                    if sample.time <= prev_sample.time {
+                        return wave(sample);
+                    }
+                    return Self::delayed_interpolate(
+                        self.lossless_interpolation_mode,
+                        prev2,
+                        prev_sample,
+                        sample,
+                        target,
+                        wave,
+                    );
+                }
+                return wave(sample);
+            }
+            prev2 = prev;
+            prev = Some(sample);
+        }
+
+        self.state_history
+            .back()
+            .map(&wave)
+            .unwrap_or_else(|| wave(&initial))
+    }
+
     fn distributed_rlc_response(
         &self,
         kernel: &DistributedRlcKernel,
@@ -928,9 +1026,8 @@ impl TransmissionLine {
         }
 
         let g = self.conductance();
-        let delayed = self.delayed_state(time);
-        let i_eq_port1 = self.attenuation * (g * delayed.v2 + delayed.i2);
-        let i_eq_port2 = self.attenuation * (g * delayed.v1 + delayed.i1);
+        let i_eq_port1 = self.attenuation * g * self.lossless_delayed_wave(time, false);
+        let i_eq_port2 = self.attenuation * g * self.lossless_delayed_wave(time, true);
         TlineTransientResponse::uncoupled(g, i_eq_port1, i_eq_port2)
     }
 
@@ -1169,6 +1266,28 @@ mod tests {
         line.set_ltra_linear_interpolation();
 
         assert_close(line.delayed_state(3.5).v1, 2.25);
+    }
+
+    #[test]
+    fn xyce_lossless_tra_uses_linear_interpolation_across_a_derivative_corner() {
+        let samples = [(0.0, 1.0), (1.0e-9, 0.0), (2.0e-9, 0.0)];
+        let make_line = || {
+            let mut line = TransmissionLine::new("TLOSS".to_string(), 1, 0, 2, 0, 1.0, 2.0e-9);
+            for &(time, v1) in &samples {
+                line.update_history(time, v1, 0.0, 0.0, 0.0);
+            }
+            line
+        };
+
+        let quadratic = make_line();
+        assert_close(
+            quadratic.transient_port_response(3.5e-9).i_eq_port2(),
+            -0.125,
+        );
+
+        let mut xyce = make_line();
+        xyce.set_xyce_tra_interpolation();
+        assert_close(xyce.transient_port_response(3.5e-9).i_eq_port2(), 0.0);
     }
 }
 

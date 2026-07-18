@@ -2563,9 +2563,14 @@ fn measurement_condition_crossings(
         };
         let previous_difference = left_previous - right_previous;
         let current_difference = left_current - right_current;
+        let previous_equal = previous_difference.abs() < XYCE_WHEN_ABSOLUTE_TOLERANCE;
         let current_equal = current_difference.abs() < XYCE_WHEN_ABSOLUTE_TOLERANCE;
-        let strict_crossing = (previous_difference < 0.0 && current_difference > 0.0)
-            || (previous_difference > 0.0 && current_difference < 0.0);
+        // Entering Xyce's MINVAL equality band is the crossing.  Normalize
+        // that state before the next strict-sign test so leaving the band
+        // cannot emit the same physical root a second time.
+        let strict_crossing = !previous_equal
+            && ((previous_difference < 0.0 && current_difference > 0.0)
+                || (previous_difference > 0.0 && current_difference < 0.0));
         if !current_equal && !strict_crossing {
             continue;
         }
@@ -3347,6 +3352,21 @@ mod tests {
                 &nearly_equal,
                 ResolvedMeasureOperand::Constant(0.0),
                 nearly_equal.len(),
+                &[],
+                EdgeType::Cross,
+            ),
+            vec![(0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn minval_endpoint_equality_is_not_recounted_on_band_exit() {
+        let enters_then_leaves = [1.0, 1.0e-14, -1.0];
+        assert_eq!(
+            measurement_condition_crossings(
+                &enters_then_leaves,
+                ResolvedMeasureOperand::Constant(0.0),
+                enters_then_leaves.len(),
                 &[],
                 EdgeType::Cross,
             ),

@@ -36,9 +36,10 @@ use crate::netlist::{
     flatten_netlist_with_models,
 };
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
+use std::io::Read;
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 9;
+const FORMAT_VERSION: u32 = 11;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -66,6 +67,8 @@ pub struct TransientCheckpoint {
     ind_i_prev: Vec<Value>,
     ind_i_prev_prev: Vec<Value>,
     ind_v_prev: Vec<Value>,
+    xyce_memristor_resistance_stores: Vec<Value>,
+    generic_switch_stores: Vec<[Value; 4]>,
     lte_signal_global_reference: Value,
     lte_signal_local_reference: Vec<Value>,
     lte_reference_history_available: bool,
@@ -143,6 +146,9 @@ fn resolved_dependency_path(
     path: &str,
     source_path: Option<&std::path::Path>,
 ) -> std::path::PathBuf {
+    if path.contains("://") {
+        return std::path::PathBuf::from(path);
+    }
     let candidate = std::path::Path::new(path);
     if candidate.is_absolute() {
         candidate.to_path_buf()
@@ -158,6 +164,7 @@ fn hash_dependency(
     path: &str,
     source_path: Option<&std::path::Path>,
     xspice_virtual_aware: bool,
+    max_bytes: Option<usize>,
 ) {
     let resolved = resolved_dependency_path(path, source_path);
     let resolved_text = resolved.to_string_lossy();
@@ -165,15 +172,54 @@ fn hash_dependency(
     if xspice_virtual_aware
         && let Some(contents) = crate::xspice::checkpoint_virtual_data_file_contents(&resolved_text)
     {
+        if max_bytes.is_some_and(|limit| contents.len() > limit) {
+            hash_field(hasher, "dependency_kind", "oversized_virtual");
+            hash_field(hasher, "dependency_length", contents.len());
+            hash_field(hasher, "dependency_limit", max_bytes);
+            return;
+        }
         hash_field(hasher, "dependency_kind", "virtual");
         hasher.update(&(contents.len() as u64).to_le_bytes());
-        hasher.update(contents.as_bytes());
+        hasher.update(blake3::hash(contents.as_bytes()).as_bytes());
     } else {
-        match std::fs::read(&resolved) {
-            Ok(contents) => {
+        match std::fs::File::open(&resolved) {
+            Ok(mut file) => {
+                let metadata_length = file.metadata().ok().map(|metadata| metadata.len());
+                if let (Some(limit), Some(length)) = (max_bytes, metadata_length)
+                    && length > limit as u64
+                {
+                    hash_field(hasher, "dependency_kind", "oversized_native");
+                    hash_field(hasher, "dependency_length", length);
+                    hash_field(hasher, "dependency_limit", limit);
+                    return;
+                }
+
+                let mut content_hasher = blake3::Hasher::new();
+                let mut length = 0usize;
+                let mut buffer = [0u8; 64 * 1024];
+                loop {
+                    match file.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(read) => {
+                            length = length.saturating_add(read);
+                            if max_bytes.is_some_and(|limit| length > limit) {
+                                hash_field(hasher, "dependency_kind", "oversized_native");
+                                hash_field(hasher, "dependency_length_at_least", length);
+                                hash_field(hasher, "dependency_limit", max_bytes);
+                                return;
+                            }
+                            content_hasher.update(&buffer[..read]);
+                        }
+                        Err(error) => {
+                            hash_field(hasher, "dependency_kind", "unavailable");
+                            hash_field(hasher, "dependency_error_kind", error.kind());
+                            return;
+                        }
+                    }
+                }
                 hash_field(hasher, "dependency_kind", "native");
-                hasher.update(&(contents.len() as u64).to_le_bytes());
-                hasher.update(&contents);
+                hasher.update(&(length as u64).to_le_bytes());
+                hasher.update(content_hasher.finalize().as_bytes());
             }
             Err(error) => {
                 hash_field(hasher, "dependency_kind", "unavailable");
@@ -195,7 +241,7 @@ fn hash_source_dependencies(
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
             hash_source_dependencies(hasher, transient, source_path);
         }
-        SourceSpec::PwlFile { path, .. } => hash_dependency(hasher, path, source_path, false),
+        SourceSpec::PwlFile { path, .. } => hash_dependency(hasher, path, source_path, false, None),
         _ => {}
     }
 }
@@ -240,7 +286,7 @@ fn hash_expression_dependencies(
                 if file_lookup_function(*func)
                     && let Some(Expr::StringLiteral(path)) = args.first()
                 {
-                    hash_dependency(hasher, path, source_path, false);
+                    hash_dependency(hasher, path, source_path, false, None);
                 }
                 for argument in args {
                     visit(hasher, argument, source_path);
@@ -280,9 +326,43 @@ fn hash_element_dependencies(
 fn model_string_is_dependency(name: &str) -> bool {
     let name = name.trim().to_ascii_lowercase();
     name == "simulation"
+        || matches!(name.as_str(), "fxpdata" | "fxmdata")
         || name.ends_with("file")
         || name.ends_with("_file")
         || name.ends_with("path")
+}
+
+fn model_string_is_pem_table_dependency(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "fxpdata" | "fxmdata"
+    )
+}
+
+fn model_uses_xyce_pem_tables(netlist: &Netlist, model: &crate::netlist::ModelDef) -> bool {
+    let temperature_kelvin =
+        crate::analysis::temperature::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0));
+    matches!(
+        crate::engine::builder::resolve_native_xyce_memristor_family(
+            netlist,
+            model,
+            "<checkpoint identity>",
+            &model.name,
+            temperature_kelvin,
+        ),
+        Ok(crate::engine::builder::NativeXyceMemristorFamily::Pem)
+    )
+}
+
+fn xyce_pem_default_table_path(netlist: &Netlist, default: &str) -> std::path::PathBuf {
+    netlist
+        .source_path
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .map_or_else(
+            || std::path::PathBuf::from(default),
+            |base| base.join(default),
+        )
 }
 
 fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
@@ -310,7 +390,51 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
                 };
                 let virtual_aware = !name.eq_ignore_ascii_case("process_file")
                     && !name.eq_ignore_ascii_case("simulation");
-                hash_dependency(hasher, path, source_path, virtual_aware);
+                let dependency_source_path = if model_string_is_pem_table_dependency(name) {
+                    // PEM paths have already been normalized by the parser and
+                    // are consumed verbatim by the device builder.
+                    None
+                } else {
+                    source_path
+                };
+                let max_bytes = model_string_is_pem_table_dependency(name)
+                    .then_some(crate::device::XYCE_PEM_MAX_TABLE_BYTES);
+                hash_dependency(
+                    hasher,
+                    path,
+                    dependency_source_path,
+                    virtual_aware,
+                    max_bytes,
+                );
+            }
+        }
+
+        if model_uses_xyce_pem_tables(&isolated_netlist, model) {
+            for (parameter, default) in [
+                (
+                    "FXPDATA",
+                    crate::device::XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE,
+                ),
+                (
+                    "FXMDATA",
+                    crate::device::XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE,
+                ),
+            ] {
+                if model
+                    .string_params
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(parameter))
+                {
+                    continue;
+                }
+                let path = xyce_pem_default_table_path(netlist, default);
+                hash_dependency(
+                    hasher,
+                    &path.to_string_lossy(),
+                    None,
+                    true,
+                    Some(crate::device::XYCE_PEM_MAX_TABLE_BYTES),
+                );
             }
         }
     }
@@ -320,6 +444,7 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
             &include.file_path.to_string_lossy(),
             source_path,
             false,
+            None,
         );
     }
 }
@@ -472,6 +597,41 @@ pub(super) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
         &mut hasher,
         "transient_lte_abstol",
         config.transient_lte_abstol.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_timeint_max_timestep",
+        config.transient_timeint_max_timestep.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_use_device_max_timestep",
+        config.transient_use_device_max_timestep,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_nonlinear_reltol",
+        config.transient_nonlinear_reltol.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_nonlinear_abstol",
+        config.transient_nonlinear_abstol.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_nonlinear_deltaxtol",
+        config.transient_nonlinear_deltaxtol.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_nonlinear_rhstol",
+        config.transient_nonlinear_rhstol.map(f64::to_bits),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_nonlinear_max_iterations",
+        config.transient_nonlinear_max_iterations,
     );
     hash_field(
         &mut hasher,
@@ -919,9 +1079,13 @@ impl TransientCheckpoint {
             .chain(&self.ind_i_prev)
             .chain(&self.ind_i_prev_prev)
             .chain(&self.ind_v_prev)
+            .chain(&self.xyce_memristor_resistance_stores)
+            .chain(self.generic_switch_stores.iter().flatten())
             .any(|value| !value.is_finite())
         {
-            return Err("checkpoint reactive history values must be finite".to_string());
+            return Err(
+                "checkpoint reactive history and device store values must be finite".to_string(),
+            );
         }
         if !self.lte_signal_global_reference.is_finite()
             || self.lte_signal_global_reference < 0.0
@@ -1063,6 +1227,12 @@ impl TransientCheckpoint {
             ind_i_prev: circuit.inductors.i_prev.clone(),
             ind_i_prev_prev: circuit.inductors.i_prev_prev.clone(),
             ind_v_prev: circuit.inductors.v_prev.clone(),
+            xyce_memristor_resistance_stores: circuit
+                .xyce_memristors
+                .iter()
+                .map(|binding| binding.resistance_store)
+                .collect(),
+            generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
             lte_signal_global_reference,
             lte_signal_local_reference,
             lte_reference_history_available: lte_estimator.is_some(),
@@ -1079,6 +1249,17 @@ impl TransientCheckpoint {
     /// circuit. Lengths must match the capture exactly.
     pub(crate) fn inject(&self, circuit: &mut Circuit) -> Result<(), String> {
         self.validate_numeric_state()?;
+
+        // Validate identity-bearing device state before ordinal storage
+        // shapes. Named instance mismatches are the most specific evidence
+        // that a checkpoint belongs to a different elaboration, whereas a
+        // later vector-length mismatch may only be a consequence of it.
+        circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
+        circuit.validate_generated_veriloga_checkpoint_states(
+            &self.generated_veriloga_instance_states,
+            self.generated_veriloga_state_available,
+        )?;
+
         let target_lengths = [
             (
                 "capacitor v_prev",
@@ -1120,6 +1301,16 @@ impl TransientCheckpoint {
                 self.ind_v_prev.len(),
                 circuit.inductors.v_prev.len(),
             ),
+            (
+                "Xyce memristor resistance store",
+                self.xyce_memristor_resistance_stores.len(),
+                circuit.xyce_memristors.len(),
+            ),
+            (
+                "generic switch store",
+                self.generic_switch_stores.len(),
+                circuit.generic_switch_count(),
+            ),
         ];
         if let Some((name, captured, target)) = target_lengths
             .into_iter()
@@ -1129,12 +1320,6 @@ impl TransientCheckpoint {
                 "checkpoint {name} shape mismatch: captured {captured}, circuit has {target}"
             ));
         }
-        circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
-        circuit.validate_generated_veriloga_checkpoint_states(
-            &self.generated_veriloga_instance_states,
-            self.generated_veriloga_state_available,
-        )?;
-
         // All state families are validated before the first mutation. The
         // restore calls below repeat their local validation defensively, but
         // cannot fail after this point without a violated internal invariant.
@@ -1155,6 +1340,14 @@ impl TransientCheckpoint {
             .i_prev_prev
             .copy_from_slice(&self.ind_i_prev_prev);
         circuit.inductors.v_prev.copy_from_slice(&self.ind_v_prev);
+        for (binding, &resistance) in circuit
+            .xyce_memristors
+            .iter_mut()
+            .zip(&self.xyce_memristor_resistance_stores)
+        {
+            binding.resistance_store = resistance;
+        }
+        circuit.restore_generic_switch_transient_store_snapshots(&self.generic_switch_stores);
         circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         circuit.restore_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
@@ -1319,6 +1512,21 @@ impl TransientCheckpoint {
             "inductors",
             &[&self.ind_i_prev, &self.ind_i_prev_prev, &self.ind_v_prev],
         );
+        write_value_vector(
+            &mut out,
+            "xyce_memristor_resistance_stores",
+            &self.xyce_memristor_resistance_stores,
+        );
+        out.push_str(&format!(
+            "generic_switch_stores {}\n",
+            self.generic_switch_stores.len()
+        ));
+        for store in &self.generic_switch_stores {
+            out.push_str(&format!(
+                "{} {} {} {}\n",
+                store[0], store[1], store[2], store[3]
+            ));
+        }
         out.push_str(&format!("xspice {}\n", self.xspice_instances.len()));
         for instance in &self.xspice_instances {
             out.push_str(instance);
@@ -1517,6 +1725,27 @@ impl TransientCheckpoint {
             };
         let cap_cols = read_value_section(&mut lines, "capacitors", 5)?;
         let ind_cols = read_value_section(&mut lines, "inductors", 3)?;
+        let xyce_memristor_resistance_stores = if version >= 10 {
+            read_value_vector(&mut lines, "xyce_memristor_resistance_stores")?
+        } else {
+            Vec::new()
+        };
+        let generic_switch_stores = if version >= 11 {
+            let columns = read_value_section(&mut lines, "generic_switch_stores", 4)?;
+            let count = columns.first().map_or(0, Vec::len);
+            (0..count)
+                .map(|index| {
+                    [
+                        columns[0][index],
+                        columns[1][index],
+                        columns[2][index],
+                        columns[3][index],
+                    ]
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let xspice_instances = if version >= 2 {
             read_nonempty_line_vector(&mut lines, "xspice")?
         } else {
@@ -1585,6 +1814,8 @@ impl TransientCheckpoint {
             ind_i_prev: ind_iter.next().unwrap(),
             ind_i_prev_prev: ind_iter.next().unwrap(),
             ind_v_prev: ind_iter.next().unwrap(),
+            xyce_memristor_resistance_stores,
+            generic_switch_stores,
             lte_signal_global_reference,
             lte_signal_local_reference,
             lte_reference_history_available: lte_reference_mode.is_some(),
@@ -1762,6 +1993,7 @@ fn netlist_has_xspice(netlist: &Netlist) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::Engine;
 
     fn sample() -> TransientCheckpoint {
         TransientCheckpoint {
@@ -1778,6 +2010,8 @@ mod tests {
             ind_i_prev: vec![7e-3],
             ind_i_prev_prev: vec![6.5e-3],
             ind_v_prev: vec![0.02],
+            xyce_memristor_resistance_stores: Vec::new(),
+            generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
             lte_signal_global_reference: 3.25,
             lte_signal_local_reference: Vec::new(),
             lte_reference_history_available: true,
@@ -1817,6 +2051,34 @@ mod tests {
                 continue;
             }
             if version < 9 && line.starts_with("simulation_identity ") {
+                continue;
+            }
+            if version < 10 && line.starts_with("xyce_memristor_resistance_stores ") {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("memristor store checkpoint vector count")
+                    .parse::<usize>()
+                    .expect("numeric memristor store checkpoint vector count");
+                for _ in 0..count {
+                    lines
+                        .next()
+                        .expect("complete memristor store checkpoint vector");
+                }
+                continue;
+            }
+            if version < 11 && line.starts_with("generic_switch_stores ") {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("generic switch checkpoint row count")
+                    .parse::<usize>()
+                    .expect("numeric generic switch checkpoint row count");
+                for _ in 0..count {
+                    lines
+                        .next()
+                        .expect("complete generic switch checkpoint rows");
+                }
                 continue;
             }
             if version < 7 && line.starts_with("generated_veriloga_state_available ") {
@@ -1922,6 +2184,69 @@ mod tests {
             b"last known good checkpoint"
         );
         std::fs::remove_dir_all(directory).expect("remove checkpoint test directory");
+    }
+
+    #[test]
+    fn pem_resistance_store_round_trips_and_legacy_resume_fails_closed() {
+        let unique = format!(
+            "checkpoint-pem-store-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let positive = format!("virtual://pem/{unique}/positive");
+        let negative = format!("virtual://pem/{unique}/negative");
+        crate::xspice::register_data_file(&positive, "0,1\n1,0\n")
+            .expect("register positive PEM table");
+        crate::xspice::register_data_file(&negative, "0,0\n1,1\n")
+            .expect("register negative PEM table");
+        let deck = format!(
+            "PEM store checkpoint\n\
+             .model pem memristor level=4 fxpdata={positive} fxmdata={negative}\n\
+             YMEMRISTOR one 1 0 pem\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("PEM checkpoint deck parses");
+        let engine = Engine::default();
+        let mut captured_circuit = engine
+            .build_circuit(&netlist)
+            .expect("captured PEM circuit builds");
+        captured_circuit.xyce_memristors[0].resistance_store = 4321.25;
+        let solution = vec![0.0; captured_circuit.num_nodes() + captured_circuit.num_branches()];
+        let checkpoint = TransientCheckpoint::capture(
+            netlist_fingerprint(&netlist),
+            netlist_checkpoint_identity(&netlist),
+            simulation_checkpoint_identity(engine.config()),
+            0.0,
+            &solution,
+            &captured_circuit,
+            None,
+        );
+        let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("PEM store checkpoint parses");
+        let mut resumed_circuit = engine
+            .build_circuit(&netlist)
+            .expect("resumed PEM circuit builds");
+        restored
+            .inject(&mut resumed_circuit)
+            .expect("PEM store state injects");
+        assert_eq!(
+            resumed_circuit.xyce_memristors[0]
+                .resistance_store
+                .to_bits(),
+            4321.25f64.to_bits()
+        );
+
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 9))
+            .expect("version-9 checkpoint parses");
+        let error = legacy
+            .inject(&mut resumed_circuit)
+            .expect_err("legacy checkpoint lacks PEM store state");
+        assert!(error.contains("memristor resistance store"));
+        crate::xspice::unregister_data_file(&positive).expect("unregister positive PEM table");
+        crate::xspice::unregister_data_file(&negative).expect("unregister negative PEM table");
     }
 
     #[test]
@@ -2457,6 +2782,126 @@ mod tests {
     }
 
     #[test]
+    fn pem_virtual_table_content_changes_checkpoint_identity() {
+        let unique = format!(
+            "rspice-checkpoint-pem-authored-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let positive = format!("virtual://pem/{unique}/positive");
+        let negative = format!("virtual://pem/{unique}/negative");
+        crate::xspice::register_data_file(&positive, "0,0\n1,1\n")
+            .expect("register positive PEM table");
+        crate::xspice::register_data_file(&negative, "0,0\n1,-1\n")
+            .expect("register negative PEM table");
+        let root = std::env::temp_dir().join(&unique).join("root.cir");
+        let source = format!(
+            "PEM dependency identity\n\
+             .model pem memristor level=4 fxpdata={positive} fxmdata={negative}\n\
+             YMEMRISTOR mr1 1 0 pem\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse_with_path(&source, &root).expect("PEM deck parses");
+
+        let first = netlist_checkpoint_identity(&netlist);
+        crate::xspice::register_data_file(&positive, "0,0\n1,2\n")
+            .expect("replace positive PEM table");
+        let changed_positive = netlist_checkpoint_identity(&netlist);
+        crate::xspice::register_data_file(&negative, "0,0\n1,-2\n")
+            .expect("replace negative PEM table");
+        let changed_negative = netlist_checkpoint_identity(&netlist);
+        crate::xspice::unregister_data_file(&positive).expect("unregister positive PEM table");
+        crate::xspice::unregister_data_file(&negative).expect("unregister negative PEM table");
+
+        assert_ne!(
+            first, changed_positive,
+            "replacing FXPDATA contents must invalidate checkpoint provenance"
+        );
+        assert_ne!(
+            changed_positive, changed_negative,
+            "replacing FXMDATA contents must invalidate checkpoint provenance"
+        );
+    }
+
+    #[test]
+    fn pem_default_table_content_changes_checkpoint_identity() {
+        let unique = format!(
+            "rspice-checkpoint-pem-default-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let directory = std::env::temp_dir().join(unique);
+        let root = directory.join("root.cir");
+        let positive = directory
+            .join(crate::device::XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE)
+            .to_string_lossy()
+            .into_owned();
+        let negative = directory
+            .join(crate::device::XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE)
+            .to_string_lossy()
+            .into_owned();
+        crate::xspice::register_data_file(&positive, "0,0\n1,1\n")
+            .expect("register default positive PEM table");
+        crate::xspice::register_data_file(&negative, "0,0\n1,-1\n")
+            .expect("register default negative PEM table");
+        let netlist = Netlist::parse_with_path(
+            "PEM default dependency identity\n\
+             .model pem memristor level=4\n\
+             YMEMRISTOR mr1 1 0 pem\n\
+             .end\n",
+            &root,
+        )
+        .expect("PEM default-table deck parses");
+
+        let first = netlist_checkpoint_identity(&netlist);
+        crate::xspice::register_data_file(&positive, "0,0\n1,2\n")
+            .expect("replace default positive PEM table");
+        let changed_positive = netlist_checkpoint_identity(&netlist);
+        crate::xspice::register_data_file(&negative, "0,0\n1,-2\n")
+            .expect("replace default negative PEM table");
+        let changed_negative = netlist_checkpoint_identity(&netlist);
+        crate::xspice::unregister_data_file(&positive)
+            .expect("unregister default positive PEM table");
+        crate::xspice::unregister_data_file(&negative)
+            .expect("unregister default negative PEM table");
+
+        assert_ne!(
+            first, changed_positive,
+            "replacing default filep.dat contents must invalidate checkpoint provenance"
+        );
+        assert_ne!(
+            changed_positive, changed_negative,
+            "replacing default filem.dat contents must invalidate checkpoint provenance"
+        );
+    }
+
+    #[test]
+    fn oversized_pem_dependency_identity_is_bounded_without_hashing_contents() {
+        let path = "virtual://checkpoint/pem-oversized-identity";
+        crate::xspice::register_data_file(path, "first")
+            .expect("register oversized identity fixture");
+        let mut first = blake3::Hasher::new();
+        hash_dependency(&mut first, path, None, true, Some(4));
+        crate::xspice::register_data_file(path, "other")
+            .expect("replace oversized identity fixture");
+        let mut second = blake3::Hasher::new();
+        hash_dependency(&mut second, path, None, true, Some(4));
+        crate::xspice::unregister_data_file(path).expect("unregister oversized fixture");
+
+        assert_eq!(
+            first.finalize(),
+            second.finalize(),
+            "invalid over-budget dependencies must be identified by kind/length/limit without reading their payload"
+        );
+    }
+
+    #[test]
     fn native_waveform_provenance_is_not_masked_by_xspice_virtual_files() {
         let unique = format!(
             "rspice-checkpoint-native-{}-{}",
@@ -2567,6 +3012,24 @@ mod tests {
         checkpoint
             .validate_for_with_config(&netlist, &changed_dialect)
             .expect_err("dialect mismatch must reject state");
+
+        let mut changed_nonlin_budget = base.clone();
+        changed_nonlin_budget.transient_nonlinear_max_iterations = Some(21);
+        checkpoint
+            .validate_for_with_config(&netlist, &changed_nonlin_budget)
+            .expect_err("transient nonlinear budget mismatch must reject state");
+
+        let mut changed_delmax = base.clone();
+        changed_delmax.transient_timeint_max_timestep = Some(1.0e-9);
+        checkpoint
+            .validate_for_with_config(&netlist, &changed_delmax)
+            .expect_err("TIMEINT DELMAX mismatch must reject state");
+
+        let mut changed_use_device_max = base.clone();
+        changed_use_device_max.transient_use_device_max_timestep = Some(false);
+        checkpoint
+            .validate_for_with_config(&netlist, &changed_use_device_max)
+            .expect_err("TIMEINT USEDEVICEMAX mismatch must reject state");
 
         let mut changed_model = base;
         changed_model.jfet_level2_model = crate::engine::JfetLevel2Model::XyceModifiedShockley;

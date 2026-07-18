@@ -2039,7 +2039,10 @@ fn model_string_param_resolves_relative(name: &str, value: &str) -> bool {
     if normalized == "simulation" {
         return model_string_value_looks_path_like(value);
     }
-    normalized.ends_with("file") || normalized.ends_with("_file") || normalized.ends_with("path")
+    normalized.ends_with("file")
+        || normalized.ends_with("_file")
+        || normalized.ends_with("path")
+        || matches!(normalized.as_str(), "fxpdata" | "fxmdata")
 }
 
 fn model_string_value_looks_path_like(value: &str) -> bool {
@@ -5258,6 +5261,23 @@ mod tests {
             }
             other => panic!("expected XSPICE element, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pem_table_model_params_resolve_relative_to_their_source_file() {
+        let base = Path::new("models/memristor");
+        assert_eq!(
+            normalize_model_string_path_value("FXPDATA", "positive.csv", Some(base)),
+            base.join("positive.csv").to_string_lossy()
+        );
+        assert_eq!(
+            normalize_model_string_path_value("fxmdata", "virtual://pem/negative", Some(base)),
+            "virtual://pem/negative"
+        );
+        assert_eq!(
+            normalize_model_string_path_value("metadata", "not-a-path", Some(base)),
+            "not-a-path"
+        );
     }
 
     #[test]

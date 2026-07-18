@@ -2760,6 +2760,24 @@ pub struct SimulationOptions {
     pub timeint_reltol: Option<Value>,
     /// Xyce `.OPTIONS TIMEINT ABSTOL` for transient LTE weighting.
     pub timeint_abstol: Option<Value>,
+    /// Xyce `.OPTIONS TIMEINT DELMAX` transient timestep ceiling.
+    pub timeint_delmax: Option<Value>,
+    /// Xyce `.OPTIONS TIMEINT USEDEVICEMAX` device-provided timestep policy.
+    /// Xyce enables this policy by default.
+    pub timeint_use_device_max_timestep: Option<bool>,
+    /// Xyce `.OPTIONS NONLIN-TRAN RELTOL` for transient Newton update weights.
+    pub nonlin_transient_reltol: Option<Value>,
+    /// Xyce `.OPTIONS NONLIN-TRAN ABSTOL` for transient Newton update weights.
+    pub nonlin_transient_abstol: Option<Value>,
+    /// Xyce `.OPTIONS NONLIN-TRAN DELTAXTOL` normalized update threshold.
+    pub nonlin_transient_deltaxtol: Option<Value>,
+    /// Xyce `.OPTIONS NONLIN-TRAN RHSTOL` raw nonlinear-residual threshold.
+    pub nonlin_transient_rhstol: Option<Value>,
+    /// Xyce `.OPTIONS NONLIN-TRAN MAXSTEP` nonlinear iteration budget.
+    pub nonlin_transient_maxstep: Option<usize>,
+    /// Xyce `.OPTIONS NONLIN-TRAN ENFORCEDEVICECONV` device-local
+    /// convergence policy.
+    pub nonlin_transient_enforce_device_convergence: Option<bool>,
     /// Xyce transient LTE error-weight reference policy (`NEWLTE=0..3`).
     pub transient_lte_reference: Option<TransientLteReference>,
     /// Xyce breakpoint-step LTE policy (`NEWBPSTEPPING=0|1`).
@@ -2890,6 +2908,31 @@ impl SimulationOptions {
         }
         if other.timeint_abstol.is_some() {
             self.timeint_abstol = other.timeint_abstol;
+        }
+        if other.timeint_delmax.is_some() {
+            self.timeint_delmax = other.timeint_delmax;
+        }
+        if other.timeint_use_device_max_timestep.is_some() {
+            self.timeint_use_device_max_timestep = other.timeint_use_device_max_timestep;
+        }
+        if other.nonlin_transient_reltol.is_some() {
+            self.nonlin_transient_reltol = other.nonlin_transient_reltol;
+        }
+        if other.nonlin_transient_abstol.is_some() {
+            self.nonlin_transient_abstol = other.nonlin_transient_abstol;
+        }
+        if other.nonlin_transient_deltaxtol.is_some() {
+            self.nonlin_transient_deltaxtol = other.nonlin_transient_deltaxtol;
+        }
+        if other.nonlin_transient_rhstol.is_some() {
+            self.nonlin_transient_rhstol = other.nonlin_transient_rhstol;
+        }
+        if other.nonlin_transient_maxstep.is_some() {
+            self.nonlin_transient_maxstep = other.nonlin_transient_maxstep;
+        }
+        if other.nonlin_transient_enforce_device_convergence.is_some() {
+            self.nonlin_transient_enforce_device_convergence =
+                other.nonlin_transient_enforce_device_convergence;
         }
         if other.transient_lte_reference.is_some() {
             self.transient_lte_reference = other.transient_lte_reference;

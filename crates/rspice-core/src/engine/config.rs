@@ -15,7 +15,7 @@ pub enum SimulationConfigError {
     /// policy before simulation begins.
     #[error(transparent)]
     ResourceLimit(#[from] ResourceLimitError),
-    /// A floating-point field was not finite or did not satisfy its lower bound.
+    /// A floating-point field did not satisfy its documented numeric domain.
     #[error("{field} must be {requirement}, got {value}")]
     InvalidValue {
         /// Configuration field name.
@@ -190,6 +190,36 @@ pub struct SimulationConfig {
     /// Explicit transient LTE absolute tolerance. `None` uses Xyce's independent
     /// TIMEINT default in Xyce mode and voltage ABSTOL in native/ngspice modes.
     pub transient_lte_abstol: Option<Value>,
+    /// Explicit Xyce `TIMEINT DELMAX` ceiling. When present it is combined
+    /// with `.TRAN DTMAX` by taking the tighter positive bound.
+    pub transient_timeint_max_timestep: Option<Value>,
+    /// Explicit Xyce `TIMEINT USEDEVICEMAX` policy. `None` uses Xyce 7.10's
+    /// enabled default in Xyce mode and leaves other dialects unchanged.
+    pub transient_use_device_max_timestep: Option<bool>,
+    /// Explicit transient nonlinear-update relative tolerance. `None` uses
+    /// Xyce's independent `NONLIN-TRAN RELTOL=1e-2` default in Xyce mode.
+    /// Native/ngspice transient convergence retains its existing voltage
+    /// tolerance policy.
+    pub transient_nonlinear_reltol: Option<Value>,
+    /// Explicit transient nonlinear-update absolute tolerance. `None` uses
+    /// Xyce's independent `NONLIN-TRAN ABSTOL=1e-6` default in Xyce mode.
+    /// Native/ngspice transient convergence retains its existing voltage
+    /// tolerance policy.
+    pub transient_nonlinear_abstol: Option<Value>,
+    /// Explicit Xyce transient normalized-update threshold. `None` uses the
+    /// Xyce 7.10 `NONLIN-TRAN DELTAXTOL=0.33` default.
+    pub transient_nonlinear_deltaxtol: Option<Value>,
+    /// Explicit Xyce transient raw nonlinear-residual threshold. `None` uses
+    /// the Xyce 7.10 `NONLIN-TRAN RHSTOL=1e-2` default.
+    pub transient_nonlinear_rhstol: Option<Value>,
+    /// Explicit Xyce transient nonlinear iteration budget. `None` uses the
+    /// Xyce 7.10 `NONLIN-TRAN MAXSTEP=20` default.
+    pub transient_nonlinear_max_iterations: Option<usize>,
+    /// Whether transient Newton acceptance additionally requires device-local
+    /// convergence flags. `None` uses Xyce 7.10's
+    /// `NONLIN-TRAN ENFORCEDEVICECONV=0` default in Xyce mode and preserves
+    /// the native/ngspice enforced-device policy in other dialects.
+    pub transient_enforce_device_convergence: Option<bool>,
     /// Reference magnitude policy for normalized transient LTE control.
     /// `None` selects the active [`SpiceDialect`]'s default policy.
     pub transient_lte_reference: Option<TransientLteReference>,
@@ -235,7 +265,7 @@ impl SimulationConfig {
         validate_count("max_iterations", self.max_iterations)?;
         validate_count("transient_max_iterations", self.transient_max_iterations)?;
         validate_positive("min_timestep", self.min_timestep)?;
-        validate_positive("max_timestep", self.max_timestep)?;
+        validate_positive_or_unbounded("max_timestep", self.max_timestep)?;
         if self.min_timestep > self.max_timestep {
             return Err(SimulationConfigError::InvalidTimestepRange {
                 min_timestep: self.min_timestep,
@@ -263,6 +293,30 @@ impl SimulationConfig {
         validate_positive("transient_trtol", self.transient_trtol)?;
         validate_optional_positive("transient_lte_reltol", self.transient_lte_reltol)?;
         validate_optional_positive("transient_lte_abstol", self.transient_lte_abstol)?;
+        validate_optional_positive(
+            "transient_timeint_max_timestep",
+            self.transient_timeint_max_timestep,
+        )?;
+        validate_optional_positive(
+            "transient_nonlinear_reltol",
+            self.transient_nonlinear_reltol,
+        )?;
+        validate_optional_positive(
+            "transient_nonlinear_abstol",
+            self.transient_nonlinear_abstol,
+        )?;
+        validate_optional_positive(
+            "transient_nonlinear_deltaxtol",
+            self.transient_nonlinear_deltaxtol,
+        )?;
+        validate_optional_positive(
+            "transient_nonlinear_rhstol",
+            self.transient_nonlinear_rhstol,
+        )?;
+        validate_optional_count(
+            "transient_nonlinear_max_iterations",
+            self.transient_nonlinear_max_iterations,
+        )?;
         validate_positive(
             "transient_node_activity_bound",
             self.transient_node_activity_bound,
@@ -549,6 +603,14 @@ impl Default for SimulationConfig {
             transient_trtol: crate::constants::TRTOL,
             transient_lte_reltol: None,
             transient_lte_abstol: None,
+            transient_timeint_max_timestep: None,
+            transient_use_device_max_timestep: None,
+            transient_nonlinear_reltol: None,
+            transient_nonlinear_abstol: None,
+            transient_nonlinear_deltaxtol: None,
+            transient_nonlinear_rhstol: None,
+            transient_nonlinear_max_iterations: None,
+            transient_enforce_device_convergence: None,
             transient_lte_reference: None,
             transient_new_bp_stepping: true,
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
@@ -591,6 +653,21 @@ fn validate_positive(field: &'static str, value: Value) -> Result<(), Simulation
     }
 }
 
+fn validate_positive_or_unbounded(
+    field: &'static str,
+    value: Value,
+) -> Result<(), SimulationConfigError> {
+    if value == Value::INFINITY || (value.is_finite() && value > 0.0) {
+        Ok(())
+    } else {
+        Err(SimulationConfigError::InvalidValue {
+            field,
+            value,
+            requirement: "a positive finite number or +infinity for no hard cap",
+        })
+    }
+}
+
 fn validate_non_negative(field: &'static str, value: Value) -> Result<(), SimulationConfigError> {
     if value.is_finite() && value >= 0.0 {
         Ok(())
@@ -608,6 +685,13 @@ fn validate_optional_positive(
     value: Option<Value>,
 ) -> Result<(), SimulationConfigError> {
     value.map_or(Ok(()), |value| validate_positive(field, value))
+}
+
+fn validate_optional_count(
+    field: &'static str,
+    value: Option<usize>,
+) -> Result<(), SimulationConfigError> {
+    value.map_or(Ok(()), |value| validate_count(field, value))
 }
 
 fn validate_locked_time_grid(grid: &[Value]) -> Result<(), SimulationConfigError> {

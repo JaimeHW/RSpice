@@ -426,6 +426,10 @@ pub(crate) fn read_to_string(path: &str) -> Result<Arc<str>, String> {
     read_to_string_with_stamp(path).map(|(contents, _)| contents)
 }
 
+/// Read a virtual or native data file without allocating beyond `limit`.
+///
+/// Registered virtual files are checked before their cheap `Arc` clone. Native
+/// files use the shared race-safe, bounded UTF-8 reader.
 pub(crate) fn read_to_string_limited(path: &str, limit: usize) -> Result<Arc<str>, String> {
     read_to_string_with_stamp_limited(path, limit).map(|(contents, _)| contents)
 }
@@ -532,6 +536,27 @@ mod tests {
         assert!(error.contains("shared_cache_bytes limit exceeded"));
         assert!(virtual_data_file_stamp("virtual://limited/second").is_none());
         clear_registered_data_files().expect("clear registry after aggregate test");
+    }
+
+    #[test]
+    fn limited_reader_accepts_only_virtual_data_within_the_exact_boundary() {
+        let _guard = test_registry_guard();
+        let path = format!("virtual://rspice/data-file/limited-{}", std::process::id());
+        let _ = unregister_data_file(&path);
+        register_data_file(&path, "0123456789").expect("register oversized virtual data");
+
+        let error = read_to_string_limited(&path, 9)
+            .expect_err("virtual data above the hard byte limit must fail");
+        assert!(
+            error.contains("external_data_bytes limit exceeded")
+                && error.contains("requested 10")
+                && error.contains("limit 9")
+        );
+        assert_eq!(
+            &*read_to_string_limited(&path, 10).expect("exact byte limit is accepted"),
+            "0123456789"
+        );
+        unregister_data_file(&path).expect("unregister limited virtual data");
     }
 
     #[test]

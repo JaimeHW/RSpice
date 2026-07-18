@@ -109,7 +109,7 @@ impl DcSweepSource {
 
 impl Engine {
     fn populate_dc_observables(
-        circuit: &CircuitData,
+        circuit: &mut CircuitData,
         solution: &[Value],
         result: &mut SimulationResult,
     ) -> Result<(), SimulationError> {
@@ -199,21 +199,28 @@ impl Engine {
                 .push((format!("W({})", source.name), power));
         }
 
-        // TEAM lead current and resistance are Xyce device outputs rather
+        // Native Xyce memristor lead current and resistance are device outputs rather
         // than MNA branches. Evaluate both from the accepted state without
         // adding observation unknowns to the circuit matrix.
-        for binding in &circuit.xyce_team_memristors {
+        for binding in &mut circuit.xyce_memristors {
             let v_pos = node_voltage(binding.node_pos);
             let v_neg = node_voltage(binding.node_neg);
             let x = node_voltage(binding.node_x);
-            let cache = binding.device.evaluate(v_pos, v_neg, x).map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "TEAM memristor '{}' DC output evaluation failed: {error}",
-                    binding.name
-                ))
-            })?;
+            let cache = binding
+                .device
+                .evaluate(v_pos, v_neg, x, true)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "{} memristor '{}' DC output evaluation failed: {error}",
+                        binding.device.family_name(),
+                        binding.name
+                    ))
+                })?;
             let voltage = v_pos - v_neg;
             let power = voltage * cache.current;
+            if let Some(resistance) = cache.resistance {
+                binding.resistance_store = resistance;
+            }
             result
                 .dc_observables
                 .push((format!("I({})", binding.name), cache.current));
@@ -225,7 +232,7 @@ impl Engine {
                 .push((format!("W({})", binding.name), power));
             result
                 .dc_observables
-                .push((format!("N({}:R)", binding.name), cache.resistance));
+                .push((format!("N({}:R)", binding.name), binding.resistance_store));
         }
         Ok(())
     }
@@ -406,7 +413,7 @@ impl Engine {
                 result.branch_currents[i - circuit.num_nodes()] = v;
             }
         }
-        Self::populate_dc_observables(&circuit, &solution, &mut result)?;
+        Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
         let device_op_report = circuit.device_op_report();
         engine.ensure_result_values(dc_result_value_count(&result, &device_op_report))?;
 
@@ -869,7 +876,7 @@ impl Engine {
                         result.branch_currents[i - circuit.num_nodes()] = v;
                     }
                 }
-                Self::populate_dc_observables(&circuit, &solution, &mut result)?;
+                Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
 
                 let point = DcSweepPointResult {
                     sweep_value,

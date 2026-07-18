@@ -15,6 +15,6 @@ pub use temperature::{
     JunctionTempScaling, MosfetTempScaling, ResistorTempCoeffs, TemperatureContext,
 };
 pub use transient::{
-    BreakpointManager, CompanionCoefficients, IntegrationMethod, LteEstimator, TimestepController,
-    TrapGearController,
+    BreakpointManager, BreakpointStepPolicy, CompanionCoefficients, IntegrationMethod,
+    LteEstimator, TimestepController, TrapGearController,
 };

@@ -3579,8 +3579,19 @@ struct XyceStaticTranPlan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticTranComparisonMode {
     Pointwise,
-    Release710IntegratedRms { scientific_precision: usize },
-    Release710IntegratedRmsComp { scientific_precision: usize },
+    Release710IntegratedRms {
+        scientific_precision: usize,
+    },
+    Release710IntegratedRmsComp {
+        scientific_precision: usize,
+        error_bounds: XyceVerifyCompErrorBounds,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceVerifyCompErrorBounds {
+    Release710Default,
+    DeckOverrides,
 }
 
 impl XyceStaticTranComparisonMode {
@@ -3595,11 +3606,23 @@ impl XyceStaticTranComparisonMode {
 impl XyceStaticTranPlan {
     fn result_contract(&self) -> &'static str {
         match self.comparison_mode {
-            XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
-            | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
                 "static_xyce_verify_prn_tran"
             }
-            XyceStaticTranComparisonMode::Pointwise => {
+            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
+                ..
+            } => "static_xyce_verify_prn_tran",
+            // An affine-only `*COMP` policy still uses Xyce's integrated-RMS
+            // comparator, but retains Release 7.10's default error bounds.
+            // The established public result label therefore remains tied to
+            // the deck's native output artifact; comparison mode is modeled
+            // independently above instead of being inferred from that label.
+            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                error_bounds: XyceVerifyCompErrorBounds::Release710Default,
+                ..
+            }
+            | XyceStaticTranComparisonMode::Pointwise => {
                 self.contract.result_contract(!self.steps.is_empty())
             }
         }
@@ -5222,6 +5245,14 @@ impl XyceVerifyTransientTolerance {
             absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
             offset: 0.0,
         }
+    }
+
+    fn has_nondefault_error_bounds(self) -> bool {
+        let default = Self::release_7_10_default();
+        self.relative.to_bits() != default.relative.to_bits()
+            || self.absolute.to_bits() != default.absolute.to_bits()
+            || self.zero.to_bits() != default.zero.to_bits()
+            || self.absolute_difference.to_bits() != default.absolute_difference.to_bits()
     }
 
     fn validate(self) -> Result<Self, String> {
@@ -19006,9 +19037,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             )
             .is_ok()
         {
-            if Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes).is_ok() {
+            if let Ok(tolerances) =
+                Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes)
+            {
                 return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
                     scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                    error_bounds: if tolerances
+                        .into_iter()
+                        .any(XyceVerifyTransientTolerance::has_nondefault_error_bounds)
+                    {
+                        XyceVerifyCompErrorBounds::DeckOverrides
+                    } else {
+                        XyceVerifyCompErrorBounds::Release710Default
+                    },
                 });
             }
         }
@@ -24864,6 +24905,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
             | XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
                 scientific_precision,
+                ..
             } => Self::xyce_verify_reference_time_grid(&plan, &reference, scientific_precision),
             XyceStaticTranComparisonMode::Pointwise => Self::reference_time_grid(&reference),
         };
@@ -24982,52 +25024,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         if plan.comparison_mode.uses_integrated_rms_verifier() {
-            let mut locked_error = None;
-            let locked_engine = self
-                .create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
-            match locked_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
-                Ok(locked_result) => {
-                    match self.compare_static_tran_reference_grid_fallback(
-                        &reference,
-                        &plan,
-                        &netlist,
-                        &locked_result,
-                    ) {
-                        Ok(locked_mismatches) => {
-                            if locked_mismatches.is_empty() {
-                                return self.passed_or_tran_side_output_failure(
-                                    deck,
-                                    start,
-                                    contract,
-                                    &plan,
-                                    &netlist,
-                                    &locked_result,
-                                );
-                            }
-                            if Self::candidate_mismatches_are_better(
-                                best_mismatches.as_deref(),
-                                &locked_mismatches,
-                            ) {
-                                best_mismatches = Some(locked_mismatches);
-                            }
-                        }
-                        Err(err) => {
-                            locked_error = Some(format!(
-                                "locked time-grid integrated-RMS comparison error: {err}"
-                            ));
-                        }
-                    }
-                }
-                Err(SimulationError::Aborted) => {
-                    locked_error = Some(format!(
-                        "locked time-grid simulation exceeded timeout ({}ms)",
-                        self.config.max_time_per_test_ms
-                    ));
-                }
-                Err(err) => {
-                    locked_error = Some(format!("locked time-grid simulation error: {err}"));
-                }
-            }
             if let Some(mismatches) = best_mismatches {
                 return self.failure_result(
                     deck,
@@ -25044,7 +25040,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 deck,
                 start,
                 contract,
-                simulation_error.or(locked_error).unwrap_or_else(|| {
+                simulation_error.unwrap_or_else(|| {
                     "integrated-RMS transient execution produced no comparable result".to_string()
                 }),
                 Vec::new(),
@@ -31887,20 +31883,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         tran: &XyceTranAnalysis,
     ) -> Result<Value, String> {
-        let requested = tran.max_step.or_else(|| {
-            (tran.step > 0.0)
-                .then_some(tran.step)
-                .and_then(|step| Self::feasible_oracle_limited_step(tran, step))
-        });
+        let solver_max_step = Self::transient_oracle_solver_max_step(tran);
         let source_step = Self::source_transient_max_step(netlist, tran)
             .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
-        let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
-        let max_step = [requested, source_step, Some(fallback)]
+        let max_step = [Some(solver_max_step), source_step]
             .into_iter()
             .flatten()
             .filter(|value| value.is_finite() && *value > 0.0)
             .reduce(Value::min)
-            .unwrap_or(fallback);
+            .unwrap_or(solver_max_step);
         if !max_step.is_finite() || max_step <= 0.0 {
             return Err(format!(
                 "resolved transient family maximum step must be finite and positive, got {max_step}"
@@ -31915,6 +31906,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         Self::validate_transient_execution_envelope(netlist, estimated_steps)?;
         Ok(max_step)
+    }
+
+    /// Xyce 7.10's StepErrorControl default maximum timestep is ten percent
+    /// of the requested transient analysis window (`TSTOP-TSTART`). An
+    /// explicit DTMAX replaces this default; it is not minimized against it.
+    /// The `.TRAN` print step is the initial timestep/output cadence, not a
+    /// persistent maximum timestep.
+    fn xyce_default_transient_max_step(tran: &XyceTranAnalysis) -> Value {
+        (0.1 * (tran.stop - tran.start.unwrap_or(0.0))).max(f64::MIN_POSITIVE)
+    }
+
+    /// Resolve the actual Xyce transient solver ceiling. The print cadence is
+    /// deliberately absent: Xyce's adaptive integrator is not constrained by
+    /// either `.TRAN TSTEP` or the density of a verification table.
+    fn xyce_transient_solver_max_step(tran: &XyceTranAnalysis) -> Value {
+        tran.max_step
+            .unwrap_or_else(|| Self::xyce_default_transient_max_step(tran))
+    }
+
+    /// The production solver may choose any step below Xyce's true ceiling,
+    /// but oracle comparison needs enough accepted samples to reproduce
+    /// stateful switching and continuous-measure event ordering. In the
+    /// absence of authored DTMAX, keep at least 1,000 verification intervals
+    /// across the requested window. An explicit DTMAX remains authoritative
+    /// and is never minimized against this harness-only sampling bound.
+    fn transient_oracle_solver_max_step(tran: &XyceTranAnalysis) -> Value {
+        tran.max_step.unwrap_or_else(|| {
+            let window = (tran.stop - tran.start.unwrap_or(0.0)).max(f64::MIN_POSITIVE);
+            Self::xyce_transient_solver_max_step(tran).min((window / 1000.0).max(f64::MIN_POSITIVE))
+        })
     }
 
     fn transient_family_result_to_prn_table(
@@ -31990,13 +32011,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Ok(output_times)
     }
 
-    /// Serialize an adaptive native result on the checked-in Xyce oracle's
-    /// time grid. The Release 7.10 verifier linearly interpolates the reference
-    /// onto the candidate grid; doing that across unresolved curvature or a
-    /// derivative discontinuity makes the score depend on which simulator
-    /// happened to accept an intermediate step. Sampling both engines at the
-    /// oracle's accepted times preserves the exact integrated-RMS value
-    /// contract while removing that unrelated adaptive-cadence dependency.
+    /// Serialize an adaptive native result on a checked-in reference grid for
+    /// verifier diagnostics. This must never decide pass/fail: Release 7.10
+    /// keeps the candidate's independently accepted grid and interpolates the
+    /// reference onto it.
+    #[cfg(test)]
     fn transient_family_result_to_prn_table_on_reference_grid(
         plan: &XyceStaticTranPlan,
         netlist: &Netlist,
@@ -32737,6 +32756,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             trtol,
             timeint_reltol,
             timeint_abstol,
+            timeint_delmax,
+            timeint_use_device_max_timestep,
+            nonlin_transient_reltol,
+            nonlin_transient_abstol,
+            nonlin_transient_deltaxtol,
+            nonlin_transient_rhstol,
+            nonlin_transient_maxstep,
+            nonlin_transient_enforce_device_convergence,
             transient_lte_reference,
             transient_new_bp_stepping,
             ramptime,
@@ -32767,6 +32794,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && abstol.is_none()
             && timeint_reltol.is_some_and(|value| value.to_bits() == reltol_bits)
             && timeint_abstol.is_some_and(|value| value.to_bits() == abstol_bits)
+            && timeint_delmax.is_none()
+            && timeint_use_device_max_timestep.is_none()
+            && nonlin_transient_reltol.is_none()
+            && nonlin_transient_abstol.is_none()
+            && nonlin_transient_deltaxtol.is_none()
+            && nonlin_transient_rhstol.is_none()
+            && nonlin_transient_maxstep.is_none()
+            && nonlin_transient_enforce_device_convergence.is_none()
             && *transient_lte_reference == lte_reference
             && transient_new_bp_stepping.is_none()
             && vntol.is_none()
@@ -44580,6 +44615,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
             XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
                 scientific_precision,
+                ..
             } => {
                 let actual = Self::transient_family_result_to_prn_table(plan, netlist, result)?;
                 let tolerances =
@@ -44616,7 +44652,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .is_empty())
     }
 
-    fn compare_static_tran_reference_grid_fallback(
+    #[cfg(test)]
+    fn compare_static_tran_reference_grid_diagnostic(
         &self,
         reference: &XycePrnTable,
         plan: &XyceStaticTranPlan,
@@ -44647,6 +44684,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
             XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
                 scientific_precision,
+                ..
             } => {
                 let actual = Self::transient_family_result_to_prn_table_on_reference_grid(
                     plan,
@@ -45380,7 +45418,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         match plan.comparison_mode {
             XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
             | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
-                Self::transient_max_step_with_optional_reference(netlist, tran, None)
+                Self::transient_max_step_with_solver_ceiling(
+                    netlist,
+                    tran,
+                    None,
+                    Self::xyce_transient_solver_max_step(tran),
+                    false,
+                )
             }
             XyceStaticTranComparisonMode::Pointwise => {
                 Self::transient_max_step_for_reference(netlist, tran, reference)
@@ -45402,27 +45446,35 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         tran: &XyceTranAnalysis,
         reference_step: Option<Value>,
     ) -> Result<Value, String> {
-        let requested = tran.max_step.or_else(|| {
-            (tran.step > 0.0)
-                .then_some(tran.step)
+        Self::transient_max_step_with_solver_ceiling(
+            netlist,
+            tran,
+            reference_step,
+            Self::transient_oracle_solver_max_step(tran),
+            true,
+        )
+    }
+
+    fn transient_max_step_with_solver_ceiling(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+        reference_step: Option<Value>,
+        solver_max_step: Value,
+        include_harness_source_resolution: bool,
+    ) -> Result<Value, String> {
+        let source_step = if include_harness_source_resolution {
+            Self::source_transient_max_step(netlist, tran)
                 .and_then(|step| Self::feasible_oracle_limited_step(tran, step))
-        });
-        let source_step = Self::source_transient_max_step(netlist, tran)
-            .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
-        let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
+        } else {
+            None
+        };
         let reference_limited_step = Self::feasible_reference_limited_step(tran, reference_step);
-        let fallback_limit = reference_limited_step.is_none().then_some(fallback);
-        let mut max_step = [
-            requested,
-            reference_limited_step,
-            source_step,
-            fallback_limit,
-        ]
-        .into_iter()
-        .flatten()
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .reduce(Value::min)
-        .unwrap_or(fallback);
+        let mut max_step = [Some(solver_max_step), reference_limited_step, source_step]
+            .into_iter()
+            .flatten()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .reduce(Value::min)
+            .unwrap_or(solver_max_step);
         let unconstrained_estimated_steps = (tran.stop / max_step).ceil();
         if unconstrained_estimated_steps > MAX_NATIVE_TRAN_ORACLE_STEPS {
             return Err(format!(
@@ -45521,20 +45573,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn preflight_transient_estimated_steps(netlist: &Netlist, tran: &XyceTranAnalysis) -> Value {
-        let requested = tran.max_step.or_else(|| {
-            (tran.step > 0.0)
-                .then_some(tran.step)
-                .and_then(|step| Self::feasible_oracle_limited_step(tran, step))
-        });
+        let solver_max_step = Self::transient_oracle_solver_max_step(tran);
         let source_step = Self::source_transient_max_step(netlist, tran)
             .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
-        let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
-        let max_step = [requested, source_step, Some(fallback)]
+        let max_step = [Some(solver_max_step), source_step]
             .into_iter()
             .flatten()
             .filter(|value| value.is_finite() && *value > 0.0)
             .reduce(Value::min)
-            .unwrap_or(fallback);
+            .unwrap_or(solver_max_step);
         (tran.stop / max_step).ceil()
     }
 
@@ -47866,9 +47913,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_device_is_native_classic_jfet(netlist, &element.name) => {}
                 ElementKind::XyceMemristor { .. }
                     if purpose.validates_absolute_device_contract()
-                        && Self::netlist_element_is_native_xyce_team_memristor(
-                            netlist, element,
-                        ) => {}
+                        && Self::netlist_element_is_native_xyce_memristor(netlist, element) => {}
                 ElementKind::Diode { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_absolute_transient_exact_is_diode(
@@ -48496,7 +48541,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if let Some((element_name, parameter)) =
             Self::parse_device_operating_point_probe(normalized)
             && parameter.eq_ignore_ascii_case("R")
-            && Self::find_native_xyce_team_memristor_element(netlist, &element_name).is_some()
+            && Self::find_native_xyce_memristor_element(netlist, &element_name).is_some()
         {
             return Ok(());
         }
@@ -48534,7 +48579,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             match parameter.as_str() {
                 "r" if Self::find_resistor_element(netlist, &element_name).is_some()
-                    || Self::find_native_xyce_team_memristor_element(netlist, &element_name)
+                    || Self::find_native_xyce_memristor_element(netlist, &element_name)
                         .is_some() =>
                 {
                     return Ok(());
@@ -49103,7 +49148,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             Self::parse_device_operating_point_probe(normalized)
         {
             if parameter.eq_ignore_ascii_case("R")
-                && Self::find_native_xyce_team_memristor_element(netlist, &element_name).is_some()
+                && Self::find_native_xyce_memristor_element(netlist, &element_name).is_some()
             {
                 return Ok(());
             }
@@ -49156,7 +49201,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 }
                 "r" => {
                     if Self::find_resistor_element(netlist, &element_name).is_some()
-                        || Self::find_native_xyce_team_memristor_element(netlist, &element_name)
+                        || Self::find_native_xyce_memristor_element(netlist, &element_name)
                             .is_some()
                     {
                         return Ok(());
@@ -49236,7 +49281,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         }
         if let Some(element_name) = Self::parse_power_probe(normalized) {
-            if Self::find_native_xyce_team_memristor_element(netlist, &element_name).is_some() {
+            if Self::find_native_xyce_memristor_element(netlist, &element_name).is_some() {
                 return Ok(());
             }
             if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)? {
@@ -49351,11 +49396,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         {
             if parameter.eq_ignore_ascii_case("R")
                 && let Some(store_name) =
-                    Self::xyce_team_resistance_store_name(netlist, &element_name)
+                    Self::xyce_memristor_resistance_store_name(netlist, &element_name)
             {
                 let observable = format!("N({store_name})");
                 return result.try_dc_observable_named(&observable).ok_or_else(|| {
-                    format!("TEAM resistance store '{store_name}' not found in DC result")
+                    format!("Xyce memristor resistance store '{store_name}' not found in DC result")
                 });
             }
             if let Some(value) = result.try_dc_observable_named(normalized) {
@@ -49386,12 +49431,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             if parameter.eq_ignore_ascii_case("R")
                 && let Some(store_name) =
-                    Self::xyce_team_resistance_store_name(netlist, &element_name)
+                    Self::xyce_memristor_resistance_store_name(netlist, &element_name)
             {
                 return result
                     .try_dc_observable_named(&format!("N({store_name})"))
                     .ok_or_else(|| {
-                        format!("TEAM resistance store '{store_name}' not found in DC result")
+                        format!(
+                            "Xyce memristor resistance store '{store_name}' not found in DC result"
+                        )
                     });
             }
             return Self::evaluate_device_parameter_probe(
@@ -50192,7 +50239,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if let Some((element_name, parameter)) =
             Self::parse_device_operating_point_probe(normalized)
             && parameter.eq_ignore_ascii_case("R")
-            && let Some(store_name) = Self::xyce_team_resistance_store_name(netlist, &element_name)
+            && let Some(store_name) =
+                Self::xyce_memristor_resistance_store_name(netlist, &element_name)
         {
             return Self::transient_store_named(result, &store_name, time);
         }
@@ -51535,7 +51583,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         parameter: &str,
     ) -> Result<f64, String> {
         if parameter == "r"
-            && let Some(store_name) = Self::xyce_team_resistance_store_name(netlist, element_name)
+            && let Some(store_name) =
+                Self::xyce_memristor_resistance_store_name(netlist, element_name)
         {
             return Self::transient_store_named(result, &store_name, time);
         }
@@ -53715,14 +53764,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             })
     }
 
-    fn find_native_xyce_team_memristor_element(
+    fn find_native_xyce_memristor_element(
         netlist: &Netlist,
         name: &str,
     ) -> Option<crate::netlist::Element> {
         if let Some(element) = netlist.elements.iter().find(|element| {
             Self::device_instance_names_match(&element.name, name)
                 && matches!(&element.kind, ElementKind::XyceMemristor { .. })
-                && Self::netlist_element_is_native_xyce_team_memristor(netlist, element)
+                && Self::netlist_element_is_native_xyce_memristor(netlist, element)
         }) {
             return Some(element.clone());
         }
@@ -53738,15 +53787,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .find(|element| {
                 Self::device_instance_names_match(&element.name, name)
                     && matches!(&element.kind, ElementKind::XyceMemristor { .. })
-                    && Self::netlist_element_is_native_xyce_team_memristor(&flat_netlist, element)
+                    && Self::netlist_element_is_native_xyce_memristor(&flat_netlist, element)
             })
             .cloned()
     }
 
-    /// Admit only the exact native TEAM subset that circuit construction can
-    /// validate and instantiate. `YMEMRISTOR` is shared by several Xyce model
-    /// levels, so syntax alone must never claim PEM or other model families.
-    fn netlist_element_is_native_xyce_team_memristor(
+    /// Admit only the exact native Xyce memristor families that circuit
+    /// construction can validate and instantiate. `YMEMRISTOR` is shared by
+    /// several model levels, so syntax alone must never claim unsupported
+    /// families.
+    fn netlist_element_is_native_xyce_memristor(
         netlist: &Netlist,
         element: &crate::netlist::Element,
     ) -> bool {
@@ -53764,7 +53814,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let Some(model_def) = Self::find_model(&netlist.models, model) else {
             return false;
         };
-        crate::engine::build_xyce_team_memristor(
+        crate::engine::build_native_xyce_memristor(
             netlist,
             model_def,
             &element.name,
@@ -53775,8 +53825,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         .is_ok()
     }
 
-    fn xyce_team_resistance_store_name(netlist: &Netlist, name: &str) -> Option<String> {
-        Self::find_native_xyce_team_memristor_element(netlist, name)
+    fn xyce_memristor_resistance_store_name(netlist: &Netlist, name: &str) -> Option<String> {
+        Self::find_native_xyce_memristor_element(netlist, name)
             .map(|element| format!("{}:R", element.name))
     }
 
@@ -67852,6 +67902,88 @@ R3 1 0 {RVAL}
     }
 
     #[test]
+    fn xyce_default_transient_max_step_is_ten_percent_of_analysis_window() {
+        let mut tran = XyceTranAnalysis {
+            step: 0.0,
+            stop: 6.0e-3,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+
+        assert!(
+            (XyceTestRunner::xyce_default_transient_max_step(&tran) - 6.0e-4).abs()
+                <= Value::EPSILON
+        );
+        tran.start = Some(1.0e-3);
+        assert!(
+            (XyceTestRunner::xyce_default_transient_max_step(&tran) - 5.0e-4).abs()
+                <= Value::EPSILON
+        );
+
+        assert_eq!(
+            XyceTestRunner::xyce_transient_solver_max_step(&tran).to_bits(),
+            5.0e-4f64.to_bits()
+        );
+        assert_eq!(
+            XyceTestRunner::transient_oracle_solver_max_step(&tran).to_bits(),
+            5.0e-6f64.to_bits(),
+            "the pointwise oracle cadence is a harness constraint, not Xyce's solver ceiling"
+        );
+
+        tran.max_step = Some(2.5e-5);
+        assert_eq!(
+            XyceTestRunner::xyce_transient_solver_max_step(&tran).to_bits(),
+            2.5e-5f64.to_bits()
+        );
+        assert_eq!(
+            XyceTestRunner::transient_oracle_solver_max_step(&tran).to_bits(),
+            2.5e-5f64.to_bits(),
+            "an authored DTMAX is authoritative for both execution paths"
+        );
+    }
+
+    #[test]
+    fn integrated_rms_uses_solver_semantics_not_harness_source_resolution() {
+        let netlist = Netlist::parse_validated(
+            "integrated source-resolution policy\n\
+             I1 1 0 PULSE(0 5 0 1m 1m 10m 25m)\n\
+             L1 2 0 10m\n\
+             R1 1 2 1m\n\
+             .end\n",
+        )
+        .expect("source-resolution fixture validates");
+        let tran = XyceTranAnalysis {
+            step: 1.0e-4,
+            stop: 2.0e-2,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+        let solver_ceiling = XyceTestRunner::xyce_transient_solver_max_step(&tran);
+
+        let integrated = XyceTestRunner::transient_max_step_with_solver_ceiling(
+            &netlist,
+            &tran,
+            None,
+            solver_ceiling,
+            false,
+        )
+        .expect("integrated-RMS maximum step resolves");
+        let pointwise = XyceTestRunner::transient_max_step_with_solver_ceiling(
+            &netlist,
+            &tran,
+            None,
+            solver_ceiling,
+            true,
+        )
+        .expect("pointwise harness maximum step resolves");
+
+        assert_eq!(integrated.to_bits(), 2.0e-3f64.to_bits());
+        assert_eq!(pointwise.to_bits(), 5.0e-6f64.to_bits());
+    }
+
+    #[test]
     fn reference_time_grid_accepts_stepnum_transient_prn_metadata() {
         let table = XycePrnTable {
             columns: ["STEPNUM", "Index", "TIME", "V(1)"]
@@ -68064,7 +68196,37 @@ C1 out 0 40u IC=1
             XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
                 .expect("long transient falls back to bounded native step count");
 
-        assert_eq!(max_step, 400.0e-6);
+        assert_eq!(max_step, (tran.stop - tran.start.unwrap_or(0.0)) / 1000.0);
+    }
+
+    #[test]
+    fn explicit_dtmax_replaces_the_xyce_default_maximum_in_both_directions() {
+        let netlist = Netlist::parse(
+            "dtmax precedence\nV1 in 0 1\nR1 in 0 1k\n.TRAN 1m 1\n.PRINT TRAN V(in)\n.END\n",
+        )
+        .expect("test netlist parses");
+        let mut tran = XyceTranAnalysis {
+            step: 1.0e-3,
+            stop: 1.0,
+            start: None,
+            max_step: Some(0.5),
+            uic: false,
+        };
+
+        assert_eq!(
+            XyceTestRunner::transient_family_max_step(&netlist, &tran)
+                .expect("large explicit DTMAX resolves"),
+            0.5,
+            "explicit DTMAX above 0.1*TSTOP must not be reduced by the default"
+        );
+
+        tran.max_step = Some(0.01);
+        assert_eq!(
+            XyceTestRunner::transient_family_max_step(&netlist, &tran)
+                .expect("small explicit DTMAX resolves"),
+            0.01,
+            "explicit DTMAX below 0.1*TSTOP must remain authoritative"
+        );
     }
 
     #[test]
@@ -75443,7 +75605,7 @@ VBIAS bias 0 0\n\
     }
 
     #[test]
-    fn integrated_rms_dispatch_samples_the_native_result_on_the_normalized_reference_grid() {
+    fn reference_grid_diagnostic_does_not_replace_the_native_integrated_rms_contract() {
         let source = "reference-grid policy\n\
                       R1 out 0 1\n\
                       .tran 0 1\n\
@@ -75512,10 +75674,10 @@ VBIAS bias 0 0\n\
         );
         assert!(
             runner
-                .compare_static_tran_reference_grid_fallback(&reference, &plan, &netlist, &result)
-                .expect("reference-grid comparison succeeds structurally")
+                .compare_static_tran_reference_grid_diagnostic(&reference, &plan, &netlist, &result)
+                .expect("reference-grid diagnostic succeeds structurally")
                 .is_empty(),
-            "integrated-RMS comparison must use the first distinct oracle time rows"
+            "the diagnostic fixture must demonstrate how grid locking could hide a native-grid mismatch"
         );
 
         let metadata_reference = XycePrnTable {

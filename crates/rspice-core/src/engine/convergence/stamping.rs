@@ -103,7 +103,7 @@ impl Engine {
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
         circuit.set_b3soi_operating_point_mode(true);
-        circuit.set_xyce_team_operating_point_mode(true);
+        circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.update_bjt_static_linearizations(solution);
@@ -133,7 +133,7 @@ impl Engine {
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
         circuit.set_b3soi_operating_point_mode(true);
-        circuit.set_xyce_team_operating_point_mode(true);
+        circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.stamp_generic_switches(matrix, rhs, time);
@@ -185,7 +185,7 @@ impl Engine {
         junction_gmin: Value,
     ) {
         circuit.set_b3soi_operating_point_mode(true);
-        circuit.set_xyce_team_operating_point_mode(true);
+        circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         if circuit.has_xspice_devices() {

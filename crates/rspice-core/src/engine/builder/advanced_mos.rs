@@ -615,7 +615,8 @@ impl Engine {
         deferred_params: &[(String, String)],
         temperature_kelvin: f64,
         tnom_default_k: f64,
-        shared: &mut HashMap<String, Bsim3v3SharedModel>,
+        equation_set: crate::device::Bsim3v3EquationSet,
+        shared: &mut HashMap<Bsim3v3SharedModelKey, Bsim3v3SharedModel>,
     ) -> Result<(), SimulationError> {
         use crate::device::Bsim3v3Device;
         use crate::device::mosfet::bsim3v3::{
@@ -627,18 +628,26 @@ impl Engine {
         // evaluates at the circuit temperature, like ngspice's CKTtemp.
         let temp_k = temperature_kelvin;
 
-        let entry = match shared.entry(model_key.to_string()) {
+        let shared_key = Bsim3v3SharedModelKey {
+            model_name: model_key.to_string(),
+            equation_set,
+        };
+        let entry = match shared.entry(shared_key) {
             std::collections::hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
             std::collections::hash_map::Entry::Vacant(vacant) => {
                 let model = std::sync::Arc::new(
-                    Bsim3v3Model::try_from_params(params_map, is_pmos, tnom_default_k).map_err(
-                        |message| {
-                            SimulationError::Circuit(format!(
-                                "MOSFET '{}': BSIM3 model '{}': {message}",
-                                element.name, model_key
-                            ))
-                        },
-                    )?,
+                    Bsim3v3Model::try_from_params_with_equation_set(
+                        params_map,
+                        is_pmos,
+                        tnom_default_k,
+                        equation_set,
+                    )
+                    .map_err(|message| {
+                        SimulationError::Circuit(format!(
+                            "MOSFET '{}': BSIM3 model '{}': {message}",
+                            element.name, model_key
+                        ))
+                    })?,
                 );
                 let model_temp = std::sync::Arc::new(Bsim3v3ModelTemp::new(&model, temp_k));
                 vacant.insert(Bsim3v3SharedModel {
@@ -1259,6 +1268,15 @@ pub(super) struct Bsim3v3SharedModel {
     model: std::sync::Arc<crate::device::Bsim3v3Model>,
     model_temp: std::sync::Arc<crate::device::mosfet::bsim3v3::Bsim3v3ModelTemp>,
     size_cache: crate::device::mosfet::bsim3v3::SizeDepCache,
+}
+
+/// Semantic identity of a shared BSIM3 model card. The equation family is
+/// part of the key so a compatibility front can never reuse temperature or
+/// size-dependent state prepared for another canonical model revision.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct Bsim3v3SharedModelKey {
+    model_name: String,
+    equation_set: crate::device::Bsim3v3EquationSet,
 }
 
 /// Per-`.model` shared BSIM4 v4.8 state: the parsed card, its temperature

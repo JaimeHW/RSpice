@@ -59,12 +59,66 @@ fn timestep_bounds_and_initial_step_are_validated() {
     );
 
     let default_maximum_sentinel = SimulationConfig {
-        transient_initial_timestep: Some(rspice_core::constants::MAX_TIMESTEP * 10.0),
+        transient_initial_timestep: Some(1.0e12),
         ..SimulationConfig::default()
     };
     default_maximum_sentinel
         .validate()
         .expect("the default maximum-timestep sentinel is not a hard cap");
+
+    for invalid_maximum in [f64::NAN, f64::NEG_INFINITY, 0.0, -1.0] {
+        let invalid = SimulationConfig {
+            max_timestep: invalid_maximum,
+            ..SimulationConfig::default()
+        };
+        assert!(matches!(
+            invalid.validate(),
+            Err(SimulationConfigError::InvalidValue {
+                field: "max_timestep",
+                requirement: "a positive finite number or +infinity for no hard cap",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn explicit_transient_solver_overrides_are_validated() {
+    let invalid_delmax = SimulationConfig {
+        transient_timeint_max_timestep: Some(f64::INFINITY),
+        ..SimulationConfig::default()
+    };
+    assert!(matches!(
+        invalid_delmax.validate(),
+        Err(SimulationConfigError::InvalidValue {
+            field: "transient_timeint_max_timestep",
+            ..
+        })
+    ));
+
+    let invalid_reltol = SimulationConfig {
+        transient_nonlinear_reltol: Some(0.0),
+        ..SimulationConfig::default()
+    };
+    assert!(matches!(
+        invalid_reltol.validate(),
+        Err(SimulationConfigError::InvalidValue {
+            field: "transient_nonlinear_reltol",
+            ..
+        })
+    ));
+
+    let invalid_max_iterations = SimulationConfig {
+        transient_nonlinear_max_iterations: Some(0),
+        ..SimulationConfig::default()
+    };
+    assert!(matches!(
+        invalid_max_iterations.validate(),
+        Err(SimulationConfigError::InvalidCount {
+            field: "transient_nonlinear_max_iterations",
+            value: 0,
+        })
+    ));
 }
 
 #[test]

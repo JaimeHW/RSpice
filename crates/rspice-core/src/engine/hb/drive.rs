@@ -495,10 +495,10 @@ impl Engine {
         if !circuit.b3soi_pd.is_empty() {
             kinds.push(describe("native B3SOI PD", circuit.b3soi_pd.len()));
         }
-        if !circuit.xyce_team_memristors.is_empty() {
+        if !circuit.xyce_memristors.is_empty() {
             kinds.push(describe(
-                "native Xyce TEAM memristor",
-                circuit.xyce_team_memristors.len(),
+                "native Xyce memristor",
+                circuit.xyce_memristors.len(),
             ));
         }
 

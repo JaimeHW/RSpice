@@ -33,21 +33,30 @@ impl Engine {
         dynamic_breakpoints_added: &mut usize,
         warned_dynamic_breakpoint_cap: &mut bool,
     ) {
+        let num_nodes = circuit.num_nodes();
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
             let nn = cap.nn.row;
             let v_new = Self::differential_voltage(accepted_solution, np, nn);
 
-            // Compute new capacitor current from OLD history before rotating it.
-            let geq = coeff.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
-            let ieq = coeff.capacitor_ieq(
-                circuit.capacitors.capacitances[cap_idx],
-                dt,
-                circuit.capacitors.v_prev[cap_idx],
-                circuit.capacitors.v_prev_prev[cap_idx],
-                circuit.capacitors.i_prev[cap_idx],
-            );
-            let i_new = geq * v_new - ieq;
+            // An IC capacitor's MNA branch is its physical lead current and is
+            // the numerically authoritative value. Ordinary Norton companions
+            // have no branch, so reconstruct those from OLD history before
+            // rotating it.
+            let i_new = if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx]
+            {
+                accepted_solution[num_nodes + branch_ordinal - 1]
+            } else {
+                let geq = coeff.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
+                let ieq = coeff.capacitor_ieq(
+                    circuit.capacitors.capacitances[cap_idx],
+                    dt,
+                    circuit.capacitors.v_prev[cap_idx],
+                    circuit.capacitors.v_prev_prev[cap_idx],
+                    circuit.capacitors.i_prev[cap_idx],
+                );
+                geq * v_new - ieq
+            };
 
             let v_old = circuit.capacitors.v_prev[cap_idx];
             circuit.capacitors.v_prev_prev_prev[cap_idx] = circuit.capacitors.v_prev_prev[cap_idx];

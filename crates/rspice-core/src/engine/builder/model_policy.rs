@@ -769,6 +769,14 @@ pub(super) const XYCE_TEAM_MODEL_PARAMS: &[&str] = &[
     "RESDELTAGRAD",
 ];
 
+pub(super) const XYCE_PEM_NUMERIC_MODEL_PARAMS: &[&str] = &[
+    "LEVEL", "V1", "V2", "I1", "I2", "G0", "VP", "VN", "D1", "D2", "C1", "C2",
+];
+
+pub(super) const XYCE_PEM_MODEL_PARAMS: &[&str] = &[
+    "LEVEL", "V1", "V2", "I1", "I2", "G0", "VP", "VN", "D1", "D2", "C1", "C2", "FXPDATA", "FXMDATA",
+];
+
 pub(super) fn native_mos_instance_multiplier(
     element_name: &str,
     family: &str,

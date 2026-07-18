@@ -51,10 +51,10 @@ pub use output::waveform_stream;
 
 // Re-export key types from core
 pub use core::{
-    AcAnalysis, AcResult, BreakpointManager, CompanionCoefficients, DcAnalysis, DcSweep,
-    DiscreteFilter, IntegrationMethod, JunctionTempScaling, LteEstimator, MosfetTempScaling,
-    ResistorTempCoeffs, TemperatureContext, TimestepController, TransferFunction,
-    TrapGearController,
+    AcAnalysis, AcResult, BreakpointManager, BreakpointStepPolicy, CompanionCoefficients,
+    DcAnalysis, DcSweep, DiscreteFilter, IntegrationMethod, JunctionTempScaling, LteEstimator,
+    MosfetTempScaling, ResistorTempCoeffs, TemperatureContext, TimestepController,
+    TransferFunction, TrapGearController,
 };
 
 // Re-export key types from advanced

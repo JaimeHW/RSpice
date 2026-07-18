@@ -150,6 +150,9 @@ impl Bjt {
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
         let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
         let nodes = self.external_terminal_nodes();
+        // The current/Jacobian pair is evaluated at the limited junction
+        // voltages.  Anchor its affine companion there as well so the direct
+        // O(1) stamp includes the limiter tangent correction.
         let anchor = self.companion_anchor(vc, vb, ve, vs);
         let currents = [self.ic, self.ib, self.ie, self.isub];
 
@@ -247,6 +250,49 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::{MatrixStamper, NonlinearDevice};
+
+    struct DenseStamper {
+        matrix: Vec<Vec<Value>>,
+        rhs: Vec<Value>,
+    }
+
+    impl DenseStamper {
+        fn new(size: usize) -> Self {
+            Self {
+                matrix: vec![vec![0.0; size]; size],
+                rhs: vec![0.0; size],
+            }
+        }
+
+        fn residual(&self, solution: &[Value]) -> Vec<Value> {
+            self.matrix
+                .iter()
+                .zip(&self.rhs)
+                .map(|(row, rhs)| {
+                    row.iter()
+                        .zip(solution)
+                        .map(|(coefficient, voltage)| coefficient * voltage)
+                        .sum::<Value>()
+                        - rhs
+                })
+                .collect()
+        }
+    }
+
+    impl MatrixStamper for DenseStamper {
+        fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+            if row > 0 && col > 0 {
+                self.matrix[row - 1][col - 1] += value;
+            }
+        }
+
+        fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+            if index > 0 {
+                self.rhs[index - 1] += value;
+            }
+        }
+    }
 
     fn full_matrix(size: usize) -> StaticMatrix {
         let triplets: Vec<_> = (0..size)
@@ -255,23 +301,51 @@ mod tests {
         StaticMatrix::from_triplets(size, size, &triplets).expect("full test matrix")
     }
 
-    #[test]
-    fn direct_stamp_anchors_legacy_companion_at_limited_junction_bias() {
-        let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 0);
-        bjt.update(&[0.0, 0.0]);
-        let candidate = [12.0, 12.0];
+    fn assert_limited_direct_stamp_matches_generic(mut bjt: Bjt, candidate: [Value; 3]) {
+        bjt.update(&[0.0; 3]);
         bjt.update(&candidate);
         assert!(
-            bjt.legacy_junction_limited,
-            "test bias must exercise legacy pnjlim"
+            bjt.legacy_junction_limited_for_trace(),
+            "test bias must exercise legacy junction limiting"
         );
 
-        let mut matrix = full_matrix(2);
-        bjt.link(&matrix);
-        let mut rhs = vec![0.0; 2];
-        bjt.stamp_direct(&mut matrix, &mut rhs, &candidate);
+        let mut direct_matrix = full_matrix(3);
+        bjt.link(&direct_matrix);
+        let mut direct_rhs = vec![0.0; 3];
+        bjt.stamp_direct(&mut direct_matrix, &mut direct_rhs, &candidate);
 
-        let (_, expected_rhs) = bjt.stamped_reduced_external_system(12.0, 12.0, 0.0, 0.0);
-        assert_eq!(rhs, expected_rhs[..2]);
+        let mut generic = DenseStamper::new(3);
+        bjt.stamp_nonlinear(&candidate, &mut generic, &mut []);
+
+        for probe in [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ] {
+            let direct_residual = direct_matrix
+                .residual_vector(&probe, &direct_rhs)
+                .expect("direct residual");
+            let generic_residual = generic.residual(&probe);
+            for (direct, expected) in direct_residual.iter().zip(generic_residual) {
+                let tolerance = 1e-13 * (1.0 + direct.abs().max(expected.abs()));
+                assert!(
+                    (direct - expected).abs() <= tolerance,
+                    "direct residual {direct:.16e} differs from generic residual {expected:.16e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn limited_legacy_bjt_direct_stamp_matches_generic_companion_anchor() {
+        assert_limited_direct_stamp_matches_generic(
+            Bjt::new_npn("qn".to_string(), 1, 2, 3),
+            [0.0, 5.0, 0.0],
+        );
+        assert_limited_direct_stamp_matches_generic(
+            Bjt::new_pnp("qp".to_string(), 1, 2, 3),
+            [0.0, -5.0, 0.0],
+        );
     }
 }
