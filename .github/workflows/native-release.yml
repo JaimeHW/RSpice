@@ -1,0 +1,278 @@
+name: Native backend release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_TOOLCHAIN: "1.94.0"
+  CARGO_DENY_VERSION: "0.19.9"
+  CARGO_AUDIT_VERSION: "0.22.2"
+  CARGO_CYCLONEDX_VERSION: "0.5.9"
+
+jobs:
+  validate:
+    name: Validate immutable release identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      source_date_epoch: ${{ steps.identity.outputs.source_date_epoch }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Validate tag, version, and main ancestry
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "native releases must run from an immutable tag" >&2
+            exit 1
+          fi
+          tag="$GITHUB_REF_NAME"
+          version=$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as source:
+              print(tomllib.load(source)["workspace"]["package"]["version"])
+          PY
+          )
+          if [ "$tag" != "v$version" ]; then
+            echo "tag $tag does not match workspace version $version" >&2
+            exit 1
+          fi
+          if [ "$(git cat-file -t "refs/tags/$tag")" != "tag" ]; then
+            echo "release tags must be annotated" >&2
+            exit 1
+          fi
+          commit=$(git rev-list -n 1 "refs/tags/$tag")
+          if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release tag did not resolve to an exact commit" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$commit" origin/main
+          source_date_epoch=$(git show -s --format=%ct "$commit")
+          git diff --exit-code
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=$source_date_epoch" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Package ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: native-release-${{ matrix.target }}
+      - name: Build locked release backend
+        env:
+          RSPICE_BUILD_COMMIT: ${{ needs.validate.outputs.commit }}
+          RUSTFLAGS: -D warnings
+        run: cargo build --locked --release -p rspice-cli --target ${{ matrix.target }}
+      - name: Smoke packaged backend identity and readiness
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ needs.validate.outputs.commit }}
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          binary="target/${EXPECTED_TARGET}/release/rspice"
+          case "$EXPECTED_TARGET" in
+            *windows*) binary="${binary}.exe" ;;
+          esac
+          "$binary" --version
+          "$binary" health --json > health.json
+          python - <<'PY'
+          import json
+          import os
+          with open("health.json", encoding="utf-8") as source:
+              health = json.load(source)
+          assert health["ready"] is True, health
+          assert health["tool"]["profile"] == "release", health
+          assert health["tool"]["target"] == os.environ["EXPECTED_TARGET"], health
+          assert health["tool"]["commit"] == os.environ["EXPECTED_COMMIT"], health
+          PY
+      - name: Create deterministic release archive and checksum
+        shell: bash
+        env:
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          binary="target/${RELEASE_TARGET}/release/rspice"
+          case "$RELEASE_TARGET" in
+            *windows*) binary="${binary}.exe" ;;
+          esac
+          python tools/release/package_native.py \
+            --binary "$binary" \
+            --target "$RELEASE_TARGET" \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            --out dist
+      - name: Upload native package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-native-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+      - name: Attest native package provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: dist/*
+
+  supply-chain:
+    name: Release advisory gate and SBOM
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: native-release-supply-chain
+      - name: Install pinned security tooling
+        run: |
+          cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
+          cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+          cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked
+      - name: Gate current dependency risk
+        run: |
+          python tools/security/check_advisory_exceptions.py
+          cargo deny check advisories bans licenses sources
+          cargo audit
+      - name: Generate release SBOM and checksum
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_DATE_EPOCH: ${{ needs.validate.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          cargo cyclonedx --format json --spec-version 1.5 --target all \
+            --manifest-path crates/rspice-cli/Cargo.toml \
+            --override-filename rspice-cli.cdx
+          mkdir -p dist
+          mv crates/rspice-cli/rspice-cli.cdx.json "dist/rspice-${RELEASE_VERSION}.cdx.json"
+          cd dist
+          sha256sum "rspice-${RELEASE_VERSION}.cdx.json" > "rspice-${RELEASE_VERSION}.cdx.json.sha256"
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sbom
+          path: dist/*
+          if-no-files-found: error
+      - name: Attest release SBOM provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: dist/*
+
+  publish:
+    name: Publish verified GitHub release
+    needs: [validate, build, supply-chain]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify complete checksum set
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          archive_count=$(find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | wc -l)
+          if [ "$archive_count" -ne 6 ]; then
+            echo "expected six native archives, found $archive_count" >&2
+            exit 1
+          fi
+          checksum_count=$(find . -maxdepth 1 -type f -name '*.sha256' | wc -l)
+          if [ "$checksum_count" -ne 7 ]; then
+            echo "expected seven checksum sidecars, found $checksum_count" >&2
+            exit 1
+          fi
+          sha256sum --check --strict *.sha256
+      - name: Create or repair release from verified assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f -print | sort)
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --verify-tag \
+              --title "RSpice ${RELEASE_VERSION}" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi

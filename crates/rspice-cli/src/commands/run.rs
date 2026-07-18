@@ -925,6 +925,7 @@ fn write_run_summary(
             "version": env!("CARGO_PKG_VERSION"),
             "target": env!("RSPICE_BUILD_TARGET"),
             "profile": env!("RSPICE_BUILD_PROFILE"),
+            "commit": env!("RSPICE_BUILD_COMMIT"),
         },
         "run_id": crate::observability::run_id(),
         "netlist": args.input.display().to_string(),

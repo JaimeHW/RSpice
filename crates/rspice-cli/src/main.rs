@@ -44,6 +44,9 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
                 "tool": {
                     "name": "rspice",
                     "version": env!("CARGO_PKG_VERSION"),
+                    "target": env!("RSPICE_BUILD_TARGET"),
+                    "profile": env!("RSPICE_BUILD_PROFILE"),
+                    "commit": env!("RSPICE_BUILD_COMMIT"),
                 },
                 "run_id": observability::run_id(),
                 "error": {

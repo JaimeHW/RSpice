@@ -41,8 +41,27 @@ fn readiness_json_exercises_parser_and_solver() {
     assert_eq!(json["checks"]["solver"]["branch_count"], 1);
     assert_eq!(json["checks"]["solver"]["output_voltage"], 1.0);
     assert!(json["run_id"].is_string());
+    assert_eq!(json["tool"]["profile"], "debug");
+    assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
+    assert!(valid_build_commit(json["tool"]["commit"].as_str().unwrap()));
 
     let _ = std::fs::remove_dir_all(directory);
+}
+
+fn valid_build_commit(commit: &str) -> bool {
+    commit == "unknown"
+        || (commit.len() == 40
+            && commit
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+}
+
+#[test]
+fn version_reports_the_correlatable_source_revision() {
+    let output = run_rspice(&["--version"]);
+    assert_eq!(output.status.code(), Some(0));
+    let version = String::from_utf8(output.stdout).expect("UTF-8 version output");
+    assert!(version.contains(env!("RSPICE_BUILD_COMMIT")), "{version}");
 }
 
 #[test]

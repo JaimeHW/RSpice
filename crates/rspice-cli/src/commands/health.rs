@@ -121,6 +121,7 @@ fn tool_identity() -> serde_json::Value {
         "version": env!("CARGO_PKG_VERSION"),
         "target": env!("RSPICE_BUILD_TARGET"),
         "profile": env!("RSPICE_BUILD_PROFILE"),
+        "commit": env!("RSPICE_BUILD_COMMIT"),
     })
 }
 

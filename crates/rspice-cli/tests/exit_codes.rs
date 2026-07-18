@@ -1002,6 +1002,7 @@ fn json_errors_publish_stable_automation_contract() {
     });
     assert_eq!(json["schema_version"], 1);
     assert_eq!(json["tool"]["name"], "rspice");
+    assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
     assert_eq!(json["error"]["code"], "input_not_found");
     assert_eq!(json["error"]["category"], "input");
     assert_eq!(json["error"]["retryable"], false);
@@ -1133,6 +1134,7 @@ fn summary_json_carries_the_verdict() {
         "per-run verdict must match failed measurement"
     );
     assert_eq!(json["tool"]["name"], "rspice");
+    assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
     assert_eq!(json["schema_version"], 1);
     assert_eq!(json["status"], "failed");
     assert_eq!(json["counts"]["runs"], 1);

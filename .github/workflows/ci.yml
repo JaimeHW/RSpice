@@ -21,6 +21,7 @@ env:
   CARGO_INCREMENTAL: "0"
   RUST_BACKTRACE: "1"
   RUST_TOOLCHAIN: "1.94.0"
+  ACTIONLINT_VERSION: "1.7.12"
 
 jobs:
   test-linux:
@@ -38,6 +39,11 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Lint GitHub workflows
+        run: |
+          export GOBIN="$RUNNER_TEMP/actionlint-bin"
+          go install "github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION}"
+          "$GOBIN/actionlint" .github/workflows/*.yml
       - name: CI configuration tests
         run: python3 tools/ci/test_ci_configuration.py
       - name: WASM playground worker tests
@@ -46,6 +52,8 @@ jobs:
         run: python3 tools/ci/test_ide_worker.py
       - name: Web release assembler tests
         run: python3 tools/deploy/test_build_site.py
+      - name: Native release packager tests
+        run: python3 tools/release/test_package_native.py
       - name: Check (warnings denied)
         env:
           RUSTFLAGS: -D warnings
@@ -177,13 +185,7 @@ jobs:
         run: |
           VERSION=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | head -1 | cut -d'"' -f2)
           echo "Cargo.lock pins wasm-bindgen $VERSION"
-          DIST="wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl"
-          if curl -sSfL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${VERSION}/${DIST}.tar.gz" | tar -xz; then
-            mv "${DIST}/wasm-bindgen" "$HOME/.cargo/bin/"
-          else
-            echo "prebuilt download failed; building from source"
-            cargo install wasm-bindgen-cli --version "$VERSION" --locked
-          fi
+          cargo install wasm-bindgen-cli --version "$VERSION" --locked
           wasm-bindgen --version
       - name: Build standalone website source
         working-directory: _site-source

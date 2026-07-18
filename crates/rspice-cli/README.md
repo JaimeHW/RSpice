@@ -337,7 +337,10 @@ Available on every subcommand:
 | `--log-format <FORMAT>` | Log format: `text` (default) or newline-delimited `json` with timestamp, source, process, thread, and `run_id` |
 | `--error-format <FORMAT>` | Fatal diagnostic format: `text` (default) or versioned `json` with stable code/category, retry policy, exit code, and numeric resource/convergence details |
 
-`rspice --version` reports the crate version with the build target and profile.
+`rspice --version` reports the crate version, build target, profile, and exact
+source commit. The same commit appears in health documents, structured fatal
+diagnostics, and run summaries so operators can correlate an installed binary
+with its release provenance.
 
 ## Configuration File
 

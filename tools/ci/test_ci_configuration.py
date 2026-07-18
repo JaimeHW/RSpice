@@ -20,6 +20,7 @@ class CiConfigurationTests(unittest.TestCase):
             ".github/workflows/python.yml",
             ".github/workflows/security.yml",
             ".github/workflows/coverage.yml",
+            ".github/workflows/native-release.yml",
         ]
 
         for workflow_path in workflows:
@@ -54,6 +55,7 @@ class CiConfigurationTests(unittest.TestCase):
             ".github/workflows/release-trigger.yml",
             ".github/workflows/security.yml",
             ".github/workflows/coverage.yml",
+            ".github/workflows/native-release.yml",
         ]
 
         for workflow_path in read_only_workflows:
@@ -122,9 +124,16 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('CARGO_PROFILE_DEV_DEBUG: "0"', workflow)
         self.assertIn('CARGO_PROFILE_TEST_DEBUG: "0"', workflow)
         self.assertIn("python3 tools/ci/test_ci_configuration.py", workflow)
+        self.assertIn('ACTIONLINT_VERSION: "1.7.12"', workflow)
+        self.assertIn(
+            'go install "github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION}"',
+            workflow,
+        )
+        self.assertIn('"$GOBIN/actionlint" .github/workflows/*.yml', workflow)
         self.assertIn("python3 tools/ci/test_wasm_playground.py", workflow)
         self.assertIn("python3 tools/ci/test_ide_worker.py", workflow)
         self.assertIn("python3 tools/deploy/test_build_site.py", workflow)
+        self.assertIn("python3 tools/release/test_package_native.py", workflow)
         self.assertRegex(
             workflow,
             r"- name: Clear check artifacts before tests\s+run: cargo clean",
@@ -247,6 +256,10 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("wasm-bindgen-cli (pinned to Cargo.lock)", workflow)
+        self.assertIn(
+            'cargo install wasm-bindgen-cli --version "$VERSION" --locked', workflow
+        )
+        self.assertNotIn("curl -sSfL", workflow)
         self.assertIn("site-smoke-bundle", workflow)
         self.assertIn("if-no-files-found: error", workflow)
         self.assertIn("RSpice-Release", release_trigger)
@@ -255,6 +268,38 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('"tablet", 820, 1180', build_script)
         self.assertIn('"phone", 390, 844', build_script)
         self.assertIn("cargo\", \"build\", \"--locked\"", build_script)
+
+    def test_native_release_is_immutable_attested_and_recoverable(self) -> None:
+        workflow = read_text(".github/workflows/native-release.yml")
+
+        self.assertIn('tags: ["v*"]', workflow)
+        self.assertIn('if [ "$GITHUB_REF_TYPE" != "tag" ]', workflow)
+        self.assertIn("release tags must be annotated", workflow)
+        self.assertIn("git merge-base --is-ancestor", workflow)
+        self.assertEqual(
+            len(re.findall(r"(?m)^\s+target: [A-Za-z0-9_.-]+$", workflow)), 6
+        )
+        for target in [
+            "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
+            "aarch64-apple-darwin",
+            "x86_64-apple-darwin",
+            "x86_64-pc-windows-msvc",
+            "aarch64-pc-windows-msvc",
+        ]:
+            self.assertIn(target, workflow)
+        self.assertIn("cargo build --locked --release -p rspice-cli", workflow)
+        self.assertIn('"$binary" health --json', workflow)
+        self.assertIn("tools/release/package_native.py", workflow)
+        self.assertIn("cargo deny check advisories bans licenses sources", workflow)
+        self.assertIn("cargo audit", workflow)
+        self.assertIn("cargo cyclonedx --format json --spec-version 1.5", workflow)
+        self.assertEqual(workflow.count("actions/attest@"), 2)
+        self.assertIn("sha256sum --check --strict *.sha256", workflow)
+        self.assertIn("gh release upload", workflow)
+        self.assertIn("--clobber", workflow)
+        self.assertIn("gh release create", workflow)
+        self.assertIn("--verify-tag", workflow)
 
     def test_security_and_coverage_workflows_are_present(self) -> None:
         security = read_text(".github/workflows/security.yml")

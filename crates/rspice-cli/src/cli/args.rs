@@ -57,7 +57,9 @@ const LONG_VERSION: &str = concat!(
     env!("RSPICE_BUILD_TARGET"),
     ", ",
     env!("RSPICE_BUILD_PROFILE"),
-    " build)"
+    " build, commit ",
+    env!("RSPICE_BUILD_COMMIT"),
+    ")"
 );
 
 /// RSpice - High-performance SPICE circuit simulator
