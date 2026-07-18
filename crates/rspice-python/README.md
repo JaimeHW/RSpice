@@ -26,6 +26,8 @@ regression tests in CI the same way you run unit tests.
 - **Application cancellation** — `engine.cancel()` safely stops every active
   call on that Engine from another Python thread and raises `CancelledError`
   in each caller
+- **Readiness probe** — `engine.health_check()` exercises the configured
+  parser-to-solver path without filesystem or network I/O
 - **Strict error discipline** — accessors raise `IndexError`/`KeyError` for
   invalid nodes; argument errors raise `ValueError`; nothing fabricates
   silent zeros

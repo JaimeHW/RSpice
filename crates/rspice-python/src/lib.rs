@@ -105,6 +105,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<netlist::PyStartupDirectiveScope>()?;
     m.add_class::<netlist::PyStartupDiagnostic>()?;
     m.add_class::<errors::PyUnresolvedOutputSymbol>()?;
+    m.add_class::<engine::PyHealthReport>()?;
     m.add_class::<engine::PyEngine>()?;
 
     // Configuration classes
@@ -185,6 +186,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "StartupDirectiveScope",
             "StartupDiagnostic",
             "UnresolvedOutputSymbol",
+            "HealthReport",
             "Engine",
             "SimulationConfig",
             "ResourceLimits",

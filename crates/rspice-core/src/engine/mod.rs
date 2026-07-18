@@ -30,6 +30,7 @@ mod dc;
 mod distortion;
 mod error;
 mod hb;
+mod health;
 mod matrix;
 mod pss;
 mod pss_noise;
@@ -65,6 +66,7 @@ pub use error::{
     SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
 pub use hb::{HbAnalysisResult, PacAnalysisResult, PnoiseAnalysisResult};
+pub use health::EngineHealthReport;
 pub use pss::{PssAnalysisResult, PssError};
 pub use pss_noise::OscPnoiseResult;
 pub use result::{TransientResult, TransientStoreTrace};

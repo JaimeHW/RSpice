@@ -76,10 +76,10 @@ pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, MeasureResult};
 pub use circuit::{Circuit, CircuitData, Node, NodeId};
 pub use device::{Device, DeviceModel};
 pub use engine::{
-    ConvergenceConfig, ConvergencePreset, DampingStrategy, Engine, JfetLevel2Model,
-    SimulationConfig, SimulationConfigError, SimulationConfigOverrides, SimulationError,
-    SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor, SpiceDialect,
-    resolve_simulation_config,
+    ConvergenceConfig, ConvergencePreset, DampingStrategy, Engine, EngineHealthReport,
+    JfetLevel2Model, SimulationConfig, SimulationConfigError, SimulationConfigOverrides,
+    SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
+    SpiceDialect, resolve_simulation_config,
 };
 #[cfg(feature = "veriloga")]
 pub use engine::{

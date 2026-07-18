@@ -31,6 +31,25 @@ pub enum LogFormat {
     Json,
 }
 
+/// Depth of the backend health probe.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum HealthMode {
+    /// Verify process startup and engine configuration only.
+    Liveness,
+    /// Exercise bounded parsing, circuit construction, and a DC solve.
+    #[default]
+    Readiness,
+}
+
+impl HealthMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Liveness => "liveness",
+            Self::Readiness => "readiness",
+        }
+    }
+}
+
 /// Version string with build metadata for `--version`.
 const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -88,6 +107,9 @@ pub enum Commands {
     /// Run a SPICE simulation
     Run(RunArgs),
 
+    /// Probe backend liveness or numerical readiness
+    Health(HealthArgs),
+
     /// Display netlist information without simulating
     Info(InfoArgs),
 
@@ -114,6 +136,18 @@ pub struct CompletionsArgs {
     /// Target shell
     #[arg(value_name = "SHELL")]
     pub shell: clap_complete::Shell,
+}
+
+/// Arguments for the backend health probe.
+#[derive(Args, Debug)]
+pub struct HealthArgs {
+    /// Probe depth
+    #[arg(long, value_enum, default_value_t = HealthMode::Readiness)]
+    pub mode: HealthMode,
+
+    /// Emit a versioned JSON health document
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the `run` subcommand

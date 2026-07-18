@@ -247,6 +247,30 @@ struct ResourceLayer {
 }
 
 impl Config {
+    /// Translate the validated frontend configuration into the engine's base
+    /// configuration. Command-specific and netlist-specific overrides are
+    /// applied after this shared boundary.
+    pub(crate) fn core_simulation_config(&self) -> rspice_core::SimulationConfig {
+        rspice_core::SimulationConfig {
+            temperature: self.simulation.temperature + 273.15,
+            max_iterations: self.simulation.max_iterations,
+            min_timestep: self.simulation.min_timestep,
+            max_timestep: self.simulation.max_timestep,
+            tolerance: self.simulation.reltol,
+            convergence_config: rspice_core::ConvergenceConfig {
+                voltage_reltol: self.simulation.reltol,
+                // SPICE tolerance semantics: ABSTOL bounds branch currents and
+                // VNTOL bounds node voltages.
+                voltage_abstol: 1e-6,
+                current_abstol: self.simulation.abstol,
+                residual_reltol: self.simulation.residual_reltol,
+                ..rspice_core::ConvergenceConfig::default()
+            },
+            resource_limits: self.resources.limits(),
+            ..rspice_core::SimulationConfig::default()
+        }
+    }
+
     /// Load configuration from default locations
     ///
     /// Configuration is loaded in order of priority (lowest to highest):

@@ -270,6 +270,18 @@ pub struct TransientSnapshot {
     pub voltages: Vec<Vec<f64>>,
 }
 
+/// Browser-facing parser-to-solver readiness result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WasmHealthReport {
+    pub status: String,
+    pub ready: bool,
+    pub duration_seconds: f64,
+    pub element_count: usize,
+    pub node_count: usize,
+    pub branch_count: usize,
+    pub output_voltage: f64,
+}
+
 impl WasmError {
     fn new(message: String, kind: &str, category: &str) -> Self {
         Self {
@@ -782,9 +794,35 @@ pub fn run_transient_analysis(
     run_transient_analysis_detailed(source, tstop, max_step).map_err(|error| error.message)
 }
 
+/// Exercise the configured browser parser-to-solver path without I/O.
+pub fn health_check_with_options_detailed(
+    options: &WasmExecutionOptions,
+) -> DetailedWasmResult<WasmHealthReport> {
+    let report = engine_with_resource_limits(options.resource_limits.to_core())?
+        .health_check()
+        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+    Ok(WasmHealthReport {
+        status: "ready".to_string(),
+        ready: true,
+        duration_seconds: report.elapsed.as_secs_f64(),
+        element_count: report.element_count,
+        node_count: report.node_count,
+        branch_count: report.branch_count,
+        output_voltage: report.output_voltage,
+    })
+}
+
 #[wasm_bindgen(js_name = defaultResourceLimits)]
 pub fn default_resource_limits_js() -> Result<JsValue, JsValue> {
     serialize_to_js(&WasmResourceLimits::default())
+}
+
+#[wasm_bindgen(js_name = healthCheck)]
+pub fn health_check_js(options: JsValue) -> Result<JsValue, JsValue> {
+    let options = execution_options_from_js(options).map_err(|error| wasm_error_to_js(*error))?;
+    let report =
+        health_check_with_options_detailed(&options).map_err(|error| wasm_error_to_js(*error))?;
+    serialize_to_js(&report)
 }
 
 #[wasm_bindgen(js_name = summarizeNetlist)]
@@ -912,6 +950,18 @@ mod tests {
         assert_eq!(browser.max_result_values, 2_000_000);
         assert!(browser.max_netlist_bytes < desktop.max_netlist_bytes);
         assert!(browser.max_analysis_points < desktop.max_analysis_points);
+    }
+
+    #[test]
+    fn browser_health_probe_exercises_parser_and_solver() {
+        let report = health_check_with_options_detailed(&WasmExecutionOptions::default())
+            .expect("browser backend is ready");
+        assert_eq!(report.status, "ready");
+        assert!(report.ready);
+        assert_eq!(report.element_count, 2);
+        assert_eq!(report.node_count, 1);
+        assert_eq!(report.branch_count, 1);
+        assert!((report.output_voltage - 1.0).abs() <= 1.0e-12);
     }
 
     #[test]

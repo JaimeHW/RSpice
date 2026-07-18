@@ -127,11 +127,12 @@ MVSG qualification remains roadmap work.
 
 ### Command line
 
-The CLI is built for scripted runs and CI: it executes the analyses a netlist requests, validates and inspects netlists, converts between output formats, and compares results against golden references. The exit status is the verification contract — failed `.MEAS` checks exit 3, non-finite results exit 1, comparison mismatches exit 3, `--timeout` overruns exit 124 — and runs can emit JUnit or TAP reports, a JSON run summary (`--summary`), and machine-readable measurement files.
+The CLI is built for scripted runs and CI: it executes the analyses a netlist requests, validates and inspects netlists, converts between output formats, and compares results against golden references. The exit status is the verification contract — failed `.MEAS` checks exit 3, non-finite results exit 1, comparison mismatches exit 3, `--timeout` overruns exit 124 — and runs can emit JUnit or TAP reports, a versioned JSON run summary (`--summary`), and machine-readable measurement files. Production wrappers can select newline-delimited JSON logs with `--log-format json` and structured fatal diagnostics with `--error-format json`.
 
 | Command | Description |
 | :--- | :--- |
 | `rspice run` | Execute simulations |
+| `rspice health` | Probe process liveness or parser-to-solver readiness |
 | `rspice info` | Print parsed netlist information |
 | `rspice check` | Validate syntax and connectivity |
 | `rspice compare` | Compare output against a golden result |
@@ -142,6 +143,9 @@ The CLI is built for scripted runs and CI: it executes the analyses a netlist re
 ```bash
 # Quiet batch run with a JUnit report and a time budget
 rspice run circuit.sp -q --report-format junit --report-file results.xml --timeout 600
+
+# Deployment readiness probe (versioned JSON, nonzero when not ready)
+rspice health --json
 
 # Compare results to a golden file (mismatches exit 3)
 rspice compare results.csv golden.csv --abstol 1e-9 --reltol 1e-6

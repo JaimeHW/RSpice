@@ -23,8 +23,8 @@ use crate::report::{
 use crate::cli::{CliError, Config, MeasFormat, OutputFormat, RunArgs};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
-    ConvergenceConfig, ConvergencePreset, Engine, Netlist, SimulationConfig,
-    SimulationConfigOverrides, resolve_simulation_config,
+    ConvergencePreset, Engine, Netlist, SimulationConfig, SimulationConfigOverrides,
+    resolve_simulation_config,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -1542,28 +1542,7 @@ fn rewrite_param_assignments(text: &str, defines: &[(String, f64)]) -> String {
 }
 
 fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
-    let base = SimulationConfig {
-        temperature: config.simulation.temperature + 273.15,
-        max_iterations: config.simulation.max_iterations,
-        min_timestep: config.simulation.min_timestep,
-        max_timestep: config.simulation.max_timestep,
-        tolerance: config.simulation.reltol,
-        convergence_config: ConvergenceConfig {
-            voltage_reltol: config.simulation.reltol,
-            // SPICE tolerance semantics: ABSTOL bounds branch currents and
-            // VNTOL bounds node voltages. Applying the 1e-12 current floor
-            // to voltages demands convergence a million times tighter than
-            // ngspice and stalls junction decks at conduction handoffs.
-            // Deck-level `.options vntol` still overrides through the
-            // config resolver.
-            voltage_abstol: 1e-6,
-            current_abstol: config.simulation.abstol,
-            residual_reltol: config.simulation.residual_reltol,
-            ..ConvergenceConfig::default()
-        },
-        resource_limits: config.resources.limits(),
-        ..SimulationConfig::default()
-    };
+    let base = config.core_simulation_config();
 
     let convergence_mode = args
         .convergence

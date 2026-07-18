@@ -13,6 +13,7 @@ pub mod compare;
 pub mod compile_va;
 pub mod convert;
 pub(crate) mod export_table;
+pub mod health;
 pub mod info;
 pub mod run;
 mod run_signals;
@@ -21,6 +22,7 @@ pub(crate) mod waveform_io;
 pub use check::execute as check;
 pub use compile_va::execute as compile_va;
 pub use convert::execute as convert;
+pub use health::execute as health;
 pub use info::execute as info;
 pub use run::execute as run;
 

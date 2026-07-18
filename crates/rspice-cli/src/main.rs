@@ -115,6 +115,7 @@ fn main() -> ExitCode {
     // Execute command
     let result: Result<(), cli::CliError> = match cli.command {
         Commands::Run(args) => commands::run(args, &config, cli.verbose, cli.quiet),
+        Commands::Health(args) => commands::health(args, &config, cli.verbose, cli.quiet),
         Commands::Info(args) => commands::info(args, &config, cli.verbose, cli.quiet),
         Commands::CompileVa(args) => commands::compile_va(args, &config, cli.verbose, cli.quiet),
         Commands::Check(args) => commands::check(args, &config, cli.verbose, cli.quiet),

@@ -21,6 +21,7 @@ by throwing an `RSpiceError` with stable structured fields.
 | JS function | Arguments | Returns |
 | :--- | :--- | :--- |
 | `defaultResourceLimits()` | none | camelCase browser resource policy object |
+| `healthCheck([options])` | optional execution options | parser-to-solver readiness report with timing and probe counts |
 | `summarizeNetlist(source[, options])` | netlist text and optional execution options | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count}` |
 | `runDcOperatingPoint(source[, options])` | netlist text and optional execution options | `{node_names, node_voltages, branch_names, branch_currents}` |
 | `runAcAnalysis(source, frequencies[, options])` | netlist text, `Float64Array`/array of Hz values (non-empty, finite, and non-negative), and optional options | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}`, one entry per frequency |
@@ -46,11 +47,12 @@ ceilings. The defaults cap netlists at 8 MiB, circuit matrices at 2,000
 unknowns, analysis grids at 200,000 points, retained results at 2,000,000
 scalar values, and shared caches at 64 MiB.
 
-Thrown errors expose `kind`, `category`, and `details`. Resource failures add
+Thrown errors expose the cross-interface `code`, compatibility `kind`,
+`category`, conservative `retryable` policy, and `details`. Resource failures add
 `resource`, `requested`, and `limit`; convergence errors add `iterations`;
 diagnostic errors retain source locations and unresolved output symbols.
 
-The same four operations are also exported as plain Rust functions
+The same analysis operations are also exported as plain Rust functions
 (`summarize_netlist`, `run_dc_operating_point`, `run_ac_analysis`,
 `run_transient_analysis`) returning `Result<T, String>`, since the crate
 builds as both `cdylib` and `rlib`. Their `*_detailed` variants return

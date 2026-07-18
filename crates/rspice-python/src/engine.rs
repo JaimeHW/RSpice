@@ -672,6 +672,39 @@ fn configure_hb_numerics(
 ///     >>> engine = Engine()
 ///     >>> result = engine.run_dc_op(netlist)
 ///     >>> print(f"V(out) = {result.voltage('out')} V")
+#[pyclass(name = "HealthReport", module = "rspice", frozen, from_py_object)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PyHealthReport {
+    #[pyo3(get)]
+    pub status: &'static str,
+    #[pyo3(get)]
+    pub ready: bool,
+    #[pyo3(get)]
+    pub duration_seconds: f64,
+    #[pyo3(get)]
+    pub element_count: usize,
+    #[pyo3(get)]
+    pub node_count: usize,
+    #[pyo3(get)]
+    pub branch_count: usize,
+    #[pyo3(get)]
+    pub output_voltage: f64,
+}
+
+impl From<rspice_core::EngineHealthReport> for PyHealthReport {
+    fn from(report: rspice_core::EngineHealthReport) -> Self {
+        Self {
+            status: "ready",
+            ready: true,
+            duration_seconds: report.elapsed.as_secs_f64(),
+            element_count: report.element_count,
+            node_count: report.node_count,
+            branch_count: report.branch_count,
+            output_voltage: report.output_voltage,
+        }
+    }
+}
+
 #[pyclass(name = "Engine", module = "rspice", frozen)]
 pub struct PyEngine {
     inner: Engine,
@@ -1292,6 +1325,15 @@ impl PyEngine {
     #[getter]
     fn progress(&self) -> Option<f64> {
         self.active_runs.progress()
+    }
+
+    /// Exercise the configured parser-to-solver path with a deterministic,
+    /// bounded in-memory circuit.
+    pub fn health_check(&self, py: Python<'_>) -> PyResult<PyHealthReport> {
+        run_interruptible(py, &self.active_runs, |abort| {
+            self.inner.health_check_with_abort(abort)
+        })
+        .map(Into::into)
     }
 
     /// Run every analysis directive in the netlist and evaluate .MEAS

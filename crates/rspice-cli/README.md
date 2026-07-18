@@ -25,6 +25,9 @@ rspice info circuit.sp
 
 # Validate syntax and connectivity
 rspice check circuit.sp --connectivity
+
+# Verify the deployed parser-to-solver path
+rspice health --json
 ```
 
 ## How Analyses Are Selected
@@ -81,6 +84,20 @@ TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject `-
 
 ## Commands
 
+### `rspice health` — Backend Health
+
+`rspice health` is a deployment probe. The default readiness mode validates the effective engine configuration and executes a deterministic, bounded in-memory circuit through parsing, construction, matrix assembly, and a linear DC solve. It performs no filesystem or network I/O. A failed check exits nonzero.
+
+```bash
+# Readiness: exercise the complete parser-to-solver path
+rspice health --json
+
+# Liveness: validate startup and engine configuration without admitting work
+rspice health --mode liveness --json
+```
+
+The versioned JSON response includes `status`, `ready`, probe duration, build/runtime identity, a per-check verdict, and the process `run_id` used by JSON logs and fatal diagnostics. Readiness honors the configured resource policy; liveness deliberately skips the synthetic workload so an intentionally narrow admission policy does not make the process appear dead.
+
 ### `rspice run` — Execute Simulations
 
 ```bash
@@ -97,7 +114,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` (default: config `output.format`, else `raw`) |
 | `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
 | `--meas` | Print `.MEAS` measurement results |
-| `--summary <FILE>` | Write a JSON run summary — tool version, per-run status, every measurement, the result files written, overall verdict — to FILE, or stdout with `-` |
+| `--summary <FILE>` | Write a versioned JSON run summary — build/run identity, execution counts and timing, effective resource limits, typed failures, every measurement, result files, and overall verdict — to FILE, or stdout with `-` |
 | `--progress` | Show a live percentage bar during transient analysis (the engine reports its completed fraction) |
 | `--compress` | Enable waveform compression for long simulations |
 | `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
@@ -317,6 +334,8 @@ Available on every subcommand:
 | `-q, --quiet` | Suppress non-error output |
 | `--config <FILE>` | Use a specific configuration file |
 | `--log-level <LEVEL>` | Set log level: `off`, `error`, `warn`, `info`, `debug`, `trace` |
+| `--log-format <FORMAT>` | Log format: `text` (default) or newline-delimited `json` with timestamp, source, process, thread, and `run_id` |
+| `--error-format <FORMAT>` | Fatal diagnostic format: `text` (default) or versioned `json` with stable code/category, retry policy, exit code, and numeric resource/convergence details |
 
 `rspice --version` reports the crate version with the build target and profile.
 
