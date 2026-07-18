@@ -1,0 +1,46 @@
+# Conservative starter profile for an isolated four-vCPU service worker.
+#
+# Treat these values as admission limits, not capacity promises. Benchmark the
+# real deck mix under the worker's OS/container CPU, memory, file, and runtime
+# quotas before changing them. Launch with an allowlisted environment because
+# RSPICE_* variables intentionally override this file.
+
+[simulation]
+temperature = 27.0
+max_iterations = 50
+abstol = 1e-12
+reltol = 1e-3
+residual_reltol = 1e-3
+min_timestep = 1e-12
+max_timestep = 1e-3
+compress_waveforms = false
+compression_tolerance = 1e-4
+convergence_mode = "default"
+
+[output]
+format = "raw"
+show_progress = false
+output_directory = "output"
+
+[paths]
+include_paths = []
+library_paths = []
+veriloga_includes = []
+
+[resources]
+max_netlist_bytes = 16777216
+max_netlist_lines = 500000
+max_expanded_source_bytes = 67108864
+max_dependency_source_bytes = 67108864
+max_external_data_bytes = 67108864
+max_external_data_values = 5000000
+max_shared_cache_bytes = 134217728
+max_include_depth = 32
+max_hierarchy_depth = 64
+max_flattened_elements = 50000
+max_circuit_nodes = 20000
+max_matrix_unknowns = 20000
+max_analysis_points = 1000000
+max_result_values = 5000000
+max_parallel_workers = 4
+max_batch_runs = 1000

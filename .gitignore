@@ -41,7 +41,9 @@ __pycache__/
 /rtlinv_*.cir
 /diagnostics/
 /design/
-/docs/
+/docs/*
+!/docs/operations/
+!/docs/operations/*.md
 /.codex-tools/
 /tmp/
 .agent/

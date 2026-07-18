@@ -52,7 +52,14 @@ class NativeReleasePackageTests(unittest.TestCase):
             self.assertEqual(manifest["schema_version"], 1)
             self.assertEqual(manifest["source"]["commit"], COMMIT)
             self.assertTrue(manifest["build"]["locked_dependencies"])
-            self.assertIn("Cargo.lock", [entry["path"] for entry in manifest["files"]])
+            payload_paths = [entry["path"] for entry in manifest["files"]]
+            for required in [
+                "Cargo.lock",
+                "NATIVE-RELEASE.md",
+                "PRODUCTION-RUNBOOK.md",
+                "production.toml",
+            ]:
+                self.assertIn(required, payload_paths)
 
     def test_windows_zip_contains_canonical_executable_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

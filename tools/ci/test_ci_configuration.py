@@ -289,7 +289,9 @@ class CiConfigurationTests(unittest.TestCase):
         ]:
             self.assertIn(target, workflow)
         self.assertIn("cargo build --locked --release -p rspice-cli", workflow)
-        self.assertIn('"$binary" health --json', workflow)
+        self.assertIn(
+            '"$binary" --config config/production.toml health --json', workflow
+        )
         self.assertIn("tools/release/package_native.py", workflow)
         self.assertIn("cargo deny check advisories bans licenses sources", workflow)
         self.assertIn("cargo audit", workflow)

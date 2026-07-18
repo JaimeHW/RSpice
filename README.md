@@ -25,7 +25,7 @@ Around the engine sit a CLI built for batch runs and CI, a desktop application f
 
 RSpice is a young project under active development. The surface area below is broad: major paths are implemented and covered by focused tests, but maturity and validation depth vary by subsystem. Accuracy is measured against ngspice continuously rather than assumed, and the current repository should not be presented as a substitute for hardened EDA tooling.
 
-Platform support is tracked by CI coverage and release gates; mobile/tablet browser use and signed release artifacts are still experimental or launch-only until their gates exist.
+Platform support is tracked by CI coverage and release gates. Native backend releases are built for six Linux, macOS, and Windows targets with deterministic archives, SHA-256 sidecars, CycloneDX SBOMs, exact source identity, and GitHub artifact attestations. Mobile/tablet browser use remains launch-gated separately.
 
 ## Quick start
 
@@ -34,7 +34,7 @@ The toolchain is pinned to Rust 1.94 via [rust-toolchain.toml](rust-toolchain.to
 ```bash
 git clone https://github.com/JaimeHW/RSpice.git
 cd RSpice
-cargo build --release -p rspice-cli   # the first release build takes a few minutes (fat LTO)
+cargo build --release -p rspice-cli   # the first optimized build compiles the full dependency graph
 ```
 
 Describe a circuit, `rc_lowpass.sp`:
@@ -232,6 +232,22 @@ cargo test --release -p rspice-core --test xyce_regression     # Xyce corpus
 ```
 
 The harness design uses oracle replay, comparison gating, and debug environment variables to keep simulator-corpus results explicit and reproducible.
+
+## Production operations
+
+The native backend is a stateless, one-shot worker process. Production service
+operators should use the checked conservative worker profile in
+[config/production.toml](config/production.toml) and follow the isolation,
+admission, observability, capacity, backup, restore, upgrade, rollback, and
+incident procedures in the
+[backend production runbook](docs/operations/production-runbook.md).
+
+Native releases are produced from annotated version tags for six target triples,
+then checksummed, attested, SBOM-bound, and published without permitting an
+existing asset to be replaced. The complete operator procedure is in the
+[native release runbook](docs/operations/native-release.md). Release archives
+include both runbooks, the production profile, and a manifest that records the
+exact source commit and payload hashes.
 
 ## Workspace
 

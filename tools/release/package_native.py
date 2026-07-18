@@ -87,6 +87,17 @@ def release_payloads(binary: Path, target: str) -> list[Payload]:
         ("NOTICE", ROOT / "NOTICE", 0o644),
         ("README.md", ROOT / "README.md", 0o644),
         ("CLI-README.md", ROOT / "crates" / "rspice-cli" / "README.md", 0o644),
+        (
+            "PRODUCTION-RUNBOOK.md",
+            ROOT / "docs" / "operations" / "production-runbook.md",
+            0o644,
+        ),
+        (
+            "NATIVE-RELEASE.md",
+            ROOT / "docs" / "operations" / "native-release.md",
+            0o644,
+        ),
+        ("production.toml", ROOT / "config" / "production.toml", 0o644),
         ("Cargo.lock", ROOT / "Cargo.lock", 0o644),
     ]
     payloads = [Payload(name, source.read_bytes(), mode) for name, source, mode in sources]
