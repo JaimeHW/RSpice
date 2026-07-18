@@ -6,6 +6,7 @@
 
 use crate::common::RSpiceApp;
 use crate::common::menu_bar::{FileMenuAction, dispatch_file_menu_action};
+use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{ComponentType, Tool};
 
 use super::state::{
@@ -1049,13 +1050,26 @@ impl Command {
             Self::SymbolDotTool => app.state.ui.symbol.tool = super::SymbolTool::Dot,
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection => {
-                app.state.schematic.rotate_selection();
+                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                app.state.schematic.rotate_selection_resolved(|component| {
+                    symbol_context.terminal_points(component)
+                });
             }
             Self::MirrorSelectionHorizontal => {
-                app.state.schematic.mirror_selection_h();
+                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                app.state
+                    .schematic
+                    .mirror_selection_h_resolved(|component| {
+                        symbol_context.terminal_points(component)
+                    });
             }
             Self::MirrorSelectionVertical => {
-                app.state.schematic.mirror_selection_v();
+                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                app.state
+                    .schematic
+                    .mirror_selection_v_resolved(|component| {
+                        symbol_context.terminal_points(component)
+                    });
             }
             Self::Cancel => {
                 if app.state.workbench.drawer.is_some() {
@@ -1618,6 +1632,90 @@ pub fn command_catalog() -> impl Iterator<Item = Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app_with_selected_authored_symbol() -> RSpiceApp {
+        use crate::state::{
+            Cell, Component, Library, LibraryCellInstance, Point, PortDirection, PortSpec,
+            SymbolDocument, SymbolPin, View, ViewType, Wire,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
+            ],
+            ..SymbolDocument::default()
+        };
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("authored symbol stores");
+        let mut cell = Cell::new("amp");
+        cell.add_view(symbol_view);
+        let mut library = Library::new("command_test");
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+
+        let interface = [
+            PortSpec {
+                name: "IN".to_owned(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "OUT".to_owned(),
+                direction: PortDirection::Out,
+            },
+        ];
+        let mut binding = LibraryCellInstance::new("command_test", "amp", "schematic");
+        binding.bind_interface(&interface);
+        app.state.schematic.components.push(
+            Component::new(701, ComponentType::CellInstance, Point::new(100, 50))
+                .with_library_cell(binding),
+        );
+        app.state
+            .schematic
+            .wires
+            .push(Wire::segment(702, Point::new(60, 40), Point::new(60, 0)));
+        app.state.schematic.selection.select_component(701);
+        app
+    }
+
+    #[test]
+    fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
+        use crate::state::{Point, Rotation};
+
+        let cases = [
+            (Command::RotateSelection, Point::new(110, 10), Rotation::R90),
+            (
+                Command::MirrorSelectionHorizontal,
+                Point::new(140, 40),
+                Rotation::R0,
+            ),
+            (
+                Command::MirrorSelectionVertical,
+                Point::new(60, 60),
+                Rotation::R0,
+            ),
+        ];
+
+        for (command, expected_wire_endpoint, expected_rotation) in cases {
+            let mut app = app_with_selected_authored_symbol();
+
+            command.execute(&mut app);
+
+            assert_eq!(
+                app.state.schematic.wires[0].points[0],
+                expected_wire_endpoint
+            );
+            assert_eq!(
+                app.state.schematic.components[0].rotation,
+                expected_rotation
+            );
+        }
+    }
 
     #[test]
     fn bus_commands_have_stable_mockup_identities() {
