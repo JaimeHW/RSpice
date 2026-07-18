@@ -283,12 +283,25 @@ pub fn collect_properties_from_component(
     // Get the primary property name for this component type
     let primary_prop = get_primary_property_name(component.kind);
 
-    // Parse the component value as the primary property
-    if !component.value.is_empty() {
-        properties.insert(
-            primary_prop.to_string(),
-            PropertyValue::Expression(component.value.clone()),
-        );
+    // Parse the component value as the primary property. A newly placed PWL
+    // source has no authored value yet, so seed its transaction from the CDF
+    // default at this bridge boundary. Once inside a transaction, an explicit
+    // empty string remains authored input and is rejected by the PWL editor.
+    if component.value.is_empty() && component.kind.is_pwl_source() {
+        if let Some(default) = registry
+            .get(component.kind)
+            .and_then(|sheet| sheet.iter().find(|def| def.name == primary_prop))
+            .map(|def| def.default_value.clone())
+        {
+            properties.insert(primary_prop.to_owned(), default);
+        }
+    } else if !component.value.is_empty() {
+        let value = if component.kind.is_pwl_source() {
+            PropertyValue::String(component.value.clone())
+        } else {
+            PropertyValue::Expression(component.value.clone())
+        };
+        properties.insert(primary_prop.to_string(), value);
     }
 
     // Parse additional parameters from params string
@@ -424,10 +437,11 @@ pub fn apply_properties_to_component(
 /// Used for serialization to SPICE netlist format.
 fn property_value_to_string(value: &PropertyValue) -> String {
     match value {
-        PropertyValue::Number { value, .. } => {
-            // Use engineering notation for cleaner values
-            crate::properties::format_engineering_value(*value)
-        }
+        // Rust's finite-f64 display is the shortest decimal that round-trips
+        // to the same binary value. This boundary feeds the durable SPICE
+        // model, so presentation-oriented engineering formatting (which may
+        // round) must never be used here.
+        PropertyValue::Number { value, .. } => value.to_string(),
         PropertyValue::String(s) => s.clone(),
         PropertyValue::Expression(expr) => expr.clone(),
         PropertyValue::Enum { selected, .. } => selected.clone(),
@@ -441,7 +455,7 @@ fn property_value_to_string(value: &PropertyValue) -> String {
 fn property_values_equal(a: &PropertyValue, b: &PropertyValue) -> bool {
     match (a, b) {
         (PropertyValue::Number { value: va, .. }, PropertyValue::Number { value: vb, .. }) => {
-            (va - vb).abs() < 1e-15 || (va.is_nan() && vb.is_nan())
+            va == vb || (va.is_nan() && vb.is_nan())
         }
         (PropertyValue::String(sa), PropertyValue::String(sb)) => sa == sb,
         (PropertyValue::Expression(ea), PropertyValue::Expression(eb)) => ea == eb,
@@ -457,3 +471,123 @@ fn property_values_equal(a: &PropertyValue, b: &PropertyValue) -> bool {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::Point;
+
+    #[test]
+    fn numeric_serialization_is_shortest_and_round_trips_exactly() {
+        let values = [
+            1.234_567_890_123_456_7,
+            1.234_567_890_123_456_7e-27,
+            f64::from_bits(1),
+            f64::MAX,
+        ];
+
+        for value in values {
+            let serialized = property_value_to_string(&PropertyValue::number(value));
+            let parsed = serialized
+                .parse::<f64>()
+                .unwrap_or_else(|error| panic!("{serialized:?} is not a decimal: {error}"));
+            assert_eq!(
+                parsed.to_bits(),
+                value.to_bits(),
+                "serialization changed {value:?} to {parsed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn component_bridge_preserves_high_precision_primary_values() {
+        let registry = PropertyRegistry::new();
+        let value = 1.234_567_890_123_456_7e-6;
+        let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
+        let properties = HashMap::from([("r".to_owned(), PropertyValue::number(value))]);
+
+        apply_properties_to_component(&mut component, &properties, &registry);
+
+        assert_eq!(
+            component
+                .value
+                .parse::<f64>()
+                .expect("serialized resistance"),
+            value
+        );
+    }
+
+    #[test]
+    fn component_bridge_does_not_drop_a_small_nonzero_default_delta() {
+        let registry = PropertyRegistry::new();
+        let value = 5.0e-16;
+        let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
+        let properties = HashMap::from([("tc1".to_owned(), PropertyValue::number(value))]);
+
+        assert!(!property_values_equal(
+            &PropertyValue::number(value),
+            &PropertyValue::number(0.0)
+        ));
+        apply_properties_to_component(&mut component, &properties, &registry);
+
+        let serialized = parse_params_string(&component.params);
+        let tc1 = serialized.get("tc1").expect("non-default tc1 is retained");
+        assert_eq!(tc1.parse::<f64>().expect("serialized tc1"), value);
+    }
+
+    #[test]
+    fn blank_optional_source_defaults_are_omitted_from_durable_parameters() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::VoltageSource, Point::origin());
+        let properties = HashMap::from([
+            (
+                "pacdbm".to_owned(),
+                PropertyValue::Expression(String::new()),
+            ),
+            ("rp".to_owned(), PropertyValue::Expression(String::new())),
+        ]);
+
+        apply_properties_to_component(&mut component, &properties, &registry);
+
+        assert!(component.params.is_empty());
+        assert!(!component.params.contains("inf"));
+    }
+}
+
+#[cfg(test)]
+mod pwl_tests {
+    use super::*;
+    use crate::state::Point;
+
+    #[test]
+    fn new_pwl_sources_seed_the_registry_waveform_default() {
+        let registry = PropertyRegistry::new();
+
+        for (kind, expected) in [
+            (ComponentType::VoltageSourcePwl, "0 0 1u 1 2u 0"),
+            (ComponentType::CurrentSourcePwl, "0 0 1u 1m 2u 0"),
+        ] {
+            let component = Component::new(1, kind, Point::origin());
+            let properties = collect_properties_from_component(&component, &registry);
+
+            assert_eq!(
+                properties.get("pwl_data"),
+                Some(&PropertyValue::String(expected.to_owned()))
+            );
+        }
+    }
+
+    #[test]
+    fn authored_pwl_source_uses_the_schema_string_type() {
+        let registry = PropertyRegistry::new();
+        let component = Component::new(1, ComponentType::VoltageSourcePwl, Point::origin())
+            .with_name_value("V1", "0 0 2n 1");
+
+        let properties = collect_properties_from_component(&component, &registry);
+
+        assert_eq!(
+            properties.get("pwl_data"),
+            Some(&PropertyValue::String("0 0 2n 1".to_owned()))
+        );
+    }
+}

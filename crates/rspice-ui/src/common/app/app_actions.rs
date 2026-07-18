@@ -279,15 +279,15 @@ impl RSpiceApp {
                 }
             }
             ShortcutCommand::ObjectProperties => {
-                if let Some(comp_id) = self.state.schematic.selection.single_component() {
-                    super::open_property_editor(&mut self.state, comp_id);
-                }
+                super::open_selected_object_properties(&mut self.state);
             }
             ShortcutCommand::Cancel => {
                 if self.state.workbench.drawer.is_some() {
                     self.state.workbench.close_drawer();
+                } else if self.state.dialogs.object_properties.open {
+                    self.state.dialogs.object_properties.attempt_close();
                 } else if self.state.tabbed_property_dialog.open {
-                    self.state.tabbed_property_dialog.close();
+                    self.state.tabbed_property_dialog.attempt_close();
                 } else if self.state.workbench.workspace
                     == crate::workbench::state::Workspace::Results
                     && self.state.ui.results.cursors.any()
@@ -919,6 +919,42 @@ mod shortcut_ownership_tests {
         assert!(app.state.ui.results.linked_cursors);
         app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
         assert!(!app.state.ui.results.linked_cursors);
+    }
+
+    #[test]
+    fn object_properties_shortcut_dispatches_bus_and_guards_dirty_cancel() {
+        use crate::state::{Bus, BusDeclaration, Point};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.schematic.buses.push(
+            Bus::segment(
+                87,
+                Point::new(0, 0),
+                Point::new(20, 0),
+                Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+            )
+            .unwrap(),
+        );
+        app.state.schematic.selection.select_only_bus(87);
+
+        app.execute_shortcut_command(ShortcutCommand::ObjectProperties);
+        assert!(matches!(
+            app.state.dialogs.object_properties.draft,
+            Some(super::super::ObjectPropertiesDraft::Bus(_))
+        ));
+        let Some(super::super::ObjectPropertiesDraft::Bus(draft)) =
+            app.state.dialogs.object_properties.draft.as_mut()
+        else {
+            unreachable!()
+        };
+        draft.declaration = "ADDR[7:0]".to_owned();
+        app.state.dialogs.object_properties.mark_edited();
+
+        app.execute_shortcut_command(ShortcutCommand::Cancel);
+        assert!(app.state.dialogs.object_properties.open);
+        assert!(app.state.dialogs.object_properties.discard_confirm);
+        app.execute_shortcut_command(ShortcutCommand::Cancel);
+        assert!(!app.state.dialogs.object_properties.open);
     }
 
     #[test]

@@ -789,8 +789,8 @@ mod tests {
     }
 
     #[test]
-    fn base_and_range_mismatches_are_rejected_live() {
-        for slice in ["ADDR[7:0]", "DATA[16]", "DATA[0:8]"] {
+    fn base_and_out_of_range_selectors_are_rejected_live() {
+        for slice in ["ADDR[7:0]", "DATA[16]", "DATA[16:8]"] {
             let draft = BusTapDialogState {
                 open: true,
                 bus: BUS_EXAMPLE.to_owned(),

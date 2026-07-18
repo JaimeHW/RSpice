@@ -20,5 +20,6 @@ pub mod tabbed_dialog;
 pub use engineering::{format_engineering_value, parse_engineering_value};
 pub use property_bridge::parse_params_string;
 pub use tabbed_dialog::{
-    TabInfo, TabbedDialogResult, TabbedPropertyDialogState, render_tabbed_property_dialog,
+    ComponentPropertySession, TabInfo, TabbedDialogResult, TabbedPropertyDialogState,
+    render_tabbed_property_dialog,
 };

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Net labels assign symbolic names to circuit nodes (e.g., "VCC", "GND", "OUT").
 /// In SPICE netlists, all points with the same label are electrically connected.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NetLabel {
     /// Unique identifier
     pub id: u64,

@@ -14,6 +14,7 @@ mod pane;
 mod pill;
 mod section;
 mod select;
+mod selection_command;
 mod table;
 mod toast;
 mod tree;
@@ -32,6 +33,10 @@ pub use pane::{
 pub use pill::{Pill, PillState};
 pub use section::section_header;
 pub use select::select;
+pub(crate) use select::select_with_response;
+pub(crate) use selection_command::{
+    SelectionImpact, SelectionPreview, selection_command_workflow, workflow_preview_status,
+};
 pub use table::measurement_table;
 pub use toast::{NotificationCategory, NotificationRecord, Toast, ToastKind, Toasts};
 pub use tree::{TreeRow, TreeRowResult};

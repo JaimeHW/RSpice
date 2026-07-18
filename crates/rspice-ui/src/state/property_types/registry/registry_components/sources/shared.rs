@@ -76,9 +76,9 @@ impl PropertyRegistry {
         sheet.add(
             PropertyDefinition::new("pacdbm")
                 .with_display_name("PAC Power (dBm)")
-                .with_description("Periodic AC power in dBm (alternative to pacmag)")
+                .with_description("Periodic AC power in dBm; leave blank to disable")
                 .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(f64::NEG_INFINITY))
+                .with_default(PropertyValue::expression(""))
                 .with_unit("dBm")
                 .with_order(32)
                 .with_category("Advanced AC")
@@ -122,11 +122,11 @@ impl PropertyRegistry {
         sheet.add(
             PropertyDefinition::new("rp")
                 .with_display_name("Parallel Resistance")
-                .with_description("Parallel leakage resistance (inf = ideal)")
+                .with_description("Parallel leakage resistance; leave blank for ideal")
                 .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(f64::INFINITY))
+                .with_default(PropertyValue::expression(""))
                 .with_unit("Ω")
-                .with_range(0.0, f64::INFINITY)
+                .with_range(0.0, f64::MAX)
                 .with_order(41)
                 .with_category("Parasitics"),
         );

@@ -92,10 +92,13 @@ pub(super) fn handle_tool_interactions(
         }
     }
 
-    if response.double_clicked_by(egui::PointerButton::Primary)
+    if matches!(current_tool, Tool::Select)
+        && response.double_clicked_by(egui::PointerButton::Primary)
         && let Some(pos) = response.interact_pointer_pos()
     {
         let grid_pos = screen_to_grid(viewport, grid_size, pos);
+        let hit_pos = screen_to_schematic(viewport, pos);
+        let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
         // Hierarchical instances descend on double-click (the Virtuoso
         // gesture); the breadcrumb pops back out. Everything else opens
         // its properties.
@@ -110,7 +113,7 @@ pub(super) fn handle_tool_interactions(
             state.schematic.selection.select_component(id);
             state.open_selected_instance_master();
         } else {
-            open_component_properties(state, grid_pos);
+            open_object_properties(state, grid_pos, hit_pos, hit_radius, symbol_context);
         }
     }
 
@@ -729,12 +732,20 @@ fn handle_component_probe(
     }
 }
 
-fn open_component_properties(state: &mut AppState, grid_pos: Point) {
-    if let Some(comp_id) = state.schematic.component_at(grid_pos) {
-        state.schematic.selection.clear();
-        state.schematic.selection.select_component(comp_id);
-        crate::common::app::open_property_editor(state, comp_id);
+fn open_object_properties(
+    state: &mut AppState,
+    grid_pos: Point,
+    hit_pos: Point,
+    hit_radius: i32,
+    symbol_context: &SchematicSymbolContext,
+) {
+    match pointer_target(state, grid_pos, hit_pos, hit_radius, symbol_context) {
+        Some(PointerTarget::Component(id)) => state.schematic.selection.select_only_component(id),
+        Some(PointerTarget::BusTap(id)) => state.schematic.selection.select_only_bus_tap(id),
+        Some(PointerTarget::Bus(id)) => state.schematic.selection.select_only_bus(id),
+        Some(PointerTarget::Junction(_)) | Some(PointerTarget::Wire(_)) | None => return,
     }
+    crate::common::app::open_selected_object_properties(state);
 }
 
 #[cfg(test)]
@@ -808,6 +819,44 @@ mod tests {
             pointer_target(&state, point, point, 1, &context),
             Some(PointerTarget::Wire(11))
         );
+    }
+
+    #[test]
+    fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
+        let mut state = AppState::default();
+        let bus = Bus::segment(
+            20,
+            Point::new(0, 0),
+            Point::new(20, 0),
+            Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+        )
+        .unwrap();
+        let tap = BusTap::new(
+            21,
+            &bus,
+            Point::new(10, 0),
+            Point::new(10, 10),
+            BusSlice::parse("DATA[3]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        state.schematic.buses.push(bus);
+        state.schematic.bus_taps.push(tap);
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+
+        open_object_properties(
+            &mut state,
+            Point::new(10, 0),
+            Point::new(10, 0),
+            1,
+            &symbol_context,
+        );
+
+        assert_eq!(state.schematic.selection.single_bus_tap(), Some(21));
+        assert!(matches!(
+            state.dialogs.object_properties.draft,
+            Some(crate::common::app::ObjectPropertiesDraft::BusTap(_))
+        ));
     }
 
     #[test]

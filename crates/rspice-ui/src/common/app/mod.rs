@@ -52,7 +52,9 @@ pub use app_confirmation_state::{
 pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
 
 mod app_dialog_state;
-pub(crate) use app_dialog_state::BusTapDialogState;
+pub(crate) use app_dialog_state::{
+    BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft, ObjectPropertiesDraft,
+};
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
 mod app_preference_runtime;
@@ -70,11 +72,12 @@ use app_veriloga_library::{
 };
 
 mod app_property_edit;
-pub(crate) use app_property_edit::open_property_editor;
+pub(crate) use app_property_edit::{open_property_editor, open_selected_object_properties};
 
 mod app_modal_workflows;
 
 mod app_bus_tap_dialog;
+mod app_object_properties_dialog;
 
 mod app_shortcuts;
 pub(crate) use app_shortcuts::{
@@ -198,6 +201,10 @@ pub struct AppState {
     /// Monotonic token that invalidates in-flight controller work whenever an
     /// unrelated design document replaces the active project/schematic.
     pub(crate) design_execution_epoch: u64,
+    /// Monotonic identity for the active schematic buffer. Unlike the
+    /// execution epoch, this advances on ordinary cell/view navigation so an
+    /// A→B→A round trip cannot revive a stale editor transaction.
+    pub(crate) active_schematic_epoch: u64,
     /// Dialog visibility
     pub(crate) dialogs: DialogState,
     /// Typed analysis configuration behind the Simulate view.
@@ -841,6 +848,7 @@ impl RSpiceApp {
         self.render_license_dialog(ctx);
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);
+        self.render_object_properties_dialog(ctx);
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);

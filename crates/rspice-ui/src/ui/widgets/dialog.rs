@@ -32,7 +32,7 @@ pub enum DialogSize {
     /// Transactional edits and confirmations: 760 pt wide, content-height,
     /// capped at 760 pt, with the full-viewport shell applied at 560 pt.
     Transaction,
-    /// Mockup-authored Simulation Studio transactions: 760 pt wide and
+    /// Mockup-authored workflow transactions: 760 pt wide and
     /// content-height, with the full-viewport workflow shell applied at the
     /// shared 820 pt dialog breakpoint; individual fields stack by local width.
     SimulationWorkflow,
@@ -454,6 +454,7 @@ pub struct Dialog<'a> {
     size: DialogSize,
     primary: &'a str,
     primary_enabled: bool,
+    interaction_enabled: bool,
     primary_on_enter: bool,
     destructive: bool,
     secondary: Option<&'a str>,
@@ -479,6 +480,7 @@ impl<'a> Dialog<'a> {
             size: DialogSize::Transaction,
             primary,
             primary_enabled: true,
+            interaction_enabled: true,
             primary_on_enter: true,
             destructive: false,
             secondary: None,
@@ -523,6 +525,13 @@ impl<'a> Dialog<'a> {
     /// while disabled.
     pub fn primary_enabled(mut self, enabled: bool) -> Self {
         self.primary_enabled = enabled;
+        self
+    }
+
+    /// Keep a parent workflow visible but inert while a nested modal owns
+    /// pointer, keyboard, and assistive-technology interaction.
+    pub fn interaction_enabled(mut self, enabled: bool) -> Self {
+        self.interaction_enabled = enabled;
         self
     }
 
@@ -688,6 +697,7 @@ impl<'a> Dialog<'a> {
                     .max_rect(layout.surface_rect)
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
+            surface.set_enabled(self.interaction_enabled);
             surface.set_width(width);
             if layout.fill_height {
                 surface.set_min_height(max_height);
@@ -850,7 +860,11 @@ impl<'a> Dialog<'a> {
         // primary action. Single-line text fields retain the canonical
         // Enter-to-submit behavior; multiline owners opt out explicitly with
         // `primary_on_enter(false)`.
-        if choice == DialogChoice::None && is_top_modal && !any_popup_open {
+        if choice == DialogChoice::None
+            && self.interaction_enabled
+            && is_top_modal
+            && !any_popup_open
+        {
             if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
                 choice = DialogChoice::Cancelled;
             } else if self.primary_enabled

@@ -592,7 +592,11 @@ impl Command {
                     selection.pins.len() + selection.shapes.len() == 1
                 } else {
                     active_schematic_editor(app)
-                        && state.schematic.selection.single_component().is_some()
+                        && !state.schematic.read_only
+                        && !state.active_view_read_only()
+                        && (state.schematic.selection.single_component().is_some()
+                            || state.schematic.selection.single_bus().is_some()
+                            || state.schematic.selection.single_bus_tap().is_some())
                 }
             }
             Self::ZoomFit => {
@@ -864,8 +868,8 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.state.workbench.inspector_visible = true;
                     app.state.workbench.drawer = Some(super::state::Drawer::Inspector);
-                } else if let Some(id) = app.state.schematic.selection.single_component() {
-                    crate::common::app::open_property_editor(&mut app.state, id);
+                } else {
+                    crate::common::app::open_selected_object_properties(&mut app.state);
                 }
             }
             Self::FindInDesign => {
@@ -1056,8 +1060,10 @@ impl Command {
             Self::Cancel => {
                 if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
+                } else if app.state.dialogs.object_properties.open {
+                    app.state.dialogs.object_properties.attempt_close();
                 } else if app.state.tabbed_property_dialog.open {
-                    app.state.tabbed_property_dialog.close();
+                    app.state.tabbed_property_dialog.attempt_close();
                 } else if app.state.workbench.workspace == Workspace::Results
                     && app.state.ui.results.cursors.any()
                 {
@@ -1654,6 +1660,54 @@ mod tests {
         app.state.schematic.read_only = true;
         assert!(!Command::PlaceBus.is_enabled(&app));
         assert!(!Command::PlaceBusTap.is_enabled(&app));
+    }
+
+    #[test]
+    fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() {
+        use crate::state::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Point};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let bus = Bus::segment(
+            80,
+            Point::new(0, 0),
+            Point::new(20, 0),
+            Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+        )
+        .unwrap();
+        let tap = BusTap::new(
+            81,
+            &bus,
+            Point::new(5, 0),
+            Point::new(5, 5),
+            BusSlice::parse("DATA[3]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        app.state.schematic.buses.push(bus);
+        app.state.schematic.bus_taps.push(tap);
+
+        app.state.schematic.selection.select_only_bus(80);
+        assert!(Command::ObjectProperties.is_enabled(&app));
+        Command::ObjectProperties.execute(&mut app);
+        assert!(matches!(
+            app.state.dialogs.object_properties.draft,
+            Some(crate::common::app::ObjectPropertiesDraft::Bus(_))
+        ));
+        app.state.dialogs.object_properties.close();
+
+        app.state.schematic.selection.select_only_bus_tap(81);
+        Command::ObjectProperties.execute(&mut app);
+        assert!(matches!(
+            app.state.dialogs.object_properties.draft,
+            Some(crate::common::app::ObjectPropertiesDraft::BusTap(_))
+        ));
+        app.state.dialogs.object_properties.close();
+
+        app.state.schematic.read_only = true;
+        assert!(!Command::ObjectProperties.is_enabled(&app));
+        Command::ObjectProperties.execute(&mut app);
+        assert!(!app.state.dialogs.object_properties.open);
     }
 
     #[test]

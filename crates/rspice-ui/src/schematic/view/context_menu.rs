@@ -839,18 +839,23 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && all_junctions_are_live
         && !has_wire_sub_object;
     let has_component = has_live_component;
-    let writable = !state.schematic.read_only;
+    let writable = !state.schematic.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
             writable
-                && selection.single_component().is_some_and(|id| {
+                && (selection.single_component().is_some_and(|id| {
                     state
                         .schematic
                         .components
                         .iter()
                         .any(|component| component.id == id)
-                }),
-            "Select one editable component to open its properties",
+                }) || selection
+                    .single_bus()
+                    .is_some_and(|id| state.schematic.buses.iter().any(|bus| bus.id == id))
+                    || selection
+                        .single_bus_tap()
+                        .is_some_and(|id| state.schematic.bus_taps.iter().any(|tap| tap.id == id))),
+            "Select one editable component, bus, or bus tap to open its properties",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
             writable && has_component,
@@ -885,9 +890,7 @@ fn execute_context_action(
 ) {
     match action {
         ContextAction::Properties => {
-            if let Some(id) = state.schematic.selection.single_component() {
-                crate::common::app::open_property_editor(state, id);
-            }
+            crate::common::app::open_selected_object_properties(state);
         }
         ContextAction::Rotate => state
             .schematic
@@ -1304,7 +1307,10 @@ impl SurfaceGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Component, ComponentType, Junction, LibraryCellInstance, Wire};
+    use crate::state::{
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
+        Junction, LibraryCellInstance, Wire,
+    };
 
     #[test]
     fn command_catalog_matches_the_mockup_exactly() {
@@ -1471,6 +1477,37 @@ mod tests {
         assert!(action_availability(ContextAction::Delete, &junction_state).0);
         assert!(action_availability(ContextAction::Copy, &junction_state).0);
         assert!(!action_availability(ContextAction::Duplicate, &junction_state).0);
+    }
+
+    #[test]
+    fn properties_context_action_is_available_for_one_live_bus_or_tap() {
+        let mut state = AppState::default();
+        let bus = Bus::segment(
+            31,
+            Point::new(0, 0),
+            Point::new(20, 0),
+            Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+        )
+        .unwrap();
+        let tap = BusTap::new(
+            32,
+            &bus,
+            Point::new(5, 0),
+            Point::new(5, 5),
+            BusSlice::parse("DATA[3]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        state.schematic.buses.push(bus);
+        state.schematic.bus_taps.push(tap);
+
+        state.schematic.selection.select_only_bus(31);
+        assert!(action_availability(ContextAction::Properties, &state).0);
+        state.schematic.selection.select_only_bus_tap(32);
+        assert!(action_availability(ContextAction::Properties, &state).0);
+
+        state.schematic.read_only = true;
+        assert!(!action_availability(ContextAction::Properties, &state).0);
     }
 
     #[test]

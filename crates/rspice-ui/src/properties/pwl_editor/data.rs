@@ -86,17 +86,19 @@ impl fmt::Display for PwlValidationError {
                 write!(
                     f,
                     "Time must be strictly increasing: point {} has t={} after t={}",
-                    index, curr, prev
+                    index + 1,
+                    curr,
+                    prev
                 )
             }
             Self::DuplicateTime { index, time } => {
-                write!(f, "Duplicate time at point {}: t={}", index, time)
+                write!(f, "Duplicate time at point {}: t={}", index + 1, time)
             }
             Self::TimeParseError { index, text } => {
-                write!(f, "Cannot parse time at point {}: '{}'", index, text)
+                write!(f, "Cannot parse time at point {}: '{}'", index + 1, text)
             }
             Self::ValueParseError { index, text } => {
-                write!(f, "Cannot parse value at point {}: '{}'", index, text)
+                write!(f, "Cannot parse value at point {}: '{}'", index + 1, text)
             }
             Self::EmptyData => write!(f, "PWL data cannot be empty"),
         }
@@ -143,7 +145,7 @@ impl PwlData {
     pub fn parse(s: &str) -> Result<Self, PwlValidationError> {
         let s = s.trim();
         if s.is_empty() {
-            return Ok(Self::new());
+            return Err(PwlValidationError::EmptyData);
         }
 
         let tokens: Vec<&str> = s.split_whitespace().collect();
@@ -175,26 +177,40 @@ impl PwlData {
             points.push(PwlPoint::new(time, value));
         }
 
-        let data = Self::with_points(points);
+        // Authored PWL rows are ordered data. Do not sort malformed input into
+        // validity: the editor must report a descending or duplicate time at
+        // the row where it was authored.
+        let data = Self::with_ordered_points(points);
         data.validate()?;
         Ok(data)
     }
 
     /// Serialize to space-separated string format.
     ///
-    /// Uses engineering notation for compact representation.
+    /// Uses a shortest round-trip decimal representation. Compact engineering
+    /// formatting is useful for presentation, but scaling and rounding it can
+    /// change an untouched `f64` when the text is parsed again.
     pub fn serialize(&self) -> String {
         self.points
             .iter()
             .map(|p| {
                 format!(
                     "{} {}",
-                    format_engineering_for_spice(p.time),
-                    format_engineering_for_spice(p.value)
+                    format_spice_number_lossless(p.time),
+                    format_spice_number_lossless(p.value)
                 )
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// Construct PWL data without changing the authored row order.
+    pub(super) fn with_ordered_points(points: Vec<PwlPoint>) -> Self {
+        Self {
+            points,
+            repeat: false,
+            delay: 0.0,
+        }
     }
 
     /// Validate the PWL data.
@@ -204,6 +220,9 @@ impl PwlData {
     /// - All values are finite
     /// - Times are strictly monotonically increasing
     pub fn validate(&self) -> Result<(), PwlValidationError> {
+        if self.points.is_empty() {
+            return Err(PwlValidationError::EmptyData);
+        }
         for point in &self.points {
             point.validate()?;
         }
@@ -433,5 +452,31 @@ pub(super) fn format_engineering_for_spice(value: f64) -> String {
         let formatted = format!("{:.6}", scaled);
         let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
         format!("{}{}", trimmed, suffix)
+    }
+}
+
+/// Format one finite SPICE number without losing any `f64` information.
+///
+/// Rust's float display uses the shortest decimal that round-trips to the
+/// same binary value. Scientific notation is accepted by the SPICE quantity
+/// parser, so no engineering-prefix rescaling is necessary here.
+pub(super) fn format_spice_number_lossless(value: f64) -> String {
+    value.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialization_round_trips_high_precision_points_bit_exact() {
+        let time = f64::from_bits(0x3ff0_0000_0000_0001);
+        let value = f64::from_bits(0x3fd5_5555_5555_5555);
+        let data = PwlData::with_points(vec![PwlPoint::origin(), PwlPoint::new(time, value)]);
+
+        let reparsed = PwlData::parse(&data.serialize()).unwrap();
+
+        assert_eq!(reparsed.points()[1].time.to_bits(), time.to_bits());
+        assert_eq!(reparsed.points()[1].value.to_bits(), value.to_bits());
     }
 }

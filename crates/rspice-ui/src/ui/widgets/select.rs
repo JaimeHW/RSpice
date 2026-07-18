@@ -6,6 +6,11 @@ use egui::{Id, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
+pub(crate) struct SelectOutput {
+    pub picked: Option<usize>,
+    pub response: egui::Response,
+}
+
 /// Render a select control showing `selected`; returns `Some(index)` when
 /// an option is picked this frame.
 pub fn select(
@@ -16,6 +21,17 @@ pub fn select(
     options: &[String],
     width: f32,
 ) -> Option<usize> {
+    select_with_response(ui, id_salt, accessible_label, selected, options, width).picked
+}
+
+pub(crate) fn select_with_response(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    width: f32,
+) -> SelectOutput {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -128,7 +144,7 @@ pub fn select(
                 });
         },
     );
-    picked
+    SelectOutput { picked, response }
 }
 
 fn keyboard_selection(

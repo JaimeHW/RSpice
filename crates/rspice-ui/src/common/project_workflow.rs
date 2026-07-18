@@ -68,6 +68,7 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.library_manager = library_manager;
     state.workspace = workspace;
     state.schematic = schematic;
+    state.bump_active_schematic_epoch();
     state.clear_design_execution_context();
     state.sim_setup =
         crate::common::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
@@ -725,6 +726,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.library_manager = libraries;
     state.workspace = workspace;
     state.schematic = schematic;
+    state.bump_active_schematic_epoch();
     state.sim_setup =
         crate::common::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
     state.model_library_manager = crate::common::app::default_model_library_manager();

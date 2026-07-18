@@ -90,7 +90,7 @@ impl LibraryCellInstance {
 /// Components are circuit elements placed on the schematic canvas.
 /// Each component has a position, rotation, reference designator (name),
 /// value, and optional parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Component {
     /// Unique identifier within the schematic
     pub id: u64,

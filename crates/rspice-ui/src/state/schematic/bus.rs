@@ -56,6 +56,23 @@ pub enum BusTargetKind {
     Bus,
 }
 
+/// Exact mutation scope resolved for one bus-property transaction.
+///
+/// The GUI uses the same domain plan that will commit the edit, so a
+/// connected-network refactor is never presented as a single-object change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BusPropertyImpact {
+    pub connected_buses: usize,
+    pub buses_changed: usize,
+    pub taps_changed: usize,
+}
+
+impl BusPropertyImpact {
+    pub const fn has_changes(self) -> bool {
+        self.buses_changed != 0 || self.taps_changed != 0
+    }
+}
+
 /// One expanded member of a bus declaration or slice.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BusMember {
@@ -156,9 +173,10 @@ impl BusDeclaration {
         if !self.contains_index(slice.msb) || !self.contains_index(slice.lsb) {
             return Err(BusParseError::SelectorOutOfRange);
         }
-        if slice.width() > 1 && self.direction() != slice.direction() {
-            return Err(BusParseError::DirectionMismatch);
-        }
+        // A vector slice may intentionally enumerate members in the opposite
+        // direction to express reversible bit-order mapping into a matching
+        // destination bus. Membership remains exact here; destination width,
+        // range, and ambiguity are validated by the tap transaction.
         Ok(())
     }
 
@@ -491,7 +509,10 @@ pub enum BusParseError {
     InvalidIndex,
     IndexOutOfRange,
     DeclarationWidthTooSmall,
-    MixedBase { expected: String, found: String },
+    MixedBase {
+        expected: String,
+        found: String,
+    },
     MixedNotation,
     DirectionMismatch,
     SelectorOutOfRange,
@@ -500,6 +521,11 @@ pub enum BusParseError {
     InvalidBusReference,
     UndeclaredBus,
     DeclarationMismatch,
+    /// The durable object changed after an editor captured its baseline.
+    StaleObject,
+    /// A selector edit would create a known scalar/bus or range mismatch at
+    /// the retained destination anchor.
+    InvalidDestination,
     ReadOnly,
 }
 
@@ -537,6 +563,12 @@ impl fmt::Display for BusParseError {
             Self::UndeclaredBus => formatter.write_str("bus tap requires a typed bus declaration"),
             Self::DeclarationMismatch => {
                 formatter.write_str("bus declaration does not match the pending tap configuration")
+            }
+            Self::StaleObject => {
+                formatter.write_str("the object changed while its properties were open")
+            }
+            Self::InvalidDestination => {
+                formatter.write_str("bus-tap destination is incompatible with the selector")
             }
             Self::ReadOnly => formatter.write_str("schematic is read-only"),
         }
@@ -796,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn slice_validation_rejects_mixed_base_style_direction_and_range() {
+    fn slice_validation_accepts_reversible_order_but_rejects_base_style_and_range_errors() {
         let declaration = BusDeclaration::parse("DATA[15:0]").unwrap();
         assert!(
             declaration
@@ -814,9 +846,15 @@ mod tests {
             declaration.validate_slice(&BusSlice::parse("DATA<7:0>").unwrap()),
             Err(BusParseError::MixedNotation)
         );
-        assert_eq!(
-            declaration.validate_slice(&BusSlice::parse("DATA[0:7]").unwrap()),
-            Err(BusParseError::DirectionMismatch)
+        assert!(
+            declaration
+                .validate_slice(&BusSlice::parse("DATA[0:7]").unwrap())
+                .is_ok()
+        );
+        assert!(
+            declaration
+                .validate_slice(&BusSlice::parse("DATA[0:3]").unwrap())
+                .is_ok()
         );
         assert_eq!(
             declaration.validate_slice(&BusSlice::parse("DATA[20:16]").unwrap()),

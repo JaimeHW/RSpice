@@ -803,6 +803,7 @@ impl AppState {
         let reference = self.workspace.active_view.clone();
         let schematic_reference = self.workspace.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.bump_active_schematic_epoch();
         // Project persistence stores topology, not the derived rubber-band
         // connection cache. Rebuild it whenever a schematic becomes active.
         self.schematic.rebuild_connections();
@@ -823,6 +824,7 @@ impl AppState {
             .select_view(&reference.library, &reference.cell, &reference.view);
         let schematic_reference = self.workspace.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.bump_active_schematic_epoch();
         self.push_user_message(ConsoleMessage::info(format!(
             "Opened {}",
             reference.display_path()
@@ -849,6 +851,7 @@ impl AppState {
             .select_view(&reference.library, &reference.cell, &reference.view);
         let schematic_reference = self.workspace.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.bump_active_schematic_epoch();
         self.push_user_message(ConsoleMessage::info(format!(
             "Entered {}",
             reference.display_path()
@@ -1225,10 +1228,15 @@ impl AppState {
     /// Refuse an edit on a read-only view, with the console line that names
     /// the library. Returns true when the edit must be blocked.
     pub(crate) fn deny_read_only_edit(&mut self) -> bool {
-        if !self.active_view_read_only() {
+        if !self.schematic.read_only && !self.active_view_read_only() {
             return false;
         }
-        self.push_user_message(ConsoleMessage::warning(self.read_only_master_message()));
+        let message = if self.active_view_read_only() {
+            self.read_only_master_message()
+        } else {
+            "The active schematic is read-only; no design data was changed.".to_owned()
+        };
+        self.push_user_message(ConsoleMessage::warning(message));
         true
     }
 
@@ -1246,7 +1254,12 @@ impl AppState {
             self.library_manager
                 .select_view(&reference.library, &reference.cell, &reference.view);
             self.schematic = schematic_for_workspace(self, &reference);
+            self.bump_active_schematic_epoch();
         }
+    }
+
+    pub(crate) fn bump_active_schematic_epoch(&mut self) {
+        self.active_schematic_epoch = self.active_schematic_epoch.wrapping_add(1);
     }
 
     pub(crate) fn open_selected_instance_master(&mut self) {

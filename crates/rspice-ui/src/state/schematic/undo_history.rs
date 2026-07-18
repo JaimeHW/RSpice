@@ -112,56 +112,13 @@ impl SchematicSnapshot {
     ///
     /// Used to prevent creating undo entries when nothing changed.
     pub fn is_equal(&self, other: &Self) -> bool {
-        // Quick length checks first
-        if self.components.len() != other.components.len()
-            || self.wires.len() != other.wires.len()
-            || self.buses.len() != other.buses.len()
-            || self.bus_taps.len() != other.bus_taps.len()
-            || self.junctions.len() != other.junctions.len()
-            || self.net_labels.len() != other.net_labels.len()
-        {
-            return false;
-        }
-
-        // Deep comparison - component IDs, positions, rotations, and values
-        for (a, b) in self.components.iter().zip(other.components.iter()) {
-            if a.id != b.id
-                || a.pos != b.pos
-                || a.rotation != b.rotation
-                || a.mirror_h != b.mirror_h
-                || a.mirror_v != b.mirror_v
-                || a.value != b.value
-            {
-                return false;
-            }
-        }
-
-        // Wire comparison
-        for (a, b) in self.wires.iter().zip(other.wires.iter()) {
-            if a.id != b.id || a.points != b.points {
-                return false;
-            }
-        }
-
-        if self.buses != other.buses || self.bus_taps != other.bus_taps {
-            return false;
-        }
-
-        // Junction comparison
-        for (a, b) in self.junctions.iter().zip(other.junctions.iter()) {
-            if a.id != b.id || a.pos != b.pos {
-                return false;
-            }
-        }
-
-        // Net label comparison
-        for (a, b) in self.net_labels.iter().zip(other.net_labels.iter()) {
-            if a.id != b.id || a.pos != b.pos || a.name != b.name {
-                return false;
-            }
-        }
-
-        true
+        self.components == other.components
+            && self.wires == other.wires
+            && self.buses == other.buses
+            && self.bus_taps == other.bus_taps
+            && self.junctions == other.junctions
+            && self.net_labels == other.net_labels
+            && self.connections == other.connections
     }
 }
 
@@ -697,6 +654,32 @@ mod tests {
         let changed = state.with_undo("Nothing", |_| {});
         assert!(!changed);
         assert!(!state.can_undo());
+    }
+
+    #[test]
+    fn complete_component_properties_and_connections_participate_in_undo_equality() {
+        let mut state = SchematicState::default();
+        let id = state.add_component(ComponentType::Resistor, Point::new(10, 20));
+        state.clear_undo_history();
+
+        assert!(state.with_undo("Edit component properties", |schematic| {
+            let component = schematic
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .unwrap();
+            component.name = "R99".to_owned();
+            component.params = "tc1=0.001".to_owned();
+        }));
+        assert!(state.can_undo());
+        assert!(state.undo());
+        let component = state
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .unwrap();
+        assert_ne!(component.name, "R99");
+        assert!(component.params.is_empty());
     }
 
     #[test]

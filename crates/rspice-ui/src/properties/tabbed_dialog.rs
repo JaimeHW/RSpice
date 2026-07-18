@@ -8,4 +8,4 @@ mod render;
 mod state;
 
 pub use render::render_tabbed_property_dialog;
-pub use state::{TabInfo, TabbedDialogResult, TabbedPropertyDialogState};
+pub use state::{ComponentPropertySession, TabInfo, TabbedDialogResult, TabbedPropertyDialogState};

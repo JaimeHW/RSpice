@@ -242,6 +242,165 @@ impl BusTapDialogState {
     }
 }
 
+/// Exact, isolated draft for a selected bus. The durable baseline is retained
+/// to guard the eventual commit against stale-object overwrite.
+#[derive(Debug, Clone)]
+pub(crate) struct BusObjectPropertiesDraft {
+    pub(crate) original: crate::state::Bus,
+    pub(crate) declaration: String,
+}
+
+/// Exact, isolated draft for a selected typed bus tap.
+#[derive(Debug, Clone)]
+pub(crate) struct BusTapObjectPropertiesDraft {
+    pub(crate) original: crate::state::BusTap,
+    pub(crate) source_bus_id: u64,
+    pub(crate) slice: String,
+    pub(crate) orientation: crate::state::BusTapOrientation,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ObjectPropertiesDraft {
+    Bus(BusObjectPropertiesDraft),
+    BusTap(BusTapObjectPropertiesDraft),
+}
+
+/// Retained owner for the mockup's generic Object properties transaction.
+/// Components continue to use their schema-driven tabbed editor; geometric
+/// connectivity objects use this draft because their invariants span object
+/// identity, exact coordinates, and neighboring topology.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ObjectPropertiesDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: Option<ObjectPropertiesDraft>,
+    /// Document generation captured when the isolated editor opened. This
+    /// prevents a matching object id in a replacement document from being
+    /// mistaken for the original transaction target.
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    /// Scoped dependency generation captured with the bus/tap draft.
+    pub(crate) topology_version: u64,
+    /// Exact cell/view identity captured with the draft.
+    pub(crate) view_path: String,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl ObjectPropertiesDialogState {
+    pub(crate) fn open_bus(
+        &mut self,
+        bus: &crate::state::Bus,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::Bus(BusObjectPropertiesDraft {
+                original: bus.clone(),
+                declaration: bus
+                    .declaration
+                    .as_ref()
+                    .map_or_else(String::new, ToString::to_string),
+            })),
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            dirty: false,
+            discard_confirm: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn open_bus_tap(
+        &mut self,
+        tap: &crate::state::BusTap,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::BusTap(BusTapObjectPropertiesDraft {
+                original: tap.clone(),
+                source_bus_id: tap.bus_id,
+                slice: tap.slice.to_string(),
+                orientation: tap.orientation,
+            })),
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            dirty: false,
+            discard_confirm: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = self
+            .draft
+            .as_ref()
+            .is_some_and(ObjectPropertiesDraft::is_modified);
+        self.discard_confirm = false;
+        self.validation_error = None;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
+impl ObjectPropertiesDraft {
+    pub(crate) fn is_modified(&self) -> bool {
+        match self {
+            Self::Bus(draft) => {
+                let text = draft.declaration.trim();
+                let candidate = if text.is_empty() {
+                    Some(None)
+                } else {
+                    crate::state::BusDeclaration::parse(text).ok().map(Some)
+                };
+                candidate.map_or_else(
+                    || {
+                        draft.declaration
+                            != draft
+                                .original
+                                .declaration
+                                .as_ref()
+                                .map_or_else(String::new, ToString::to_string)
+                    },
+                    |candidate| candidate != draft.original.declaration,
+                )
+            }
+            Self::BusTap(draft) => {
+                let selector_changed = crate::state::BusSlice::parse(draft.slice.trim())
+                    .map_or_else(
+                        |_| draft.slice != draft.original.slice.to_string(),
+                        |slice| slice != draft.original.slice,
+                    );
+                draft.source_bus_id != draft.original.bus_id
+                    || selector_changed
+                    || draft.orientation != draft.original.orientation
+            }
+        }
+    }
+}
+
 /// Dialog visibility state
 
 #[derive(Debug, Clone, Default)]
@@ -354,6 +513,10 @@ pub struct DialogState {
     /// Validated configuration transaction for Place bus tap.
     pub(crate) bus_tap: BusTapDialogState,
 
+    /// Generic typed properties transaction for non-component schematic
+    /// objects selected by Edit, Q, double-click, or the context menu.
+    pub(crate) object_properties: ObjectPropertiesDialogState,
+
     /// Project-owned technology attachment transaction.
     pub(crate) technology_attachment: TechnologyAttachmentDialogState,
 
@@ -400,6 +563,7 @@ impl DialogState {
             || self.license_dialog.open
             || self.command_palette.open
             || self.bus_tap.open
+            || self.object_properties.open
             || self.technology_attachment.open
             || self.interaction.schematic_delete_confirmation_open
             || self.confirmation_dialog.visible
@@ -441,11 +605,51 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
+        assert_blocks_shortcuts(|dialogs| {
+            let bus = crate::state::Bus::segment(
+                1,
+                crate::state::Point::new(0, 0),
+                crate::state::Point::new(10, 0),
+                None,
+            )
+            .unwrap();
+            dialogs
+                .object_properties
+                .open_bus(&bus, 0, 0, 0, String::new());
+        });
         assert_blocks_shortcuts(|dialogs| dialogs.technology_attachment.open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs.interaction.schematic_delete_confirmation_open = true;
         });
         assert_blocks_shortcuts(|dialogs| dialogs.confirmation_dialog.visible = true);
         assert_blocks_shortcuts(|dialogs| dialogs.project_review_dialog.show_close_project());
+    }
+
+    #[test]
+    fn generic_property_dirty_state_clears_after_semantic_revert() {
+        let bus = crate::state::Bus::segment(
+            7,
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(10, 0),
+            Some(crate::state::BusDeclaration::parse("DATA[7:0]").unwrap()),
+        )
+        .unwrap();
+        let mut dialog = ObjectPropertiesDialogState::default();
+        dialog.open_bus(&bus, 1, 2, 3, "work/top/schematic".to_owned());
+
+        let Some(ObjectPropertiesDraft::Bus(draft)) = dialog.draft.as_mut() else {
+            unreachable!()
+        };
+        draft.declaration = "ADDR[7:0]".to_owned();
+        dialog.mark_edited();
+        assert!(dialog.dirty);
+
+        let Some(ObjectPropertiesDraft::Bus(draft)) = dialog.draft.as_mut() else {
+            unreachable!()
+        };
+        draft.declaration = " DATA[7:0] ".to_owned();
+        dialog.mark_edited();
+        assert!(!dialog.dirty);
+        assert!(!dialog.discard_confirm);
     }
 }

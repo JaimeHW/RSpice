@@ -97,6 +97,7 @@ pub(crate) fn create_new_schematic(state: &mut AppState) {
 
 fn replace_active_schematic_document(state: &mut AppState, schematic: SchematicState) {
     state.schematic = schematic;
+    state.bump_active_schematic_epoch();
     match state.workspace.active_view_type() {
         ViewType::Schematic | ViewType::Testbench => {
             state.sync_active_schematic_to_workspace();

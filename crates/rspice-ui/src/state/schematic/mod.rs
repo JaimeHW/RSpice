@@ -38,8 +38,9 @@ mod wire;
 // Re-export all public types for backwards compatibility
 pub(crate) use bus::nearest_lattice_point_on_segment;
 pub use bus::{
-    Bus, BusDeclaration, BusDirection, BusDrawing, BusMember, BusNotation, BusParseError, BusSlice,
-    BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, PendingBusTap,
+    Bus, BusDeclaration, BusDirection, BusDrawing, BusMember, BusNotation, BusParseError,
+    BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX,
+    PendingBusTap,
 };
 pub use canvas_cache::CanvasCache;
 pub use clipboard::ClipboardData;

@@ -365,6 +365,12 @@ impl PropertyDefinition {
 
     /// Validate a value against this definition
     pub fn validate(&self, value: &PropertyValue) -> Result<(), String> {
+        if let PropertyValue::Number { value, .. } = value
+            && !value.is_finite()
+        {
+            return Err(format!("{} must be finite", self.display_name));
+        }
+
         // Check required
         if self.required {
             match value {
@@ -576,7 +582,7 @@ pub fn format_engineering(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_engineering;
+    use super::{PropertyDefinition, PropertyValue, format_engineering};
 
     #[test]
     fn engineering_display_uses_unambiguous_mega_for_editor_round_trip() {
@@ -590,5 +596,17 @@ mod tests {
             crate::properties::parse_engineering_value("3.3M").unwrap(),
             3.3e-3
         );
+    }
+
+    #[test]
+    fn property_schema_rejects_every_non_finite_number() {
+        let definition = PropertyDefinition::new("value").with_display_name("Value");
+
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                definition.validate(&PropertyValue::number(value)),
+                Err("Value must be finite".to_owned())
+            );
+        }
     }
 }

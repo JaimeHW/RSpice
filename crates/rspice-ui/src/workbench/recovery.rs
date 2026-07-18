@@ -665,6 +665,7 @@ pub(crate) fn open_comparison(
     app.state.library_manager = comparison.libraries;
     app.state.workspace = comparison.workspace;
     app.state.schematic = comparison.active;
+    app.state.bump_active_schematic_epoch();
     app.state.sim_setup = crate::common::app::SimSetupState::new();
     app.state.model_library_manager = crate::common::app::default_model_library_manager();
     app.state.workbench.activate(Workspace::Design);
