@@ -2710,7 +2710,6 @@ fn measurement_condition_crossings(
     edge: EdgeType,
     minval: Value,
 ) -> Vec<(usize, Value)> {
-    const FLAT_LEFT_NUMERIC_TOLERANCE: Value = 1.0e-12;
     if left.len() != point_count || point_count < 2 || !minval.is_finite() || minval < 0.0 {
         return Vec::new();
     }
@@ -2722,10 +2721,12 @@ fn measurement_condition_crossings(
         }
         let left_previous = left[segment];
         let left_current = left[segment + 1];
-        let left_scale = left_previous.abs().max(left_current.abs()).max(1.0);
-        // MINVAL applies to equality with the target, not to Xyce's
-        // independent requirement that the left operand itself move.
-        if (left_current - left_previous).abs() <= FLAT_LEFT_NUMERIC_TOLERANCE * left_scale {
+        // Xyce rejects an interval when the dependent-variable motion is
+        // smaller than this measurement's MINVAL. NOISE decks can lower
+        // MINVAL explicitly, so physically meaningful sub-picounit spectral
+        // motion remains eligible without allowing numerical jitter on an
+        // otherwise constant waveform to fabricate events.
+        if (left_current - left_previous).abs() < minval {
             continue;
         }
         let Some(right_previous) = right.value_at(segment) else {
@@ -2757,20 +2758,22 @@ fn measurement_condition_crossings(
         }
 
         let denominator = current_difference - previous_difference;
-        let fraction = if current_equal {
-            // The accepted endpoint is equal within Xyce's MINVAL contract.
-            // Pinning the event to that endpoint prevents a tiny same-side
-            // solver residual from extrapolating the nominal root beyond the
-            // segment and changing after finite-precision PRN serialization.
-            1.0
-        } else if denominator == 0.0 {
-            // Parallel, identical moving operands are considered equal at the
-            // current accepted point by Xyce.
-            1.0
+        let fraction = if denominator == 0.0 {
+            if previous_difference == 0.0 && current_difference == 0.0 {
+                // Parallel, identical moving operands are considered equal at
+                // the current accepted point by Xyce.
+                1.0
+            } else {
+                continue;
+            }
         } else {
             -previous_difference / denominator
         };
-        if fraction.is_finite() && (0.0..=1.0).contains(&fraction) {
+        // Xyce always performs its linear intersection calculation when the
+        // accepted endpoint is inside MINVAL. The resulting instant may lie
+        // just outside this segment when both samples are on the same side of
+        // the target, while a strict sign crossing remains bracketed.
+        if fraction.is_finite() && (current_equal || (0.0..=1.0).contains(&fraction)) {
             crossings.push((segment, fraction));
         }
     }
@@ -3605,35 +3608,34 @@ mod tests {
     }
 
     #[test]
-    fn minval_endpoint_equality_pins_crossing_inside_segment() {
+    fn minval_endpoint_equality_uses_xyce_linear_intersection() {
         let nearly_equal = [-1.0, -1.0e-14];
-        assert_eq!(
-            measurement_condition_crossings(
-                &nearly_equal,
-                ResolvedMeasureOperand::Constant(0.0),
-                nearly_equal.len(),
-                &[],
-                EdgeType::Cross,
-                XYCE_DEFAULT_MEASURE_MINVAL,
-            ),
-            vec![(0, 1.0)]
+        let events = measurement_condition_crossings(
+            &nearly_equal,
+            ResolvedMeasureOperand::Constant(0.0),
+            nearly_equal.len(),
+            &[],
+            EdgeType::Cross,
+            XYCE_DEFAULT_MEASURE_MINVAL,
         );
+        assert_eq!(events.len(), 1);
+        assert!(events[0].1 > 1.0);
+        assert!((events[0].1 - 1.00000000000001).abs() < 1.0e-15);
     }
 
     #[test]
     fn minval_endpoint_equality_is_not_recounted_on_band_exit() {
         let enters_then_leaves = [1.0, 1.0e-14, -1.0];
-        assert_eq!(
-            measurement_condition_crossings(
-                &enters_then_leaves,
-                ResolvedMeasureOperand::Constant(0.0),
-                enters_then_leaves.len(),
-                &[],
-                EdgeType::Cross,
-                XYCE_DEFAULT_MEASURE_MINVAL,
-            ),
-            vec![(0, 1.0)]
+        let events = measurement_condition_crossings(
+            &enters_then_leaves,
+            ResolvedMeasureOperand::Constant(0.0),
+            enters_then_leaves.len(),
+            &[],
+            EdgeType::Cross,
+            XYCE_DEFAULT_MEASURE_MINVAL,
         );
+        assert_eq!(events.len(), 1);
+        assert!(events[0].1 > 1.0);
     }
 
     #[test]
@@ -3650,16 +3652,42 @@ mod tests {
             )
             .is_empty()
         );
-        assert_eq!(
+        let events = measurement_condition_crossings(
+            &nearly_equal,
+            ResolvedMeasureOperand::Constant(0.0),
+            nearly_equal.len(),
+            &[],
+            EdgeType::Cross,
+            1.0e-13,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(events[0].1 > 1.0);
+    }
+
+    #[test]
+    fn sub_picounit_noise_motion_remains_eligible_for_crossing_detection() {
+        let falling_psd = [2.0e-14, 1.2e-14, 8.0e-15];
+        let events = measurement_condition_crossings(
+            &falling_psd,
+            ResolvedMeasureOperand::Constant(1.0e-14),
+            falling_psd.len(),
+            &[],
+            EdgeType::Fall,
+            1.0e-16,
+        );
+        assert_eq!(events, vec![(1, 0.5)]);
+
+        let flat_psd = [1.2e-14, 1.2e-14];
+        assert!(
             measurement_condition_crossings(
-                &nearly_equal,
-                ResolvedMeasureOperand::Constant(0.0),
-                nearly_equal.len(),
+                &flat_psd,
+                ResolvedMeasureOperand::Constant(1.0e-14),
+                flat_psd.len(),
                 &[],
                 EdgeType::Cross,
-                1.0e-13,
-            ),
-            vec![(0, 1.0)]
+                1.0e-16,
+            )
+            .is_empty()
         );
     }
 
