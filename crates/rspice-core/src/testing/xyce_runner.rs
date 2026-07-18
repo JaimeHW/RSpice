@@ -4097,6 +4097,7 @@ struct XyceStaticNoisePlan {
     source: String,
     print: Option<XycePrintRequest>,
     reference_path: Option<PathBuf>,
+    side_references: Vec<XyceStaticNoiseSideReference>,
     measurement_reference_paths: Vec<PathBuf>,
     continuous_measurement_reference_paths: Vec<PathBuf>,
     gs_reference_path: Option<PathBuf>,
@@ -4106,6 +4107,14 @@ struct XyceStaticNoisePlan {
     input_source: String,
     frequencies: Vec<Value>,
     steps: Vec<StepCommand>,
+    contract: XyceStaticNoiseContract,
+}
+
+#[derive(Debug, Clone)]
+struct XyceStaticNoiseSideReference {
+    file: String,
+    print: XycePrintRequest,
+    reference_path: PathBuf,
     contract: XyceStaticNoiseContract,
 }
 
@@ -20539,19 +20548,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let (output_node, reference_node, input_source, frequencies) =
             Self::noise_analysis_for_netlist(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        if !steps.is_empty()
-            && Self::aggregate_print_output_requests(
-                Self::print_output_requests(&source, "NOISE")?,
-                "NOISE",
-            )?
-            .iter()
-            .any(|request| request.file.is_some())
-        {
-            return Err(
-                ".STEP NOISE multi-destination waveform comparison requires a complete side-output artifact contract"
-                    .to_string(),
-            );
-        }
         let has_scalar_derivative = netlist.measurements.iter().any(|measurement| {
             measurement.analysis.eq_ignore_ascii_case("NOISE")
                 && matches!(
@@ -20629,7 +20625,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let reference_path = self
             .static_output_reference_path(&deck.path, contract.reference_extension())
             .filter(|path| path.is_file());
+        let side_references = self.static_noise_side_references(&source, &deck.path)?;
         if reference_path.is_none()
+            && side_references.is_empty()
             && measurement_reference_paths.is_empty()
             && continuous_measurement_reference_paths.is_empty()
         {
@@ -20645,6 +20643,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             source,
             print,
             reference_path,
+            side_references,
             measurement_reference_paths,
             continuous_measurement_reference_paths,
             gs_reference_path: qualified_step_cont_derivative.then(|| {
@@ -20701,6 +20700,33 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
         Ok(())
+    }
+
+    fn static_noise_side_references(
+        &self,
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<Vec<XyceStaticNoiseSideReference>, String> {
+        let requests = Self::aggregate_print_output_requests(
+            Self::print_output_requests(source, "NOISE")?,
+            "NOISE",
+        )?;
+        requests
+            .into_iter()
+            .filter_map(|request| request.file.clone().map(|file| (request, file)))
+            .map(|(request, file)| {
+                let contract = XyceStaticNoiseContract::for_format(request.format.as_deref())?;
+                let reference_path = self.side_output_reference_path_for_deck(deck_path, &file)?;
+                Ok(XyceStaticNoiseSideReference {
+                    file,
+                    print: XycePrintRequest {
+                        probes: request.probes,
+                    },
+                    reference_path,
+                    contract,
+                })
+            })
+            .collect()
     }
 
     #[cfg_attr(feature = "veriloga-builtins", allow(dead_code))]
@@ -23611,7 +23637,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         plan: XyceStaticNoisePlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = if plan.reference_path.is_some() {
+        let contract = if plan.reference_path.is_some() || !plan.side_references.is_empty() {
             plan.contract.result_contract(false)
         } else {
             "wrapper_scalar_measure_noise"
@@ -23726,6 +23752,54 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 }
             }
         }
+        for side in &plan.side_references {
+            let reference =
+                match Self::parse_noise_reference_file(side.contract, &side.reference_path) {
+                    Ok(reference) => reference,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "failed to parse Xyce NOISE side-output oracle '{}': {err}",
+                                side.file
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            match self.compare_noise_prn_reference(
+                &reference,
+                &side.print,
+                &netlist,
+                &plan.source,
+                &results,
+            ) {
+                Ok(mut side_mismatches) => {
+                    for mismatch in &mut side_mismatches {
+                        mismatch.probe = format!("{}:{}", side.file, mismatch.probe);
+                    }
+                    mismatches.extend(side_mismatches);
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "NOISE side-output '{}' reference comparison error: {err}",
+                            side.file
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
         if mismatches.is_empty()
             && (!plan.measurement_reference_paths.is_empty()
                 || !plan.continuous_measurement_reference_paths.is_empty())
@@ -23780,12 +23854,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: Netlist,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = if plan.reference_path.is_some() {
+        let contract = if plan.reference_path.is_some() || !plan.side_references.is_empty() {
             plan.contract.result_contract(true)
         } else {
             "wrapper_scalar_measure_step_noise"
         };
-        if plan.reference_path.is_none() && plan.measurement_reference_paths.is_empty() {
+        if plan.reference_path.is_none()
+            && plan.side_references.is_empty()
+            && plan.measurement_reference_paths.is_empty()
+        {
             return self.failure_result(
                 deck,
                 start,
@@ -23823,6 +23900,26 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 );
             }
             (None, _) => None,
+        };
+        let side_waveform_references = match plan
+            .side_references
+            .iter()
+            .map(|side| {
+                Self::parse_noise_reference_file(side.contract, &side.reference_path)
+                    .map(|reference| (side, reference))
+                    .map_err(|err| {
+                        format!(
+                            "failed to parse stepped Xyce NOISE side-output oracle '{}': {err}",
+                            side.file
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(references) => references,
+            Err(err) => {
+                return self.failure_result(deck, start, contract, err, Vec::new());
+            }
         };
 
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
@@ -23901,6 +23998,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let engine = self.create_xyce_engine();
         let mut all_mismatches = Vec::new();
         let mut waveform_offset = 0usize;
+        let mut side_waveform_offsets = vec![0usize; side_waveform_references.len()];
         for (step_index, run) in step_runs.iter().enumerate() {
             let temperature = run.netlist.options.temp.unwrap_or(27.0) + 273.15;
             if !temperature.is_finite() || temperature <= 0.0 {
@@ -23988,12 +24086,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     }
                 };
                 waveform_offset = end;
-                match self.compare_noise_prn_reference(
+                match self.compare_noise_prn_reference_with_step(
                     &step_reference,
                     print,
                     &run.netlist,
                     &plan.source,
                     &results,
+                    Some(step_index),
                 ) {
                     Ok(waveform_mismatches) => mismatches.extend(waveform_mismatches),
                     Err(err) => {
@@ -24003,6 +24102,55 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             contract,
                             format!(
                                 "NOISE waveform comparison error in step {}: {err}",
+                                step_index + 1
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                }
+            }
+
+            for (side_index, (side, reference)) in side_waveform_references.iter().enumerate() {
+                let (step_reference, end) = match Self::noise_step_reference_batch(
+                    reference,
+                    side_waveform_offsets[side_index],
+                    results.len(),
+                    step_index,
+                ) {
+                    Ok(batch) => batch,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("NOISE side-output '{}': {err}", side.file),
+                            Vec::new(),
+                        );
+                    }
+                };
+                side_waveform_offsets[side_index] = end;
+                match self.compare_noise_prn_reference_with_step(
+                    &step_reference,
+                    &side.print,
+                    &run.netlist,
+                    &plan.source,
+                    &results,
+                    Some(step_index),
+                ) {
+                    Ok(mut side_mismatches) => {
+                        for mismatch in &mut side_mismatches {
+                            mismatch.probe = format!("{}:{}", side.file, mismatch.probe);
+                        }
+                        mismatches.extend(side_mismatches);
+                    }
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "NOISE side-output '{}' waveform comparison error in step {}: {err}",
+                                side.file,
                                 step_index + 1
                             ),
                             Vec::new(),
@@ -24104,6 +24252,24 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ),
                 Vec::new(),
             );
+        }
+
+        for ((side, reference), offset) in
+            side_waveform_references.iter().zip(&side_waveform_offsets)
+        {
+            if *offset != reference.rows.len() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "stepped NOISE side-output '{}' oracle left rows unclaimed: consumed {offset}/{}",
+                        side.file,
+                        reference.rows.len()
+                    ),
+                    Vec::new(),
+                );
+            }
         }
 
         if let Some(gs) = gs_rows.as_deref()
@@ -44522,15 +44688,35 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         source: &str,
         results: &[crate::analysis::NoiseResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_noise_prn_reference_with_step(reference, print, netlist, source, results, None)
+    }
+
+    fn compare_noise_prn_reference_with_step(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        results: &[crate::analysis::NoiseResult],
+        expected_step_index: Option<usize>,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
         if reference.columns.is_empty() {
             return Err("reference table has no columns".to_string());
         }
         let mut data_column_offset = 0usize;
-        let index_column = reference
+        let stepnum_column = reference
             .columns
             .first()
-            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .is_some_and(|column| column.eq_ignore_ascii_case("STEPNUM"))
             .then_some(0usize);
+        if stepnum_column.is_some() {
+            data_column_offset += 1;
+        }
+        let index_column = reference
+            .columns
+            .get(data_column_offset)
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .then_some(data_column_offset);
         if index_column.is_some() {
             data_column_offset += 1;
         }
@@ -44586,6 +44772,22 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     reference.columns.len()
                 ));
             }
+            if let Some(stepnum_column) = stepnum_column {
+                let expected = row[stepnum_column];
+                let actual = expected_step_index.unwrap_or(0) as Value;
+                if (expected - actual).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "STEPNUM".to_string(),
+                        expected,
+                        actual,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
             if let Some(index_column) = index_column {
                 let expected = row[index_column];
                 let actual = row_index as Value;
@@ -44635,6 +44837,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         .map(|(_, value)| *value)
                         .next_back()
                         .unwrap_or(0.0)
+                } else if column.component() == XyceAcProbeComponent::Scalar
+                    && let Some(value) = Self::evaluate_static_frequency_device_parameter_probe(
+                        "NOISE",
+                        netlist,
+                        &Self::normalize_probe(probe),
+                    )
+                {
+                    value?
                 } else if let Some(waveform) = signals.iter().find_map(|(name, values)| {
                     name.eq_ignore_ascii_case(&signal_probe).then_some(*values)
                 }) {
@@ -50735,7 +50945,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 });
         }
 
-        if let Some(value) = Self::evaluate_static_ac_device_parameter_probe(netlist, normalized) {
+        if let Some(value) =
+            Self::evaluate_static_frequency_device_parameter_probe("AC", netlist, normalized)
+        {
             return value;
         }
 
@@ -50850,7 +51062,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Ok(pos - neg)
     }
 
-    fn evaluate_static_ac_device_parameter_probe(
+    fn evaluate_static_frequency_device_parameter_probe(
+        analysis: &str,
         netlist: &Netlist,
         normalized: &str,
     ) -> Option<Result<Value, String>> {
@@ -50860,31 +51073,35 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 .map(|(magnitude, _)| magnitude)
                 .ok_or_else(|| {
                     format!(
-                        "AC device parameter probe '{element_name}:ACMAG' has no independent source"
+                        "{analysis} device parameter probe '{element_name}:ACMAG' has no independent source"
                     )
                 }),
             "acphase" => Self::independent_source_ac_terms(netlist, &element_name)
                 .map(|(_, phase)| phase.to_degrees())
                 .ok_or_else(|| {
                     format!(
-                        "AC device parameter probe '{element_name}:ACPHASE' has no independent source"
+                        "{analysis} device parameter probe '{element_name}:ACPHASE' has no independent source"
                     )
                 }),
             "r" => Self::effective_resistor_value(netlist, &element_name).and_then(|value| {
                 value.ok_or_else(|| {
                     format!(
-                        "AC device parameter probe '{element_name}:R' has no finite resistance"
+                        "{analysis} device parameter probe '{element_name}:R' has no finite resistance"
                     )
                 })
             }),
             "c" => Self::effective_capacitor_value(netlist, &element_name).ok_or_else(|| {
-                format!("AC device parameter probe '{element_name}:C' has no finite capacitance")
+                format!(
+                    "{analysis} device parameter probe '{element_name}:C' has no finite capacitance"
+                )
             }),
             "l" => Self::effective_inductor_value(netlist, &element_name).ok_or_else(|| {
-                format!("AC device parameter probe '{element_name}:L' has no finite inductance")
+                format!(
+                    "{analysis} device parameter probe '{element_name}:L' has no finite inductance"
+                )
             }),
             _ => Err(format!(
-                "AC device parameter probe '{element_name}:{parameter}' is not supported"
+                "{analysis} device parameter probe '{element_name}:{parameter}' is not supported"
             )),
         })
     }
@@ -67594,7 +67811,7 @@ mod tests {
     }
 
     #[test]
-    fn stepped_noise_plan_rejects_an_unvalidated_side_output_artifact() {
+    fn stepped_noise_plan_rejects_a_missing_side_output_artifact() {
         let (root, deck) = stepped_noise_fixture_root("side-output", 0);
         let source = fs::read_to_string(&deck.path).expect("read stepped NOISE fixture");
         fs::write(
@@ -67611,9 +67828,53 @@ mod tests {
             .static_noise_plan_for_deck(&deck)
             .expect_err("unvalidated stepped NOISE side output must remain unsupported");
 
+        assert!(
+            error.contains("missing checked-in side-output oracle") && error.contains("side.prn"),
+            "unexpected planning error: {error}"
+        );
+
+        fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+    }
+
+    #[test]
+    fn stepped_noise_plan_collects_every_checked_in_side_output_artifact() {
+        let (root, deck) = stepped_noise_fixture_root("complete-side-output", 0);
+        let source = fs::read_to_string(&deck.path).expect("read stepped NOISE fixture");
+        fs::write(
+            &deck.path,
+            source.replace(
+                ".PRINT NOISE VM(out)\n",
+                ".PRINT NOISE VM(out)\n.PRINT NOISE FORMAT=SPLOT FILE=side.prn VM(out)\n",
+            ),
+        )
+        .expect("add stepped NOISE side output");
+        let side_path = root.join("OutputData/MEASURE_NOISE/STEP/side.prn");
+        fs::write(
+            &side_path,
+            "Index FREQ VM(out)\n0 1 0\n1 2 0\n0 1 0\n1 2 0\nEnd of Xyce(TM) Parameter Sweep\n",
+        )
+        .expect("write stepped NOISE side-output artifact");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+        let plan = runner
+            .static_noise_plan_for_deck(&deck)
+            .expect("complete stepped NOISE side output is supported");
+
+        assert!(plan.reference_path.is_none());
+        assert_eq!(plan.side_references.len(), 1);
+        assert_eq!(plan.side_references[0].file, "side.prn");
         assert_eq!(
-            error,
-            ".STEP NOISE multi-destination waveform comparison requires a complete side-output artifact contract"
+            plan.side_references[0].contract,
+            XyceStaticNoiseContract::SplotPrn
+        );
+        assert_eq!(
+            plan.side_references[0]
+                .reference_path
+                .canonicalize()
+                .expect("canonical plan side path"),
+            side_path
+                .canonicalize()
+                .expect("canonical fixture side path")
         );
 
         fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
