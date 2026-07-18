@@ -13,8 +13,10 @@
 //! The merit function is the scaled infinity-norm of the true nonlinear
 //! residual `F(x) = A(x)·x − b(x)`, available for one matrix-vector product
 //! right after the loop stamps `A(x), b(x)` at the current iterate — before
-//! the linear solve, at essentially no cost. The previous iterate's merit is
-//! retained; when a step grows the merit beyond [`MERIT_GROWTH_GATE`] while
+//! the linear solve. A first iteration that converges immediately never needs
+//! a merit comparison, so its matrix-vector product is evaluated lazily only
+//! when another Newton iteration is required. The previous iterate's merit is
+//! then retained; when a step grows it beyond [`MERIT_GROWTH_GATE`] while
 //! the residual is still unconverged, the step is re-tried at geometrically
 //! damped fractions until one satisfies an Armijo decrease or the trial
 //! budget is exhausted (the best trial seen is then kept). Steps that do not

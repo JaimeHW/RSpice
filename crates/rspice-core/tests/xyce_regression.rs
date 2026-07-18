@@ -1367,6 +1367,24 @@ fn test_xyce_bug_629_power_alias_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_bug_655_continuation_pair_runs_relationally() {
+    let _guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_655_SON/contLine.cir";
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed,
+        "{relative} should own the native BUG 655 continuation-line relational pair, got {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "bug655_continuation_relational_wrapper_owner"
+    );
+}
+
+#[test]
 fn test_xyce_bug_1301_wrapper_transient_case_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

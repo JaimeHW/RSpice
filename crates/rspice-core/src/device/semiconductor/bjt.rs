@@ -1634,6 +1634,19 @@ impl NonlinearDevice for Bjt {
 }
 
 impl Bjt {
+    /// Forget Newton/limiter history before a fresh legacy operating-point
+    /// startup attempt. Model parameters and accepted transient charge state
+    /// are preserved; the next `update` follows the MODEINITJCT seed path.
+    pub(crate) fn reset_legacy_operating_point_history(&mut self) {
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
+            return;
+        }
+        self.reduced_linearization_cache_valid.set(false);
+        self.previous_reduced_linearization_valid = false;
+        self.charge_snapshot_cache_valid.set(false);
+        self.legacy_junction_limited = false;
+    }
+
     /// Re-linearize promoted native VBIC devices directly at a static
     /// residual/validation candidate.
     pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {

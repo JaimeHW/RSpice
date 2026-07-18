@@ -22,6 +22,29 @@ impl Diodes {
         self.devices.is_empty()
     }
 
+    pub(crate) fn nonlinear_state_snapshot(
+        &self,
+    ) -> Vec<crate::device::semiconductor::DiodeNonlinearState> {
+        self.devices
+            .iter()
+            .map(Diode::nonlinear_state_snapshot)
+            .collect()
+    }
+
+    pub(crate) fn restore_nonlinear_state(
+        &mut self,
+        states: Vec<crate::device::semiconductor::DiodeNonlinearState>,
+    ) {
+        assert_eq!(
+            self.devices.len(),
+            states.len(),
+            "diode rollback state must match circuit topology"
+        );
+        for (device, state) in self.devices.iter_mut().zip(states) {
+            device.restore_nonlinear_state(state);
+        }
+    }
+
     /// Update all diodes with current solution
     pub fn update_all(&mut self, voltages: &[Value]) {
         use crate::device::NonlinearDevice;
@@ -609,6 +632,29 @@ impl Mosfets {
 
     pub fn is_empty(&self) -> bool {
         self.devices.is_empty()
+    }
+
+    pub(crate) fn nonlinear_state_snapshot(
+        &self,
+    ) -> Vec<crate::device::mosfet::MosfetNonlinearState> {
+        self.devices
+            .iter()
+            .map(Mosfet::nonlinear_state_snapshot)
+            .collect()
+    }
+
+    pub(crate) fn restore_nonlinear_state(
+        &mut self,
+        states: Vec<crate::device::mosfet::MosfetNonlinearState>,
+    ) {
+        assert_eq!(
+            self.devices.len(),
+            states.len(),
+            "classic MOS rollback state must match circuit topology"
+        );
+        for (device, state) in self.devices.iter_mut().zip(states) {
+            device.restore_nonlinear_state(state);
+        }
     }
 
     /// Update all MOSFETs with current solution

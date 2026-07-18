@@ -385,8 +385,9 @@ endmodule
         .iter()
         .position(|name| name.eq_ignore_ascii_case("in"))
         .expect("input node");
-    let result =
-        std::panic::catch_unwind(|| engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM)
+    }));
 
     let _ = std::fs::remove_file(model);
 
@@ -436,8 +437,9 @@ endmodule
         .iter()
         .position(|name| name.eq_ignore_ascii_case("in"))
         .expect("input node");
-    let result =
-        std::panic::catch_unwind(|| engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine.run_noise_ports(&netlist, input, None, &[1.0e3], T_NOM)
+    }));
 
     let _ = std::fs::remove_file(model);
 

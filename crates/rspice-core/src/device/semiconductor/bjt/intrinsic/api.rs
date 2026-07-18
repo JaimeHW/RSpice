@@ -150,7 +150,7 @@ impl Bjt {
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
         let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
         let nodes = self.external_terminal_nodes();
-        let biases = [vc, vb, ve, vs];
+        let anchor = self.companion_anchor(vc, vb, ve, vs);
         let currents = [self.ic, self.ib, self.ie, self.isub];
 
         let stamp_entry =
@@ -232,7 +232,7 @@ impl Bjt {
         for row_idx in 0..EXTERNAL_DIM {
             let ieq = currents[row_idx]
                 - (0..EXTERNAL_DIM)
-                    .map(|col_idx| rows[row_idx][col_idx] * biases[col_idx])
+                    .map(|col_idx| rows[row_idx][col_idx] * anchor[col_idx])
                     .sum::<Value>();
             for col_idx in 0..EXTERNAL_DIM {
                 stamp_entry(matrix, row_idx, col_idx, rows[row_idx][col_idx]);
@@ -241,5 +241,37 @@ impl Bjt {
                 rhs[nodes[row_idx] - 1] -= ieq;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn full_matrix(size: usize) -> StaticMatrix {
+        let triplets: Vec<_> = (0..size)
+            .flat_map(|row| (0..size).map(move |col| (row, col, 0.0)))
+            .collect();
+        StaticMatrix::from_triplets(size, size, &triplets).expect("full test matrix")
+    }
+
+    #[test]
+    fn direct_stamp_anchors_legacy_companion_at_limited_junction_bias() {
+        let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 0);
+        bjt.update(&[0.0, 0.0]);
+        let candidate = [12.0, 12.0];
+        bjt.update(&candidate);
+        assert!(
+            bjt.legacy_junction_limited,
+            "test bias must exercise legacy pnjlim"
+        );
+
+        let mut matrix = full_matrix(2);
+        bjt.link(&matrix);
+        let mut rhs = vec![0.0; 2];
+        bjt.stamp_direct(&mut matrix, &mut rhs, &candidate);
+
+        let (_, expected_rhs) = bjt.stamped_reduced_external_system(12.0, 12.0, 0.0, 0.0);
+        assert_eq!(rhs, expected_rhs[..2]);
     }
 }

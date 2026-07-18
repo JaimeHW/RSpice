@@ -133,6 +133,27 @@ pub struct OutputRequest {
 }
 
 impl OutputRequest {
+    /// Whether this request needs a derived transient current for `device`.
+    ///
+    /// Direct `I(device)` probes already appear in [`SaveSet`](super::SaveSet),
+    /// but current and power accessors nested inside output expressions are
+    /// represented only by this typed dependency sidecar. Result retention
+    /// must honor both representations before integration starts.
+    pub(crate) fn selects_transient_device_current(&self, device: &str) -> bool {
+        if self
+            .analysis
+            .is_some_and(|analysis| analysis != OutputAnalysisKind::Tran)
+        {
+            return false;
+        }
+        let device = canonical_symbol(device);
+        self.dependencies.iter().any(|dependency| {
+            dependency.kind == OutputSymbolKind::Device
+                && matches!(dependency.operator.as_str(), "I" | "P" | "W")
+                && hierarchy_pattern_matches(&canonical_symbol(&dependency.symbol), &device)
+        })
+    }
+
     pub(crate) fn from_source(
         directive: OutputDirectiveKind,
         origin: NetlistSourceLocation,

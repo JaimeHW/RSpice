@@ -314,7 +314,112 @@ pub struct Mosfet {
     pub indices: MosfetIndices,
 }
 
+/// Mutable Newton/limiting state for a classic MOS instance.
+///
+/// Circuit rollback must preserve these values, but cloning the complete
+/// [`Mosfet`] also copies its name, model card, geometry, and linked matrix
+/// indices. Keeping a compact state record makes transient checkpoints scale
+/// with the actual mutable solver state instead of the full device model.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MosfetNonlinearState {
+    junction_gmin: Value,
+    vt: Value,
+    vgs: Value,
+    vds: Value,
+    vbs: Value,
+    eval_vgs: Value,
+    eval_vds: Value,
+    eval_vbs: Value,
+    id: Value,
+    gm: Value,
+    gds: Value,
+    gmb: Value,
+    id_eq: Value,
+    region: MosRegion,
+    vgs_prev: Value,
+    vds_prev: Value,
+    vbs_prev: Value,
+    eval_vgs_prev: Value,
+    eval_vds_prev: Value,
+    eval_vbs_prev: Value,
+    id_prev: Value,
+    gm_prev: Value,
+    gds_prev: Value,
+    gmb_prev: Value,
+    ibs_prev: Value,
+    gbs_prev: Value,
+    ibd_prev: Value,
+    gbd_prev: Value,
+    has_branch_history: bool,
+}
+
 impl Mosfet {
+    pub(crate) fn nonlinear_state_snapshot(&self) -> MosfetNonlinearState {
+        MosfetNonlinearState {
+            junction_gmin: self.junction_gmin,
+            vt: self.vt,
+            vgs: self.vgs,
+            vds: self.vds,
+            vbs: self.vbs,
+            eval_vgs: self.eval_vgs,
+            eval_vds: self.eval_vds,
+            eval_vbs: self.eval_vbs,
+            id: self.id,
+            gm: self.gm,
+            gds: self.gds,
+            gmb: self.gmb,
+            id_eq: self.id_eq,
+            region: self.region,
+            vgs_prev: self.vgs_prev,
+            vds_prev: self.vds_prev,
+            vbs_prev: self.vbs_prev,
+            eval_vgs_prev: self.eval_vgs_prev,
+            eval_vds_prev: self.eval_vds_prev,
+            eval_vbs_prev: self.eval_vbs_prev,
+            id_prev: self.id_prev,
+            gm_prev: self.gm_prev,
+            gds_prev: self.gds_prev,
+            gmb_prev: self.gmb_prev,
+            ibs_prev: self.ibs_prev,
+            gbs_prev: self.gbs_prev,
+            ibd_prev: self.ibd_prev,
+            gbd_prev: self.gbd_prev,
+            has_branch_history: self.has_branch_history,
+        }
+    }
+
+    pub(crate) fn restore_nonlinear_state(&mut self, state: MosfetNonlinearState) {
+        self.junction_gmin = state.junction_gmin;
+        self.vt = state.vt;
+        self.vgs = state.vgs;
+        self.vds = state.vds;
+        self.vbs = state.vbs;
+        self.eval_vgs = state.eval_vgs;
+        self.eval_vds = state.eval_vds;
+        self.eval_vbs = state.eval_vbs;
+        self.id = state.id;
+        self.gm = state.gm;
+        self.gds = state.gds;
+        self.gmb = state.gmb;
+        self.id_eq = state.id_eq;
+        self.region = state.region;
+        self.vgs_prev = state.vgs_prev;
+        self.vds_prev = state.vds_prev;
+        self.vbs_prev = state.vbs_prev;
+        self.eval_vgs_prev = state.eval_vgs_prev;
+        self.eval_vds_prev = state.eval_vds_prev;
+        self.eval_vbs_prev = state.eval_vbs_prev;
+        self.id_prev = state.id_prev;
+        self.gm_prev = state.gm_prev;
+        self.gds_prev = state.gds_prev;
+        self.gmb_prev = state.gmb_prev;
+        self.ibs_prev = state.ibs_prev;
+        self.gbs_prev = state.gbs_prev;
+        self.ibd_prev = state.ibd_prev;
+        self.gbd_prev = state.gbd_prev;
+        self.has_branch_history = state.has_branch_history;
+    }
+
     /// True when this instance uses the Berkeley MOS3 equation core.
     pub(in crate::device::mosfet::mosfet) fn uses_mos3_core(&self) -> bool {
         matches!(self.level, 3 | 9)

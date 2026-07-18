@@ -411,6 +411,7 @@ impl Engine {
                 Self::DC_LIMIT_CYCLE_HISTORY.min(dc_max_iterations),
             );
         let mut limit_cycle_hits = 0usize;
+        let mut rail_limited_bjt_stall_hits = 0usize;
         let mut limit_cycle_detected = false;
         let mut direct_solver_error = None;
         for iteration in 0..dc_max_iterations {
@@ -508,6 +509,20 @@ impl Engine {
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, &new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let legacy_bjt_limiter_engaged = circuit
+                .bjts
+                .devices
+                .iter()
+                .any(|bjt| bjt.legacy_junction_limited_for_trace());
+            if hit_voltage_limit
+                && voltage_converged
+                && !device_converged
+                && legacy_bjt_limiter_engaged
+            {
+                rail_limited_bjt_stall_hits += 1;
+            } else if !legacy_bjt_limiter_engaged || device_converged {
+                rail_limited_bjt_stall_hits = 0;
+            }
             if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
                 let max_dv = solution
                     .iter()
@@ -551,6 +566,16 @@ impl Engine {
                     return Ok(refined);
                 }
                 return Ok(solution);
+            }
+
+            // A junction-limited BJT may legitimately need several full
+            // Newton steps, but repeated node-fixed iterations after hitting
+            // the physical rail indicate the characteristic three-state
+            // clamp cycle. Escape early so the constrained half-bias recovery
+            // below can run instead of burning the entire DC iteration budget.
+            if rail_limited_bjt_stall_hits >= 3 {
+                limit_cycle_detected = true;
+                break;
             }
 
             if repeats_prior_iterate {
@@ -631,6 +656,79 @@ impl Engine {
                 return Err(err);
             }
             return Err(SimulationError::ConvergenceFailed(dc_max_iterations));
+        }
+
+        if hit_voltage_limit && limit_cycle_detected && !circuit.bjts.is_empty() {
+            let hints = Self::legacy_bjt_half_bias_startup_hints(circuit, &startup_seed);
+            if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
+                eprintln!(
+                    "DCTRACE legacy_bjt_half_bias hints={hints:?} startup={:?}",
+                    startup_seed
+                        .iter()
+                        .take(circuit.num_nodes())
+                        .collect::<Vec<_>>()
+                );
+            }
+            if !hints.is_empty() {
+                let startup_state = circuit.nonlinear_state_snapshot();
+                circuit.reset_legacy_bjt_operating_point_history();
+                match self.solve_nonlinear_nodeset_dc_startup_with_abort(
+                    circuit,
+                    matrix,
+                    &startup_seed,
+                    &hints,
+                    abort,
+                ) {
+                    Ok(constrained_seed) => {
+                        if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
+                            eprintln!(
+                                "DCTRACE legacy_bjt_half_bias constrained={:?}",
+                                constrained_seed
+                                    .iter()
+                                    .take(circuit.num_nodes())
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+                        match self.warm_restart_after_fallback(
+                            circuit,
+                            matrix,
+                            &constrained_seed,
+                            abort,
+                        ) {
+                            Ok(Some(restarted)) => {
+                                log::info!(
+                                    "Legacy BJT half-bias startup escaped a rail-limited DC cycle."
+                                );
+                                return Ok(restarted);
+                            }
+                            Ok(None) => {
+                                if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
+                                    eprintln!(
+                                        "DCTRACE legacy_bjt_half_bias unconstrained restart rejected"
+                                    );
+                                }
+                            }
+                            Err(SimulationError::Aborted) => {
+                                return Err(SimulationError::Aborted);
+                            }
+                            Err(error) => {
+                                if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
+                                    eprintln!("DCTRACE legacy_bjt_half_bias restart_error={error}");
+                                }
+                                log::debug!("Legacy BJT half-bias restart failed: {error}");
+                            }
+                        }
+                    }
+                    Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                    Err(error) => {
+                        if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
+                            eprintln!("DCTRACE legacy_bjt_half_bias constrained_error={error}");
+                        }
+                        log::debug!("Legacy BJT half-bias constrained startup failed: {error}");
+                    }
+                }
+                circuit.restore_nonlinear_state(startup_state);
+            }
         }
 
         if let Some(legacy_seed) = self.legacy_hfet_inverse_branch_seed(circuit, &startup_seed) {

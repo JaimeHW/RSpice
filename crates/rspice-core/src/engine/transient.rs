@@ -270,6 +270,10 @@ impl Engine {
         branches.retain(|&branch| {
             let name = Self::derived_transient_branch_name(circuit, branch);
             netlist.saves.selects(&format!("I({name})"))
+                || netlist
+                    .output_requests
+                    .iter()
+                    .any(|request| request.selects_transient_device_current(&name))
         });
     }
 
@@ -2039,6 +2043,24 @@ impl Engine {
                     0.0,
                 )?;
 
+                let newton_stamp_elapsed = newton_stamp_start.elapsed();
+                total_stamp_nanos += newton_stamp_elapsed.as_nanos();
+                static TRANSIENT_NEWTON_STAMP_LOG_COUNT: std::sync::atomic::AtomicUsize =
+                    std::sync::atomic::AtomicUsize::new(0);
+                if newton_stamp_elapsed.as_millis() >= 100 {
+                    let log_count = TRANSIENT_NEWTON_STAMP_LOG_COUNT
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if log_count < 40 {
+                        log::warn!(
+                            "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, iter={}, elapsed={:.3?}",
+                            t,
+                            dt,
+                            total_iterations,
+                            newton_stamp_elapsed,
+                        );
+                    }
+                }
+
                 // Merit-gated Newton globalization: the freshly stamped
                 // system gives the true nonlinear residual at the current
                 // iterate for one matrix-vector product. Judge the previous
@@ -2046,8 +2068,10 @@ impl Engine {
                 // basin — the saturation-boundary limit cycles this breaks
                 // are unreachable by timestep reduction alone (the cycle is
                 // driven by the static nonlinearity, not by stiffness).
-                let merit_phase_start = crate::time_compat::Instant::now();
-                if circuit.has_nonlinear_devices() && !is_strictly_linear_transient {
+                let globalization_active =
+                    circuit.has_nonlinear_devices() && !is_strictly_linear_transient;
+                if globalization_active && _iter > 0 {
+                    let merit_phase_start = crate::time_compat::Instant::now();
                     let current_merit = self
                         .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
                         .unwrap_or(Value::INFINITY);
@@ -2075,7 +2099,7 @@ impl Engine {
                                     .enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                                 nonlinear_state_matches_new_solution = false;
                                 merit_backtrack = Some((search, rollback));
-                                total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                                total_merit_nanos += merit_phase_start.elapsed().as_nanos();
                                 total_merit_trials += 1;
                                 continue;
                             }
@@ -2116,7 +2140,7 @@ impl Engine {
                         circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                         nonlinear_state_matches_new_solution = false;
                         merit_backtrack = Some((search, rollback));
-                        total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                        total_merit_nanos += merit_phase_start.elapsed().as_nanos();
                         total_merit_trials += 1;
                         continue;
                     }
@@ -2126,27 +2150,10 @@ impl Engine {
                         circuit.nonlinear_state_snapshot(),
                         vbic_snapshot_cache.to_vec(),
                     ));
+                    total_merit_nanos += merit_phase_start.elapsed().as_nanos();
                 }
-                total_merit_nanos += merit_phase_start.elapsed().as_nanos();
 
                 // Solve and check convergence
-                let newton_stamp_elapsed = newton_stamp_start.elapsed();
-                total_stamp_nanos += newton_stamp_elapsed.as_nanos();
-                static TRANSIENT_NEWTON_STAMP_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                if newton_stamp_elapsed.as_millis() >= 100 {
-                    let log_count = TRANSIENT_NEWTON_STAMP_LOG_COUNT
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 40 {
-                        log::warn!(
-                            "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, iter={}, elapsed={:.3?}",
-                            t,
-                            dt,
-                            total_iterations,
-                            newton_stamp_elapsed,
-                        );
-                    }
-                }
                 let newton_solve_start = crate::time_compat::Instant::now();
                 let solve_result = if prefer_dense_solver {
                     matrix.solve_dense(&rhs)
@@ -2264,6 +2271,23 @@ impl Engine {
                         // If this Newton step was numerically bad, keep the sanitized
                         // candidate and continue Newton iterations.
                         if has_bad_values {
+                            if _iter == 0 && globalization_active {
+                                let seed_start = crate::time_compat::Instant::now();
+                                last_stamped_iterate.clone_from(&new_solution);
+                                last_stamped_merit = self
+                                    .residual_inf_norm(
+                                        &circuit,
+                                        &mut matrix,
+                                        &last_stamped_iterate,
+                                        &rhs,
+                                    )
+                                    .unwrap_or(Value::INFINITY);
+                                last_stamped_rollback = Some((
+                                    circuit.nonlinear_state_snapshot(),
+                                    vbic_snapshot_cache.to_vec(),
+                                ));
+                                total_merit_nanos += seed_start.elapsed().as_nanos();
+                            }
                             new_solution = sol;
                             nonlinear_state_matches_new_solution = false;
                             continue;
@@ -2286,6 +2310,27 @@ impl Engine {
                         let voltage_converged_for_acceptance = voltage_converged;
                         let residual_converged =
                             self.residual_convergence_met(&circuit, &mut matrix, &sol, &rhs);
+                        if _iter == 0 && globalization_active && !voltage_converged_for_acceptance {
+                            // The circuit still holds the first stamped
+                            // iterate here. Capture its rollback state only
+                            // after the solve proves that another Newton step
+                            // is required.
+                            let seed_start = crate::time_compat::Instant::now();
+                            last_stamped_iterate.clone_from(&new_solution);
+                            last_stamped_merit = self
+                                .residual_inf_norm(
+                                    &circuit,
+                                    &mut matrix,
+                                    &last_stamped_iterate,
+                                    &rhs,
+                                )
+                                .unwrap_or(Value::INFINITY);
+                            last_stamped_rollback = Some((
+                                circuit.nonlinear_state_snapshot(),
+                                vbic_snapshot_cache.to_vec(),
+                            ));
+                            total_merit_nanos += seed_start.elapsed().as_nanos();
+                        }
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
                         new_solution = sol;
@@ -2362,6 +2407,30 @@ impl Engine {
                                 &new_solution,
                                 &rhs,
                             );
+                            if _iter == 0
+                                && globalization_active
+                                && !residual_converged_for_acceptance
+                            {
+                                // The restamp replaced the first iterate's
+                                // linearization. If the candidate still needs
+                                // another Newton correction, make this
+                                // restamped candidate the globalization base;
+                                // accepted one-solve points avoid both merit
+                                // matrix-vector products entirely.
+                                last_stamped_iterate.clone_from(&new_solution);
+                                last_stamped_merit = self
+                                    .residual_inf_norm(
+                                        &circuit,
+                                        &mut matrix,
+                                        &last_stamped_iterate,
+                                        &rhs,
+                                    )
+                                    .unwrap_or(Value::INFINITY);
+                                last_stamped_rollback = Some((
+                                    circuit.nonlinear_state_snapshot(),
+                                    vbic_snapshot_cache.to_vec(),
+                                ));
+                            }
                         }
                         total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 

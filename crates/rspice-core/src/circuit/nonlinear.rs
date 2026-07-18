@@ -4,9 +4,9 @@ use super::*;
 pub(crate) struct NonlinearDeviceStateSnapshot {
     inductors: Inductors,
     jiles_atherton_inductors: Vec<JilesAthertonBinding>,
-    diodes: Diodes,
+    diodes: Vec<crate::device::semiconductor::DiodeNonlinearState>,
     bjts: Bjts,
-    mosfets: Mosfets,
+    mosfets: Vec<crate::device::mosfet::MosfetNonlinearState>,
     b3soi: B3SoiDds,
     b3soi_fd: B3SoiFds,
     b3soi_pd: B3SoiPds,
@@ -105,6 +105,48 @@ mod tests {
         circuit.restore_nonlinear_state(snapshot);
 
         assert_eq!(circuit.inductors.inductances, vec![2.0e-3]);
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_compact_classic_mos_state() {
+        let mut circuit = CircuitData::new();
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        let expected = circuit.mosfets.nonlinear_state_snapshot();
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.mosfets.devices[0].set_junction_gmin(3.0e-6);
+        circuit.mosfets.update_all(&[1.0, 2.0]);
+        assert_ne!(circuit.mosfets.nonlinear_state_snapshot(), expected);
+
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(circuit.mosfets.nonlinear_state_snapshot(), expected);
+        assert_eq!(circuit.mosfets.devices[0].name, "m1");
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_compact_diode_state() {
+        let mut circuit = CircuitData::new();
+        circuit
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        let expected = circuit.diodes.nonlinear_state_snapshot();
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.diodes.devices[0].set_junction_gmin(4.0e-6);
+        circuit.diodes.update_all(&[0.7]);
+        assert_ne!(circuit.diodes.nonlinear_state_snapshot(), expected);
+
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(circuit.diodes.nonlinear_state_snapshot(), expected);
+        assert_eq!(circuit.diodes.devices[0].name, "d1");
     }
 
     #[test]
@@ -239,6 +281,12 @@ impl CircuitData {
         }
         for dev in &mut self.b3soi_pd.devices {
             dev.reset_operating_point_history();
+        }
+    }
+
+    pub(crate) fn reset_legacy_bjt_operating_point_history(&mut self) {
+        for dev in &mut self.bjts.devices {
+            dev.reset_legacy_operating_point_history();
         }
     }
 
@@ -493,9 +541,9 @@ impl CircuitData {
         NonlinearDeviceStateSnapshot {
             inductors: self.inductors.clone(),
             jiles_atherton_inductors: self.jiles_atherton_inductors.clone(),
-            diodes: self.diodes.clone(),
+            diodes: self.diodes.nonlinear_state_snapshot(),
             bjts: self.bjts.clone(),
-            mosfets: self.mosfets.clone(),
+            mosfets: self.mosfets.nonlinear_state_snapshot(),
             b3soi: self.b3soi.clone(),
             b3soi_fd: self.b3soi_fd.clone(),
             b3soi_pd: self.b3soi_pd.clone(),
@@ -529,9 +577,9 @@ impl CircuitData {
     pub(crate) fn restore_nonlinear_state(&mut self, snapshot: NonlinearDeviceStateSnapshot) {
         self.inductors = snapshot.inductors;
         self.jiles_atherton_inductors = snapshot.jiles_atherton_inductors;
-        self.diodes = snapshot.diodes;
+        self.diodes.restore_nonlinear_state(snapshot.diodes);
         self.bjts = snapshot.bjts;
-        self.mosfets = snapshot.mosfets;
+        self.mosfets.restore_nonlinear_state(snapshot.mosfets);
         self.b3soi = snapshot.b3soi;
         self.b3soi_fd = snapshot.b3soi_fd;
         self.b3soi_pd = snapshot.b3soi_pd;

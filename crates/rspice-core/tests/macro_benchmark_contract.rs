@@ -84,3 +84,28 @@ fn explicitly_requested_derived_current_is_retained() {
         "an unrequested derived capacitor current must not be retained"
     );
 }
+
+#[test]
+fn expression_current_dependencies_are_retained() {
+    let deck = "expression derived currents\n\
+                V1 in 0 PULSE(0 1 0 1n 1n 8n 20n)\n\
+                R1 in out 1k\n\
+                C1 out 0 1p\n\
+                .tran 1n 5n\n\
+                .print tran {1/I(R1)} {I(C1)+I(R1)}\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("expression selection deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 5.0e-9, 1.0e-9)
+        .expect("expression selection deck runs");
+
+    for expected in ["R1", "C1"] {
+        assert!(
+            result
+                .branch_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(expected)),
+            "an expression dependency on I({expected}) must retain its derived current channel"
+        );
+    }
+}

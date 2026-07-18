@@ -134,7 +134,49 @@ pub struct Diode {
     pub indices: DiodeIndices,
 }
 
+/// Mutable Newton and junction-limiter state for a diode rollback point.
+/// Static model, topology, temperature, and linked-index fields remain on the
+/// live device and are not recopied for every transient timestep.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DiodeNonlinearState {
+    prev_vd: Value,
+    prev_vd_old: Value,
+    prev_id: Value,
+    junction_gmin: Value,
+    last_limited_vd: Value,
+    limited: bool,
+    last_stamp_vd: Value,
+    last_stamp_id: Value,
+    last_stamp_gd: Value,
+}
+
 impl Diode {
+    pub(crate) fn nonlinear_state_snapshot(&self) -> DiodeNonlinearState {
+        DiodeNonlinearState {
+            prev_vd: self.prev_vd,
+            prev_vd_old: self.prev_vd_old,
+            prev_id: self.prev_id,
+            junction_gmin: self.junction_gmin,
+            last_limited_vd: self.last_limited_vd.get(),
+            limited: self.limited.get(),
+            last_stamp_vd: self.last_stamp_vd.get(),
+            last_stamp_id: self.last_stamp_id.get(),
+            last_stamp_gd: self.last_stamp_gd.get(),
+        }
+    }
+
+    pub(crate) fn restore_nonlinear_state(&mut self, state: DiodeNonlinearState) {
+        self.prev_vd = state.prev_vd;
+        self.prev_vd_old = state.prev_vd_old;
+        self.prev_id = state.prev_id;
+        self.junction_gmin = state.junction_gmin;
+        self.last_limited_vd.set(state.last_limited_vd);
+        self.limited.set(state.limited);
+        self.last_stamp_vd.set(state.last_stamp_vd);
+        self.last_stamp_id.set(state.last_stamp_id);
+        self.last_stamp_gd.set(state.last_stamp_gd);
+    }
+
     /// Create a new diode with default 1N4148 parameters
     pub fn new(name: String, node_anode: NodeId, node_cathode: NodeId) -> Self {
         Self {

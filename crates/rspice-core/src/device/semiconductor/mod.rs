@@ -11,3 +11,4 @@ pub(crate) use bjt::{
 };
 pub use bjt::{Bjt, BjtType};
 pub use diode::Diode;
+pub(crate) use diode::DiodeNonlinearState;

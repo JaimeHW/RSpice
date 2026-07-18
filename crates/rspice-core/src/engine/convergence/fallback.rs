@@ -650,6 +650,116 @@ impl Engine {
         }
     }
 
+    /// Build a constrained half-bias seed for legacy BJTs after flat Newton
+    /// reaches a rail-limited cycle.
+    ///
+    /// The linear presolve sees the externalized base/collector resistors but
+    /// not the transistor currents, so a floating transistor can inherit the
+    /// open-circuit supply rail at both intrinsic terminals. Holding the base
+    /// near its corrected forward-bias seed while moving the collector halfway
+    /// toward the emitter is a small source-homotopy step. A constrained solve
+    /// then lets the surrounding linear network establish consistent terminal
+    /// currents before the real device equations are released again.
+    pub(in crate::engine::convergence) fn legacy_bjt_half_bias_startup_hints(
+        circuit: &CircuitData,
+        startup_seed: &[Value],
+    ) -> Vec<(usize, Value)> {
+        const VBE_FORWARD: Value = 0.7;
+        const VCE_ACTIVE_MARGIN: Value = 0.2;
+
+        let node_count = circuit.num_nodes();
+        if node_count == 0 || startup_seed.len() < node_count {
+            return Vec::new();
+        }
+
+        let series_resistors: rustc_hash::FxHashMap<&str, (usize, usize)> = circuit
+            .resistors
+            .names
+            .iter()
+            .zip(&circuit.resistors.stamps)
+            .map(|(name, stamp)| (name.as_str(), (stamp.pp.row, stamp.nn.row)))
+            .collect();
+        let externalized_terminal = |device_name: &str, suffix: &str, intrinsic_node: usize| {
+            let resistor_name = format!("{device_name}.__{suffix}");
+            series_resistors
+                .get(resistor_name.as_str())
+                .and_then(|&(first, second)| {
+                    if first == intrinsic_node {
+                        Some(second)
+                    } else if second == intrinsic_node {
+                        Some(first)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(intrinsic_node)
+        };
+        let protected = circuit.force_accept_protected_nodes();
+        let mut targets = vec![(0.0, 0usize); node_count];
+        let node_voltage = |node: usize| {
+            if node == 0 {
+                0.0
+            } else {
+                startup_seed.get(node - 1).copied().unwrap_or(0.0)
+            }
+        };
+        let mut add_target = |node: usize, value: Value| {
+            if node == 0
+                || node > node_count
+                || !value.is_finite()
+                || protected.get(node - 1).copied().unwrap_or(true)
+            {
+                return;
+            }
+            targets[node - 1].0 += value;
+            targets[node - 1].1 += 1;
+        };
+
+        for bjt in &circuit.bjts.devices {
+            if bjt.is_initially_off() || bjt.vbic_mna_promoted() || !bjt.uses_legacy_gummel_poon() {
+                continue;
+            }
+
+            let polarity = match bjt.bjt_type {
+                crate::device::BjtType::Npn => 1.0,
+                crate::device::BjtType::Pnp => -1.0,
+            };
+            let collector_node = externalized_terminal(&bjt.name, "rc", bjt.node_collector);
+            let base_node = externalized_terminal(&bjt.name, "rb", bjt.node_base);
+            let emitter_node = externalized_terminal(&bjt.name, "re", bjt.node_emitter);
+            let emitter = node_voltage(emitter_node);
+            let seeded_base = node_voltage(base_node);
+            let base_bias = polarity * (seeded_base - emitter);
+            let base = if (0.1..=1.0).contains(&base_bias) {
+                seeded_base
+            } else {
+                emitter + polarity * VBE_FORWARD
+            };
+            add_target(base_node, base);
+
+            if collector_node == base_node {
+                continue;
+            }
+            let seeded_collector = node_voltage(collector_node);
+            let half_bias_collector = emitter + 0.5 * (seeded_collector - emitter);
+            let active_boundary = base + polarity * VCE_ACTIVE_MARGIN;
+            let collector = if polarity > 0.0 {
+                half_bias_collector.max(active_boundary)
+            } else {
+                half_bias_collector.min(active_boundary)
+            };
+            add_target(collector_node, collector);
+        }
+
+        targets
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, (sum, count))| {
+                (count > 0).then_some((index + 1, sum / count as Value))
+            })
+            .collect()
+    }
+
     /// Seed promoted VBIC internal MNA nodes from their owning terminal
     /// voltages. The linear presolve intentionally excludes nonlinear compact
     /// devices, so active VBIC internal rows can otherwise start at 0 V even
