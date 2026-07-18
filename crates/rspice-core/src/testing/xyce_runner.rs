@@ -44328,7 +44328,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
-        let series = crate::analysis::advanced::NoiseSweepSeries::from_sweep(results)
+        let series = crate::analysis::advanced::NoiseSweepSeries::from_sweep(results)?
             .ok_or_else(|| "NOISE simulation produced no points".to_string())?;
         let signals = series.signal_map();
         let equation_traces =

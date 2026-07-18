@@ -10,14 +10,14 @@
 //! `TIME` (the swept value plays that role for DC sweeps, so
 //! `FIND TIME WHEN V(out)=...` addresses the sweep variable).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::measure::{
     ContinuousMeasureResult, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement,
     MeasureType, TriggerEvent,
 };
 use crate::Value;
-use crate::analysis::AcResult;
+use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
 use crate::engine::TransientResult;
 use crate::netlist::Netlist;
 use crate::netlist::expr::Expr as NetExpr;
@@ -187,7 +187,7 @@ pub fn evaluate_noise_equation_measurements(
     netlist: &Netlist,
     sweep: &[crate::analysis::NoiseResult],
 ) -> Result<Vec<EquationMeasureTrace>, String> {
-    let Some(series) = NoiseSweepSeries::from_sweep(sweep) else {
+    let Some(series) = NoiseSweepSeries::from_sweep(sweep)? else {
         return Ok(Vec::new());
     };
     let signals = series.equation_signal_map();
@@ -415,6 +415,24 @@ fn bind_equation_expression(
                 ));
             }
         }
+        NetExpr::FnCall { name, args } if is_equation_noise_accessor(name) => {
+            let prefix = name.to_ascii_uppercase();
+            if !(1..=2).contains(&args.len()) {
+                return Err(format!(
+                    "{prefix}() in continuous measure requires one or two arguments"
+                ));
+            }
+            let arguments = args
+                .iter()
+                .map(|argument| {
+                    equation_probe_argument(Some(argument)).ok_or_else(|| {
+                        format!("{prefix}() in continuous measure has an invalid argument")
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let probe = format!("{prefix}({})", arguments.join(","));
+            NetExpr::Number(lookup_equation_signal(signals, &probe, row)?)
+        }
         NetExpr::FnCall { name, args } => NetExpr::FnCall {
             name: name.clone(),
             args: args
@@ -431,6 +449,10 @@ fn is_equation_probe_accessor(name: &str) -> bool {
         name.to_ascii_uppercase().as_str(),
         "V" | "VM" | "VR" | "VI" | "VP" | "VDB" | "I" | "IM" | "IR" | "II" | "IP" | "IDB"
     )
+}
+
+fn is_equation_noise_accessor(name: &str) -> bool {
+    matches!(name.to_ascii_uppercase().as_str(), "DNO" | "DNI")
 }
 
 fn equation_probe_argument(argument: Option<&NetExpr>) -> Option<String> {
@@ -714,13 +736,46 @@ pub struct NoiseSweepSeries {
     onoise: Vec<Value>,
     inoise: Vec<Value>,
     projections: ComplexProjectionSeries,
+    contributions: Vec<(String, Vec<Value>)>,
 }
 
 impl NoiseSweepSeries {
-    /// Collect spectral-density series across the sweep. Returns `None`
-    /// for an empty sweep.
-    pub fn from_sweep(sweep: &[crate::analysis::NoiseResult]) -> Option<Self> {
-        let first = sweep.first()?;
+    /// Collect spectral-density series across the sweep. Returns `Ok(None)`
+    /// for an empty sweep and fails explicitly if the device contribution
+    /// catalog changes between accepted frequency points.
+    pub fn from_sweep(sweep: &[crate::analysis::NoiseResult]) -> Result<Option<Self>, String> {
+        let Some(first) = sweep.first() else {
+            return Ok(None);
+        };
+        let catalog_key = |identity: &crate::analysis::NoiseSourceIdentity| {
+            (
+                identity.device.to_ascii_uppercase(),
+                identity
+                    .mechanism
+                    .as_ref()
+                    .map(|mechanism| mechanism.to_ascii_uppercase()),
+            )
+        };
+        let sorted_catalog = |point: &crate::analysis::NoiseResult| {
+            let mut catalog = point
+                .contribution_catalog
+                .iter()
+                .map(catalog_key)
+                .collect::<Vec<_>>();
+            catalog.sort_unstable();
+            catalog
+        };
+        let expected_catalog = sorted_catalog(first);
+        for point in sweep.iter().skip(1) {
+            let actual_catalog = sorted_catalog(point);
+            if actual_catalog != expected_catalog {
+                return Err(format!(
+                    "noise contribution catalog changed at frequency {}",
+                    point.frequency
+                ));
+            }
+        }
+
         let mut projections = ComplexProjectionSeries::default();
         for (index, name) in first.node_names.iter().enumerate() {
             let raw = if name.is_empty() {
@@ -750,7 +805,55 @@ impl NoiseSweepSeries {
                     .collect(),
             );
         }
-        Some(Self {
+        let mut contribution_probes = Vec::new();
+        let mut seen_devices = HashSet::new();
+        let mut seen_mechanisms = HashSet::new();
+        for identity in &first.contribution_catalog {
+            let device_key = identity.device.to_ascii_uppercase();
+            if seen_devices.insert(device_key) {
+                contribution_probes.push((identity.device.clone(), None));
+            }
+            if let Some(mechanism) = &identity.mechanism {
+                let key = (
+                    identity.device.to_ascii_uppercase(),
+                    mechanism.to_ascii_uppercase(),
+                );
+                if seen_mechanisms.insert(key) {
+                    contribution_probes.push((identity.device.clone(), Some(mechanism.clone())));
+                }
+            }
+        }
+        let mut contributions = Vec::with_capacity(contribution_probes.len() * 2);
+        for (device, mechanism) in contribution_probes {
+            for (prefix, kind) in [
+                ("DNO", NoiseContributionKind::Output),
+                ("DNI", NoiseContributionKind::Input),
+            ] {
+                let probe = NoiseContributionProbe {
+                    kind,
+                    device: device.clone(),
+                    mechanism: mechanism.clone(),
+                };
+                let name = match &mechanism {
+                    Some(mechanism) => format!("{prefix}({device},{mechanism})"),
+                    None => format!("{prefix}({device})"),
+                };
+                let values = sweep
+                    .iter()
+                    .map(|point| {
+                        point.contribution(&probe).map_err(|error| {
+                            format!(
+                                "failed to resolve noise contribution '{name}' at frequency {}: {error}",
+                                point.frequency
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                contributions.push((name, values));
+            }
+        }
+
+        Ok(Some(Self {
             axis: sweep.iter().map(|point| point.frequency).collect(),
             // Xyce passes the total one-sided power spectral densities directly
             // to the ONOISE and INOISE operators.  The exported
@@ -767,7 +870,8 @@ impl NoiseSweepSeries {
                 .map(|point| point.input_referred_density)
                 .collect(),
             projections,
-        })
+            contributions,
+        }))
     }
 
     /// The sweep frequencies, used as the measurement abscissa.
@@ -785,6 +889,9 @@ impl NoiseSweepSeries {
         }
         for key in ["Inoise", "Inoise_Spectrum"] {
             insert_case_variants(&mut signals, key, self.inoise.as_slice());
+        }
+        for (name, waveform) in &self.contributions {
+            insert_case_variants(&mut signals, name, waveform.as_slice());
         }
         signals
     }
@@ -810,11 +917,20 @@ pub fn evaluate_noise_measurements(
     if statements.is_empty() {
         return Vec::new();
     }
-    let Some(series) = NoiseSweepSeries::from_sweep(sweep) else {
-        return statements
-            .iter()
-            .map(|m| MeasureResult::failed(&m.name, "noise sweep produced no points"))
-            .collect();
+    let series = match NoiseSweepSeries::from_sweep(sweep) {
+        Ok(Some(series)) => series,
+        Ok(None) => {
+            return statements
+                .iter()
+                .map(|m| MeasureResult::failed(&m.name, "noise sweep produced no points"))
+                .collect();
+        }
+        Err(error) => {
+            return statements
+                .iter()
+                .map(|m| MeasureResult::failed(&m.name, &error))
+                .collect();
+        }
     };
     let signals = series.equation_signal_map();
     // NOISE equations participate in the accepted-point stream just like AC
@@ -850,16 +966,30 @@ pub fn evaluate_noise_continuous_measurements(
     if statements.is_empty() {
         return Vec::new();
     }
-    let Some(series) = NoiseSweepSeries::from_sweep(sweep) else {
-        return statements
-            .iter()
-            .map(|statement| ContinuousMeasureResult {
-                name: statement.name.clone(),
-                records: Vec::new(),
-                failure: Some("noise sweep produced no points".to_string()),
-                failure_metadata: None,
-            })
-            .collect();
+    let series = match NoiseSweepSeries::from_sweep(sweep) {
+        Ok(Some(series)) => series,
+        Ok(None) => {
+            return statements
+                .iter()
+                .map(|statement| ContinuousMeasureResult {
+                    name: statement.name.clone(),
+                    records: Vec::new(),
+                    failure: Some("noise sweep produced no points".to_string()),
+                    failure_metadata: None,
+                })
+                .collect();
+        }
+        Err(error) => {
+            return statements
+                .iter()
+                .map(|statement| ContinuousMeasureResult {
+                    name: statement.name.clone(),
+                    records: Vec::new(),
+                    failure: Some(error.clone()),
+                    failure_metadata: None,
+                })
+                .collect();
+        }
     };
     let signals = series.equation_signal_map();
     evaluate_continuous_statements(&statements, series.axis(), signals, &netlist.params, &[])
@@ -2005,6 +2135,53 @@ mod tests {
         }
     }
 
+    fn noise_point_with_contributions(
+        frequency: Value,
+        scale: Value,
+    ) -> crate::analysis::NoiseResult {
+        use crate::analysis::advanced::NoiseContribution;
+        use crate::analysis::{NoiseSourceIdentity, NoiseSourceType};
+
+        crate::analysis::NoiseResult {
+            frequency,
+            output_noise_density: 10.0 * scale,
+            input_referred_density: 2.5 * scale,
+            input_gain_squared: 4.0,
+            contribution_catalog: vec![
+                NoiseSourceIdentity::device("R4"),
+                NoiseSourceIdentity::mechanism("Q1", "IB"),
+                NoiseSourceIdentity::mechanism("Q1", "FN"),
+            ],
+            contributions: vec![
+                NoiseContribution {
+                    identity: NoiseSourceIdentity::device("r4"),
+                    noise_type: NoiseSourceType::Thermal,
+                    output_contribution: 4.0 * scale,
+                    input_contribution: scale,
+                    percentage: 0.0,
+                },
+                NoiseContribution {
+                    identity: NoiseSourceIdentity::mechanism("Q1", "IB"),
+                    noise_type: NoiseSourceType::Shot,
+                    output_contribution: 2.0 * scale,
+                    input_contribution: 0.5 * scale,
+                    percentage: 0.0,
+                },
+                NoiseContribution {
+                    identity: NoiseSourceIdentity::mechanism("q1", "ib"),
+                    noise_type: NoiseSourceType::Shot,
+                    output_contribution: 3.0 * scale,
+                    input_contribution: 0.75 * scale,
+                    percentage: 0.0,
+                },
+            ],
+            node_names: Vec::new(),
+            branch_names: Vec::new(),
+            voltages: Vec::new(),
+            currents: Vec::new(),
+        }
+    }
+
     #[test]
     fn noise_series_exposes_complex_projections_and_noise_aliases() {
         let sweep = vec![
@@ -2020,7 +2197,9 @@ mod tests {
             ),
         ];
 
-        let series = NoiseSweepSeries::from_sweep(&sweep).expect("non-empty noise sweep");
+        let series = NoiseSweepSeries::from_sweep(&sweep)
+            .expect("noise series is valid")
+            .expect("non-empty noise sweep");
         let signals = series.signal_map();
         assert_eq!(signals["VM(out)"], &[5.0, 2.0]);
         assert_eq!(signals["VR(out)"], &[3.0, 0.0]);
@@ -2044,6 +2223,68 @@ mod tests {
         let equation_signals = series.equation_signal_map();
         assert_eq!(equation_signals["V(out)"], &[3.0, 0.0]);
         assert_eq!(equation_signals["I(V1)"], &[0.0, 3.0]);
+    }
+
+    #[test]
+    fn noise_series_exposes_dno_dni_device_and_mechanism_contributions() {
+        let sweep = vec![
+            noise_point_with_contributions(10.0, 1.0),
+            noise_point_with_contributions(20.0, 2.0),
+        ];
+        let series = NoiseSweepSeries::from_sweep(&sweep)
+            .expect("contribution catalogs remain stable")
+            .expect("non-empty noise sweep");
+        let signals = series.signal_map();
+
+        assert_eq!(signals["DNO(R4)"], &[4.0, 8.0]);
+        assert_eq!(signals["DNI(R4)"], &[1.0, 2.0]);
+        assert_eq!(signals["DNO(Q1)"], &[5.0, 10.0]);
+        assert_eq!(signals["DNI(Q1)"], &[1.25, 2.5]);
+        assert_eq!(signals["DNO(Q1,IB)"], &[5.0, 10.0]);
+        assert_eq!(signals["DNI(Q1,IB)"], &[1.25, 2.5]);
+        assert_eq!(signals["DNO(Q1,FN)"], &[0.0, 0.0]);
+        assert!(!signals.contains_key("DNO(R4,R4)"));
+    }
+
+    #[test]
+    fn noise_measurements_bind_direct_braced_and_equation_dno_dni() {
+        let netlist = Netlist::parse(
+            "* noise contribution measures\n\
+             .measure noise direct AVG DNI(r4)\n\
+             .measure noise braced AVG {DNI(R4)}\n\
+             .measure noise mechanism AVG {DNO(q1, ib)}\n\
+             .measure noise equation EQN {DNO(Q1,IB)+DNI(q1,ib)}\n\
+             .end\n",
+        )
+        .expect("noise contribution measurement deck parses");
+        let sweep = vec![
+            noise_point_with_contributions(10.0, 1.0),
+            noise_point_with_contributions(20.0, 2.0),
+        ];
+
+        let results = evaluate_noise_measurements(&netlist, &sweep);
+        let result = |name: &str| {
+            results
+                .iter()
+                .find(|result| result.name.eq_ignore_ascii_case(name))
+                .expect("named noise measurement")
+        };
+        assert_eq!(result("direct").value, Some(1.5));
+        assert_eq!(result("braced").value, Some(1.5));
+        assert_eq!(result("mechanism").value, Some(7.5));
+        assert_eq!(result("equation").value, Some(12.5));
+        assert!(results.iter().all(|result| result.passed), "{results:#?}");
+    }
+
+    #[test]
+    fn noise_series_rejects_frequency_dependent_contribution_catalogs() {
+        let mut changed = noise_point_with_contributions(20.0, 2.0);
+        changed.contribution_catalog.pop();
+        let error =
+            NoiseSweepSeries::from_sweep(&[noise_point_with_contributions(10.0, 1.0), changed])
+                .err()
+                .expect("catalog mismatch must fail closed");
+        assert!(error.contains("catalog changed at frequency 20"), "{error}");
     }
 
     #[test]
