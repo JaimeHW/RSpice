@@ -241,6 +241,7 @@ pub(super) fn rewrite_scoped_references(
             | ElementKind::Mosfet { model, .. }
             | ElementKind::Jfet { model, .. }
             | ElementKind::Mesfet { model, .. }
+            | ElementKind::XyceMemristor { model, .. }
             | ElementKind::VSwitch { model, .. }
             | ElementKind::ISwitch { model, .. }
             | ElementKind::Xspice { model, .. } => Some(model),

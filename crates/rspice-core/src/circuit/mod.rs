@@ -12,7 +12,7 @@ use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::xspice::{CodeModelRegistry, DigitalValue, EventQueue, XspiceInstance};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -277,6 +277,20 @@ pub struct MultiWindingTransformerBinding {
     pub device: crate::device::MultiWindingTransformer,
 }
 
+/// Circuit binding for one native Xyce level-2 TEAM memristor.
+///
+/// `node_x` is integrated by a private unity capacitor in the ordinary
+/// capacitor pipeline (`Qx = x`). Xyce's `N(...:R)` value is emitted as a
+/// derived store waveform and deliberately does not occupy an MNA unknown.
+#[derive(Debug, Clone)]
+pub(crate) struct XyceTeamMemristorBinding {
+    pub name: String,
+    pub node_pos: NodeId,
+    pub node_neg: NodeId,
+    pub node_x: NodeId,
+    pub device: crate::device::XyceTeamMemristor,
+}
+
 /// High-performance circuit representation using Struct-of-Arrays
 ///
 /// `Clone` exists so embarrassingly-parallel sweeps (AC frequency points)
@@ -322,6 +336,13 @@ pub struct CircuitData {
     pub(crate) ekv3s: Ekv3Mosfets,
     pub(crate) vdmoses: Vdmoses,
     pub(crate) jfets: Vec<crate::device::Jfet>,
+    pub(crate) xyce_team_memristors: Vec<XyceTeamMemristorBinding>,
+    /// Node IDs occupied by private non-electrical DAE state variables.
+    /// Maintained alongside node remapping so hot solver classification is O(1).
+    pub(crate) non_electrical_state_nodes: HashSet<NodeId>,
+    /// Enables the deterministic gauge row used only when a TEAM state
+    /// equation is rank-deficient during a DC/startup operating-point solve.
+    pub(crate) xyce_team_operating_point_mode: bool,
 
     // Controlled sources
     pub(crate) vcvs: Vcvs,

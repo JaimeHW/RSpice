@@ -236,6 +236,18 @@ impl Engine {
             }
         }
 
+        // Native Xyce TEAM memristors couple both terminals and the implicit
+        // state unknown. Resistance is a derived store output, not an MNA row.
+        for dev in &circuit.xyce_team_memristors {
+            for &row in &[dev.node_pos, dev.node_neg, dev.node_x] {
+                for &col in &[dev.node_pos, dev.node_neg, dev.node_x] {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
         // B3SOIDD (BSIMSOI level 56) stamps.
         // 5-terminal SOI device (drain, gate, source, back-gate E, body) plus
         // optional gate-prime/body-contact/self-heating nodes. The DC load

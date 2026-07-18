@@ -205,6 +205,7 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
         | ElementKind::VoltageSource(_)
         | ElementKind::CurrentSource(_)
         | ElementKind::Diode { .. }
+        | ElementKind::XyceMemristor { .. }
         | ElementKind::Cccs { .. }
         | ElementKind::Ccvs { .. }
         | ElementKind::BehavioralVoltage { .. }

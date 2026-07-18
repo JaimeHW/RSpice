@@ -78,6 +78,7 @@ struct DerivedTransientBranchCurrent {
 enum DerivedTransientBranchCurrentKind {
     LinearResistor,
     LinearCapacitor,
+    XyceTeamMemristor,
     BehavioralCurrentSource,
     VoltageSwitch,
     CurrentSwitch,
@@ -117,6 +118,9 @@ impl Engine {
             });
         }
         for (index, name) in circuit.capacitors.names.iter().enumerate() {
+            if circuit.capacitors.is_internal(index) {
+                continue;
+            }
             if existing_branch_names
                 .iter()
                 .any(|existing| existing.eq_ignore_ascii_case(name))
@@ -128,6 +132,22 @@ impl Engine {
             }
             derived.push(DerivedTransientBranchCurrent {
                 kind: DerivedTransientBranchCurrentKind::LinearCapacitor,
+                index,
+            });
+        }
+        for (index, binding) in circuit.xyce_team_memristors.iter().enumerate() {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&binding.name))
+                || derived.iter().any(|&branch| {
+                    Self::derived_transient_branch_name(circuit, branch)
+                        .eq_ignore_ascii_case(&binding.name)
+                })
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::XyceTeamMemristor,
                 index,
             });
         }
@@ -214,6 +234,9 @@ impl Engine {
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 circuit.capacitors.names[branch.index].clone()
             }
+            DerivedTransientBranchCurrentKind::XyceTeamMemristor => {
+                circuit.xyce_team_memristors[branch.index].name.clone()
+            }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
                 circuit.behavioral_sources.current_sources[branch.index]
                     .name
@@ -255,8 +278,8 @@ impl Engine {
         solution: &[Value],
         time: Value,
         branch: DerivedTransientBranchCurrent,
-    ) -> Value {
-        match branch.kind {
+    ) -> Result<Value, SimulationError> {
+        let current = match branch.kind {
             DerivedTransientBranchCurrentKind::LinearResistor => {
                 let stamp = circuit.resistors.stamps[branch.index];
                 Self::two_terminal_conductance_current(
@@ -268,6 +291,22 @@ impl Engine {
             }
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 circuit.capacitors.i_prev[branch.index]
+            }
+            DerivedTransientBranchCurrentKind::XyceTeamMemristor => {
+                let binding = &circuit.xyce_team_memristors[branch.index];
+                let v_pos = Self::solution_node_voltage(solution, binding.node_pos);
+                let v_neg = Self::solution_node_voltage(solution, binding.node_neg);
+                let x = Self::solution_node_voltage(solution, binding.node_x);
+                binding
+                    .device
+                    .evaluate(v_pos, v_neg, x)
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "TEAM memristor '{}' output evaluation failed: {error}",
+                            binding.name
+                        ))
+                    })?
+                    .current
             }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
                 circuit.behavioral_sources.current_sources[branch.index].evaluate(solution, time)
@@ -299,7 +338,25 @@ impl Engine {
                     switch.conductance(),
                 )
             }
-        }
+        };
+        Ok(current)
+    }
+
+    fn xyce_team_resistance_output(
+        binding: &crate::circuit::XyceTeamMemristorBinding,
+        solution: &[Value],
+    ) -> Result<Value, SimulationError> {
+        let x = Self::solution_node_voltage(solution, binding.node_x);
+        binding
+            .device
+            .resistance(x)
+            .map(|(resistance, _)| resistance)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "TEAM memristor '{}' resistance output evaluation failed: {error}",
+                    binding.name
+                ))
+            })
     }
 
     fn initial_transient_branch_currents(
@@ -308,16 +365,16 @@ impl Engine {
         num_nodes: usize,
         time: Value,
         derived_branches: &[DerivedTransientBranchCurrent],
-    ) -> Vec<Vec<Value>> {
+    ) -> Result<Vec<Vec<Value>>, SimulationError> {
         let mut currents: Vec<Vec<Value>> = (0..circuit.num_branches())
             .map(|i| vec![solution.get(num_nodes + i).copied().unwrap_or(0.0)])
             .collect();
-        currents.extend(derived_branches.iter().map(|&branch| {
-            vec![Self::derived_transient_branch_current(
+        for &branch in derived_branches {
+            currents.push(vec![Self::derived_transient_branch_current(
                 circuit, solution, time, branch,
-            )]
-        }));
-        currents
+            )?]);
+        }
+        Ok(currents)
     }
 
     fn transient_result_value_count(result: &TransientResult) -> usize {
@@ -341,6 +398,13 @@ impl Engine {
             .saturating_add(
                 result
                     .device_op_traces
+                    .iter()
+                    .map(|trace| trace.values.len())
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                result
+                    .store_traces
                     .iter()
                     .map(|trace| trace.values.len())
                     .fold(0usize, usize::saturating_add),
@@ -399,11 +463,23 @@ impl Engine {
                 .voltages
                 .len()
                 .saturating_add(result.branch_currents.len())
+                .saturating_add(result.store_traces.len())
                 .saturating_add(1),
         )?;
         result.time.push(time);
-        for (i, voltages) in result.voltages.iter_mut().enumerate() {
+        for (i, voltages) in result.voltages.iter_mut().take(num_nodes).enumerate() {
             voltages.push(solution.get(i).copied().unwrap_or(0.0));
+        }
+        for (index, binding) in circuit.xyce_team_memristors.iter().enumerate() {
+            let trace = result.store_traces.get_mut(index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "TEAM memristor '{}' resistance output channel is missing",
+                    binding.name
+                ))
+            })?;
+            trace
+                .values
+                .push(Self::xyce_team_resistance_output(binding, solution)?);
         }
 
         let solved_branch_count = circuit.num_branches();
@@ -442,7 +518,7 @@ impl Engine {
         {
             currents.push(Self::derived_transient_branch_current(
                 circuit, solution, time, *branch,
-            ));
+            )?);
         }
         if record_device_op_traces {
             result.record_device_op_sample(circuit.device_op_report());
@@ -735,6 +811,7 @@ impl Engine {
                 digital_traces: Vec::new(),
                 real_traces: Vec::new(),
                 device_op_traces: Vec::new(),
+                store_traces: Vec::new(),
             };
             let checkpoint = TransientCheckpoint::capture(
                 fingerprint,
@@ -902,6 +979,7 @@ impl Engine {
             && circuit.vswitches.is_empty()
             && circuit.iswitches.is_empty()
             && circuit.generic_switches.is_empty()
+            && circuit.xyce_team_memristors.is_empty()
             && !circuit.has_xspice_devices()
             && {
                 #[cfg(feature = "veriloga")]
@@ -1071,7 +1149,8 @@ impl Engine {
             }
         };
 
-        // Initialize result storage with actual node names from netlist
+        // Initialize result storage with actual MNA node names. TEAM resistance
+        // remains a typed store trace and never enters this voltage namespace.
         let node_names = circuit.node_names_sorted();
 
         log::debug!("Transient node mapping contains {} nodes", node_names.len());
@@ -1086,6 +1165,13 @@ impl Engine {
                 "Applied {} .IC node override(s) to transient initial state",
                 applied_ic
             );
+        }
+        let mut store_traces = Vec::with_capacity(circuit.xyce_team_memristors.len());
+        for binding in &circuit.xyce_team_memristors {
+            store_traces.push(crate::engine::TransientStoreTrace {
+                name: format!("{}:R", binding.name),
+                values: vec![Self::xyce_team_resistance_output(binding, &solution)?],
+            });
         }
 
         let mut branch_names = circuit.branch_names_sorted();
@@ -1112,13 +1198,14 @@ impl Engine {
                 num_nodes,
                 resume_time,
                 &derived_branch_currents,
-            ),
+            )?,
             num_nodes,
             node_names,
             branch_names,
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces,
         };
         if record_device_op_traces {
             result.record_device_op_sample(circuit.device_op_report());
@@ -4276,6 +4363,7 @@ impl Engine {
                 voltages: vec![Vec::new(); result.num_nodes],
                 num_nodes: result.num_nodes,
                 node_names: result.node_names.clone(),
+                store_traces: result.store_traces.clone(),
                 compression_ratio: 1.0,
                 input_points: 0,
             });
@@ -4314,9 +4402,13 @@ fn compress_transient_result(
             .voltages
             .iter()
             .any(|waveform| waveform.len() != point_count)
+        || result
+            .store_traces
+            .iter()
+            .any(|trace| trace.values.len() != point_count)
     {
         return Err(SimulationError::Circuit(
-            "Cannot compress a malformed transient voltage matrix".to_string(),
+            "Cannot compress malformed transient voltage or store waveforms".to_string(),
         ));
     }
     if point_count <= 2 || !config.enabled {
@@ -4325,6 +4417,7 @@ fn compress_transient_result(
             voltages: result.voltages.clone(),
             num_nodes: result.num_nodes,
             node_names: result.node_names.clone(),
+            store_traces: result.store_traces.clone(),
             compression_ratio: 1.0,
             input_points: point_count,
         });
@@ -4385,7 +4478,11 @@ fn compress_transient_result(
                     return Err(SimulationError::Aborted);
                 }
                 let fraction = (result.time[point] - t0) * inverse_dt;
-                for waveform in &result.voltages {
+                for waveform in result
+                    .voltages
+                    .iter()
+                    .chain(result.store_traces.iter().map(|trace| &trace.values))
+                {
                     let actual = waveform[point];
                     let predicted = waveform[start] + fraction * (waveform[end] - waveform[start]);
                     let tolerance = config.abs_tol + config.rel_tol * actual.abs();
@@ -4431,6 +4528,14 @@ fn compress_transient_result(
             .collect(),
         num_nodes: result.num_nodes,
         node_names: result.node_names.clone(),
+        store_traces: result
+            .store_traces
+            .iter()
+            .map(|trace| crate::engine::TransientStoreTrace {
+                name: trace.name.clone(),
+                values: indices.iter().map(|&index| trace.values[index]).collect(),
+            })
+            .collect(),
         compression_ratio: point_count as Value / stored_points as Value,
         input_points: point_count,
     })
@@ -4654,6 +4759,7 @@ mod tests {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
         let config = CompressionConfig {
             abs_tol: 1e-6,

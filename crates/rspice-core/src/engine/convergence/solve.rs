@@ -203,10 +203,7 @@ impl Engine {
         let junction_gmin =
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
         let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
-            let node_count = circuit.num_nodes().min(rhs.len());
-            for i in 0..node_count {
-                probe.add(i, i, gmin_floor);
-            }
+            Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
             circuit.stamp_dc_direct(probe, rhs);
             self.try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
                 circuit,
@@ -264,7 +261,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
-        let mut solution = Self::sanitize_initial_guess(initial_guess, size, node_count);
+        let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
         Self::enforce_node_voltage_hints(circuit, &mut solution, node_hints);
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
 
@@ -279,15 +276,13 @@ impl Engine {
 
             matrix.clear_values();
             rhs.fill(0.0);
-            for i in 0..node_count {
-                matrix.add(i, i, gmin_floor);
-            }
+            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             circuit.stamp_dc_direct(matrix, &mut rhs);
             self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
 
             let mut new_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
-            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
 
             let voltage_converged =
@@ -335,7 +330,9 @@ impl Engine {
         // Sanitize any warm-start seed before Newton so pathological presolve
         // artifacts do not launch the iteration from physically impossible rails.
         let mut solution = match initial_guess {
-            Some(guess) => Self::sanitize_initial_guess(guess, size, circuit.num_nodes().min(size)),
+            Some(guess) => {
+                Self::sanitize_initial_guess(circuit, guess, size, circuit.num_nodes().min(size))
+            }
             None => {
                 let mut guess = vec![0.0; size];
                 Self::apply_bjt_initial_guess_correction(&mut guess, circuit);
@@ -406,9 +403,7 @@ impl Engine {
             matrix.clear_values();
             rhs.fill(0.0);
             let node_count = circuit.num_nodes().min(size);
-            for i in 0..node_count {
-                matrix.add(i, i, gmin_floor);
-            }
+            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             // Stamp linear devices
             circuit.stamp_dc_direct(matrix, &mut rhs);
             // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
@@ -429,6 +424,7 @@ impl Engine {
                 if requires_conservative_nonlinear_limiting && !junction_owns_steps {
                     self.apply_damping_strategy_for_circuit(
                         circuit.has_b3soi_devices(),
+                        &circuit.non_electrical_state_mask(),
                         &solution,
                         &raw_solution,
                         &mut damping_state,
@@ -450,6 +446,7 @@ impl Engine {
                     );
                     *v = 0.0; // Replace NaN/Inf with zero
                 } else if i < node_count
+                    && !circuit.is_non_electrical_state_matrix_index(i)
                     && requires_conservative_nonlinear_limiting
                     && v.abs() > Self::MAX_NODE_VOLTAGE
                 {
@@ -592,6 +589,7 @@ impl Engine {
         let zero_seed = vec![0.0; solution.len()];
         let mut fallback_seed = if circuit.has_b3soi_devices() {
             Self::sanitize_initial_guess(
+                circuit,
                 &solution,
                 solution.len(),
                 circuit.num_nodes().min(solution.len()),
@@ -964,7 +962,7 @@ impl Engine {
         let node_count = circuit.num_nodes().min(size);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
-        let mut solution = Self::sanitize_initial_guess(initial_guess, size, node_count);
+        let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
         Self::enforce_node_voltage_hints(circuit, &mut solution, node_hints);
         self.prime_operating_point_seed(
             circuit,
@@ -999,7 +997,7 @@ impl Engine {
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
 
             let mut new_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
-            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
 
             let voltage_converged =
@@ -1137,7 +1135,8 @@ impl Engine {
             solution[node_id - 1] = voltage;
         }
 
-        solution = Self::sanitize_initial_guess(&solution, size, circuit.num_nodes().min(size));
+        solution =
+            Self::sanitize_initial_guess(circuit, &solution, size, circuit.num_nodes().min(size));
         let mut nodeset_startup_solution = None;
         if !node_hints.is_empty() {
             match self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
@@ -1215,6 +1214,7 @@ impl Engine {
                 if requires_conservative_nonlinear_limiting && !junction_owns_steps {
                     self.apply_damping_strategy_for_circuit(
                         circuit.has_b3soi_devices(),
+                        &circuit.non_electrical_state_mask(),
                         &solution,
                         &raw_solution,
                         &mut damping_state,
@@ -1241,6 +1241,7 @@ impl Engine {
                 };
             circuit.enforce_ideal_voltage_constraints(&mut new_solution, time);
             Self::clamp_solution_to_physical_bounds(
+                circuit,
                 &mut new_solution,
                 circuit.num_nodes().min(size),
             );

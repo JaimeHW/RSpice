@@ -19,6 +19,7 @@ mod coupled_transmission_line;
 mod cpl_native;
 pub mod ffi;
 pub mod gan_hemt;
+pub mod memristor_team;
 pub mod model_bypass;
 pub mod opamp;
 pub mod pwl_file;
@@ -58,6 +59,10 @@ pub use semiconductor::{Bjt, BjtType, Diode};
 pub use behavioral::{BehavioralCurrentSource, BehavioralSources, BehavioralVoltageSource};
 pub use controlled::{Cccs, Ccvs, Vccs, Vcvs};
 pub use coupled_transmission_line::CoupledTransmissionLine;
+pub use memristor_team::{
+    XYCE_TEAM_MEMRISTOR_LEVEL, XyceTeamInstanceParams, XyceTeamMemristor, XyceTeamMemristorCache,
+    XyceTeamMemristorError, XyceTeamModelParams,
+};
 pub use sources::{CurrentSource, VoltageSource};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;

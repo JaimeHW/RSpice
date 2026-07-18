@@ -115,13 +115,12 @@ impl Engine {
             // Keep the warmup matrix well-conditioned for highly floating
             // transistor stacks without overwhelming very high-resistance
             // native device topologies such as BSIM4 RGATEMOD=3.
-            for i in 0..size {
-                matrix.add(i, i, gmin_floor);
-            }
+            Self::stamp_matrix_conditioning_diagonal(circuit, matrix, size, gmin_floor);
             circuit.stamp_dc_direct(matrix, &mut rhs);
             circuit.stamp_generic_switches(matrix, &mut rhs, 0.0);
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
+                circuit.set_xyce_team_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
                 circuit
                     .stamp_nonlinear(matrix, &mut rhs, &solution)
@@ -145,6 +144,10 @@ impl Engine {
                 if !new_v.is_finite() {
                     new_v = old;
                 }
+                if i < circuit.num_nodes() && circuit.is_non_electrical_state_matrix_index(i) {
+                    proposal[i] = new_v;
+                    continue;
+                }
                 let delta =
                     (new_v - old).clamp(-STARTUP_WARMUP_MAX_DELTA_V, STARTUP_WARMUP_MAX_DELTA_V);
                 proposal[i] = old + delta;
@@ -152,6 +155,7 @@ impl Engine {
 
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
+                circuit.set_xyce_team_operating_point_mode(true);
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
@@ -187,9 +191,7 @@ impl Engine {
             matrix.clear_values();
             rhs.fill(0.0);
 
-            for i in 0..size {
-                matrix.add(i, i, gmin_floor);
-            }
+            Self::stamp_matrix_conditioning_diagonal(circuit, matrix, size, gmin_floor);
             circuit.stamp_transient_operating_point_direct(matrix, &mut rhs);
             let num_nodes = circuit.num_nodes();
             circuit
@@ -200,6 +202,7 @@ impl Engine {
 
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
+                circuit.set_xyce_team_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
                 circuit
                     .stamp_nonlinear(matrix, &mut rhs, &solution)
@@ -226,6 +229,10 @@ impl Engine {
                 if !new_v.is_finite() {
                     new_v = old;
                 }
+                if i < circuit.num_nodes() && circuit.is_non_electrical_state_matrix_index(i) {
+                    proposal[i] = new_v;
+                    continue;
+                }
                 let delta =
                     (new_v - old).clamp(-STARTUP_WARMUP_MAX_DELTA_V, STARTUP_WARMUP_MAX_DELTA_V);
                 proposal[i] = old + delta;
@@ -233,6 +240,7 @@ impl Engine {
 
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
+                circuit.set_xyce_team_operating_point_mode(true);
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {

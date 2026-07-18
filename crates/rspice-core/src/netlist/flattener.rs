@@ -1373,6 +1373,24 @@ impl<'a> Flattener<'a> {
                 )?,
                 deferred_params: Vec::new(),
             },
+            ElementKind::XyceMemristor {
+                model,
+                instance_params,
+                deferred_params,
+            } => ElementKind::XyceMemristor {
+                model: self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    scope,
+                )?,
+                deferred_params: Vec::new(),
+            },
 
             // Nested subcircuit - propagate parameters
             ElementKind::Subcircuit {
@@ -2378,6 +2396,7 @@ fn device_initial_condition_element_type(kind: &ElementKind) -> &'static str {
         ElementKind::Bjt { .. } => "BJT",
         ElementKind::Jfet { .. } => "JFET",
         ElementKind::Mesfet { .. } => "MESFET",
+        ElementKind::XyceMemristor { .. } => "Xyce memristor",
         ElementKind::Vcvs { .. }
         | ElementKind::Cccs { .. }
         | ElementKind::Vccs { .. }

@@ -340,12 +340,18 @@ impl CircuitData {
             .collect()
     }
 
-    /// Nodes driven by ideal voltage-output elements should not be post-clamped
-    /// after a force-accepted Newton step because that would immediately break
-    /// the ideal constraint equation the solver is trying to preserve.
+    /// Nodal-prefix unknowns that must not receive generic voltage clamps.
+    ///
+    /// This includes nodes driven by ideal voltage-output elements, where a
+    /// post-clamp would break the ideal constraint, and private non-electrical
+    /// DAE state rows, whose values and deltas are not measured in volts.
     pub fn force_accept_protected_nodes(&self) -> Vec<bool> {
         let mut mask = vec![false; self.num_nodes()];
         let ground_reachable = self.force_accept_ground_reachable_nodes();
+
+        for binding in &self.xyce_team_memristors {
+            Self::mark_force_accept_protected_node(&mut mask, binding.node_x);
+        }
 
         for idx in 0..self.voltage_sources.len() {
             Self::mark_force_accept_protected_node(&mut mask, self.voltage_sources.node_pos[idx]);

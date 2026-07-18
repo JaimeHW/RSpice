@@ -338,7 +338,7 @@ impl Engine {
         }
         let zero_guess = vec![0.0; size];
         let mut solution = if circuit.has_b3soi_devices() {
-            Self::sanitize_initial_guess(initial_guess, size, node_count)
+            Self::sanitize_initial_guess(circuit, initial_guess, size, node_count)
         } else {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, initial_guess, &zero_guess, 0.0)
         };
@@ -462,12 +462,12 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut solution = Self::normalize_initial_guess(initial_guess, size);
         let node_count = circuit.num_nodes().min(size);
-        if Self::is_suspicious_solution(&solution, node_count) {
+        if Self::is_suspicious_solution(circuit, &solution, node_count) {
             solution.fill(0.0);
         }
         let mut anchor_solution = solution.clone();
-        Self::clamp_solution_to_physical_bounds(&mut solution, node_count);
-        Self::clamp_solution_to_physical_bounds(&mut anchor_solution, node_count);
+        Self::clamp_solution_to_physical_bounds(circuit, &mut solution, node_count);
+        Self::clamp_solution_to_physical_bounds(circuit, &mut anchor_solution, node_count);
 
         let mut pseudo = PseudoTransient::new();
         let mut damping_state = NewtonDampingState::default();
@@ -489,9 +489,10 @@ impl Engine {
                 matrix.clear_values();
 
                 for i in 0..size {
-                    matrix.add(i, i, 1e-12 + pseudo_conductance);
+                    matrix.add(i, i, pseudo_conductance);
                     rhs[i] += pseudo.current(anchor_solution[i]);
                 }
+                Self::stamp_matrix_conditioning_diagonal(circuit, matrix, size, 1e-12);
 
                 circuit.stamp_dc_direct(matrix, &mut rhs);
                 self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
@@ -503,6 +504,7 @@ impl Engine {
 
                 let mut new_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
+                    &circuit.non_electrical_state_mask(),
                     &solution,
                     &raw_solution,
                     &mut damping_state,
@@ -519,7 +521,7 @@ impl Engine {
                     },
                 );
                 circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution);
-                Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+                Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
 
                 let converged = self.node_voltage_convergence_met(
                     &solution,
@@ -572,10 +574,10 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut current_solution = Self::normalize_initial_guess(initial_guess, size);
         let node_count = circuit.num_nodes().min(size);
-        if Self::is_suspicious_solution(&current_solution, node_count) {
+        if Self::is_suspicious_solution(circuit, &current_solution, node_count) {
             current_solution.fill(0.0);
         }
-        Self::clamp_solution_to_physical_bounds(&mut current_solution, node_count);
+        Self::clamp_solution_to_physical_bounds(circuit, &mut current_solution, node_count);
         let arc_newton_iters = self.continuation_iteration_budget(8, 16);
 
         let mut arc_cfg = ArcLengthConfig {
@@ -670,7 +672,7 @@ impl Engine {
 
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
-        let mut solution = Self::sanitize_initial_guess(initial_guess, size, node_count);
+        let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
         let mut damping_state = NewtonDampingState::default();
         let corrector_iterations = self.continuation_iteration_budget(8, 16);
         let mut total_iterations = 0usize;
@@ -934,7 +936,7 @@ impl Engine {
         );
 
         // Final check: detect both clamped values and suspicious uniformity
-        let has_clamped = Self::has_clamped_values(&solution, node_count);
+        let has_clamped = Self::has_clamped_values(circuit, &solution, node_count);
 
         // Check for suspicious uniformity (same issue as source stepping)
         let final_node_count = node_count.min(solution.len());
@@ -995,10 +997,8 @@ impl Engine {
             let mut rhs = vec![0.0; solution.len()];
             matrix.clear_values();
 
+            Self::stamp_nodal_gmin(circuit, matrix, gmin);
             let node_count = circuit.num_nodes().min(solution.len());
-            for i in 0..node_count {
-                matrix.add(i, i, gmin);
-            }
 
             circuit.stamp_dc_direct(matrix, &mut rhs);
             self.try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
@@ -1016,6 +1016,7 @@ impl Engine {
 
             let mut new_solution = self.apply_damping_strategy_for_circuit(
                 circuit.has_b3soi_devices(),
+                &circuit.non_electrical_state_mask(),
                 &solution,
                 &raw_solution,
                 damping_state,
@@ -1024,7 +1025,7 @@ impl Engine {
                 |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
             );
             circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution);
-            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);

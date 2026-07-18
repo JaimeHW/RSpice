@@ -16,6 +16,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     ekv3s: Ekv3Mosfets,
     vdmoses: Vdmoses,
     jfets: Vec<crate::device::Jfet>,
+    xyce_team_memristors: Vec<XyceTeamMemristorBinding>,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
     generic_switches: Vec<crate::device::GenericSwitch>,
@@ -143,6 +144,7 @@ impl CircuitData {
             || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
+            || !self.xyce_team_memristors.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || !self.generic_switches.is_empty()
@@ -221,6 +223,14 @@ impl CircuitData {
         for dev in &self.b3soi_pd.devices {
             dev.set_dc_mode(operating_point);
         }
+    }
+
+    /// Select whether a rank-deficient TEAM state equation may receive its
+    /// deterministic operating-point gauge. This never replaces an active
+    /// physical state equation and is disabled for real transient steps,
+    /// where the private Q(x) companion supplies the dynamic row.
+    pub(crate) fn set_xyce_team_operating_point_mode(&mut self, operating_point: bool) {
+        self.xyce_team_operating_point_mode = operating_point;
     }
 
     pub(crate) fn reset_b3soi_operating_point_history(&mut self) {
@@ -327,6 +337,7 @@ impl CircuitData {
             || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
+            || !self.xyce_team_memristors.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self
@@ -375,6 +386,7 @@ impl CircuitData {
             || !self.ekv26s.is_empty()
             || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
+            || !self.xyce_team_memristors.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self
@@ -493,6 +505,7 @@ impl CircuitData {
             ekv3s: self.ekv3s.clone(),
             vdmoses: self.vdmoses.clone(),
             jfets: self.jfets.clone(),
+            xyce_team_memristors: self.xyce_team_memristors.clone(),
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
             generic_switches: self.generic_switches.clone(),
@@ -528,6 +541,7 @@ impl CircuitData {
         self.ekv3s = snapshot.ekv3s;
         self.vdmoses = snapshot.vdmoses;
         self.jfets = snapshot.jfets;
+        self.xyce_team_memristors = snapshot.xyce_team_memristors;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
         self.generic_switches = snapshot.generic_switches;
@@ -716,6 +730,7 @@ impl CircuitData {
         for jfet in &self.jfets {
             jfet.stamp_direct(matrix, rhs, voltages);
         }
+        self.stamp_xyce_team_memristors(matrix, rhs, voltages)?;
         let mut stamper = StaticMatrixStamper { matrix, rhs };
         // B3SOIDD devices use the generic stamper path (1-indexed -> 0-indexed
         // handled by StaticMatrixStamper). Their DC conductance/current stamp is
@@ -762,6 +777,93 @@ impl CircuitData {
                 },
                 evaluation_mode,
             )?;
+        }
+        Ok(())
+    }
+
+    fn stamp_xyce_team_memristors(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+    ) -> Result<(), String> {
+        #[inline]
+        fn value_at(solution: &[Value], node: NodeId) -> Result<Value, String> {
+            solution_node_voltage(solution, node)
+                .ok_or_else(|| format!("TEAM memristor node {node} is outside the solution vector"))
+        }
+
+        #[inline]
+        fn stamp_row(
+            matrix: &mut StaticMatrix,
+            rhs: &mut [Value],
+            row: NodeId,
+            columns: &[(NodeId, Value)],
+            equivalent_rhs: Value,
+        ) {
+            if row == 0 {
+                return;
+            }
+            for &(column, derivative) in columns {
+                if column > 0 && derivative != 0.0 {
+                    matrix.add(row - 1, column - 1, derivative);
+                }
+            }
+            rhs[row - 1] += equivalent_rhs;
+        }
+
+        for binding in &self.xyce_team_memristors {
+            let v_pos = value_at(solution, binding.node_pos)?;
+            let v_neg = value_at(solution, binding.node_neg)?;
+            let x = value_at(solution, binding.node_x)?;
+            let cache = binding
+                .device
+                .evaluate(v_pos, v_neg, x)
+                .map_err(|error| format!("TEAM memristor '{}': {error}", binding.name))?;
+            let variables = [v_pos, v_neg, x];
+            let nodes = [binding.node_pos, binding.node_neg, binding.node_x];
+
+            for row_index in 0..2 {
+                let row_jacobian = cache.jacobian[row_index];
+                let equivalent_rhs = row_jacobian
+                    .iter()
+                    .zip(variables)
+                    .map(|(derivative, value)| derivative * value)
+                    .sum::<Value>()
+                    - cache.residual[row_index];
+                let columns = [
+                    (nodes[0], row_jacobian[0]),
+                    (nodes[1], row_jacobian[1]),
+                    (nodes[2], row_jacobian[2]),
+                ];
+                stamp_row(matrix, rhs, nodes[row_index], &columns, equivalent_rhs);
+            }
+
+            let mut row_jacobian = cache.jacobian[2];
+            let mut state_residual = cache.residual[2];
+            if self.xyce_team_operating_point_mode
+                && state_residual == 0.0
+                && row_jacobian.iter().all(|derivative| *derivative == 0.0)
+            {
+                // Within the threshold deadband, F_x is identically zero and
+                // a DC operating point does not determine x. Select x=0 as a
+                // gauge only for that rank-deficient row. Transient stamping
+                // disables this mode so dQ/dt remains the governing equation.
+                row_jacobian = [0.0, 0.0, 1.0];
+                state_residual = x;
+            }
+            let equivalent_rhs = row_jacobian
+                .iter()
+                .zip(variables)
+                .map(|(derivative, value)| derivative * value)
+                .sum::<Value>()
+                - state_residual;
+            let columns = [
+                (nodes[0], row_jacobian[0]),
+                (nodes[1], row_jacobian[1]),
+                (nodes[2], row_jacobian[2]),
+            ];
+            stamp_row(matrix, rhs, binding.node_x, &columns, equivalent_rhs);
         }
         Ok(())
     }

@@ -1676,6 +1676,7 @@ mod tests {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         }
     }
 

@@ -27,6 +27,28 @@ impl DeviceOpReport {
 }
 
 impl CircuitData {
+    /// Whether a matrix row inside the nodal prefix represents a private
+    /// non-electrical DAE state rather than an electrical node voltage.
+    ///
+    /// Solver-wide electrical aids such as nodal GMIN and voltage clamps must
+    /// not alter these rows. The state still lives in the nodal prefix so it
+    /// can reuse the sparse topology and capacitor companion infrastructure.
+    pub(crate) fn is_non_electrical_state_matrix_index(&self, index: usize) -> bool {
+        self.non_electrical_state_nodes.contains(&(index + 1))
+    }
+
+    pub(crate) fn non_electrical_state_mask(&self) -> Vec<bool> {
+        let mut mask = vec![false; self.num_nodes()];
+        for node in &self.non_electrical_state_nodes {
+            if *node > 0
+                && let Some(slot) = mask.get_mut(*node - 1)
+            {
+                *slot = true;
+            }
+        }
+        mask
+    }
+
     /// Linearize every behavioral source at the DC operating point so the
     /// small-signal (AC/noise/sensitivity) assembly can read the cached
     /// partials immutably. One-shot per analysis for frequency-invariant
@@ -331,7 +353,12 @@ impl CircuitData {
             .map(|diode| (diode.node_anode, diode.node_cathode))
     }
 
-    /// Read-only access to capacitor storage (names, nodes, capacitances, ICs).
+    /// Read-only access to capacitor storage (names, nodes, capacitances, ICs,
+    /// and authored/internal provenance).
+    ///
+    /// Internal capacitors are canonical integration companions and remain
+    /// visible here for diagnostics. Use [`Capacitors::is_internal`] or
+    /// [`Capacitors::authored_len`] when presenting authored-device views.
     pub fn capacitor_storage(&self) -> &Capacitors {
         &self.capacitors
     }
@@ -377,7 +404,7 @@ impl CircuitData {
     pub fn device_count(&self) -> usize {
         let count = self.resistors.len()
             + self.resistor_branches.len()
-            + self.capacitors.len()
+            + self.capacitors.authored_len()
             + self.inductors.len()
             + self.voltage_sources.len()
             + self.current_sources.len()
@@ -388,6 +415,7 @@ impl CircuitData {
             + self.ekv3s.len()
             + self.vdmoses.len()
             + self.jfets.len()
+            + self.xyce_team_memristors.len()
             + self.vcvs.len()
             + self.vccs.len()
             + self.cccs.len()

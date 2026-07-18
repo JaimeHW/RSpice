@@ -112,7 +112,7 @@ impl Engine {
         circuit: &CircuitData,
         solution: &[Value],
         result: &mut SimulationResult,
-    ) {
+    ) -> Result<(), SimulationError> {
         let node_voltage = |node: usize| {
             if node == 0 {
                 0.0
@@ -198,6 +198,36 @@ impl Engine {
                 .dc_observables
                 .push((format!("W({})", source.name), power));
         }
+
+        // TEAM lead current and resistance are Xyce device outputs rather
+        // than MNA branches. Evaluate both from the accepted state without
+        // adding observation unknowns to the circuit matrix.
+        for binding in &circuit.xyce_team_memristors {
+            let v_pos = node_voltage(binding.node_pos);
+            let v_neg = node_voltage(binding.node_neg);
+            let x = node_voltage(binding.node_x);
+            let cache = binding.device.evaluate(v_pos, v_neg, x).map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "TEAM memristor '{}' DC output evaluation failed: {error}",
+                    binding.name
+                ))
+            })?;
+            let voltage = v_pos - v_neg;
+            let power = voltage * cache.current;
+            result
+                .dc_observables
+                .push((format!("I({})", binding.name), cache.current));
+            result
+                .dc_observables
+                .push((format!("P({})", binding.name), power));
+            result
+                .dc_observables
+                .push((format!("W({})", binding.name), power));
+            result
+                .dc_observables
+                .push((format!("N({}:R)", binding.name), cache.resistance));
+        }
+        Ok(())
     }
 
     fn build_empty_dc_result() -> SimulationResult {
@@ -376,7 +406,7 @@ impl Engine {
                 result.branch_currents[i - circuit.num_nodes()] = v;
             }
         }
-        Self::populate_dc_observables(&circuit, &solution, &mut result);
+        Self::populate_dc_observables(&circuit, &solution, &mut result)?;
         let device_op_report = circuit.device_op_report();
         engine.ensure_result_values(dc_result_value_count(&result, &device_op_report))?;
 
@@ -839,7 +869,7 @@ impl Engine {
                         result.branch_currents[i - circuit.num_nodes()] = v;
                     }
                 }
-                Self::populate_dc_observables(&circuit, &solution, &mut result);
+                Self::populate_dc_observables(&circuit, &solution, &mut result)?;
 
                 let point = DcSweepPointResult {
                     sweep_value,

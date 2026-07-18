@@ -749,6 +749,22 @@ impl LteEstimator {
     }
 
     #[inline]
+    fn accepted_point_global_reference_prefix_excluding(
+        &self,
+        prefix_len: usize,
+        excluded_indices: &[usize],
+    ) -> Option<Value> {
+        self.accepted_reference_solution
+            .iter()
+            .take(prefix_len)
+            .enumerate()
+            .filter(|(index, _)| excluded_indices.binary_search(index).is_err())
+            .try_fold(0.0_f64, |reference, (_, value)| {
+                value.is_finite().then(|| reference.max(value.abs()))
+            })
+    }
+
+    #[inline]
     fn accepted_reference_magnitude(&self, index: usize, accepted_point_global: Value) -> Value {
         match self.reference {
             TransientLteReference::PredictorLocal => 0.0,
@@ -1221,7 +1237,9 @@ impl LteEstimator {
             | TransientLteReference::PointLocal
             | TransientLteReference::SignalLocal => 0.0,
             TransientLteReference::PointGlobal | TransientLteReference::SignalGlobal => {
-                let Some(reference) = self.accepted_point_global_reference() else {
+                let Some(reference) =
+                    self.accepted_point_global_reference_prefix_excluding(len, excluded_indices)
+                else {
                     return (Value::INFINITY, false);
                 };
                 reference
@@ -1681,6 +1699,36 @@ mod lte_estimator_tests {
 
         assert_eq!(lte, 0.0);
         assert!(accepts);
+    }
+
+    #[test]
+    fn xyce_device_mask_excludes_algebraic_values_from_point_global_weight() {
+        let estimator = accepted_estimator(
+            TransientLteReference::PointGlobal,
+            &[1.0, 1000.0],
+            &[1.0, 1000.0],
+        );
+
+        let (masked_lte, _) = estimator.estimate_correction_prefix_excluding_for_integration(
+            &[1.6, 1000.0],
+            &[1.0, 1000.0],
+            2,
+            1.0,
+            &[1],
+            IntegrationMethod::Trapezoidal,
+            2,
+        );
+        let (unmasked_lte, _) = estimator.estimate_correction_prefix_excluding_for_integration(
+            &[1.6, 1000.0],
+            &[1.0, 1000.0],
+            2,
+            1.0,
+            &[],
+            IntegrationMethod::Trapezoidal,
+            2,
+        );
+
+        assert!(masked_lte > unmasked_lte * 100.0);
     }
 
     #[test]

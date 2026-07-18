@@ -19,9 +19,7 @@ impl Engine {
         let node_count = circuit.num_nodes().min(size);
         let mut polished_solution = None;
         let accepted = matrix.with_probe_values(|probe, rhs| {
-            for row in 0..node_count {
-                probe.add(row, row, gmin_floor);
-            }
+            Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
             circuit.stamp_dc_direct(probe, rhs);
             if self
                 .try_stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution)
@@ -224,10 +222,7 @@ impl Engine {
             solution,
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
-                let node_count = circuit.num_nodes().min(rhs.len());
-                for i in 0..node_count {
-                    matrix.add(i, i, gmin_floor);
-                }
+                Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
@@ -247,10 +242,7 @@ impl Engine {
             solution,
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
-                let node_count = circuit.num_nodes().min(rhs.len());
-                for i in 0..node_count {
-                    matrix.add(i, i, gmin_floor);
-                }
+                Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
                 circuit.stamp_dc_direct_scaled(matrix, rhs, source_scale);
             },
         )
@@ -270,10 +262,7 @@ impl Engine {
             solution,
             junction_gmin,
             |circuit, matrix, rhs| {
-                let node_count = circuit.num_nodes().min(rhs.len());
-                for i in 0..node_count {
-                    matrix.add(i, i, gmin);
-                }
+                Self::stamp_nodal_gmin(circuit, matrix, gmin);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
@@ -294,9 +283,10 @@ impl Engine {
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
                 for i in 0..rhs.len() {
-                    matrix.add(i, i, 1e-12 + pseudo_conductance);
+                    matrix.add(i, i, pseudo_conductance);
                     rhs[i] += pseudo_conductance * anchor_solution[i];
                 }
+                Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), 1e-12);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
@@ -395,10 +385,7 @@ impl Engine {
     ) -> Option<Value> {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            let node_count = circuit.num_nodes().min(rhs.len());
-            for i in 0..node_count {
-                matrix.add(i, i, gmin_floor);
-            }
+            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             circuit.stamp_dc_direct(matrix, rhs);
         })
     }
@@ -412,10 +399,7 @@ impl Engine {
     ) -> Option<Value> {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            let node_count = circuit.num_nodes().min(rhs.len());
-            for i in 0..node_count {
-                matrix.add(i, i, gmin_floor);
-            }
+            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             circuit.stamp_dc_direct_scaled(matrix, rhs, source_scale);
         })
     }
@@ -434,10 +418,7 @@ impl Engine {
             solution,
             junction_gmin,
             |circuit, matrix, rhs| {
-                let node_count = circuit.num_nodes().min(rhs.len());
-                for i in 0..node_count {
-                    matrix.add(i, i, gmin);
-                }
+                Self::stamp_nodal_gmin(circuit, matrix, gmin);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
@@ -454,9 +435,10 @@ impl Engine {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
             for i in 0..rhs.len() {
-                matrix.add(i, i, gmin_floor + pseudo_conductance);
+                matrix.add(i, i, pseudo_conductance);
                 rhs[i] += pseudo_conductance * anchor_solution[i];
             }
+            Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), gmin_floor);
             circuit.stamp_dc_direct(matrix, rhs);
         })
     }

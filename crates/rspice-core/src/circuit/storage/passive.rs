@@ -263,6 +263,13 @@ impl ResistorBranches {
 #[derive(Debug, Default, Clone)]
 pub struct Capacitors {
     pub names: Vec<String>,
+    /// Construction provenance aligned with `names` and the other SoA fields.
+    ///
+    /// `true` identifies a simulator-generated integration companion rather
+    /// than a capacitor authored in the input netlist. Internal capacitors
+    /// still participate in matrix stamping and state history, but callers
+    /// can exclude them from authored-device introspection and public output.
+    pub internal: Vec<bool>,
     /// Pre-computed stamps for the capacitor matrix entries
     pub stamps: Vec<TwoTerminalStamp>,
     /// Capacitance values in Farads
@@ -296,6 +303,7 @@ impl Capacitors {
 
     pub fn add(&mut self, name: String, node_pos: NodeId, node_neg: NodeId, capacitance: Value) {
         self.names.push(name);
+        self.internal.push(false);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.capacitances.push(capacitance);
         self.v_prev.push(0.0);
@@ -317,6 +325,7 @@ impl Capacitors {
         ic: Value,
     ) {
         self.names.push(name);
+        self.internal.push(false);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.capacitances.push(capacitance);
         self.v_prev.push(ic); // Initialize v_prev to IC
@@ -327,6 +336,23 @@ impl Capacitors {
         self.ic.push(Some(ic));
         self.ic_branch_indices.push(None);
         self.ic_branch_csc_indices.push([None; 5]);
+    }
+
+    /// Add a simulator-generated capacitor that owns private integration
+    /// state. It remains in the canonical capacitor pipeline while carrying
+    /// explicit provenance for public introspection and output filtering.
+    pub fn add_internal(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        capacitance: Value,
+    ) {
+        self.add(name, node_pos, node_neg, capacitance);
+        *self
+            .internal
+            .last_mut()
+            .expect("capacitor provenance follows capacitor storage") = true;
     }
 
     /// Add a capacitor whose `IC=` is enforced as an ideal voltage source
@@ -385,6 +411,18 @@ impl Capacitors {
 
     pub fn len(&self) -> usize {
         self.names.len()
+    }
+
+    /// Number of capacitors authored by the input netlist.
+    pub fn authored_len(&self) -> usize {
+        self.names
+            .len()
+            .saturating_sub(self.internal.iter().filter(|&&internal| internal).count())
+    }
+
+    /// Whether the capacitor at `index` is a simulator-generated companion.
+    pub fn is_internal(&self, index: usize) -> bool {
+        self.internal.get(index).copied().unwrap_or(false)
     }
 
     pub fn is_empty(&self) -> bool {

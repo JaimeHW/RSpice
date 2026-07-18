@@ -4202,8 +4202,12 @@ pub(super) fn parse_lossy_tline(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
+    if name.eq_ignore_ascii_case("YMEMRISTOR") {
+        return parse_xyce_memristor(stream, line_num, elements, params, defer_simple_param_refs);
+    }
     if let Some(keyword) = xyce_ydevice_keyword(&name) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -4241,6 +4245,83 @@ pub(super) fn parse_lossy_tline(
     Ok(())
 }
 
+/// Parse Xyce's keyword-style memristor instance.
+///
+/// Syntax: `YMEMRISTOR name n+ n- model [NAME=value ...]`. The keyword and
+/// instance name are distinct tokens, unlike an ordinary SPICE Y-line whose
+/// first token is the instance name itself. The referenced model's `LEVEL`
+/// selects TEAM, PEM, or another Xyce family later during model resolution.
+fn parse_xyce_memristor(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+) -> Result<(), ParseError> {
+    let instance_name = expect_ident(stream, line_num)?;
+    // Xyce exposes keyword-style devices through a type-qualified namespace
+    // (`I(YMEMRISTOR!MR1)`, `N(YMEMRISTOR!MR1_X)`). Store that canonical
+    // identity directly so every downstream symbol consumer sees one name.
+    let name = format!("YMEMRISTOR!{instance_name}");
+    let pos = expect_node(stream, line_num)?;
+    let neg = expect_node(stream, line_num)?;
+    let model = expect_ident(stream, line_num)?;
+    let mut instance_params: Vec<(String, Value)> = Vec::new();
+    let mut deferred_params: Vec<(String, String)> = Vec::new();
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        let raw_name = expect_ident(stream, line_num)?;
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "YMEMRISTOR instance parameter '{}' requires NAME=value syntax",
+                    raw_name
+                ),
+            });
+        }
+        let param_name = raw_name.to_ascii_uppercase();
+        match take_deferrable_value(stream, params, defer_simple_param_refs) {
+            Some(DeferrableValue::Resolved(value)) => {
+                instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case(&param_name));
+                deferred_params.retain(|(name, _)| !name.eq_ignore_ascii_case(&param_name));
+                instance_params.push((param_name, value));
+            }
+            Some(DeferrableValue::Deferred(expression)) => {
+                instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case(&param_name));
+                deferred_params.retain(|(name, _)| !name.eq_ignore_ascii_case(&param_name));
+                deferred_params.push((param_name, expression));
+            }
+            None => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Expected value for YMEMRISTOR instance parameter '{}'",
+                        raw_name
+                    ),
+                });
+            }
+        }
+    }
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::XyceMemristor {
+            model,
+            instance_params,
+            deferred_params,
+        },
+        nodes: vec![pos, neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
+    });
+    Ok(())
+}
+
 fn xyce_ydevice_keyword(name: &str) -> Option<&'static str> {
     let upper = name.to_ascii_uppercase();
     match upper.as_str() {
@@ -4251,7 +4332,6 @@ fn xyce_ydevice_keyword(name: &str) -> Option<&'static str> {
         "YDELAY" => Some("YDELAY"),
         "YDFF" => Some("YDFF"),
         "YLIN" => Some("YLIN"),
-        "YMEMRISTOR" => Some("YMEMRISTOR"),
         "YNAND" => Some("YNAND"),
         "YNEURON" => Some("YNEURON"),
         "YNOT" => Some("YNOT"),

@@ -27,15 +27,16 @@ impl Engine {
 
     #[inline]
     pub(in crate::engine::convergence) fn sanitize_initial_guess(
+        circuit: &CircuitData,
         initial_guess: &[Value],
         size: usize,
         node_count: usize,
     ) -> Vec<Value> {
         let mut guess = Self::normalize_initial_guess(initial_guess, size);
-        if Self::is_suspicious_solution(&guess, node_count) {
+        if Self::is_suspicious_solution(circuit, &guess, node_count) {
             guess.fill(0.0);
         }
-        Self::clamp_solution_to_physical_bounds(&mut guess, node_count);
+        Self::clamp_solution_to_physical_bounds(circuit, &mut guess, node_count);
         guess
     }
 
@@ -114,8 +115,8 @@ impl Engine {
     ) -> Vec<Value> {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
-        let incumbent = Self::sanitize_initial_guess(incumbent, size, node_count);
-        let proposal = Self::sanitize_initial_guess(proposal, size, node_count);
+        let incumbent = Self::sanitize_initial_guess(circuit, incumbent, size, node_count);
+        let proposal = Self::sanitize_initial_guess(circuit, proposal, size, node_count);
 
         if incumbent == proposal {
             return incumbent;
@@ -202,10 +203,8 @@ impl Engine {
             let mut rhs = vec![0.0; solution.len()];
             matrix.clear_values();
 
+            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             let node_count = circuit.num_nodes().min(solution.len());
-            for i in 0..node_count {
-                matrix.add(i, i, gmin_floor);
-            }
 
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
             if matches!(
@@ -229,6 +228,7 @@ impl Engine {
                 || self.b3soi_limiter_owns_global_damping(circuit);
             let mut new_solution = self.apply_damping_strategy_for_circuit(
                 circuit.has_b3soi_devices(),
+                &circuit.non_electrical_state_mask(),
                 &solution,
                 &raw_solution,
                 damping_state,
@@ -241,7 +241,7 @@ impl Engine {
                 circuit
                     .enforce_scaled_dc_ideal_voltage_constraints(&mut new_solution, source_scale);
             }
-            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
@@ -297,7 +297,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         let node_count = circuit.num_nodes().min(candidate.len());
-        let suspicious = Self::is_suspicious_solution(&candidate, node_count);
+        let suspicious = Self::is_suspicious_solution(circuit, &candidate, node_count);
         let validated =
             !suspicious && self.validate_nonlinear_solution(circuit, matrix, &candidate);
         if validated {
@@ -316,7 +316,7 @@ impl Engine {
         }
 
         if suspicious {
-            if Self::has_clamped_values(&candidate, node_count) {
+            if Self::has_clamped_values(circuit, &candidate, node_count) {
                 log::warn!(
                     "{} produced clamped/non-finite values; candidate rejected.",
                     method_name
