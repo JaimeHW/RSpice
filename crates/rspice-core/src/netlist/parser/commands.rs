@@ -1168,6 +1168,66 @@ pub(super) fn parse_options_command(
                 options.auto_bridge = Some(enabled);
                 options.auto_bridge_show_generated = Some(show_generated);
             }
+            (Some("NONLIN-TRAN"), "RELTOL") | (Some("NONLIN-TRANSIENT"), "RELTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.nonlin_transient_reltol = Some(parse_positive_real_option(
+                    "NONLIN-TRAN.RELTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("NONLIN-TRAN"), "ABSTOL") | (Some("NONLIN-TRANSIENT"), "ABSTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.nonlin_transient_abstol = Some(parse_positive_real_option(
+                    "NONLIN-TRAN.ABSTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("NONLIN-TRAN"), "DELTAXTOL") | (Some("NONLIN-TRANSIENT"), "DELTAXTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.nonlin_transient_deltaxtol = Some(parse_positive_real_option(
+                    "NONLIN-TRAN.DELTAXTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("NONLIN-TRAN"), "RHSTOL") | (Some("NONLIN-TRANSIENT"), "RHSTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.nonlin_transient_rhstol = Some(parse_positive_real_option(
+                    "NONLIN-TRAN.RHSTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("NONLIN-TRAN"), "MAXSTEP") | (Some("NONLIN-TRANSIENT"), "MAXSTEP") => {
+                let value = expect_value(stream, line_num, params)?;
+                let value = parse_usize_option("NONLIN-TRAN.MAXSTEP", value, line_num)?;
+                if value == 0 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "NONLIN-TRAN.MAXSTEP must be at least 1".to_string(),
+                    });
+                }
+                options.nonlin_transient_maxstep = Some(value);
+            }
+            (Some("NONLIN-TRAN"), "ENFORCEDEVICECONV" | "ENFORCE_DEVICE_CONV")
+            | (Some("NONLIN-TRANSIENT"), "ENFORCEDEVICECONV" | "ENFORCE_DEVICE_CONV") => {
+                options.nonlin_transient_enforce_device_convergence =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (Some("NONLIN-TRAN"), _) | (Some("NONLIN-TRANSIENT"), _) => {
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
+            }
             (Some("TIMEINT"), "RELTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.timeint_reltol = Some(parse_positive_real_option(
@@ -1183,6 +1243,18 @@ pub(super) fn parse_options_command(
                     value,
                     line_num,
                 )?);
+            }
+            (Some("TIMEINT"), "DELMAX") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.timeint_delmax = Some(parse_positive_real_option(
+                    "TIMEINT.DELMAX",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("TIMEINT"), "USEDEVICEMAX" | "USE_DEVICE_MAX") => {
+                options.timeint_use_device_max_timestep =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
             (Some("TIMEINT"), "NEWLTE") => {
                 let value = expect_value(stream, line_num, params)?;
@@ -4281,6 +4353,10 @@ mod tests {
             ".options chgtol=-1e-15",
             ".options pivtol=0",
             ".options gmin=-1e-12",
+            ".options nonlin-tran reltol=0",
+            ".options nonlin-tran abstol=-1e-6",
+            ".options nonlin-tran deltaxtol=0",
+            ".options nonlin-tran rhstol=1e309",
         ] {
             let err = Netlist::parse(&deck_with_options(options))
                 .expect_err("invalid .OPTIONS value must fail parsing");
@@ -4410,18 +4486,38 @@ mod tests {
     #[test]
     fn timeint_tolerances_remain_separate_from_generic_solver_tolerances() {
         let netlist = Netlist::parse(&deck_with_options(
-            ".options timeint reltol=2e-6 abstol=3e-9 newlte=2",
+            ".options timeint reltol=2e-6 abstol=3e-9 delmax=4e-8 useDeviceMax=0 newlte=2",
         ))
         .expect("TIMEINT tolerances parse");
 
         assert_eq!(netlist.options.timeint_reltol, Some(2.0e-6));
         assert_eq!(netlist.options.timeint_abstol, Some(3.0e-9));
+        assert_eq!(netlist.options.timeint_delmax, Some(4.0e-8));
+        assert_eq!(netlist.options.timeint_use_device_max_timestep, Some(false));
         assert_eq!(netlist.options.reltol, None);
         assert_eq!(netlist.options.abstol, None);
         assert_eq!(
             netlist.options.transient_lte_reference,
             Some(super::TransientLteReference::SignalGlobal)
         );
+    }
+
+    #[test]
+    fn timeint_use_device_max_accepts_xyce_boolean_forms() {
+        for (option, expected) in [
+            ("USEDEVICEMAX", true),
+            ("USEDEVICEMAX=1", true),
+            ("USEDEVICEMAX=0", false),
+            ("USEDEVICEMAX=TRUE", true),
+            ("USEDEVICEMAX=FALSE", false),
+        ] {
+            let netlist = Netlist::parse(&deck_with_options(&format!(".options timeint {option}")))
+                .expect("Xyce USEDEVICEMAX option parses");
+            assert_eq!(
+                netlist.options.timeint_use_device_max_timestep,
+                Some(expected)
+            );
+        }
     }
 
     #[test]
@@ -4599,13 +4695,50 @@ mod tests {
     #[test]
     fn options_parse_xyce_hyphenated_solver_package() {
         let netlist = Netlist::parse(&deck_with_options(
-            ".options nonlin-tran reltol=1e-3\n\
+            ".options reltol=9e-4 abstol=8e-12\n\
+             .options nonlin-tran reltol=1e-3 abstol=2e-6 deltaxtol=0.25 rhstol=3e-3 maxstep=37 enforceDeviceConv=1\n\
+             .options nonlin-transient reltol=4e-3\n\
              .options timeint method=gear",
         ))
         .expect("Xyce hyphenated solver option package parses");
 
-        assert_eq!(netlist.options.reltol, Some(1.0e-3));
+        assert_eq!(netlist.options.reltol, Some(9.0e-4));
+        assert_eq!(netlist.options.abstol, Some(8.0e-12));
+        assert_eq!(netlist.options.nonlin_transient_reltol, Some(4.0e-3));
+        assert_eq!(netlist.options.nonlin_transient_abstol, Some(2.0e-6));
+        assert_eq!(netlist.options.nonlin_transient_deltaxtol, Some(0.25));
+        assert_eq!(netlist.options.nonlin_transient_rhstol, Some(3.0e-3));
+        assert_eq!(netlist.options.nonlin_transient_maxstep, Some(37));
+        assert_eq!(
+            netlist.options.nonlin_transient_enforce_device_convergence,
+            Some(true)
+        );
         assert_eq!(netlist.options.method.as_deref(), Some("GEAR"));
+        assert!(netlist.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn transient_nonlinear_options_merge_without_clobbering_other_packages() {
+        let mut merged = crate::netlist::SimulationOptions {
+            nonlin_transient_reltol: Some(1.0e-3),
+            timeint_reltol: Some(2.0e-3),
+            ..Default::default()
+        };
+        merged.merge(&crate::netlist::SimulationOptions {
+            nonlin_transient_rhstol: Some(3.0e-3),
+            nonlin_transient_maxstep: Some(23),
+            nonlin_transient_enforce_device_convergence: Some(false),
+            ..Default::default()
+        });
+
+        assert_eq!(merged.nonlin_transient_reltol, Some(1.0e-3));
+        assert_eq!(merged.nonlin_transient_rhstol, Some(3.0e-3));
+        assert_eq!(merged.nonlin_transient_maxstep, Some(23));
+        assert_eq!(
+            merged.nonlin_transient_enforce_device_convergence,
+            Some(false)
+        );
+        assert_eq!(merged.timeint_reltol, Some(2.0e-3));
     }
 
     #[test]

@@ -73,7 +73,20 @@ impl Engine {
 
     #[inline]
     pub(crate) fn transient_trtol(&self) -> Value {
-        Self::sanitize_positive_tolerance(self.config.transient_trtol, crate::constants::TRTOL)
+        match self.config.spice_dialect {
+            // Xyce's StepErrorControl accepts normalized DAE-Q error at one;
+            // ngspice's CKTterr applies the independent TRTOL multiplier
+            // (default seven). RSpice's device charge estimators feed the
+            // same accepted-history Q error into both dialect paths, so the
+            // multiplier must remain dialect-specific.
+            SpiceDialect::Xyce => 1.0,
+            SpiceDialect::BestAvailable | SpiceDialect::Ngspice => {
+                Self::sanitize_positive_tolerance(
+                    self.config.transient_trtol,
+                    crate::constants::TRTOL,
+                )
+            }
+        }
     }
 
     #[inline]
@@ -95,6 +108,151 @@ impl Engine {
             .unwrap_or_else(|| match self.config.spice_dialect {
                 SpiceDialect::Xyce => 1.0e-6,
                 SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.voltage_abstol(),
+            })
+    }
+
+    #[inline]
+    pub(crate) fn transient_nonlinear_reltol(&self) -> Value {
+        self.config
+            .transient_nonlinear_reltol
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or_else(|| match self.config.spice_dialect {
+                SpiceDialect::Xyce => 1.0e-2,
+                SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.voltage_reltol(),
+            })
+    }
+
+    #[inline]
+    pub(crate) fn transient_nonlinear_abstol(&self) -> Value {
+        self.config
+            .transient_nonlinear_abstol
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or_else(|| match self.config.spice_dialect {
+                SpiceDialect::Xyce => 1.0e-6,
+                SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.voltage_abstol(),
+            })
+    }
+
+    #[inline]
+    pub(crate) fn transient_nonlinear_deltaxtol(&self) -> Value {
+        self.config
+            .transient_nonlinear_deltaxtol
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(match self.config.spice_dialect {
+                SpiceDialect::Xyce => 0.33,
+                SpiceDialect::BestAvailable | SpiceDialect::Ngspice => 1.0,
+            })
+    }
+
+    #[inline]
+    pub(crate) fn transient_nonlinear_rhstol(&self) -> Value {
+        self.config
+            .transient_nonlinear_rhstol
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or_else(|| match self.config.spice_dialect {
+                SpiceDialect::Xyce => 1.0e-2,
+                SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.current_abstol(),
+            })
+    }
+
+    /// Resolve Xyce's `NONLIN-TRAN ENFORCEDEVICECONV` status-test policy.
+    /// Xyce 7.10 deliberately disables the device-local convergence test for
+    /// transient NOX solves; its weighted-update and raw-residual tests remain
+    /// authoritative. Native and ngspice modes preserve the stricter legacy
+    /// RSpice policy unless explicitly overridden.
+    #[inline]
+    pub(crate) fn transient_enforce_device_convergence(&self) -> bool {
+        self.config
+            .transient_enforce_device_convergence
+            .unwrap_or(self.config.spice_dialect != SpiceDialect::Xyce)
+    }
+
+    /// Build Xyce's immutable transient nonlinear-update weights.
+    ///
+    /// Xyce 7.10 NOX computes these weights once, at nonlinear iteration zero,
+    /// from the initial timepoint iterate and the previously accepted solution.
+    /// It then reuses them for every subsequent update at that timepoint.
+    pub(crate) fn transient_newton_update_weights(
+        &self,
+        initial: &[Value],
+        accepted: &[Value],
+    ) -> Option<Vec<Value>> {
+        if self.config.spice_dialect != SpiceDialect::Xyce || initial.len() != accepted.len() {
+            return None;
+        }
+
+        let reltol = self.transient_nonlinear_reltol();
+        let abstol = self.transient_nonlinear_abstol();
+        Some(
+            initial
+                .iter()
+                .zip(accepted)
+                .map(|(&initial, &accepted)| reltol * initial.abs().max(accepted.abs()) + abstol)
+                .collect(),
+        )
+    }
+
+    /// Test a transient Newton correction using the active solver's update
+    /// contract. Xyce applies its frozen weighted max norm to every MNA
+    /// unknown, including branch currents and private device states, and does
+    /// not allow the iteration-zero update test to declare convergence.
+    #[inline]
+    pub(crate) fn transient_newton_update_convergence_met(
+        &self,
+        old: &[Value],
+        new: &[Value],
+        node_count: usize,
+        xyce_weights: Option<&[Value]>,
+        iteration: usize,
+    ) -> bool {
+        if old.len() != new.len() || old.iter().chain(new.iter()).any(|v| !v.is_finite()) {
+            return false;
+        }
+
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            if iteration == 0 {
+                return false;
+            }
+            return self
+                .transient_newton_weighted_update_norm(old, new, xyce_weights)
+                .is_some_and(|norm| norm < self.transient_nonlinear_deltaxtol());
+        }
+
+        let limit = node_count.min(old.len()).min(new.len());
+        Self::check_voltage_convergence_with_tolerances(
+            &old[..limit],
+            &new[..limit],
+            self.voltage_abstol(),
+            self.voltage_reltol(),
+        )
+    }
+
+    /// Compute Xyce's frozen weighted maximum norm for one transient Newton
+    /// correction. Returning the norm (rather than only a boolean) lets the
+    /// ordered NOX status tests apply both DELTAXTOL and SMALLUPDATETOL to the
+    /// same canonical quantity.
+    pub(crate) fn transient_newton_weighted_update_norm(
+        &self,
+        old: &[Value],
+        new: &[Value],
+        xyce_weights: Option<&[Value]>,
+    ) -> Option<Value> {
+        if self.config.spice_dialect != SpiceDialect::Xyce
+            || old.len() != new.len()
+            || old.iter().chain(new.iter()).any(|value| !value.is_finite())
+        {
+            return None;
+        }
+        let weights = xyce_weights.filter(|weights| weights.len() == old.len())?;
+        old.iter()
+            .zip(new)
+            .zip(weights)
+            .try_fold(0.0_f64, |norm, ((&old, &new), &weight)| {
+                if !weight.is_finite() || weight <= 0.0 {
+                    None
+                } else {
+                    Some(norm.max((new - old).abs() / weight))
+                }
             })
     }
 
@@ -225,5 +383,113 @@ mod tests {
             assert_eq!(engine.transient_lte_reltol(), 0.25);
             assert_eq!(engine.transient_lte_abstol(), 0.5);
         }
+    }
+
+    #[test]
+    fn transient_nonlinear_tolerance_fallbacks_are_dialect_specific() {
+        let mut engine = Engine::default();
+        engine.config.convergence_config.voltage_reltol = 0.25;
+        engine.config.convergence_config.voltage_abstol = 0.5;
+        engine.config.convergence_config.current_abstol = 0.75;
+
+        for dialect in [SpiceDialect::BestAvailable, SpiceDialect::Ngspice] {
+            engine.config.spice_dialect = dialect;
+            assert_eq!(engine.transient_nonlinear_reltol(), 0.25);
+            assert_eq!(engine.transient_nonlinear_abstol(), 0.5);
+            assert_eq!(engine.transient_nonlinear_deltaxtol(), 1.0);
+            assert_eq!(engine.transient_nonlinear_rhstol(), 0.75);
+            assert!(engine.transient_enforce_device_convergence());
+            assert_eq!(engine.transient_trtol(), crate::constants::TRTOL);
+        }
+
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        assert_eq!(engine.transient_nonlinear_reltol(), 1.0e-2);
+        assert_eq!(engine.transient_nonlinear_abstol(), 1.0e-6);
+        assert_eq!(engine.transient_nonlinear_deltaxtol(), 0.33);
+        assert_eq!(engine.transient_nonlinear_rhstol(), 1.0e-2);
+        assert!(!engine.transient_enforce_device_convergence());
+        assert_eq!(engine.transient_trtol(), 1.0);
+
+        engine.config.transient_enforce_device_convergence = Some(true);
+        assert!(engine.transient_enforce_device_convergence());
+    }
+
+    #[test]
+    fn xyce_transient_newton_update_honors_nonlin_tran_options() {
+        let mut engine = Engine::default();
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        engine.config.transient_nonlinear_reltol = Some(0.5);
+        engine.config.transient_nonlinear_abstol = Some(0.25);
+        engine.config.transient_nonlinear_deltaxtol = Some(0.2);
+
+        let initial = [2.0];
+        let accepted = [1.0];
+        let weights = engine
+            .transient_newton_update_weights(&initial, &accepted)
+            .expect("Xyce weights");
+        assert_eq!(weights, vec![1.25]);
+        assert!(engine.transient_newton_update_convergence_met(
+            &initial,
+            &[2.24],
+            1,
+            Some(&weights),
+            1,
+        ));
+        assert!(!engine.transient_newton_update_convergence_met(
+            &initial,
+            &[2.25],
+            1,
+            Some(&weights),
+            1,
+        ));
+    }
+
+    #[test]
+    fn xyce_transient_newton_update_uses_frozen_full_vector_weights() {
+        let mut engine = Engine::default();
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        engine.config.convergence_config.voltage_reltol = 1.0e-4;
+        engine.config.convergence_config.voltage_abstol = 1.0e-6;
+
+        let initial = [0.5, 1.0e-3];
+        let accepted = [0.4, 0.0];
+        let weights = engine
+            .transient_newton_update_weights(&initial, &accepted)
+            .expect("Xyce weights");
+        assert_eq!(
+            weights,
+            vec![1.0e-2 * 0.5 + 1.0e-6, 1.0e-2 * 1.0e-3 + 1.0e-6]
+        );
+        assert!(!engine.transient_newton_update_convergence_met(
+            &initial,
+            &[0.5, 1.0e-3],
+            1,
+            Some(&weights),
+            0,
+        ));
+        assert!(engine.transient_newton_update_convergence_met(
+            &initial,
+            &[0.500_1, 1.003e-3],
+            1,
+            Some(&weights),
+            1,
+        ));
+        assert!(!engine.transient_newton_update_convergence_met(
+            &initial,
+            &[0.500_1, 1.004e-3],
+            1,
+            Some(&weights),
+            1,
+        ));
+
+        // The denominator remains tied to the initial timepoint scale even
+        // after an intermediate Newton iterate grows by orders of magnitude.
+        assert!(!engine.transient_newton_update_convergence_met(
+            &[1.0e3, 1.0e-3],
+            &[1.0e3 + 1.0, 1.0e-3],
+            1,
+            Some(&weights),
+            2,
+        ));
     }
 }

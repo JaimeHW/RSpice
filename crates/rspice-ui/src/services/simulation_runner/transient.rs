@@ -459,6 +459,7 @@ mod tests {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
         };
         let names = result.node_names.clone();
         let abort = AbortOnPoll::new(2);

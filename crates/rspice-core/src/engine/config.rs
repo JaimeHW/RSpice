@@ -96,6 +96,36 @@ pub struct SimulationConfig {
     /// Explicit transient LTE absolute tolerance. `None` uses Xyce's independent
     /// TIMEINT default in Xyce mode and voltage ABSTOL in native/ngspice modes.
     pub transient_lte_abstol: Option<Value>,
+    /// Explicit Xyce `TIMEINT DELMAX` ceiling. When present it is combined
+    /// with `.TRAN DTMAX` by taking the tighter positive bound.
+    pub transient_timeint_max_timestep: Option<Value>,
+    /// Explicit Xyce `TIMEINT USEDEVICEMAX` policy. `None` uses Xyce 7.10's
+    /// enabled default in Xyce mode and leaves other dialects unchanged.
+    pub transient_use_device_max_timestep: Option<bool>,
+    /// Explicit transient nonlinear-update relative tolerance. `None` uses
+    /// Xyce's independent `NONLIN-TRAN RELTOL=1e-2` default in Xyce mode.
+    /// Native/ngspice transient convergence retains its existing voltage
+    /// tolerance policy.
+    pub transient_nonlinear_reltol: Option<Value>,
+    /// Explicit transient nonlinear-update absolute tolerance. `None` uses
+    /// Xyce's independent `NONLIN-TRAN ABSTOL=1e-6` default in Xyce mode.
+    /// Native/ngspice transient convergence retains its existing voltage
+    /// tolerance policy.
+    pub transient_nonlinear_abstol: Option<Value>,
+    /// Explicit Xyce transient normalized-update threshold. `None` uses the
+    /// Xyce 7.10 `NONLIN-TRAN DELTAXTOL=0.33` default.
+    pub transient_nonlinear_deltaxtol: Option<Value>,
+    /// Explicit Xyce transient raw nonlinear-residual threshold. `None` uses
+    /// the Xyce 7.10 `NONLIN-TRAN RHSTOL=1e-2` default.
+    pub transient_nonlinear_rhstol: Option<Value>,
+    /// Explicit Xyce transient nonlinear iteration budget. `None` uses the
+    /// Xyce 7.10 `NONLIN-TRAN MAXSTEP=20` default.
+    pub transient_nonlinear_max_iterations: Option<usize>,
+    /// Whether transient Newton acceptance additionally requires device-local
+    /// convergence flags. `None` uses Xyce 7.10's
+    /// `NONLIN-TRAN ENFORCEDEVICECONV=0` default in Xyce mode and preserves
+    /// the native/ngspice enforced-device policy in other dialects.
+    pub transient_enforce_device_convergence: Option<bool>,
     /// Reference magnitude policy for normalized transient LTE control.
     /// `None` selects the active [`SpiceDialect`]'s default policy.
     pub transient_lte_reference: Option<TransientLteReference>,
@@ -361,6 +391,14 @@ impl Default for SimulationConfig {
             transient_trtol: crate::constants::TRTOL,
             transient_lte_reltol: None,
             transient_lte_abstol: None,
+            transient_timeint_max_timestep: None,
+            transient_use_device_max_timestep: None,
+            transient_nonlinear_reltol: None,
+            transient_nonlinear_abstol: None,
+            transient_nonlinear_deltaxtol: None,
+            transient_nonlinear_rhstol: None,
+            transient_nonlinear_max_iterations: None,
+            transient_enforce_device_convergence: None,
             transient_lte_reference: None,
             transient_new_bp_stepping: true,
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,

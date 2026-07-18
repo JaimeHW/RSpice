@@ -53,6 +53,14 @@ pub struct SimulationConfigOverrides {
     pub transient_trtol: Option<Value>,
     pub transient_lte_reltol: Option<Value>,
     pub transient_lte_abstol: Option<Value>,
+    pub transient_timeint_max_timestep: Option<Value>,
+    pub transient_use_device_max_timestep: Option<bool>,
+    pub transient_nonlinear_reltol: Option<Value>,
+    pub transient_nonlinear_abstol: Option<Value>,
+    pub transient_nonlinear_deltaxtol: Option<Value>,
+    pub transient_nonlinear_rhstol: Option<Value>,
+    pub transient_nonlinear_max_iterations: Option<usize>,
+    pub transient_enforce_device_convergence: Option<bool>,
     pub transient_lte_reference: Option<TransientLteReference>,
     pub transient_new_bp_stepping: Option<bool>,
     pub ramptime: Option<Value>,
@@ -91,6 +99,14 @@ pub fn resolve_simulation_config(
     let mut transient_trtol = base.transient_trtol;
     let mut transient_lte_reltol = base.transient_lte_reltol;
     let mut transient_lte_abstol = base.transient_lte_abstol;
+    let mut transient_timeint_max_timestep = base.transient_timeint_max_timestep;
+    let mut transient_use_device_max_timestep = base.transient_use_device_max_timestep;
+    let mut transient_nonlinear_reltol = base.transient_nonlinear_reltol;
+    let mut transient_nonlinear_abstol = base.transient_nonlinear_abstol;
+    let mut transient_nonlinear_deltaxtol = base.transient_nonlinear_deltaxtol;
+    let mut transient_nonlinear_rhstol = base.transient_nonlinear_rhstol;
+    let mut transient_nonlinear_max_iterations = base.transient_nonlinear_max_iterations;
+    let mut transient_enforce_device_convergence = base.transient_enforce_device_convergence;
     let mut transient_lte_reference = base
         .transient_lte_reference
         .unwrap_or_else(|| base.spice_dialect.default_transient_lte_reference());
@@ -137,6 +153,30 @@ pub fn resolve_simulation_config(
         }
         if let Some(abstol) = opts.timeint_abstol {
             transient_lte_abstol = Some(abstol);
+        }
+        if let Some(delmax) = opts.timeint_delmax {
+            transient_timeint_max_timestep = Some(delmax);
+        }
+        if let Some(enabled) = opts.timeint_use_device_max_timestep {
+            transient_use_device_max_timestep = Some(enabled);
+        }
+        if let Some(reltol) = opts.nonlin_transient_reltol {
+            transient_nonlinear_reltol = Some(reltol);
+        }
+        if let Some(abstol) = opts.nonlin_transient_abstol {
+            transient_nonlinear_abstol = Some(abstol);
+        }
+        if let Some(deltaxtol) = opts.nonlin_transient_deltaxtol {
+            transient_nonlinear_deltaxtol = Some(deltaxtol);
+        }
+        if let Some(rhstol) = opts.nonlin_transient_rhstol {
+            transient_nonlinear_rhstol = Some(rhstol);
+        }
+        if let Some(maxstep) = opts.nonlin_transient_maxstep {
+            transient_nonlinear_max_iterations = Some(maxstep);
+        }
+        if let Some(enforce) = opts.nonlin_transient_enforce_device_convergence {
+            transient_enforce_device_convergence = Some(enforce);
         }
         if let Some(reference) = opts.transient_lte_reference {
             transient_lte_reference = reference;
@@ -186,6 +226,7 @@ pub fn resolve_simulation_config(
     if let Some(iters) = overrides.max_iterations {
         max_iterations = iters;
         transient_max_iterations = iters;
+        transient_nonlinear_max_iterations = Some(iters);
     }
     if let Some(min_step) = overrides.min_timestep {
         min_timestep = min_step;
@@ -204,6 +245,30 @@ pub fn resolve_simulation_config(
     }
     if let Some(abstol) = overrides.transient_lte_abstol {
         transient_lte_abstol = Some(abstol);
+    }
+    if let Some(delmax) = overrides.transient_timeint_max_timestep {
+        transient_timeint_max_timestep = Some(delmax);
+    }
+    if let Some(enabled) = overrides.transient_use_device_max_timestep {
+        transient_use_device_max_timestep = Some(enabled);
+    }
+    if let Some(reltol) = overrides.transient_nonlinear_reltol {
+        transient_nonlinear_reltol = Some(reltol);
+    }
+    if let Some(abstol) = overrides.transient_nonlinear_abstol {
+        transient_nonlinear_abstol = Some(abstol);
+    }
+    if let Some(deltaxtol) = overrides.transient_nonlinear_deltaxtol {
+        transient_nonlinear_deltaxtol = Some(deltaxtol);
+    }
+    if let Some(rhstol) = overrides.transient_nonlinear_rhstol {
+        transient_nonlinear_rhstol = Some(rhstol);
+    }
+    if let Some(maxstep) = overrides.transient_nonlinear_max_iterations {
+        transient_nonlinear_max_iterations = Some(maxstep);
+    }
+    if let Some(enforce) = overrides.transient_enforce_device_convergence {
+        transient_enforce_device_convergence = Some(enforce);
     }
     if let Some(value) = overrides.ramptime {
         ramptime = value;
@@ -265,6 +330,14 @@ pub fn resolve_simulation_config(
     resolved.transient_trtol = transient_trtol;
     resolved.transient_lte_reltol = transient_lte_reltol;
     resolved.transient_lte_abstol = transient_lte_abstol;
+    resolved.transient_timeint_max_timestep = transient_timeint_max_timestep;
+    resolved.transient_use_device_max_timestep = transient_use_device_max_timestep;
+    resolved.transient_nonlinear_reltol = transient_nonlinear_reltol;
+    resolved.transient_nonlinear_abstol = transient_nonlinear_abstol;
+    resolved.transient_nonlinear_deltaxtol = transient_nonlinear_deltaxtol;
+    resolved.transient_nonlinear_rhstol = transient_nonlinear_rhstol;
+    resolved.transient_nonlinear_max_iterations = transient_nonlinear_max_iterations;
+    resolved.transient_enforce_device_convergence = transient_enforce_device_convergence;
     resolved.transient_lte_reference = Some(transient_lte_reference);
     resolved.transient_new_bp_stepping = transient_new_bp_stepping;
     resolved.ramptime = ramptime;
@@ -400,6 +473,8 @@ mod tests {
         let options = NetlistSimulationOptions {
             timeint_reltol: Some(2.0e-6),
             timeint_abstol: Some(3.0e-9),
+            timeint_delmax: Some(4.0e-8),
+            timeint_use_device_max_timestep: Some(false),
             transient_lte_reference: Some(TransientLteReference::SignalGlobal),
             abstol: Some(7.0e-12),
             ..Default::default()
@@ -407,6 +482,8 @@ mod tests {
         let overrides = SimulationConfigOverrides {
             transient_lte_reltol: Some(8.0e-7),
             transient_lte_abstol: Some(9.0e-10),
+            transient_timeint_max_timestep: Some(1.0e-8),
+            transient_use_device_max_timestep: Some(true),
             transient_lte_reference: Some(TransientLteReference::SignalLocal),
             ..Default::default()
         };
@@ -415,6 +492,8 @@ mod tests {
 
         assert_eq!(resolved.transient_lte_reltol, Some(8.0e-7));
         assert_eq!(resolved.transient_lte_abstol, Some(9.0e-10));
+        assert_eq!(resolved.transient_timeint_max_timestep, Some(1.0e-8));
+        assert_eq!(resolved.transient_use_device_max_timestep, Some(true));
         assert_eq!(
             resolved.transient_lte_reference,
             Some(TransientLteReference::SignalLocal)
@@ -422,6 +501,50 @@ mod tests {
         assert_eq!(resolved.convergence_config.voltage_reltol, 4.0e-3);
         assert_eq!(resolved.convergence_config.voltage_abstol, 5.0e-6);
         assert_eq!(resolved.convergence_config.current_abstol, 7.0e-12);
+    }
+
+    #[test]
+    fn transient_nonlinear_settings_are_separate_and_follow_override_precedence() {
+        let base = SimulationConfig {
+            transient_nonlinear_reltol: Some(1.0e-2),
+            transient_nonlinear_abstol: Some(2.0e-6),
+            transient_nonlinear_deltaxtol: Some(0.33),
+            transient_nonlinear_rhstol: Some(3.0e-2),
+            transient_nonlinear_max_iterations: Some(20),
+            transient_enforce_device_convergence: Some(true),
+            ..Default::default()
+        };
+        let options = NetlistSimulationOptions {
+            nonlin_transient_reltol: Some(4.0e-3),
+            nonlin_transient_abstol: Some(5.0e-7),
+            nonlin_transient_deltaxtol: Some(0.25),
+            nonlin_transient_rhstol: Some(6.0e-3),
+            nonlin_transient_maxstep: Some(30),
+            nonlin_transient_enforce_device_convergence: Some(false),
+            reltol: Some(7.0e-4),
+            abstol: Some(8.0e-12),
+            timeint_reltol: Some(9.0e-5),
+            ..Default::default()
+        };
+        let overrides = SimulationConfigOverrides {
+            transient_nonlinear_reltol: Some(1.0e-3),
+            transient_nonlinear_rhstol: Some(2.0e-3),
+            transient_nonlinear_max_iterations: Some(40),
+            transient_enforce_device_convergence: Some(true),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(&base, Some(&options), &overrides);
+
+        assert_eq!(resolved.transient_nonlinear_reltol, Some(1.0e-3));
+        assert_eq!(resolved.transient_nonlinear_abstol, Some(5.0e-7));
+        assert_eq!(resolved.transient_nonlinear_deltaxtol, Some(0.25));
+        assert_eq!(resolved.transient_nonlinear_rhstol, Some(2.0e-3));
+        assert_eq!(resolved.transient_nonlinear_max_iterations, Some(40));
+        assert_eq!(resolved.transient_enforce_device_convergence, Some(true));
+        assert_eq!(resolved.convergence_config.voltage_reltol, 7.0e-4);
+        assert_eq!(resolved.convergence_config.current_abstol, 8.0e-12);
+        assert_eq!(resolved.transient_lte_reltol, Some(9.0e-5));
     }
 
     #[test]

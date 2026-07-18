@@ -86,6 +86,24 @@ impl TimestepController {
         self.preferred_min_dt
     }
 
+    /// Update the hard recovery floor while preserving the controller's
+    /// current proposal and soft-floor invariants.
+    ///
+    /// Xyce derives this floor from the current accepted time and machine
+    /// precision, so it changes as a transient advances. Dialects with a
+    /// fixed floor simply never call this method after construction.
+    pub fn set_hard_min_dt(&mut self, hard_min_dt: Value) {
+        let hard_min_dt = if hard_min_dt.is_finite() && hard_min_dt >= 0.0 {
+            hard_min_dt.max(1e-30).min(self.max_dt)
+        } else {
+            1e-30_f64.min(self.max_dt)
+        };
+        self.hard_min_dt = hard_min_dt;
+        self.preferred_min_dt = self.preferred_min_dt.max(hard_min_dt).min(self.max_dt);
+        self.current_dt = self.current_dt.clamp(hard_min_dt, self.max_dt);
+        self.prev_dt = self.prev_dt.clamp(hard_min_dt, self.max_dt);
+    }
+
     /// Adjust timestep based on local truncation error estimate
     pub fn adjust(&mut self, lte_estimate: Value) -> Value {
         // Calculate new timestep using LTE estimate
@@ -137,6 +155,26 @@ impl TimestepController {
     }
 }
 
+#[cfg(test)]
+mod timestep_controller_tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_hard_minimum_clamps_existing_and_future_proposals() {
+        let mut controller =
+            TimestepController::new_with_preferred_min(1.0e-20, 1.0e-30, 1.0e-12, 1.0);
+
+        controller.set_hard_min_dt(2.0e-18);
+        assert_eq!(controller.hard_min_dt(), 2.0e-18);
+        assert_eq!(controller.dt(), 2.0e-18);
+        assert!(controller.is_at_minimum());
+
+        controller.set_hard_min_dt(1.0e-19);
+        controller.force_step(5.0e-20);
+        assert_eq!(controller.dt(), 1.0e-19);
+    }
+}
+
 /// Minimum timestep to use immediately after a breakpoint (for restart behavior)
 const MIN_STEP_AFTER_BREAKPOINT: Value = 1e-12;
 
@@ -149,13 +187,27 @@ const DEFAULT_BREAKPOINT_TOLERANCE: Value = 1e-15;
 /// Ngspice `dctran.c` factor for equalizing the last two pre-breakpoint steps.
 const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
 
-/// Xyce-compatible scale for the first step after a source breakpoint.
+/// Established restart scale used by the default (ngspice-compatible)
+/// breakpoint policy.
+const DEFAULT_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.005;
+
+/// Xyce 7.10 OneStep/Gear12 scale for the first step after a breakpoint.
 ///
-/// Xyce 7.10 exposes this as `.OPTIONS TIMEINT RESTARTSTEPSCALE` and defaults
-/// it to `0.005`. Keeping the restart tied to the saved attempted step prevents
-/// interpolation across source derivative corners from hiding the true
-/// post-breakpoint state of ideal energy-storage devices.
-const BREAKPOINT_RESTART_STEP_SCALE: Value = 0.005;
+/// This is deliberately distinct from TIMEINT `RESTARTSTEPSCALE=0.005`, which
+/// bounds the initial step at the beginning of an analysis. The legacy Xyce
+/// integrators restart after later breakpoints at 10% of the saved, uncut
+/// proposal.
+const XYCE_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.1;
+
+/// Dialect-specific behavior for approaching and leaving breakpoints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreakpointStepPolicy {
+    /// Apply ngspice's 1.9-factor equalization before truncating to a corner.
+    Ngspice,
+    /// Match Xyce OneStep/Gear12: truncate directly to the stop time and
+    /// restart at 10% of the saved pre-truncation proposal.
+    Xyce,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct BreakpointTimeKey(Value);
@@ -200,6 +252,11 @@ pub struct BreakpointManager {
     just_passed_breakpoint: bool,
     /// Timestep that was proposed before it was cut/equalized for a breakpoint.
     saved_delta_before_breakpoint: Option<Value>,
+    /// Integrator-specific fraction of the saved pre-breakpoint proposal used
+    /// to initialize the first post-breakpoint step.
+    restart_step_scale: Value,
+    /// Whether to equalize the final two steps before a breakpoint.
+    equalize_pre_breakpoint_steps: bool,
     /// Tolerance for merging and detecting breakpoint times.
     tolerance: Value,
 }
@@ -216,12 +273,22 @@ impl BreakpointManager {
     }
 
     pub fn new_with_tolerance(tolerance: Value) -> Self {
+        Self::new_with_tolerance_and_policy(tolerance, BreakpointStepPolicy::Ngspice)
+    }
+
+    pub fn new_with_tolerance_and_policy(tolerance: Value, policy: BreakpointStepPolicy) -> Self {
+        let (restart_step_scale, equalize_pre_breakpoint_steps) = match policy {
+            BreakpointStepPolicy::Ngspice => (DEFAULT_BREAKPOINT_RESTART_STEP_SCALE, true),
+            BreakpointStepPolicy::Xyce => (XYCE_BREAKPOINT_RESTART_STEP_SCALE, false),
+        };
         Self {
             breakpoints: Vec::new(),
             runtime_breakpoints: BTreeSet::new(),
             current_index: 0,
             just_passed_breakpoint: false,
             saved_delta_before_breakpoint: None,
+            restart_step_scale,
+            equalize_pre_breakpoint_steps,
             tolerance: if tolerance.is_finite() && tolerance > 0.0 {
                 tolerance
             } else {
@@ -418,7 +485,9 @@ impl BreakpointManager {
                     self.saved_delta_before_breakpoint = Some(proposed_dt);
                     self.just_passed_breakpoint = false;
                     (time_to_bp, true)
-                } else if current_time + BREAKPOINT_EQUALIZATION_FACTOR * proposed_dt > bp {
+                } else if self.equalize_pre_breakpoint_steps
+                    && current_time + BREAKPOINT_EQUALIZATION_FACTOR * proposed_dt > bp
+                {
                     self.saved_delta_before_breakpoint = Some(proposed_dt);
                     self.just_passed_breakpoint = false;
                     (time_to_bp / 2.0, false)
@@ -452,7 +521,7 @@ impl BreakpointManager {
             .filter(|delta| delta.is_finite() && *delta > 0.0);
 
         saved_delta
-            .map(|delta| BREAKPOINT_RESTART_STEP_SCALE * delta.min(next_gap))
+            .map(|delta| self.restart_step_scale * delta.min(next_gap))
             .filter(|restart| restart.is_finite() && *restart > 0.0)
             .unwrap_or(MIN_STEP_AFTER_BREAKPOINT)
     }
@@ -531,8 +600,34 @@ mod breakpoint_manager_tests {
 
         let restart = breakpoints.mark_breakpoint_solved(10.0);
 
-        assert_eq!(restart, BREAKPOINT_RESTART_STEP_SCALE * 6.0);
+        assert_eq!(restart, DEFAULT_BREAKPOINT_RESTART_STEP_SCALE * 6.0);
         assert!(breakpoints.should_use_minimal_step());
+    }
+
+    #[test]
+    fn xyce_breakpoint_policy_uses_the_integrator_restart_scale() {
+        let mut breakpoints =
+            BreakpointManager::new_with_tolerance_and_policy(1.0e-15, BreakpointStepPolicy::Xyce);
+        breakpoints.add(10.0);
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert_eq!(dt, 6.0);
+        assert!(lands_on_breakpoint);
+
+        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        assert!((restart - 0.6).abs() <= 8.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn xyce_breakpoint_policy_truncates_without_ngspice_equalization() {
+        let mut breakpoints =
+            BreakpointManager::new_with_tolerance_and_policy(1.0e-15, BreakpointStepPolicy::Xyce);
+        breakpoints.add(10.0);
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(0.0, 6.0);
+
+        assert_eq!(dt, 6.0);
+        assert!(!lands_on_breakpoint);
     }
 
     #[test]

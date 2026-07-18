@@ -784,6 +784,8 @@ fn model_param_accepts_contextual_bare_string(name: &str, model_type: Option<&st
     name.eq_ignore_ascii_case("model") && model_type.eq_ignore_ascii_case("multi_input_pwl")
         || name.eq_ignore_ascii_case("string")
             && model_type.eq_ignore_ascii_case("print_param_types")
+        || (name.eq_ignore_ascii_case("fxpdata") || name.eq_ignore_ascii_case("fxmdata"))
+            && model_type.eq_ignore_ascii_case("memristor")
 }
 
 fn push_model_string_value(

@@ -96,10 +96,13 @@ pub const MAX_TOTAL_ITERATIONS: usize = 100_000;
 /// retreat below it when needed.
 pub const MIN_TIMESTEP: Value = 1e-12;
 
-/// Maximum timestep for transient analysis (seconds)
+/// Default transient timestep ceiling.
 ///
-/// Ensures adequate resolution of fast waveforms.
-pub const MAX_TIMESTEP: Value = 1e-3;
+/// The core engine is unbounded unless a frontend or caller supplies a
+/// finite maximum. Frontends that expose a product-level default (for
+/// example 1 ms) pass it explicitly, so every finite value remains
+/// distinguishable from the unset state.
+pub const MAX_TIMESTEP: Value = Value::INFINITY;
 
 /// Minimum timestep immediately after a breakpoint (seconds)
 ///
