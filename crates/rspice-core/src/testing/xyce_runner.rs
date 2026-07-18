@@ -19084,6 +19084,38 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         !Self::logical_comp_directives(source).is_empty()
     }
 
+    fn pointwise_switch_transition_needs_rms_fallback(netlist: &Netlist) -> bool {
+        netlist.models.iter().any(|model| {
+            if !matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "VSWITCH" | "VSW"
+            ) {
+                return false;
+            }
+
+            let parameter = |names: &[&str]| {
+                model.params.iter().find_map(|(name, value)| {
+                    names
+                        .iter()
+                        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+                        .then_some(*value)
+                })
+            };
+            let Some((on, off)) = parameter(&["ON", "VON"]).zip(parameter(&["OFF", "VOFF"])) else {
+                return false;
+            };
+            let span = (on - off).abs();
+            let scale = on.abs().max(off.abs()).max(1.0);
+
+            // A narrow Xyce switch curve is intentionally very steep. Tiny
+            // differences in accepted transition times can move pointwise
+            // samples substantially even when the waveforms are equivalent.
+            // Keep pointwise comparison as the primary check and allow the
+            // canonical Release 7.10 integrated-RMS verifier as a fallback.
+            span.is_finite() && span > 0.0 && span <= scale * 0.01
+        })
+    }
+
     fn logical_comp_directives(source: &str) -> Vec<String> {
         let mut directives = Vec::new();
         let mut current: Option<String> = None;
@@ -24883,6 +24915,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mut best_mismatches = None;
         let mut simulation_error = None;
+        let mut fallback_errors = Vec::new();
         match engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
             Ok(result) => {
                 let mismatches = match self
@@ -24903,6 +24936,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return self.passed_or_tran_side_output_failure(
                         deck, start, contract, &plan, &netlist, &result,
                     );
+                }
+                match self.pointwise_switch_transition_rms_fallback_passes(
+                    &reference, &plan, &netlist, &result,
+                ) {
+                    Ok(true) => {
+                        return self.passed_or_tran_side_output_failure(
+                            deck, start, contract, &plan, &netlist, &result,
+                        );
+                    }
+                    Err(err) => fallback_errors.push(format!(
+                        "switch-transition integrated-RMS comparison error: {err}"
+                    )),
+                    Ok(false) => {}
                 }
 
                 best_mismatches = Some(mismatches);
@@ -25007,7 +25053,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         let capacitor_branch_print =
             Self::transient_print_requests_linear_capacitor_branch_quantity(&netlist, &plan.print);
-        let mut fallback_errors = Vec::new();
 
         let locked_engine =
             self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
@@ -25031,6 +25076,27 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                                 &netlist,
                                 &locked_result,
                             );
+                        }
+                        match self.pointwise_switch_transition_rms_fallback_passes(
+                            &reference,
+                            &plan,
+                            &netlist,
+                            &locked_result,
+                        ) {
+                            Ok(true) => {
+                                return self.passed_or_tran_side_output_failure(
+                                    deck,
+                                    start,
+                                    contract,
+                                    &plan,
+                                    &netlist,
+                                    &locked_result,
+                                );
+                            }
+                            Err(err) => fallback_errors.push(format!(
+                                "locked switch-transition integrated-RMS comparison error: {err}"
+                            )),
+                            Ok(false) => {}
                         }
                         if Self::candidate_mismatches_are_better(
                             best_mismatches.as_deref(),
@@ -25084,6 +25150,27 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                                     &netlist,
                                     &backward_euler_result,
                                 );
+                            }
+                            match self.pointwise_switch_transition_rms_fallback_passes(
+                                &reference,
+                                &plan,
+                                &netlist,
+                                &backward_euler_result,
+                            ) {
+                                Ok(true) => {
+                                    return self.passed_or_tran_side_output_failure(
+                                        deck,
+                                        start,
+                                        contract,
+                                        &plan,
+                                        &netlist,
+                                        &backward_euler_result,
+                                    );
+                                }
+                                Err(err) => fallback_errors.push(format!(
+                                    "backward-Euler switch-transition integrated-RMS comparison error: {err}"
+                                )),
+                                Ok(false) => {}
                             }
                             if Self::candidate_mismatches_are_better(
                                 best_mismatches.as_deref(),
@@ -44505,6 +44592,28 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 )
             }
         }
+    }
+
+    fn pointwise_switch_transition_rms_fallback_passes(
+        &self,
+        reference: &XycePrnTable,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<bool, String> {
+        if plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+            || !Self::pointwise_switch_transition_needs_rms_fallback(netlist)
+        {
+            return Ok(false);
+        }
+
+        let mut rms_plan = plan.clone();
+        rms_plan.comparison_mode = XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        };
+        Ok(self
+            .compare_static_tran_primary_reference(reference, &rms_plan, netlist, result)?
+            .is_empty())
     }
 
     fn compare_static_tran_reference_grid_fallback(
@@ -78287,6 +78396,32 @@ C1 out 0 10f
             wrapper_tolerance: None,
             comparison_mode: XyceStaticTranComparisonMode::Pointwise,
         }
+    }
+
+    #[test]
+    fn narrow_voltage_switch_pointwise_comparisons_enable_rms_fallback() {
+        let source = "\
+narrow Xyce voltage switch
+VCTRL control 0 0
+S1 out 0 control 0 SW
+R1 out 0 1k
+.MODEL SW VSWITCH (RON=1 ROFF=1MEG VON=2.51 VOFF=2.5)
+.TRAN 1n 10n
+.PRINT TRAN V(out)
+.END
+";
+        let narrow = Netlist::parse(source).expect("narrow VSWITCH fixture parses");
+        assert!(
+            XyceTestRunner::pointwise_switch_transition_needs_rms_fallback(&narrow),
+            "a narrow transition should retain pointwise comparison with the canonical RMS fallback"
+        );
+
+        let wide = Netlist::parse(&source.replace("VON=2.51", "VON=3.5"))
+            .expect("wide VSWITCH fixture parses");
+        assert!(
+            !XyceTestRunner::pointwise_switch_transition_needs_rms_fallback(&wide),
+            "a wide transition should remain strictly pointwise"
+        );
     }
 
     #[test]
