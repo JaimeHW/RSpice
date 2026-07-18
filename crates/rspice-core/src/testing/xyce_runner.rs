@@ -4096,6 +4096,7 @@ struct XyceStaticNoisePlan {
     deck_path: PathBuf,
     source: String,
     print: Option<XycePrintRequest>,
+    output_override: bool,
     reference_path: Option<PathBuf>,
     side_references: Vec<XyceStaticNoiseSideReference>,
     measurement_reference_paths: Vec<PathBuf>,
@@ -20533,6 +20534,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn static_noise_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticNoisePlan, String> {
+        let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        let output_override = requires_wrapper
+            && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
         let qualified_step_cont_derivative = Self::normalize_manifest_key(&deck.relative_path)
             == XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD;
         let source = if qualified_step_cont_derivative {
@@ -20556,16 +20560,26 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             );
         }
         Self::reject_unsupported_source_directives(&source)?;
-        let print_output = Self::canonical_print_output_request(&source, "NOISE", false)?;
+        let print_output = if output_override {
+            Self::output_override_print_output_request(&source, "NOISE")?
+        } else {
+            Self::canonical_print_output_request(&source, "NOISE", false)?
+        };
         let print = print_output.as_ref().map(|request| XycePrintRequest {
             probes: request.probes.clone(),
         });
-        let contract = XyceStaticNoiseContract::for_format(
-            print_output
-                .as_ref()
-                .and_then(|request| request.format.as_deref()),
-        )?;
-        if let Some(primary) = print_output.as_ref() {
+        let contract = if output_override {
+            XyceStaticNoiseContract::StdPrn
+        } else {
+            XyceStaticNoiseContract::for_format(
+                print_output
+                    .as_ref()
+                    .and_then(|request| request.format.as_deref()),
+            )?
+        };
+        if output_override {
+            Self::validate_native_output_override_prn_wrapper_contract(&source, "NOISE")?;
+        } else if let Some(primary) = print_output.as_ref() {
             Self::validate_static_noise_output_destinations(&source, primary, contract)?;
         }
 
@@ -20660,7 +20674,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let reference_path = self
             .static_output_reference_path(&deck.path, contract.reference_extension())
             .filter(|path| path.is_file());
-        let side_references = self.static_noise_side_references(&source, &deck.path)?;
+        let side_references = if output_override {
+            Vec::new()
+        } else {
+            self.static_noise_side_references(&source, &deck.path)?
+        };
         if reference_path.is_none()
             && side_references.is_empty()
             && measurement_reference_paths.is_empty()
@@ -20677,6 +20695,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             deck_path: deck.path.clone(),
             source,
             print,
+            output_override,
             reference_path,
             side_references,
             measurement_reference_paths,
@@ -22696,6 +22715,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     fn validate_native_output_override_prn_tran_wrapper_contract(
         source: &str,
     ) -> Result<(), String> {
+        Self::validate_native_output_override_prn_wrapper_contract(source, "TRAN")
+    }
+
+    fn validate_native_output_override_prn_wrapper_contract(
+        source: &str,
+        expected_analysis: &str,
+    ) -> Result<(), String> {
+        if !matches!(expected_analysis, "TRAN" | "NOISE") {
+            return Err(format!(
+                "unsupported output override analysis '{expected_analysis}'"
+            ));
+        }
         let mut print_count = 0usize;
         let mut probe_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
@@ -22712,9 +22743,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 let Some(analysis) = token_refs.get(1).copied() else {
                     return Err("output override .PRINT statement has no analysis type".to_string());
                 };
-                if !analysis.eq_ignore_ascii_case("TRAN") {
+                if !analysis.eq_ignore_ascii_case(expected_analysis) {
                     return Err(format!(
-                        "wrapper-origin transient output override contract does not cover .PRINT {analysis}"
+                        "wrapper-origin {expected_analysis} output override contract does not cover .PRINT {analysis}"
                     ));
                 }
 
@@ -22726,12 +22757,26 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     {
                         let value = raw_value.trim().trim_matches(['"', '\'']);
                         if raw_key.trim().eq_ignore_ascii_case("FORMAT") {
-                            Self::static_tran_contract_for_print_format(true, Some(value))
-                                .map_err(|err| {
-                                    format!(
-                                        "wrapper-origin transient output override contract does not cover {err}"
-                                    )
-                                })?;
+                            match expected_analysis {
+                                "TRAN" => {
+                                    Self::static_tran_contract_for_print_format(true, Some(value))
+                                        .map_err(|err| {
+                                            format!(
+                                                "wrapper-origin TRAN output override contract does not cover {err}"
+                                            )
+                                        })?;
+                                }
+                                "NOISE" => {
+                                    XyceStaticNoiseContract::for_format(Some(value)).map_err(
+                                        |err| {
+                                            format!(
+                                                "wrapper-origin NOISE output override contract does not cover {err}"
+                                            )
+                                        },
+                                    )?;
+                                }
+                                _ => unreachable!("analysis was validated above"),
+                            }
                         }
                         index += consumed;
                         continue;
@@ -22744,18 +22789,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 }
                 continue;
             }
-            if Self::is_extra_wrapper_tran_output_analysis_command(command) {
+            if expected_analysis == "TRAN"
+                && Self::is_extra_wrapper_tran_output_analysis_command(command)
+            {
                 return Err(format!(
-                    "wrapper-origin transient output override contract does not cover {command} directives"
+                    "wrapper-origin TRAN output override contract does not cover {command} directives"
                 ));
             }
         }
 
         if print_count == 0 || probe_count == 0 {
-            return Err(
-                "wrapper-origin transient output override contract requires .PRINT TRAN probes"
-                    .to_string(),
-            );
+            return Err(format!(
+                "wrapper-origin {expected_analysis} output override contract requires .PRINT {expected_analysis} probes"
+            ));
         }
         Ok(())
     }
@@ -23684,7 +23730,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         plan: XyceStaticNoisePlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = if plan.reference_path.is_some() || !plan.side_references.is_empty() {
+        let contract = if plan.output_override {
+            "wrapper_output_override_prn_noise"
+        } else if plan.reference_path.is_some() || !plan.side_references.is_empty() {
             plan.contract.result_contract(false)
         } else {
             "wrapper_scalar_measure_noise"
@@ -23901,7 +23949,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: Netlist,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = if plan.reference_path.is_some() || !plan.side_references.is_empty() {
+        let contract = if plan.output_override {
+            "wrapper_output_override_prn_step_noise"
+        } else if plan.reference_path.is_some() || !plan.side_references.is_empty() {
             plan.contract.result_contract(true)
         } else {
             "wrapper_scalar_measure_step_noise"
@@ -69775,6 +69825,33 @@ R3 1 0 {RVAL}
         assert!(
             err.contains(".PRINT AC"),
             "unexpected validation error: {err}"
+        );
+    }
+
+    #[test]
+    fn noise_output_override_aggregates_mixed_formats_into_forced_prn_schema() {
+        let source = r#"
+.NOISE V(out) V1 DEC 5 100 100MEG 1
+.PRINT NOISE FORMAT=NOINDEX DELIMITER=COMMA V(out) VR(out)
+.PRINT NOISE FORMAT=CSV FILE=noiseFoo VI(out) INOISE ONOISE
+"#;
+
+        XyceTestRunner::validate_native_output_override_prn_wrapper_contract(source, "NOISE")
+            .expect("output override NOISE wrapper contract validates");
+        let request = XyceTestRunner::output_override_print_output_request(source, "NOISE")
+            .expect("output override request parses")
+            .expect("output override has probes");
+
+        assert_eq!(
+            request,
+            XycePrintOutputRequest {
+                format: None,
+                file: None,
+                probes: ["V(out)", "VR(out)", "VI(out)", "INOISE", "ONOISE"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }
         );
     }
 
