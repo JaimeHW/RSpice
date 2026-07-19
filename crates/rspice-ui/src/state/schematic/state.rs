@@ -14,6 +14,7 @@ use super::component_type::ComponentType;
 use super::document_policy::SchematicDocumentPolicy;
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
+use super::port::PendingPortPlacement;
 use super::rotation::Rotation;
 use super::selection::Selection;
 use super::snap::SnapEngine;
@@ -131,6 +132,10 @@ pub struct SchematicState {
     #[serde(skip)]
     pub pending_bus_tap: Option<PendingBusTap>,
 
+    /// Validated one-shot interface contract used while the port tool is armed.
+    #[serde(skip)]
+    pub pending_port: Option<PendingPortPlacement>,
+
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
 
@@ -220,6 +225,7 @@ impl Default for SchematicState {
             preview_rotation: Rotation::default(),
             pending_library_cell: None,
             pending_bus_tap: None,
+            pending_port: None,
             connections: Vec::new(),
             net_mapping: HashMap::new(),
             is_dirty: false,

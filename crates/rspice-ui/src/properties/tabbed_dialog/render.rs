@@ -16,7 +16,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, SelectionImpact,
-    SelectionPreview, dialog_tabs, selection_command_workflow, workflow_preview_status,
+    SelectionPreview, dialog_tabs_in_width, selection_command_options_paint_width,
+    selection_command_workflow, workflow_preview_status,
 };
 
 use super::editors::render_value_editor;
@@ -194,13 +195,25 @@ pub fn render_tabbed_property_dialog(
                 ui.add_space(8.0);
 
                 let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+                // The command workflow's retained split minimum can report a
+                // wider `available_width` than this pane can actually paint.
+                // Bound the tab fit to the live clip edge so the last label
+                // never disappears under the neighboring pane or scrollbar.
+                let tabs_width = ui
+                    .available_width()
+                    .min((ui.clip_rect().right() - ui.cursor().left()).max(1.0))
+                    .min(selection_command_options_paint_width(
+                        ui.ctx().content_rect().width(),
+                    ));
                 egui::ScrollArea::horizontal()
                     .id_salt("component-property-tabs")
                     .scroll_bar_visibility(
                         egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
                     )
                     .auto_shrink([false, true])
-                    .show(ui, |ui| dialog_tabs(ui, &label_refs, &mut active_index));
+                    .show(ui, |ui| {
+                        dialog_tabs_in_width(ui, &label_refs, &mut active_index, tabs_width)
+                    });
                 if let Some(name) = names.get(active_index) {
                     state.active_tab = name.clone();
                 }

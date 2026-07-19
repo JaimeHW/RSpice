@@ -454,7 +454,7 @@ mod tests {
             .write_new_text_file(&path, "second generation")
             .expect_err("existing automatic export must not be overwritten");
 
-        assert!(conflict.contains("destination changed"));
+        assert!(conflict.contains("destination changed"), "{conflict}");
         assert_eq!(
             std::fs::read_to_string(&path).expect("read preserved export"),
             "first generation"

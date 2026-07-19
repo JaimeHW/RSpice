@@ -296,12 +296,33 @@ pub fn collect_properties_from_component(
             properties.insert(primary_prop.to_owned(), default);
         }
     } else if !component.value.is_empty() {
-        let value = if component.kind.is_pwl_source() {
+        let value = if component.kind.is_pwl_source() || component.kind == ComponentType::Port {
             PropertyValue::String(component.value.clone())
         } else {
             PropertyValue::Expression(component.value.clone())
         };
         properties.insert(primary_prop.to_string(), value);
+    }
+
+    // A legacy Port may only carry `dir=`. Materialize the complete typed
+    // contract at the property boundary so every schema field is editable and
+    // applying the unchanged form upgrades it to the durable representation.
+    // Canonical contract values intentionally win over legacy aliases such as
+    // `input`, `digital`, or `real`.
+    if component.kind == ComponentType::Port
+        && let Some(contract) = component.port_contract()
+    {
+        for (key, value) in [
+            ("dir", contract.direction.keyword().to_owned()),
+            ("signal_type", contract.signal_type.keyword().to_owned()),
+            ("discipline", contract.discipline.keyword().to_owned()),
+            ("documentation", contract.documentation),
+        ] {
+            properties.insert(
+                key.to_owned(),
+                property_value_from_schema(component.kind, key, value, registry),
+            );
+        }
     }
 
     // Parse additional parameters from params string
@@ -312,40 +333,11 @@ pub fn collect_properties_from_component(
             continue;
         }
 
-        // Determine the appropriate PropertyValue type based on the registry
-        let prop_value = if let Some(sheet) = registry.get(component.kind) {
-            if let Some(def) = sheet.iter().find(|d| d.name == key) {
-                // Use the definition's type to create appropriate PropertyValue
-                match &def.default_value {
-                    PropertyValue::Number { .. } => {
-                        // Engineering notation ("1k", "10n") counts as numeric.
-                        if let Ok(num) = crate::properties::parse_engineering_value(&value) {
-                            PropertyValue::Number {
-                                value: num,
-                                unit: def.unit.clone(),
-                            }
-                        } else {
-                            PropertyValue::Expression(value)
-                        }
-                    }
-                    PropertyValue::Boolean(_) => {
-                        let bool_val =
-                            matches!(value.to_lowercase().as_str(), "true" | "1" | "yes" | "on");
-                        PropertyValue::Boolean(bool_val)
-                    }
-                    PropertyValue::Enum { options, .. } => PropertyValue::Enum {
-                        selected: value.clone(),
-                        options: options.clone(),
-                    },
-                    _ => PropertyValue::Expression(value),
-                }
-            } else {
-                // Unknown property, treat as expression
-                PropertyValue::Expression(value)
-            }
-        } else {
-            PropertyValue::Expression(value)
-        };
+        if component.kind == ComponentType::Port && is_port_contract_property(&key) {
+            continue;
+        }
+
+        let prop_value = property_value_from_schema(component.kind, &key, value, registry);
 
         properties.insert(key, prop_value);
     }
@@ -397,7 +389,14 @@ pub fn apply_properties_to_component(
     }
 
     // Collect secondary parameters
-    let mut secondary_params: HashMap<String, String> = HashMap::new();
+    let mut secondary_params: HashMap<String, String> = if component.kind == ComponentType::Port {
+        // Port contracts can coexist with future/extension metadata. Preserve
+        // fields unknown to this property sheet instead of erasing them while
+        // upgrading a legacy contract.
+        parse_params_string(&component.params)
+    } else {
+        HashMap::new()
+    };
 
     for (key, value) in properties {
         // Skip name and primary property
@@ -422,14 +421,75 @@ pub fn apply_properties_to_component(
             false
         };
 
-        // Only include non-default values (Spectre behavior: minimize netlist verbosity)
-        if !is_default {
+        // Port contract fields stay explicit even at schema defaults. This
+        // makes their durable meaning independent of defaults changing in a
+        // future release and upgrades legacy `dir=`-only components safely.
+        if !is_default || (component.kind == ComponentType::Port && is_port_contract_property(key))
+        {
             secondary_params.insert(key.clone(), string_value);
         }
     }
 
+    if component.kind == ComponentType::Port
+        && let Some(contract) = component.port_contract()
+    {
+        secondary_params
+            .entry("dir".to_owned())
+            .or_insert_with(|| contract.direction.keyword().to_owned());
+        secondary_params
+            .entry("signal_type".to_owned())
+            .or_insert_with(|| contract.signal_type.keyword().to_owned());
+        secondary_params
+            .entry("discipline".to_owned())
+            .or_insert_with(|| contract.discipline.keyword().to_owned());
+        secondary_params
+            .entry("documentation".to_owned())
+            .or_insert(contract.documentation);
+    }
+
     // Format secondary parameters into params string
     component.params = format_params_string(&secondary_params);
+}
+
+fn is_port_contract_property(key: &str) -> bool {
+    matches!(key, "dir" | "signal_type" | "discipline" | "documentation")
+}
+
+fn property_value_from_schema(
+    kind: ComponentType,
+    key: &str,
+    value: String,
+    registry: &PropertyRegistry,
+) -> PropertyValue {
+    let Some(definition) = registry
+        .get(kind)
+        .and_then(|sheet| sheet.iter().find(|definition| definition.name == key))
+    else {
+        return PropertyValue::Expression(value);
+    };
+
+    match &definition.default_value {
+        PropertyValue::Number { .. } => {
+            if let Ok(number) = crate::properties::parse_engineering_value(&value) {
+                PropertyValue::Number {
+                    value: number,
+                    unit: definition.unit.clone(),
+                }
+            } else {
+                PropertyValue::Expression(value)
+            }
+        }
+        PropertyValue::String(_) => PropertyValue::String(value),
+        PropertyValue::Expression(_) => PropertyValue::Expression(value),
+        PropertyValue::Boolean(_) => PropertyValue::Boolean(matches!(
+            value.to_lowercase().as_str(),
+            "true" | "1" | "yes" | "on"
+        )),
+        PropertyValue::Enum { options, .. } => PropertyValue::Enum {
+            selected: value,
+            options: options.clone(),
+        },
+    }
 }
 
 /// Converts a PropertyValue to its string representation.
@@ -551,6 +611,99 @@ mod tests {
 
         assert!(component.params.is_empty());
         assert!(!component.params.contains("inf"));
+    }
+
+    #[test]
+    fn legacy_port_contract_is_materialized_without_losing_extension_metadata() {
+        let registry = PropertyRegistry::new();
+        let mut component =
+            Component::new(7, ComponentType::Port, Point::origin()).with_name_value("", "BIAS_EN");
+        component.params = "dir=input vendor_role=calibration".to_owned();
+
+        let properties = collect_properties_from_component(&component, &registry);
+
+        assert_eq!(
+            properties.get("value"),
+            Some(&PropertyValue::String("BIAS_EN".to_owned()))
+        );
+        assert!(matches!(
+            properties.get("dir"),
+            Some(PropertyValue::Enum { selected, .. }) if selected == "in"
+        ));
+        assert!(matches!(
+            properties.get("signal_type"),
+            Some(PropertyValue::Enum { selected, .. }) if selected == "analog"
+        ));
+        assert!(matches!(
+            properties.get("discipline"),
+            Some(PropertyValue::Enum { selected, .. }) if selected == "electrical"
+        ));
+        assert!(matches!(
+            properties.get("documentation"),
+            Some(PropertyValue::String(value)) if !value.is_empty()
+        ));
+
+        apply_properties_to_component(&mut component, &properties, &registry);
+        let encoded = parse_params_string(&component.params);
+        assert_eq!(encoded.get("dir").map(String::as_str), Some("in"));
+        assert_eq!(
+            encoded.get("signal_type").map(String::as_str),
+            Some("analog")
+        );
+        assert_eq!(
+            encoded.get("discipline").map(String::as_str),
+            Some("electrical")
+        );
+        assert_eq!(
+            encoded.get("vendor_role").map(String::as_str),
+            Some("calibration")
+        );
+    }
+
+    #[test]
+    fn typed_port_property_edit_preserves_order_and_updates_the_complete_contract() {
+        let registry = PropertyRegistry::new();
+        let mut state = crate::state::SchematicState::default();
+        let pending = crate::state::PendingPortPlacement::new(
+            "OUT",
+            crate::state::PortDirectionType::OutputAnalog,
+            crate::state::PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        let id = state
+            .place_pending_port(Point::origin(), pending)
+            .expect("typed port places");
+        let mut component = state
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("port exists")
+            .clone();
+        let mut properties = collect_properties_from_component(&component, &registry);
+        properties.insert(
+            "discipline".to_owned(),
+            PropertyValue::enumeration(
+                "thermal",
+                ["electrical", "logic", "wreal", "thermal"]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+        );
+        properties.insert(
+            "documentation".to_owned(),
+            PropertyValue::String("Thermal monitor output".to_owned()),
+        );
+
+        apply_properties_to_component(&mut component, &properties, &registry);
+
+        let contract = component.port_contract().expect("typed contract remains");
+        assert_eq!(contract.direction, crate::state::PortDirection::Out);
+        assert_eq!(contract.signal_type, crate::state::PortSignalType::Analog);
+        assert_eq!(contract.discipline, crate::state::PortDiscipline::Thermal);
+        assert_eq!(contract.netlist_order, Some(1));
+        assert_eq!(contract.documentation, "Thermal monitor output");
     }
 }
 

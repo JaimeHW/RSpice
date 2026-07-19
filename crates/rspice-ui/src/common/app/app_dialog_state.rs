@@ -242,6 +242,64 @@ impl BusTapDialogState {
     }
 }
 
+/// Isolated draft for the mockup-owned Place pin or port transaction.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PinPortDialogState {
+    pub(crate) open: bool,
+    pub(crate) name: String,
+    pub(crate) direction_type: crate::state::PortDirectionType,
+    pub(crate) discipline: crate::state::PortDiscipline,
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) topology_version: u64,
+    pub(crate) view_path: String,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl PinPortDialogState {
+    pub(crate) fn open(
+        &mut self,
+        name: String,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            name,
+            direction_type: crate::state::PortDirectionType::default(),
+            discipline: crate::state::PortDiscipline::default(),
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = true;
+        self.discard_confirm = false;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
 /// Exact, isolated draft for a selected bus. The durable baseline is retained
 /// to guard the eventual commit against stale-object overwrite.
 #[derive(Debug, Clone)]
@@ -644,6 +702,9 @@ pub struct DialogState {
     /// Validated configuration transaction for Place bus tap.
     pub(crate) bus_tap: BusTapDialogState,
 
+    /// Typed interface-port placement transaction.
+    pub(crate) pin_port: PinPortDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -698,6 +759,7 @@ impl DialogState {
             || self.license_dialog.open
             || self.command_palette.open
             || self.bus_tap.open
+            || self.pin_port.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
@@ -742,6 +804,15 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs.pin_port.open(
+                "BIAS_EN".to_owned(),
+                0,
+                0,
+                0,
+                "user/top/schematic".to_owned(),
+            );
+        });
         assert_blocks_shortcuts(|dialogs| {
             let bus = crate::state::Bus::segment(
                 1,

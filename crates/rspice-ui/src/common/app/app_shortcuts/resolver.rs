@@ -903,6 +903,40 @@ mod tests {
     }
 
     #[test]
+    fn shift_p_resolves_schematic_place_pin_without_breaking_plain_p_contexts() {
+        let profile = ShortcutPreferences::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::NONE
+        };
+
+        let resolve = |key, modifiers, environment| {
+            ShortcutResolverState::default().resolve(
+                &snapshot(&[event(key, modifiers, false)], false),
+                &profile,
+                CommandPlatform::Desktop,
+                environment,
+                Duration::ZERO,
+                |_| true,
+            )
+        };
+
+        assert_eq!(
+            resolve(Key::P, shift, design(true)).command,
+            Some(Command::PlacePin)
+        );
+        assert_eq!(
+            resolve(Key::P, Modifiers::NONE, design(true)).command,
+            Some(Command::PlaceProbe)
+        );
+        assert_eq!(
+            resolve(Key::P, Modifiers::NONE, models_symbol(true)).command,
+            Some(Command::SymbolPinTool)
+        );
+        assert_eq!(resolve(Key::P, shift, models_symbol(true)).command, None);
+    }
+
+    #[test]
     fn result_context_beats_global_only_when_enabled() {
         let mut profile = ShortcutPreferences::default();
         bind(

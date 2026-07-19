@@ -53,6 +53,284 @@ impl PortDirection {
     }
 }
 
+/// Signal semantics declared by an interface port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum PortSignalType {
+    Logic,
+    #[default]
+    Analog,
+    Power,
+}
+
+impl PortSignalType {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Logic => "logic",
+            Self::Analog => "analog",
+            Self::Power => "power",
+        }
+    }
+
+    fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "logic" | "digital" => Self::Logic,
+            "power" | "supply" | "rail" => Self::Power,
+            _ => Self::Analog,
+        }
+    }
+}
+
+/// Physical or behavioral discipline carried by an interface port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum PortDiscipline {
+    #[default]
+    Electrical,
+    Logic,
+    Wreal,
+    Thermal,
+}
+
+impl PortDiscipline {
+    pub const ALL: [Self; 4] = [Self::Electrical, Self::Logic, Self::Wreal, Self::Thermal];
+
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Electrical => "electrical",
+            Self::Logic => "logic",
+            Self::Wreal => "wreal",
+            Self::Thermal => "thermal",
+        }
+    }
+
+    fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "logic" | "digital" => Self::Logic,
+            "wreal" | "real" => Self::Wreal,
+            "thermal" | "temperature" | "heat" => Self::Thermal,
+            _ => Self::Electrical,
+        }
+    }
+}
+
+/// The four exact direction/type combinations specified by the workbench
+/// mockup. Keeping the pair typed prevents a dialog index or translated label
+/// from silently producing a different electrical contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PortDirectionType {
+    #[default]
+    InputLogic,
+    InputAnalog,
+    OutputAnalog,
+    InOutPower,
+}
+
+impl PortDirectionType {
+    pub const ALL: [Self; 4] = [
+        Self::InputLogic,
+        Self::InputAnalog,
+        Self::OutputAnalog,
+        Self::InOutPower,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::InputLogic => "input \u{00b7} logic",
+            Self::InputAnalog => "input \u{00b7} analog",
+            Self::OutputAnalog => "output \u{00b7} analog",
+            Self::InOutPower => "inout \u{00b7} power",
+        }
+    }
+
+    pub const fn direction(self) -> PortDirection {
+        match self {
+            Self::InputLogic | Self::InputAnalog => PortDirection::In,
+            Self::OutputAnalog => PortDirection::Out,
+            Self::InOutPower => PortDirection::InOut,
+        }
+    }
+
+    pub const fn signal_type(self) -> PortSignalType {
+        match self {
+            Self::InputLogic => PortSignalType::Logic,
+            Self::InputAnalog | Self::OutputAnalog => PortSignalType::Analog,
+            Self::InOutPower => PortSignalType::Power,
+        }
+    }
+}
+
+/// Durable, typed interface metadata encoded in the component parameter
+/// string. SPICE itself consumes the positional port list; hierarchy,
+/// generated symbols, documentation, AMS tooling and future connect rules
+/// consume this richer contract without maintaining a second source of truth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortContract {
+    pub direction: PortDirection,
+    pub signal_type: PortSignalType,
+    pub discipline: PortDiscipline,
+    /// One-based positional interface order. Legacy ports derive this from
+    /// document order until they are rewritten through the typed editor.
+    pub netlist_order: Option<usize>,
+    pub documentation: String,
+}
+
+impl PortContract {
+    fn from_component(component: &Component, name: &str) -> Self {
+        let params = crate::properties::parse_params_string(&component.params);
+        let direction = params
+            .get("dir")
+            .map(|raw| PortDirection::parse(raw))
+            .unwrap_or_default();
+        let signal_type = params
+            .get("signal_type")
+            .map(|raw| PortSignalType::parse(raw))
+            .unwrap_or_else(|| {
+                if direction == PortDirection::Supply {
+                    PortSignalType::Power
+                } else {
+                    PortSignalType::Analog
+                }
+            });
+        let discipline = params
+            .get("discipline")
+            .map(|raw| PortDiscipline::parse(raw))
+            .unwrap_or_default();
+        let netlist_order = params
+            .get("interface_order")
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .filter(|order| *order > 0);
+        let documentation = params.get("documentation").cloned().unwrap_or_else(|| {
+            format!(
+                "{name} {} {} interface port",
+                direction.keyword(),
+                discipline.keyword()
+            )
+        });
+        Self {
+            direction,
+            signal_type,
+            discipline,
+            netlist_order,
+            documentation,
+        }
+    }
+
+    fn encoded_params(&self) -> String {
+        let mut values = std::collections::HashMap::from([
+            ("dir".to_owned(), self.direction.keyword().to_owned()),
+            (
+                "signal_type".to_owned(),
+                self.signal_type.keyword().to_owned(),
+            ),
+            (
+                "discipline".to_owned(),
+                self.discipline.keyword().to_owned(),
+            ),
+            ("documentation".to_owned(), self.documentation.clone()),
+        ]);
+        if let Some(order) = self.netlist_order {
+            values.insert("interface_order".to_owned(), order.to_string());
+        }
+        crate::properties::property_bridge::format_params_string(&values)
+    }
+}
+
+/// Validated one-shot configuration owned by the armed port tool.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPortPlacement {
+    pub name: String,
+    pub contract: PortContract,
+    pub expected_topology_version: u64,
+    pub expected_netlist_order: usize,
+    pub document_authority: Option<PortPlacementAuthority>,
+}
+
+/// Application-document authority captured when a validated port draft arms
+/// the one-shot canvas tool. Schematic-only callers can leave it absent, but
+/// the interactive placement boundary requires an exact match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortPlacementAuthority {
+    pub design_execution_epoch: u64,
+    pub active_schematic_epoch: u64,
+    pub view_path: String,
+}
+
+impl PendingPortPlacement {
+    pub fn new(
+        name: impl Into<String>,
+        direction_type: PortDirectionType,
+        discipline: PortDiscipline,
+        expected_topology_version: u64,
+        expected_netlist_order: usize,
+    ) -> Self {
+        let name = name.into();
+        let contract = PortContract {
+            direction: direction_type.direction(),
+            signal_type: direction_type.signal_type(),
+            discipline,
+            netlist_order: Some(expected_netlist_order),
+            documentation: format!(
+                "{name} {} {} interface port",
+                direction_type.label(),
+                discipline.keyword()
+            ),
+        };
+        Self {
+            name,
+            contract,
+            expected_topology_version,
+            expected_netlist_order,
+            document_authority: None,
+        }
+    }
+
+    pub fn with_document_authority(
+        mut self,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        view_path: impl Into<String>,
+    ) -> Self {
+        self.document_authority = Some(PortPlacementAuthority {
+            design_execution_epoch,
+            active_schematic_epoch,
+            view_path: view_path.into(),
+        });
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortPlacementError {
+    ReadOnly,
+    EmptyName,
+    NameTooLong,
+    InvalidName(&'static str),
+    DuplicateName(String),
+    InvalidContract(&'static str),
+    StaleTopology,
+    StaleOrder,
+}
+
+impl std::fmt::Display for PortPlacementError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadOnly => formatter.write_str("the active schematic is read-only"),
+            Self::EmptyName => formatter.write_str("enter a port name"),
+            Self::NameTooLong => formatter.write_str("port names are limited to 128 characters"),
+            Self::InvalidName(reason) => write!(formatter, "port name: {reason}"),
+            Self::DuplicateName(name) => {
+                write!(formatter, "an interface port named '{name}' already exists")
+            }
+            Self::InvalidContract(reason) => write!(formatter, "interface contract: {reason}"),
+            Self::StaleTopology => formatter.write_str(
+                "the schematic changed after this port contract was armed; reopen the dialog",
+            ),
+            Self::StaleOrder => formatter.write_str(
+                "the interface order changed after this port contract was armed; reopen the dialog",
+            ),
+        }
+    }
+}
+
 /// One pin of a cell's interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortSpec {
@@ -76,15 +354,17 @@ impl Component {
         if name.is_empty() {
             return None;
         }
-        let params = crate::properties::parse_params_string(&self.params);
-        let direction = params
-            .get("dir")
-            .map(|raw| PortDirection::parse(raw))
-            .unwrap_or_default();
+        let direction = PortContract::from_component(self, name).direction;
         Some(PortSpec {
             name: name.to_string(),
             direction,
         })
+    }
+
+    /// Typed interface metadata for a named port.
+    pub fn port_contract(&self) -> Option<PortContract> {
+        let spec = self.port_spec()?;
+        Some(PortContract::from_component(self, &spec.name))
     }
 }
 
@@ -97,11 +377,22 @@ impl SchematicState {
     /// (several port flags may pin the same net on different sheets/edges).
     pub fn interface_ports(&self) -> Vec<PortSpec> {
         let mut seen = std::collections::HashSet::new();
-        self.components
+        let mut ports = self
+            .components
             .iter()
-            .filter_map(Component::port_spec)
-            .filter(|spec| seen.insert(spec.name.to_ascii_lowercase()))
-            .collect()
+            .enumerate()
+            .filter_map(|(document_index, component)| {
+                let spec = component.port_spec()?;
+                let order = component
+                    .port_contract()
+                    .and_then(|contract| contract.netlist_order)
+                    .unwrap_or(document_index + 1);
+                Some((order, document_index, spec))
+            })
+            .filter(|(_, _, spec)| seen.insert(spec.name.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
+        ports.sort_by_key(|(order, document_index, _)| (*order, *document_index));
+        ports.into_iter().map(|(_, _, spec)| spec).collect()
     }
 
     /// `true` when the schematic declares at least one interface port —
@@ -111,6 +402,203 @@ impl SchematicState {
             .iter()
             .any(|component| component.port_spec().is_some())
     }
+
+    pub fn next_interface_order(&self) -> usize {
+        self.components
+            .iter()
+            .enumerate()
+            .filter_map(|(document_index, component)| {
+                component.port_spec()?;
+                Some(
+                    component
+                        .port_contract()
+                        .and_then(|contract| contract.netlist_order)
+                        .unwrap_or(document_index + 1),
+                )
+            })
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+
+    pub fn suggested_port_name(&self, base: &str) -> String {
+        let trimmed = base.trim();
+        let mut stem = trimmed.chars().take(128).collect::<String>();
+        if stem.is_empty()
+            || super::NetLabel::validate_name(&stem, self.document_policy.net_naming).is_err()
+        {
+            stem = "PORT".to_owned();
+        }
+        if self.validate_new_port_name(&stem).is_ok() {
+            return stem;
+        }
+        (2..)
+            .map(|index| {
+                let suffix = format!("_{index}");
+                let stem_budget = 128usize.saturating_sub(suffix.chars().count());
+                format!(
+                    "{}{}",
+                    stem.chars().take(stem_budget).collect::<String>(),
+                    suffix
+                )
+            })
+            .find(|candidate| self.validate_new_port_name(candidate).is_ok())
+            .expect("the valid bounded stem has an unbounded numeric suffix space")
+    }
+
+    /// Validate the exact name accepted by the dialog and netlister.
+    pub fn validate_new_port_name(&self, name: &str) -> Result<(), PortPlacementError> {
+        self.validate_port_name_except(name, None)
+    }
+
+    /// Validate an edited port name while excluding the component being
+    /// edited from the case-insensitive uniqueness check.
+    pub fn validate_edited_port_name(
+        &self,
+        component_id: u64,
+        name: &str,
+    ) -> Result<(), PortPlacementError> {
+        self.validate_port_name_except(name, Some(component_id))
+    }
+
+    fn validate_port_name_except(
+        &self,
+        name: &str,
+        excluded_component_id: Option<u64>,
+    ) -> Result<(), PortPlacementError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(PortPlacementError::EmptyName);
+        }
+        if name.chars().count() > 128 {
+            return Err(PortPlacementError::NameTooLong);
+        }
+        super::NetLabel::validate_name(name, self.document_policy.net_naming)
+            .map_err(PortPlacementError::InvalidName)?;
+        if self.components.iter().any(|component| {
+            Some(component.id) != excluded_component_id
+                && component
+                    .port_spec()
+                    .is_some_and(|port| port.name.eq_ignore_ascii_case(name))
+        }) {
+            return Err(PortPlacementError::DuplicateName(name.to_owned()));
+        }
+        Ok(())
+    }
+
+    pub fn validate_pending_port(
+        &self,
+        pending: &PendingPortPlacement,
+    ) -> Result<(), PortPlacementError> {
+        if self.read_only {
+            return Err(PortPlacementError::ReadOnly);
+        }
+        self.validate_new_port_name(&pending.name)?;
+        validate_contract_fields(&pending.contract)?;
+        if pending.contract.netlist_order != Some(pending.expected_netlist_order) {
+            return Err(PortPlacementError::InvalidContract(
+                "the durable netlist order does not match the armed placement",
+            ));
+        }
+        if self.topology_version() != pending.expected_topology_version {
+            return Err(PortPlacementError::StaleTopology);
+        }
+        if self.next_interface_order() != pending.expected_netlist_order {
+            return Err(PortPlacementError::StaleOrder);
+        }
+        Ok(())
+    }
+
+    /// Validate a complete edited port candidate against the live interface,
+    /// excluding its own stable object from uniqueness checks.
+    pub fn validate_edited_port_contract(
+        &self,
+        component_id: u64,
+        candidate: &Component,
+    ) -> Result<(), PortPlacementError> {
+        if candidate.kind != ComponentType::Port {
+            return Err(PortPlacementError::InvalidContract(
+                "the edited object is not an interface port",
+            ));
+        }
+        self.validate_edited_port_name(component_id, candidate.value.trim())?;
+        let encoded = crate::properties::parse_params_string(&candidate.params);
+        if encoded
+            .get("documentation")
+            .is_none_or(|documentation| documentation.trim().is_empty())
+        {
+            return Err(PortPlacementError::InvalidContract(
+                "documentation is empty",
+            ));
+        }
+        let contract = candidate
+            .port_contract()
+            .ok_or(PortPlacementError::EmptyName)?;
+        validate_contract_fields(&contract)?;
+        if let Some(order) = contract.netlist_order
+            && self.components.iter().any(|component| {
+                component.id != component_id
+                    && component
+                        .port_contract()
+                        .and_then(|other| other.netlist_order)
+                        == Some(order)
+            })
+        {
+            return Err(PortPlacementError::InvalidContract(
+                "netlist order conflicts with another interface port",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Place one named typed port as a single undoable document transaction.
+    pub fn place_pending_port(
+        &mut self,
+        pos: super::Point,
+        pending: PendingPortPlacement,
+    ) -> Result<u64, PortPlacementError> {
+        self.validate_pending_port(&pending)?;
+        let mut placed_id = None;
+        let name = pending.name.trim().to_owned();
+        let params = pending.contract.encoded_params();
+        let changed = self.with_undo("place interface port", |schematic| {
+            let id = schematic.add_component(ComponentType::Port, pos);
+            let component = schematic
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("newly allocated port exists");
+            component.value.clone_from(&name);
+            component.params.clone_from(&params);
+            placed_id = Some(id);
+        });
+        if !changed {
+            return Err(PortPlacementError::ReadOnly);
+        }
+        Ok(placed_id.expect("a changed placement records its stable identifier"))
+    }
+}
+
+fn validate_contract_fields(contract: &PortContract) -> Result<(), PortPlacementError> {
+    let valid_direction_type = matches!(
+        (contract.direction, contract.signal_type),
+        (PortDirection::In, PortSignalType::Logic)
+            | (PortDirection::In, PortSignalType::Analog)
+            | (PortDirection::Out, PortSignalType::Analog)
+            | (PortDirection::InOut, PortSignalType::Power)
+            | (PortDirection::Supply, PortSignalType::Power)
+    );
+    if !valid_direction_type {
+        return Err(PortPlacementError::InvalidContract(
+            "direction and signal type are not one of the supported typed combinations",
+        ));
+    }
+    if contract.documentation.trim().is_empty() {
+        return Err(PortPlacementError::InvalidContract(
+            "documentation is empty",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -172,11 +660,198 @@ mod tests {
     }
 
     #[test]
+    fn suggested_name_is_valid_and_bounded_for_invalid_or_max_length_bases() {
+        let mut state = SchematicState::default();
+        port(&mut state, "PORT", "dir=in");
+        assert_eq!(state.suggested_port_name("invalid name"), "PORT_2");
+
+        let long = "A".repeat(128);
+        port(&mut state, &long, "dir=in");
+        let suggested = state.suggested_port_name(&long);
+        assert_eq!(suggested.chars().count(), 128);
+        assert!(suggested.ends_with("_2"));
+        assert!(state.validate_new_port_name(&suggested).is_ok());
+    }
+
+    #[test]
     fn direction_parsing_tolerates_synonyms() {
         assert_eq!(PortDirection::parse("Input"), PortDirection::In);
         assert_eq!(PortDirection::parse("OUTPUT"), PortDirection::Out);
         assert_eq!(PortDirection::parse("power"), PortDirection::Supply);
         assert_eq!(PortDirection::parse("weird"), PortDirection::InOut);
+    }
+
+    #[test]
+    fn every_typed_contract_places_and_round_trips_losslessly() {
+        for direction_type in PortDirectionType::ALL {
+            for discipline in PortDiscipline::ALL {
+                let mut state = SchematicState::default();
+                let pending = PendingPortPlacement::new(
+                    "PORT_A",
+                    direction_type,
+                    discipline,
+                    state.topology_version(),
+                    state.next_interface_order(),
+                );
+                let expected = pending.contract.clone();
+                let stable_id = state
+                    .place_pending_port(Point::new(10, 20), pending)
+                    .expect("valid typed contract places atomically");
+                let placed = state
+                    .components
+                    .iter()
+                    .find(|component| component.id == stable_id)
+                    .expect("stable identity is retained");
+                assert_eq!(placed.port_contract(), Some(expected.clone()));
+
+                let encoded = serde_json::to_string(&state).expect("schematic serializes");
+                let restored: SchematicState =
+                    serde_json::from_str(&encoded).expect("schematic restores");
+                let restored_port = restored
+                    .components
+                    .iter()
+                    .find(|component| component.id == stable_id)
+                    .expect("stable identity survives persistence");
+                assert_eq!(restored_port.port_contract(), Some(expected));
+                assert!(restored.pending_port.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn typed_interface_order_survives_component_storage_reordering() {
+        let mut state = SchematicState::default();
+        for name in ["IN", "OUT"] {
+            let pending = PendingPortPlacement::new(
+                name,
+                PortDirectionType::InputAnalog,
+                PortDiscipline::Electrical,
+                state.topology_version(),
+                state.next_interface_order(),
+            );
+            state
+                .place_pending_port(Point::origin(), pending)
+                .expect("port places");
+        }
+        state.components.reverse();
+
+        let names = state
+            .interface_ports()
+            .into_iter()
+            .map(|port| port.name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["IN", "OUT"]);
+        assert_eq!(state.next_interface_order(), 3);
+    }
+
+    #[test]
+    fn duplicate_and_stale_pending_ports_make_no_document_change() {
+        let mut state = SchematicState::default();
+        port(&mut state, "BIAS_EN", "dir=in");
+        let baseline = state.components.clone();
+        let duplicate = PendingPortPlacement::new(
+            "bias_en",
+            PortDirectionType::InputLogic,
+            PortDiscipline::Logic,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        assert!(matches!(
+            state.place_pending_port(Point::origin(), duplicate),
+            Err(PortPlacementError::DuplicateName(_))
+        ));
+        assert_eq!(state.components, baseline);
+
+        let stale = PendingPortPlacement::new(
+            "UNIQUE",
+            PortDirectionType::OutputAnalog,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        state.bump_topology_version();
+        assert_eq!(
+            state.place_pending_port(Point::origin(), stale),
+            Err(PortPlacementError::StaleTopology)
+        );
+        assert_eq!(state.components, baseline);
+
+        let mut malformed = PendingPortPlacement::new(
+            "UNIQUE",
+            PortDirectionType::OutputAnalog,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        malformed.contract.signal_type = PortSignalType::Logic;
+        assert!(matches!(
+            state.place_pending_port(Point::origin(), malformed),
+            Err(PortPlacementError::InvalidContract(_))
+        ));
+        assert_eq!(state.components, baseline);
+    }
+
+    #[test]
+    fn edited_contract_rejects_invalid_type_pair_empty_docs_and_duplicate_order() {
+        let mut state = SchematicState::default();
+        let first = PendingPortPlacement::new(
+            "IN",
+            PortDirectionType::InputAnalog,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        let first_id = state
+            .place_pending_port(Point::origin(), first)
+            .expect("first port places");
+        let second = PendingPortPlacement::new(
+            "OUT",
+            PortDirectionType::OutputAnalog,
+            PortDiscipline::Electrical,
+            state.topology_version(),
+            state.next_interface_order(),
+        );
+        let second_id = state
+            .place_pending_port(Point::origin(), second)
+            .expect("second port places");
+        let baseline = state
+            .components
+            .iter()
+            .find(|component| component.id == second_id)
+            .expect("second port exists")
+            .clone();
+
+        let rewrite = |component: &Component, key: &str, value: String| {
+            let mut candidate = component.clone();
+            let mut params = crate::properties::parse_params_string(&candidate.params);
+            params.insert(key.to_owned(), value);
+            candidate.params = crate::properties::property_bridge::format_params_string(&params);
+            candidate
+        };
+        let invalid_pair = rewrite(&baseline, "signal_type", "logic".to_owned());
+        assert!(matches!(
+            state.validate_edited_port_contract(second_id, &invalid_pair),
+            Err(PortPlacementError::InvalidContract(_))
+        ));
+
+        let empty_docs = rewrite(&baseline, "documentation", String::new());
+        assert!(matches!(
+            state.validate_edited_port_contract(second_id, &empty_docs),
+            Err(PortPlacementError::InvalidContract(_))
+        ));
+
+        let first_order = state
+            .components
+            .iter()
+            .find(|component| component.id == first_id)
+            .and_then(Component::port_contract)
+            .and_then(|contract| contract.netlist_order)
+            .expect("first order");
+        let duplicate_order = rewrite(&baseline, "interface_order", first_order.to_string());
+        assert!(matches!(
+            state.validate_edited_port_contract(second_id, &duplicate_order),
+            Err(PortPlacementError::InvalidContract(_))
+        ));
     }
 
     /// A bound instance's electrical terminals follow the generated,

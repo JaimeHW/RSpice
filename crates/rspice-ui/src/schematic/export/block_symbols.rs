@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::state::ComponentType;
+use crate::state::{ComponentType, PortDirection};
 
 use super::SvgExportConfig;
 
@@ -38,20 +38,60 @@ pub(super) fn write_cell_instance_symbol(
 }
 
 /// Interface port: a flag whose tip is the attachment point at (-10, 0).
-pub(super) fn write_port_symbol(svg: &mut String, cx: f64, cy: f64, _config: &SvgExportConfig) {
+pub(super) fn write_port_symbol(
+    svg: &mut String,
+    cx: f64,
+    cy: f64,
+    direction: PortDirection,
+    mirror_h: bool,
+    mirror_v: bool,
+    config: &SvgExportConfig,
+) {
+    let local = |dx: f64, dy: f64| {
+        (
+            cx + if mirror_h { -dx } else { dx },
+            cy + if mirror_v { -dy } else { dy },
+        )
+    };
+    let tip = local(-10.0, 0.0);
+    let upper_left = local(-4.0, -6.0);
+    let upper_right = local(10.0, -6.0);
+    let lower_right = local(10.0, 6.0);
+    let lower_left = local(-4.0, 6.0);
     writeln!(
         svg,
         r#"<polygon class="component" fill="none" points="{},{} {},{} {},{} {},{} {},{}"/>"#,
-        cx - 10.0,
-        cy,
-        cx - 4.0,
-        cy - 6.0,
-        cx + 10.0,
-        cy - 6.0,
-        cx + 10.0,
-        cy + 6.0,
-        cx - 4.0,
-        cy + 6.0
+        tip.0,
+        tip.1,
+        upper_left.0,
+        upper_left.1,
+        upper_right.0,
+        upper_right.1,
+        lower_right.0,
+        lower_right.1,
+        lower_left.0,
+        lower_left.1
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<circle class="component" fill="{}" cx="{}" cy="{}" r="1.6"/>"#,
+        config.component_color, tip.0, tip.1
+    )
+    .unwrap();
+    let path = match direction {
+        PortDirection::In => "M -1.5 0 L 5 0 M 5 0 L 2 -2.5 M 5 0 L 2 2.5",
+        PortDirection::Out => "M 5 0 L -1.5 0 M -1.5 0 L 1.5 -2.5 M -1.5 0 L 1.5 2.5",
+        PortDirection::InOut => {
+            "M -1.5 0 L 5 0 M 5 0 L 2 -2.5 M 5 0 L 2 2.5 M -1.5 0 L 1.5 -2.5 M -1.5 0 L 1.5 2.5"
+        }
+        PortDirection::Supply => "M 2 -3 L 2 3 M -1 -3 L 5 -3",
+    };
+    writeln!(
+        svg,
+        r#"<path class="component" fill="none" transform="translate({cx} {cy}) scale({} {})" d="{path}"/>"#,
+        if mirror_h { -1 } else { 1 },
+        if mirror_v { -1 } else { 1 }
     )
     .unwrap();
 }

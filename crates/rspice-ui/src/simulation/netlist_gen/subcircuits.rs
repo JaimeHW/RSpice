@@ -281,8 +281,9 @@ fn emit_cell_definition(
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, CellViewRef, Library, LibraryCellInstance, LibraryManager, NetLabel, Point,
-        PortDirection, PortSpec, SymbolDocument, SymbolPin, View, ViewType, Wire,
+        Cell, CellViewRef, Library, LibraryCellInstance, LibraryManager, NetLabel,
+        PendingPortPlacement, Point, PortDirection, PortDirectionType, PortDiscipline, PortSpec,
+        SymbolDocument, SymbolPin, View, ViewType, Wire,
     };
 
     fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
@@ -358,6 +359,40 @@ mod tests {
             .find(|l| l.to_lowercase().starts_with("x1 "))
             .expect("x line");
         assert!(x_line.to_lowercase().ends_with(" div"), "got: {x_line}");
+    }
+
+    #[test]
+    fn typed_port_order_drives_subckt_header_after_storage_reordering() {
+        let mut master = SchematicState::default();
+        for name in ["IN", "OUT"] {
+            let pending = PendingPortPlacement::new(
+                name,
+                if name == "IN" {
+                    PortDirectionType::InputAnalog
+                } else {
+                    PortDirectionType::OutputAnalog
+                },
+                PortDiscipline::Electrical,
+                master.topology_version(),
+                master.next_interface_order(),
+            );
+            master
+                .place_pending_port(Point::origin(), pending)
+                .expect("typed port places");
+        }
+        master.components.reverse();
+        let mut hierarchy = HierarchySource::empty();
+        hierarchy.insert("work", "ordered", &master);
+        let mut top = SchematicState::default();
+        top.add_library_cell_component(Point::new(100, 100), binding("ordered", &["IN", "OUT"]));
+
+        let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+
+        assert!(
+            result.netlist.contains(".subckt ordered IN OUT"),
+            "netlist:\n{}",
+            result.netlist
+        );
     }
 
     #[test]

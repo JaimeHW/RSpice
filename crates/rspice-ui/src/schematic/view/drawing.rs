@@ -1,7 +1,7 @@
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::common::app::AppState;
-use crate::state::{Bus, BusTap, Component, ComponentType, Point, Wire};
+use crate::state::{Bus, BusTap, Component, ComponentType, Point, PortDirection, Wire};
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::SchematicSymbolContext;
@@ -22,6 +22,7 @@ const DEFAULT_BUS_STROKE_WIDTH: f32 = 1.2;
 const SELECTED_BUS_STROKE_WIDTH: f32 = 1.6;
 const DEFAULT_BUS_TAP_STROKE_WIDTH: f32 = 2.0;
 const SELECTED_BUS_TAP_STROKE_WIDTH: f32 = 2.4;
+type PortMarkerSegment = ((f32, f32), (f32, f32));
 
 const _: [(); 1] = [(); (DEFAULT_WIRE_STROKE_WIDTH.to_bits() == 1.1f32.to_bits()) as usize];
 const _: [(); 1] = [(); (SELECTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
@@ -269,7 +270,11 @@ pub(super) fn draw_component(
     // Try to use SVG symbol if available — via the library's baked
     // (pre-flattened, pre-transformed) geometry: per frame this is one
     // multiply-add per vertex instead of bezier + trig per vertex.
-    let svg_rendered = if let Some(library) = symbol_library {
+    let svg_rendered = if component.kind == ComponentType::Port {
+        // Typed interface direction is component-owned runtime data; the
+        // static library glyph cannot represent it without lying.
+        false
+    } else if let Some(library) = symbol_library {
         if let Some((symbol, adjusted_rotation)) = library.get_with_rotation_variant(
             component.kind,
             rotation_degrees,
@@ -315,7 +320,18 @@ pub(super) fn draw_component(
                 draw_ground_symbol(painter, pos, scale, stroke);
             }
             ComponentType::Port => {
-                draw_port_symbol(painter, pos, scale, rotation_index, stroke);
+                draw_port_symbol(
+                    painter,
+                    pos,
+                    scale,
+                    rotation_index,
+                    (component.mirror_h, component.mirror_v),
+                    component
+                        .port_spec()
+                        .map(|port| port.direction)
+                        .unwrap_or_default(),
+                    stroke,
+                );
             }
             ComponentType::Diode => {
                 draw_diode_symbol(painter, pos, scale, rotation_index, stroke);
@@ -370,8 +386,18 @@ pub(super) fn draw_component(
 /// Interface port: a flag whose tip is the attachment point at (-10, 0).
 /// It must read as "this net leaves the cell", not as a floating label —
 /// the filled tip distinguishes it from a net label at a glance.
-fn draw_port_symbol(painter: &Painter, pos: Pos2, scale: f32, rotation_index: i32, stroke: Stroke) {
+pub(super) fn draw_port_symbol(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    rotation_index: i32,
+    mirror: (bool, bool),
+    direction: PortDirection,
+    stroke: Stroke,
+) {
     let rotate = |dx: f32, dy: f32| -> Pos2 {
+        let dx = if mirror.0 { -dx } else { dx };
+        let dy = if mirror.1 { -dy } else { dy };
         let (x, y) = match rotation_index.rem_euclid(4) {
             0 => (dx, dy),
             1 => (-dy, dx),
@@ -391,6 +417,29 @@ fn draw_port_symbol(painter: &Painter, pos: Pos2, scale: f32, rotation_index: i3
         painter.line_segment([outline[i], outline[(i + 1) % outline.len()]], stroke);
     }
     painter.circle_filled(rotate(-10.0, 0.0), 1.6 * scale, stroke.color);
+    let direction_segments: &[PortMarkerSegment] = match direction {
+        PortDirection::In => &[
+            ((-1.5, 0.0), (5.0, 0.0)),
+            ((5.0, 0.0), (2.0, -2.5)),
+            ((5.0, 0.0), (2.0, 2.5)),
+        ],
+        PortDirection::Out => &[
+            ((5.0, 0.0), (-1.5, 0.0)),
+            ((-1.5, 0.0), (1.5, -2.5)),
+            ((-1.5, 0.0), (1.5, 2.5)),
+        ],
+        PortDirection::InOut => &[
+            ((-1.5, 0.0), (5.0, 0.0)),
+            ((5.0, 0.0), (2.0, -2.5)),
+            ((5.0, 0.0), (2.0, 2.5)),
+            ((-1.5, 0.0), (1.5, -2.5)),
+            ((-1.5, 0.0), (1.5, 2.5)),
+        ],
+        PortDirection::Supply => &[((2.0, -3.0), (2.0, 3.0)), ((-1.0, -3.0), (5.0, -3.0))],
+    };
+    for &((x1, y1), (x2, y2)) in direction_segments {
+        painter.line_segment([rotate(x1, y1), rotate(x2, y2)], stroke);
+    }
 }
 
 /// Hierarchical cell instance: a block body with pin stubs and pin names

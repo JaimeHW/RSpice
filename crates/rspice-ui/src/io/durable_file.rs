@@ -559,6 +559,21 @@ fn compare_exchange_bytes_impl(
     let parent = parent_directory(path);
     std::fs::create_dir_all(parent)?;
     let _lease = DestinationLease::acquire(path)?;
+    // Reject an already-stale caller before staging or touching the canonical
+    // pathname. The durable lease serializes cooperating RSpice writers; the
+    // post-publication predecessor check below remains necessary for a race
+    // with an external writer after this inexpensive preflight observation.
+    let initially_observed = current_digest(path)?;
+    let initially_matches = match expected {
+        ExpectedContent::Missing => initially_observed.is_none(),
+        ExpectedContent::Digest(digest) => initially_observed == Some(digest),
+    };
+    if !initially_matches {
+        return Err(CompareExchangeError::Conflict {
+            expected,
+            actual: initially_observed,
+        });
+    }
     let staged_digest: [u8; 32] = Sha256::digest(bytes).into();
     let predecessor_permissions = std::fs::metadata(path)
         .ok()
@@ -2725,8 +2740,15 @@ fn replace_file_checked(
     replaced_digest: [u8; 32],
     replacement_digest: [u8; 32],
 ) -> Result<(), PublicationFailure> {
-    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+    use windows_sys::Win32::Storage::FileSystem::{REPLACEFILE_IGNORE_ACL_ERRORS, ReplaceFileW};
 
+    // ReplaceFileW requests WRITE_DAC on the destination while merging its
+    // ACL. Managed project locations may permit ordinary replacement while
+    // withholding that privilege. The staged sibling must already have the
+    // exact owner/group/DACL contract before we ignore only that redundant
+    // merge step; a custom or weaker descriptor fails closed.
+    verify_windows_file_security_equivalence(replaced, replacement)
+        .map_err(PublicationFailure::Safe)?;
     let replaced_w = wide(replaced);
     let replacement_w = wide(replacement);
     let backup_w = wide(backup);
@@ -2738,7 +2760,7 @@ fn replace_file_checked(
             replaced_w.as_ptr(),
             replacement_w.as_ptr(),
             backup_w.as_ptr(),
-            0,
+            REPLACEFILE_IGNORE_ACL_ERRORS,
             std::ptr::null(),
             std::ptr::null(),
         )
@@ -2835,6 +2857,61 @@ fn replace_file_checked(
             recovery_paths: recovery_paths(&[replaced, replacement, backup]),
         }),
     }
+}
+
+#[cfg(windows)]
+fn verify_windows_file_security_equivalence(source: &Path, destination: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    };
+
+    const OBSERVED_CONTRACT: u32 =
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+
+    fn read(path: &Path) -> io::Result<Vec<u8>> {
+        use windows_sys::Win32::Security::GetFileSecurityW;
+
+        let path = wide(path);
+        let mut needed = 0_u32;
+        unsafe {
+            GetFileSecurityW(
+                path.as_ptr(),
+                OBSERVED_CONTRACT,
+                std::ptr::null_mut(),
+                0,
+                &mut needed,
+            )
+        };
+        if needed == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut descriptor = vec![0_u8; needed as usize];
+        let read = unsafe {
+            GetFileSecurityW(
+                path.as_ptr(),
+                OBSERVED_CONTRACT,
+                descriptor.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        };
+        if read == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        descriptor.truncate(needed as usize);
+        Ok(descriptor)
+    }
+
+    let expected = read(source)?;
+    let actual = read(destination)?;
+    if actual != expected {
+        return Err(io::Error::other(format!(
+            "staged security descriptor for '{}' does not match '{}'",
+            destination.display(),
+            source.display()
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(windows)]

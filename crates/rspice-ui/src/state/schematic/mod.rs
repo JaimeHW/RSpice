@@ -53,7 +53,10 @@ pub use document_policy::{
 pub use net_highlight::{NetGraph, NetHighlightState};
 pub use net_label::{Junction, NetLabel};
 pub use point::{LabelPosition, Point};
-pub use port::{PortDirection, PortSpec};
+pub use port::{
+    PendingPortPlacement, PortContract, PortDirection, PortDirectionType, PortDiscipline,
+    PortPlacementAuthority, PortPlacementError, PortSignalType, PortSpec,
+};
 pub use rotation::Rotation;
 pub use selection::{JunctionSelection, Selection, WireSegmentSelection, WireVertexSelection};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};

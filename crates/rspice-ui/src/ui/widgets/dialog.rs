@@ -236,6 +236,9 @@ const WORKFLOW_FOOTER_HORIZONTAL_MARGIN: i8 = 12;
 const WORKFLOW_FOOTER_VERTICAL_MARGIN: i8 = 10;
 const DIALOG_CLOSE_TARGET_WIDTH: f32 = 28.0;
 const DIALOG_CLOSE_TARGET_HEIGHT: f32 = 27.0;
+const DIALOG_TAB_HORIZONTAL_PADDING: f32 = 18.0;
+const DIALOG_TAB_MIN_HORIZONTAL_PADDING: f32 = 6.0;
+const DIALOG_TAB_SCROLL_VIEWPORT_RESERVE: f32 = 12.0;
 const TOUCH_TARGET_SIDE: f32 = 44.0;
 
 /// Geometry resolved before the dialog is painted. Keeping this calculation
@@ -1339,26 +1342,48 @@ fn restore_dialog_focus(
 /// Center a header strip text baseline helper used by dialog tabs (mono
 /// uppercase underline tabs, as in the results docbar).
 pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
+    dialog_tabs_impl(ui, tabs, active, None);
+}
+
+/// Render dialog tabs using compact symmetric padding when a known viewport
+/// width can contain every label without introducing a horizontal scroll.
+/// Larger registries retain the ordinary scrollable tab-strip behavior.
+pub fn dialog_tabs_in_width(ui: &mut Ui, tabs: &[&str], active: &mut usize, available_width: f32) {
+    // egui's horizontal ScrollArea keeps a narrow interaction/scroll track at
+    // the trailing edge. Fit to the actual paint viewport so the last label
+    // cannot disappear underneath that reserved strip.
+    let paint_width = (available_width - DIALOG_TAB_SCROLL_VIEWPORT_RESERVE).max(1.0);
+    dialog_tabs_impl(ui, tabs, active, Some(paint_width));
+}
+
+fn dialog_tabs_impl(ui: &mut Ui, tabs: &[&str], active: &mut usize, available_width: Option<f32>) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let standard_galleys = dialog_tab_galleys(ui, tabs, 0.06 * tokens::FS_0);
+    let standard_text_width = dialog_tab_text_width(&standard_galleys);
+    let use_compact_tracking = available_width
+        .is_some_and(|width| dialog_tab_required_width(standard_text_width, tabs.len()) > width);
+    let galleys = if use_compact_tracking {
+        // The mockup's narrow panel tabs retain their complete labels and
+        // remove tracking before allowing overflow. Keeping the font and
+        // labels unchanged avoids both illegible scaling and invented
+        // abbreviations in compact property panes.
+        dialog_tab_galleys(ui, tabs, 0.0)
+    } else {
+        standard_galleys
+    };
+    let text_width = dialog_tab_text_width(&galleys);
+    let horizontal_padding = dialog_tab_horizontal_padding(available_width, text_width, tabs.len());
+    let text_inset = horizontal_padding * 0.5;
+    let underline_inset = text_inset.min(5.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        for (index, label) in tabs.iter().enumerate() {
+        for (index, (label, galley)) in tabs.iter().zip(galleys).enumerate() {
             let selected = *active == index;
-            let mut job = egui::text::LayoutJob::default();
-            job.append(
-                &label.to_uppercase(),
-                0.0,
-                egui::TextFormat {
-                    font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
-                    color: egui::Color32::PLACEHOLDER,
-                    extra_letter_spacing: 0.06 * tokens::FS_0,
-                    ..Default::default()
-                },
+            let (rect, response) = ui.allocate_exact_size(
+                vec2(galley.size().x + horizontal_padding, 24.0),
+                Sense::click(),
             );
-            let galley = ui.fonts_mut(|f| f.layout_job(job));
-            let (rect, response) =
-                ui.allocate_exact_size(vec2(galley.size().x + 22.0, 24.0), Sense::click());
             response.widget_info(|| {
                 WidgetInfo::labeled(WidgetType::SelectableLabel, ui.is_enabled(), label)
             });
@@ -1381,13 +1406,19 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
                 crate::ui::theme::mix(c.text_dim, c.text, hover)
             };
             ui.painter().galley(
-                egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y * 0.5),
+                egui::pos2(
+                    rect.left() + text_inset,
+                    rect.center().y - galley.size().y * 0.5,
+                ),
                 galley,
                 color,
             );
             if selected {
                 ui.painter().hline(
-                    egui::Rangef::new(rect.left() + 6.0, rect.right() - 6.0),
+                    egui::Rangef::new(
+                        rect.left() + underline_inset,
+                        rect.right() - underline_inset,
+                    ),
                     rect.bottom() - 1.0,
                     Stroke::new(2.0, c.accent),
                 );
@@ -1402,6 +1433,54 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
     ui.painter()
         .hline(ui.max_rect().x_range(), y, Stroke::new(1.0, t.color.border));
     ui.add_space(10.0);
+}
+
+fn dialog_tab_galleys(
+    ui: &mut Ui,
+    tabs: &[&str],
+    extra_letter_spacing: f32,
+) -> Vec<std::sync::Arc<egui::Galley>> {
+    tabs.iter()
+        .map(|label| {
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                &label.to_uppercase(),
+                0.0,
+                egui::TextFormat {
+                    font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+                    color: egui::Color32::PLACEHOLDER,
+                    extra_letter_spacing,
+                    ..Default::default()
+                },
+            );
+            ui.fonts_mut(|fonts| fonts.layout_job(job))
+        })
+        .collect()
+}
+
+fn dialog_tab_text_width(galleys: &[std::sync::Arc<egui::Galley>]) -> f32 {
+    galleys.iter().map(|galley| galley.size().x).sum()
+}
+
+fn dialog_tab_required_width(text_width: f32, tab_count: usize) -> f32 {
+    let gaps = tab_count.saturating_sub(1) as f32 * 2.0;
+    text_width + gaps + tab_count as f32 * DIALOG_TAB_MIN_HORIZONTAL_PADDING
+}
+
+fn dialog_tab_horizontal_padding(
+    available_width: Option<f32>,
+    text_width: f32,
+    tab_count: usize,
+) -> f32 {
+    let gaps = tab_count.saturating_sub(1) as f32 * 2.0;
+    available_width
+        .filter(|_| tab_count > 0)
+        .map(|width| ((width - text_width - gaps) / tab_count as f32).floor())
+        .unwrap_or(DIALOG_TAB_HORIZONTAL_PADDING)
+        .clamp(
+            DIALOG_TAB_MIN_HORIZONTAL_PADDING,
+            DIALOG_TAB_HORIZONTAL_PADDING,
+        )
 }
 
 #[cfg(test)]
@@ -1666,6 +1745,17 @@ mod tests {
         assert!(!padded.flush_body);
         let flush = Dialog::new("Test", TEST_TITLE, "Accept").flush_body();
         assert!(flush.flush_body);
+    }
+
+    #[test]
+    fn dialog_tab_padding_fits_small_complete_sets_and_bounds_large_sets() {
+        assert_eq!(dialog_tab_horizontal_padding(None, 190.0, 3), 18.0);
+        assert_eq!(dialog_tab_horizontal_padding(Some(230.0), 190.0, 3), 12.0);
+        assert_eq!(dialog_tab_horizontal_padding(Some(200.0), 190.0, 3), 6.0);
+        assert_eq!(dialog_tab_horizontal_padding(Some(400.0), 190.0, 3), 18.0);
+        assert_eq!(dialog_tab_required_width(190.0, 3), 212.0);
+        assert_eq!(dialog_tab_required_width(190.0, 0), 190.0);
+        assert_eq!(230.0 - DIALOG_TAB_SCROLL_VIEWPORT_RESERVE, 218.0);
     }
 
     #[test]

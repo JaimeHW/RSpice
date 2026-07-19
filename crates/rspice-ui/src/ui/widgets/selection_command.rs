@@ -19,6 +19,7 @@ const COMPACT_COLUMNS_BREAKPOINT: f32 = 980.0;
 const RIGHT_MIN_WIDTH: f32 = 270.0;
 const COMPACT_RIGHT_MIN_WIDTH: f32 = 240.0;
 const PANE_PADDING: i8 = 14;
+const OPTIONS_SCROLLBAR_RESERVE: f32 = 12.0;
 const CANVAS_HEIGHT: f32 = 250.0;
 const COMPACT_CANVAS_HEIGHT: f32 = 220.0;
 const PANE_MIN_HEIGHT: f32 = 414.0;
@@ -179,6 +180,13 @@ fn selection_workflow_right_track(viewport_width: f32) -> (f32, f32) {
     } else {
         (0.8 / 2.35, RIGHT_MIN_WIDTH)
     }
+}
+
+/// Exact usable width of the mockup's minimum command-options track after its
+/// pane padding and vertical-scroll interaction strip are removed.
+pub(crate) fn selection_command_options_paint_width(viewport_width: f32) -> f32 {
+    let (_, minimum) = selection_workflow_right_track(viewport_width);
+    minimum - 2.0 * f32::from(PANE_PADDING) - OPTIONS_SCROLLBAR_RESERVE
 }
 
 fn left_pane(ui: &mut Ui, code: &str, preview: &SelectionPreview, impact: SelectionImpact<'_>) {
@@ -613,5 +621,7 @@ mod tests {
             selection_workflow_right_track(981.0),
             (0.8 / 2.35, RIGHT_MIN_WIDTH)
         );
+        assert_eq!(selection_command_options_paint_width(980.0), 200.0);
+        assert_eq!(selection_command_options_paint_width(981.0), 230.0);
     }
 }

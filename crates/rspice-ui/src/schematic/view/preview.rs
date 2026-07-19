@@ -2,14 +2,14 @@ use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::common::app::AppState;
 use crate::state::{
-    Bus, BusTap, Component, ComponentType, NetLabel, Point, ResolvedCellSymbol, Tool,
+    Bus, BusTap, Component, ComponentType, NetLabel, Point, PortDirection, ResolvedCellSymbol, Tool,
 };
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
 use super::SchematicSymbolContext;
 use super::bus_interaction::resolve_bus_tap_candidate;
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
-use super::drawing::{draw_bus, draw_bus_tap};
+use super::drawing::{draw_bus, draw_bus_tap, draw_port_symbol};
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
 use super::symbol_primitives::{
@@ -314,6 +314,25 @@ fn draw_component_preview(
             return;
         }
 
+        if component_type == ComponentType::Port {
+            let direction = state
+                .schematic
+                .pending_port
+                .as_ref()
+                .map(|pending| pending.contract.direction)
+                .unwrap_or_default();
+            draw_port_symbol(
+                painter,
+                preview_pos,
+                viewport.zoom,
+                preview_rotation_index,
+                (false, false),
+                direction,
+                preview_stroke,
+            );
+            return;
+        }
+
         let svg_rendered = if let Some(library) = symbol_library {
             if let Some((symbol, adjusted_rotation)) =
                 library.get_with_rotation_variant(component_type, preview_rotation_degrees, None)
@@ -374,6 +393,15 @@ pub(super) fn draw_procedural_component_preview(
             draw_isource_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
         }
         ComponentType::Ground => draw_ground_symbol(painter, preview_pos, zoom, preview_stroke),
+        ComponentType::Port => draw_port_symbol(
+            painter,
+            preview_pos,
+            zoom,
+            rotation_index,
+            (false, false),
+            PortDirection::default(),
+            preview_stroke,
+        ),
         ComponentType::Diode => {
             draw_diode_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
         }

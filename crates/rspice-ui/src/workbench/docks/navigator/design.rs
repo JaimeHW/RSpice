@@ -801,6 +801,10 @@ fn metadata_ports(metadata: &std::collections::HashMap<String, String>) -> Optio
 }
 
 fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
+    if kind == ComponentType::Port {
+        crate::workbench::commands::Command::PlacePin.execute(app);
+        return;
+    }
     app.state.schematic.pending_library_cell = None;
     crate::workbench::commands::arm_schematic_tool(&mut app.state.schematic, Tool::Place(kind));
     app.state.ui.toasts.success(
@@ -904,6 +908,18 @@ mod tests {
         );
         assert!(!app.state.schematic.wire_drawing.active);
         assert!(!app.state.schematic.bus_drawing.active);
+    }
+
+    #[test]
+    fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
+        let mut app = RSpiceApp::test_instance();
+
+        arm_primitive(&mut app, ComponentType::Port, &egui::Context::default());
+
+        assert!(app.state.dialogs.pin_port.open);
+        assert_eq!(app.state.schematic.tool, Tool::Select);
+        assert!(app.state.schematic.pending_port.is_none());
+        assert!(app.state.schematic.components.is_empty());
     }
 
     #[test]

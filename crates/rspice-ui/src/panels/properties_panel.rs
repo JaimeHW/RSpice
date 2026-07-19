@@ -56,6 +56,18 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             &values,
             &state.property_registry,
         );
+        if candidate.kind == crate::state::ComponentType::Port
+            && let Err(error) = state
+                .schematic
+                .validate_edited_port_contract(comp_id, &candidate)
+        {
+            state.tabbed_property_dialog.open = true;
+            state.tabbed_property_dialog.session_error =
+                Some(format!("The interface contract was not changed: {error}."));
+            return TabbedDialogResult::None;
+        }
+        let changed_port_contract =
+            candidate.kind == crate::state::ComponentType::Port && &candidate != component;
         if &candidate != component {
             let before = crate::state::SchematicSnapshot::capture(&state.schematic);
             if let Some(component) = state
@@ -69,6 +81,9 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.schematic.is_dirty = true;
             state.schematic.bump_topology_version();
             state.schematic.commit_undo_from(before, "edit properties");
+        }
+        if changed_port_contract {
+            state.sync_active_schematic_to_workspace();
         }
 
         // The mockup primary closes after the exact transaction completes.

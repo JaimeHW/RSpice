@@ -31,7 +31,7 @@ const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
 const MENU_RENDER_STATE_ID: &str = "workbench.title_menu.render_state";
 const MENU_RETURN_FOCUS_ID: &str = "workbench.title_menu.return_focus";
 const MENU_TYPEAHEAD_ID: &str = "workbench.title_menu.typeahead";
-const DESIGN_PLACEMENT_COMMANDS: [Command; 7] = [
+const DESIGN_PLACEMENT_COMMANDS: [Command; 8] = [
     Command::PlaceInstance,
     Command::PlaceWire,
     Command::PlaceBus,
@@ -39,6 +39,7 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 7] = [
     Command::PlaceJunction,
     Command::PlaceLabel,
     Command::PlaceProbe,
+    Command::PlacePin,
 ];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -1176,6 +1177,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlaceJunction => WorkbenchIcon::Grid,
         Command::PlaceLabel => WorkbenchIcon::Label,
         Command::PlaceProbe => WorkbenchIcon::Probe,
+        Command::PlacePin => WorkbenchIcon::Component,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy => WorkbenchIcon::Folder,
         Command::RunSimulation => WorkbenchIcon::Run,
@@ -2353,8 +2355,25 @@ mod tests {
                 Command::PlaceJunction,
                 Command::PlaceLabel,
                 Command::PlaceProbe,
+                Command::PlacePin,
             ]
         );
+    }
+
+    #[test]
+    fn design_placement_menu_routes_place_pin_to_the_schematic_command() {
+        let probe = DESIGN_PLACEMENT_COMMANDS
+            .iter()
+            .position(|command| *command == Command::PlaceProbe)
+            .expect("probe command is present");
+        let pin = DESIGN_PLACEMENT_COMMANDS
+            .iter()
+            .position(|command| *command == Command::PlacePin)
+            .expect("schematic pin command is present");
+
+        assert_eq!(pin, probe + 1);
+        assert!(!DESIGN_PLACEMENT_COMMANDS.contains(&Command::SymbolPinTool));
+        assert_eq!(DESIGN_PLACEMENT_COMMANDS[pin].stable_id(), "place-pin");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

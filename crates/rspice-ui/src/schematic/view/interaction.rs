@@ -407,21 +407,80 @@ fn select_drag_can_start(shift_pressed: bool) -> bool {
 }
 
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
-    if component_type == ComponentType::CellInstance {
-        if let Some(library_cell) = state.schematic.pending_library_cell.clone() {
-            state
+    match component_type {
+        ComponentType::Port => place_pending_port(state, grid_pos),
+        ComponentType::CellInstance => {
+            let Some(library_cell) = state.schematic.pending_library_cell.clone() else {
+                state.push_user_message(ConsoleMessage::warning(
+                    "No library cell selected for placement".to_string(),
+                ));
+                crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+                return;
+            };
+            let changed = state
                 .schematic
-                .add_library_cell_component(grid_pos, library_cell);
-            log::info!("Placed library cell instance at {:?}", grid_pos);
-        } else {
-            state.push_user_message(ConsoleMessage::warning(
-                "No library cell selected for placement".to_string(),
-            ));
+                .with_undo("place library cell", |schematic| {
+                    schematic.add_library_cell_component(grid_pos, library_cell);
+                });
+            if changed {
+                log::info!("Placed library cell instance at {:?}", grid_pos);
+            }
+        }
+        _ => {
+            let changed = state.schematic.with_undo(
+                format!("place {}", component_type.display_name()),
+                |schematic| {
+                    schematic.add_component(component_type, grid_pos);
+                },
+            );
+            if changed {
+                log::info!("Placed {:?} at {:?}", component_type, grid_pos);
+            }
+        }
+    }
+}
+
+fn place_pending_port(state: &mut AppState, grid_pos: Point) {
+    let Some(pending) = state.schematic.pending_port.clone() else {
+        state.push_user_message(ConsoleMessage::warning(
+            "Port placement requires a validated interface contract; reopen Place pin or port."
+                .to_owned(),
+        ));
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
+    };
+    let authority_matches = pending
+        .document_authority
+        .as_ref()
+        .is_some_and(|authority| {
+            authority.design_execution_epoch == state.design_execution_epoch
+                && authority.active_schematic_epoch == state.active_schematic_epoch
+                && authority.view_path == state.workspace.active_view.display_path()
+        });
+    if state.schematic.read_only || state.active_view_read_only() || !authority_matches {
+        state.push_user_message(ConsoleMessage::warning(
+            "Interface port was not placed: the active schematic authority changed; reopen Place pin or port."
+                .to_owned(),
+        ));
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
+    }
+    let name = pending.name.clone();
+    match state.schematic.place_pending_port(grid_pos, pending) {
+        Ok(stable_id) => {
+            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.sync_active_schematic_to_workspace();
+            state.push_user_message(ConsoleMessage::info(format!(
+                "Placed interface port {name} as stable object {stable_id}; generated symbol synchronization completed where applicable."
+            )));
+            log::info!("Placed interface port {name} at {:?}", grid_pos);
+        }
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "Interface port was not placed: {error}."
+            )));
             crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
         }
-    } else {
-        state.schematic.add_component(component_type, grid_pos);
-        log::info!("Placed {:?} at {:?}", component_type, grid_pos);
     }
 }
 
@@ -840,7 +899,8 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        Junction, NetLabel, Wire,
+        Junction, NetLabel, PendingPortPlacement, PortDirection, PortDirectionType, PortDiscipline,
+        PortSignalType, Tool, Wire,
     };
 
     fn pointer_viewport() -> Viewport {
@@ -849,6 +909,115 @@ mod tests {
             zoom: 1.0,
             bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(400.0)),
         }
+    }
+
+    #[test]
+    fn validated_port_contract_places_once_and_undo_redo_is_exact() {
+        let mut state = AppState::default();
+        let pending = PendingPortPlacement::new(
+            "BIAS_EN",
+            PortDirectionType::InputLogic,
+            PortDiscipline::Logic,
+            state.schematic.topology_version(),
+            state.schematic.next_interface_order(),
+        )
+        .with_document_authority(
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            state.workspace.active_view.display_path(),
+        );
+        state.schematic.pending_port = Some(pending);
+        state.schematic.tool = Tool::Place(ComponentType::Port);
+
+        place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+
+        assert_eq!(state.schematic.components.len(), 1);
+        let placed = state.schematic.components[0].clone();
+        assert_eq!(placed.pos, Point::new(20, 30));
+        assert_eq!(placed.value, "BIAS_EN");
+        let contract = placed.port_contract().expect("typed interface contract");
+        assert_eq!(contract.direction, PortDirection::In);
+        assert_eq!(contract.signal_type, PortSignalType::Logic);
+        assert_eq!(contract.discipline, PortDiscipline::Logic);
+        assert!(!contract.documentation.is_empty());
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(state.schematic.pending_port.is_none());
+        assert_eq!(
+            state.schematic.undo_description(),
+            Some("place interface port")
+        );
+
+        assert!(state.schematic.undo());
+        assert!(state.schematic.components.is_empty());
+        assert!(state.schematic.redo());
+        assert_eq!(state.schematic.components, [placed]);
+    }
+
+    #[test]
+    fn port_placement_without_a_current_validated_contract_fails_closed() {
+        let mut state = AppState::default();
+        state.schematic.tool = Tool::Place(ComponentType::Port);
+
+        place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+
+        assert!(state.schematic.components.is_empty());
+        assert!(!state.schematic.can_undo());
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(state.schematic.pending_port.is_none());
+    }
+
+    #[test]
+    fn topology_change_rejects_frozen_port_without_partial_mutation() {
+        let mut state = AppState::default();
+        state.schematic.pending_port = Some(
+            PendingPortPlacement::new(
+                "OUT",
+                PortDirectionType::OutputAnalog,
+                PortDiscipline::Electrical,
+                state.schematic.topology_version(),
+                state.schematic.next_interface_order(),
+            )
+            .with_document_authority(
+                state.design_execution_epoch,
+                state.active_schematic_epoch,
+                state.workspace.active_view.display_path(),
+            ),
+        );
+        state.schematic.tool = Tool::Place(ComponentType::Port);
+        state.schematic.bump_topology_version();
+
+        place_component(&mut state, ComponentType::Port, Point::new(40, 10));
+
+        assert!(state.schematic.components.is_empty());
+        assert!(!state.schematic.can_undo());
+        assert_eq!(state.schematic.tool, Tool::Select);
+    }
+
+    #[test]
+    fn armed_port_rejects_a_replaced_active_document_even_when_topology_matches() {
+        let mut state = AppState::default();
+        state.schematic.pending_port = Some(
+            PendingPortPlacement::new(
+                "OUT",
+                PortDirectionType::OutputAnalog,
+                PortDiscipline::Electrical,
+                state.schematic.topology_version(),
+                state.schematic.next_interface_order(),
+            )
+            .with_document_authority(
+                state.design_execution_epoch,
+                state.active_schematic_epoch,
+                state.workspace.active_view.display_path(),
+            ),
+        );
+        state.schematic.tool = Tool::Place(ComponentType::Port);
+        state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
+
+        place_component(&mut state, ComponentType::Port, Point::new(40, 10));
+
+        assert!(state.schematic.components.is_empty());
+        assert!(!state.schematic.can_undo());
+        assert_eq!(state.schematic.tool, Tool::Select);
     }
 
     #[test]

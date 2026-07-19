@@ -335,6 +335,7 @@ const PLACE_BUS_TAP: &[ShortcutBinding] = &[primary(chord(Key::T, false, false, 
 const PLACE_JUNCTION: &[ShortcutBinding] = &[primary(chord(Key::J, false, false, false, "J"), ALL)];
 const PLACE_LABEL: &[ShortcutBinding] = &[primary(chord(Key::N, false, false, false, "N"), ALL)];
 const PLACE_PROBE: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
+const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true, "Shift+P"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const SYMBOL_POLYLINE: &[ShortcutBinding] =
     &[primary(chord(Key::W, false, false, false, "W"), ALL)];
@@ -502,6 +503,7 @@ impl Command {
             | Self::PlaceJunction
             | Self::PlaceLabel
             | Self::PlaceProbe
+            | Self::PlacePin
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -586,6 +588,7 @@ impl Command {
             Self::PlaceJunction => PLACE_JUNCTION,
             Self::PlaceLabel => PLACE_LABEL,
             Self::PlaceProbe => PLACE_PROBE,
+            Self::PlacePin => PLACE_PIN,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -841,6 +844,39 @@ mod tests {
             assert_eq!(Command::PlaceBus.default_shortcut_label(platform), "B");
             assert_eq!(Command::PlaceBusTap.default_shortcut_label(platform), "T");
             assert_eq!(Command::PlaceJunction.default_shortcut_label(platform), "J");
+        }
+    }
+
+    #[test]
+    fn schematic_place_pin_is_shift_p_without_displacing_probe_or_symbol_pin() {
+        assert_eq!(
+            Command::PlacePin.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        assert_eq!(
+            Command::PlaceProbe.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        assert_eq!(
+            Command::SymbolPinTool.shortcut_context(),
+            ShortcutContext::SymbolCanvas
+        );
+
+        for platform in CommandPlatform::ALL {
+            assert_eq!(
+                Command::PlacePin.default_shortcut_label(platform),
+                "Shift+P"
+            );
+            assert_eq!(Command::PlaceProbe.default_shortcut_label(platform), "P");
+            assert_eq!(Command::SymbolPinTool.default_shortcut_label(platform), "P");
+            assert_eq!(
+                binding_owners(PLACE_PIN[0].chord, platform),
+                vec![Command::PlacePin]
+            );
+            assert_eq!(
+                binding_owners(PLACE_PROBE[0].chord, platform),
+                vec![Command::PlaceProbe, Command::SymbolPinTool]
+            );
         }
     }
 }

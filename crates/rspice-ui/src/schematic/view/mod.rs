@@ -420,6 +420,7 @@ fn schematic_accessibility_label(
             Command::PlaceBusTap,
             Command::PlaceJunction,
             Command::PlaceProbe,
+            Command::PlacePin,
             Command::ZoomFit,
             Command::Cancel,
         ],

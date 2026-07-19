@@ -268,7 +268,18 @@ fn write_component(
         | ComponentType::VoltageSourceExp
         | ComponentType::VoltageSourceSffm => write_vsource_symbol(svg, cx, cy, config),
         ComponentType::Ground => write_ground_symbol(svg, cx, cy, config),
-        ComponentType::Port => write_port_symbol(svg, cx, cy, config),
+        ComponentType::Port => write_port_symbol(
+            svg,
+            cx,
+            cy,
+            component
+                .port_spec()
+                .map(|port| port.direction)
+                .unwrap_or_default(),
+            component.mirror_h,
+            component.mirror_v,
+            config,
+        ),
         ComponentType::Nmos | ComponentType::NVdmos => write_nmos_symbol(svg, cx, cy, config),
         ComponentType::Pmos | ComponentType::PVdmos => write_pmos_symbol(svg, cx, cy, config),
         ComponentType::NpnBjt => write_npn_symbol(svg, cx, cy, config),
@@ -375,6 +386,48 @@ mod tests {
         SymbolPin, SymbolResolver, SymbolShape, View, ViewType,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn svg_port_symbol_preserves_direction_and_filled_terminal_tip() {
+        let config = SvgExportConfig::default();
+        let mut input = String::new();
+        write_port_symbol(
+            &mut input,
+            100.0,
+            80.0,
+            PortDirection::In,
+            false,
+            false,
+            &config,
+        );
+        assert!(input.contains(r##"fill="#FFFFFF" cx="90" cy="80" r="1.6""##));
+        assert!(input.contains("M -1.5 0 L 5 0 M 5 0 L 2 -2.5"));
+
+        let mut output = String::new();
+        write_port_symbol(
+            &mut output,
+            100.0,
+            80.0,
+            PortDirection::Out,
+            false,
+            false,
+            &config,
+        );
+        assert!(output.contains("M 5 0 L -1.5 0 M -1.5 0 L 1.5 -2.5"));
+
+        let mut bidirectional = String::new();
+        write_port_symbol(
+            &mut bidirectional,
+            100.0,
+            80.0,
+            PortDirection::InOut,
+            false,
+            false,
+            &config,
+        );
+        assert!(bidirectional.contains("M -1.5 0 L 5 0"));
+        assert!(bidirectional.contains("M -1.5 0 L 1.5 -2.5"));
+    }
 
     #[test]
     fn svg_export_uses_authored_cell_symbol_body_and_labels() {

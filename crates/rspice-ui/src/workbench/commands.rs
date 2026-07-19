@@ -83,6 +83,7 @@ pub enum Command {
     PlaceJunction,
     PlaceLabel,
     PlaceProbe,
+    PlacePin,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -265,6 +266,7 @@ impl Command {
             Self::PlaceJunction => spec("place-junction", "Place junction", "Design"),
             Self::PlaceLabel => spec("place-label", "Place net label", "Design"),
             Self::PlaceProbe => spec("place-probe", "Place probe", "Design"),
+            Self::PlacePin => spec("place-pin", "Place pin or port\u{2026}", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -290,6 +292,7 @@ impl Command {
             Self::Place(ComponentType::CurrentSource) => {
                 spec("place-current-source", "Place current source", "Design")
             }
+            Self::Place(ComponentType::Port) => Self::PlacePin.spec(),
             Self::Place(_) => spec("place-component", "Place component", "Design"),
             Self::RotateSelection => spec("rotate-selection", "Rotate clockwise", "Design"),
             Self::MirrorSelectionHorizontal => spec(
@@ -625,9 +628,16 @@ impl Command {
             | Self::PlaceBus
             | Self::PlaceBusTap
             | Self::PlaceJunction
-            | Self::PlaceProbe => active_schematic_editor(app) && !state.schematic.read_only,
+            | Self::PlaceProbe
+            | Self::PlacePin => {
+                active_schematic_editor(app)
+                    && !state.schematic.read_only
+                    && !state.active_view_read_only()
+            }
             Self::PlaceInstance | Self::PlaceLabel | Self::Place(_) => {
-                active_schematic_editor(app) && !state.schematic.read_only
+                active_schematic_editor(app)
+                    && !state.schematic.read_only
+                    && !state.active_view_read_only()
             }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
@@ -777,7 +787,9 @@ impl Command {
                             .push_user_message(crate::common::app::ConsoleMessage::warning(error));
                     }
                 } else {
-                    app.state.schematic.undo();
+                    if app.state.schematic.undo() {
+                        app.state.sync_active_schematic_to_workspace();
+                    }
                 }
             }
             Self::Redo => {
@@ -787,7 +799,9 @@ impl Command {
                             .push_user_message(crate::common::app::ConsoleMessage::warning(error));
                     }
                 } else {
-                    app.state.schematic.redo();
+                    if app.state.schematic.redo() {
+                        app.state.sync_active_schematic_to_workspace();
+                    }
                 }
             }
             Self::Cut => {
@@ -1010,6 +1024,21 @@ impl Command {
             Self::PlaceJunction => set_tool(app, Tool::Junction),
             Self::PlaceLabel => set_tool(app, Tool::Label),
             Self::PlaceProbe => set_tool(app, Tool::Probe),
+            Self::PlacePin => {
+                activate_workspace(app, Workspace::Design);
+                let name = app.state.schematic.suggested_port_name("BIAS_EN");
+                let design_execution_epoch = app.state.design_execution_epoch;
+                let active_schematic_epoch = app.state.active_schematic_epoch;
+                let topology_version = app.state.schematic.topology_version();
+                let view_path = app.state.workspace.active_view.display_path();
+                app.state.dialogs.pin_port.open(
+                    name,
+                    design_execution_epoch,
+                    active_schematic_epoch,
+                    topology_version,
+                    view_path,
+                );
+            }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
                 let next = app
@@ -1043,6 +1072,7 @@ impl Command {
             }
             Self::SymbolArrowTool => app.state.ui.symbol.tool = super::SymbolTool::Arrow,
             Self::SymbolDotTool => app.state.ui.symbol.tool = super::SymbolTool::Dot,
+            Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection => {
                 let symbol_context = SchematicSymbolContext::from_state(&app.state);
@@ -1363,13 +1393,16 @@ fn set_tool(app: &mut RSpiceApp, tool: Tool) {
 
 /// Arm one schematic tool through the single conductor-lifecycle boundary.
 /// Switching tools cancels every incompatible unfinished route, and leaving
-/// bus-tap placement retires its validated runtime configuration.
+/// typed placement retires every incompatible runtime configuration.
 pub(crate) fn arm_schematic_tool(schematic: &mut crate::state::SchematicState, tool: Tool) {
     if schematic.tool != tool {
         schematic.cancel_routing_gestures();
     }
     if tool != Tool::BusTap {
         schematic.pending_bus_tap = None;
+    }
+    if tool != Tool::Place(ComponentType::Port) {
+        schematic.pending_port = None;
     }
     schematic.tool = tool;
 }
@@ -1379,6 +1412,7 @@ pub(crate) fn arm_schematic_tool(schematic: &mut crate::state::SchematicState, t
 pub(crate) fn cancel_schematic_tool(schematic: &mut crate::state::SchematicState) {
     schematic.cancel_routing_gestures();
     schematic.pending_bus_tap = None;
+    schematic.pending_port = None;
     schematic.tool = Tool::Select;
 }
 
@@ -1550,6 +1584,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PlaceJunction,
     Command::PlaceLabel,
     Command::PlaceProbe,
+    Command::PlacePin,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -1849,6 +1884,18 @@ mod tests {
     }
 
     #[test]
+    fn place_pin_command_has_the_exact_mockup_identity() {
+        assert_eq!(Command::PlacePin.stable_id(), "place-pin");
+        assert_eq!(Command::PlacePin.spec().label, "Place pin or port\u{2026}");
+        assert_eq!(Command::PlacePin.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("place-pin"),
+            Some(Command::PlacePin)
+        );
+        assert_ne!(Command::PlacePin, Command::SymbolPinTool);
+    }
+
+    #[test]
     fn rename_command_has_mockup_identity_and_opens_the_stable_target_dialog() {
         use crate::state::Point;
 
@@ -1895,15 +1942,90 @@ mod tests {
     }
 
     #[test]
+    fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let components = app.state.schematic.components.clone();
+        let topology = app.state.schematic.topology_version();
+        let dirty = app.state.schematic.is_dirty;
+        let tool = app.state.schematic.tool;
+
+        Command::PlacePin.execute(&mut app);
+
+        assert!(app.state.dialogs.pin_port.open);
+        assert_eq!(app.state.dialogs.pin_port.name, "BIAS_EN");
+        assert_eq!(app.state.schematic.components, components);
+        assert_eq!(app.state.schematic.topology_version(), topology);
+        assert_eq!(app.state.schematic.is_dirty, dirty);
+        assert_eq!(app.state.schematic.tool, tool);
+        assert!(app.state.schematic.pending_port.is_none());
+        assert!(!app.state.schematic.can_undo());
+    }
+
+    #[test]
+    fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+
+        Command::Place(ComponentType::Port).execute(&mut app);
+
+        assert!(app.state.dialogs.pin_port.open);
+        assert_eq!(app.state.schematic.tool, Tool::Select);
+        assert!(app.state.schematic.pending_port.is_none());
+        assert!(app.state.schematic.components.is_empty());
+    }
+
+    #[test]
+    fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let reference = app.state.workspace.active_view.clone();
+        let pending = crate::state::PendingPortPlacement::new(
+            "BIAS_EN",
+            crate::state::PortDirectionType::InputLogic,
+            crate::state::PortDiscipline::Logic,
+            app.state.schematic.topology_version(),
+            app.state.schematic.next_interface_order(),
+        );
+        app.state
+            .schematic
+            .place_pending_port(crate::state::Point::origin(), pending)
+            .expect("port places");
+        app.state.sync_active_schematic_to_workspace();
+        let symbol_ports = |app: &RSpiceApp| {
+            app.state
+                .library_manager
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view("symbol"))
+                .and_then(|view| view.metadata.get("ports"))
+                .cloned()
+        };
+        assert_eq!(symbol_ports(&app).as_deref(), Some("BIAS_EN:in"));
+
+        Command::Undo.execute(&mut app);
+        assert!(app.state.schematic.components.is_empty());
+        assert!(symbol_ports(&app).is_none());
+
+        Command::Redo.execute(&mut app);
+        assert_eq!(symbol_ports(&app).as_deref(), Some("BIAS_EN:in"));
+    }
+
+    #[test]
     fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
         assert!(Command::PlaceBus.is_enabled(&app));
         assert!(Command::PlaceBusTap.is_enabled(&app));
+        assert!(Command::PlacePin.is_enabled(&app));
 
         app.state.schematic.read_only = true;
         assert!(!Command::PlaceBus.is_enabled(&app));
         assert!(!Command::PlaceBusTap.is_enabled(&app));
+        assert!(!Command::PlacePin.is_enabled(&app));
+        app.state.schematic.read_only = false;
+        app.state.workbench.workspace = Workspace::Results;
+        assert!(!Command::PlacePin.is_enabled(&app));
     }
 
     #[test]

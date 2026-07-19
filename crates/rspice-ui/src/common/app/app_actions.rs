@@ -247,6 +247,7 @@ impl RSpiceApp {
                     Tool::Probe,
                 );
             }
+            ShortcutCommand::PlacePin => command.execute(self),
             ShortcutCommand::SymbolPinTool
             | ShortcutCommand::SymbolPolylineTool
             | ShortcutCommand::SymbolCircleTool
@@ -551,6 +552,7 @@ impl RSpiceApp {
             | ShortcutCommand::PlaceBusTap
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceProbe
+            | ShortcutCommand::PlacePin
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::PlaceInstance
             | ShortcutCommand::DescendHierarchy
@@ -809,6 +811,7 @@ impl RSpiceApp {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             if self.state.schematic.undo() {
+                self.state.sync_active_schematic_to_workspace();
                 self.state
                     .push_user_message(ConsoleMessage::info(format!("Undo: {}", desc)));
             }
@@ -827,6 +830,7 @@ impl RSpiceApp {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             if self.state.schematic.redo() {
+                self.state.sync_active_schematic_to_workspace();
                 self.state
                     .push_user_message(ConsoleMessage::info(format!("Redo: {}", desc)));
             }
@@ -877,6 +881,7 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::PlaceWire
             | ShortcutCommand::PlaceBus
             | ShortcutCommand::PlaceBusTap
+            | ShortcutCommand::PlacePin
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::Place(_)
