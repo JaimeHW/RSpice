@@ -374,6 +374,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Disto { .. } => ".disto",
         AnalysisCommand::Tran { .. } => ".tran",
         AnalysisCommand::Noise { .. } => ".noise",
+        AnalysisCommand::NoiseData { .. } => ".noise data",
         AnalysisCommand::PoleZero { .. } => ".pz",
         AnalysisCommand::Sensitivity { .. } => ".sens",
         AnalysisCommand::Tf { .. } => ".tf",
@@ -801,6 +802,10 @@ fn command_to_queue_item(
                 spec_options,
             })
         }
+        AnalysisCommand::NoiseData { .. } => Err(
+            "Manual-deck .NOISE DATA requires row-local parameter contexts and cannot be represented by the fixed-grid UI noise queue"
+                .to_string(),
+        ),
         AnalysisCommand::PoleZero {
             input_pos,
             input_neg,

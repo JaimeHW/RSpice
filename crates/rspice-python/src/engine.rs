@@ -1592,6 +1592,31 @@ impl PyEngine {
                         format!(".noise V({output_node}) {input_source}"),
                     ));
                 }
+                AnalysisCommand::NoiseData {
+                    output_node,
+                    reference_node,
+                    input_source,
+                    table_name,
+                } => {
+                    let engine = self.engine_for_netlist(net);
+                    let (_, results) = run_interruptible(py, &self.active_runs, |abort| {
+                        engine.run_noise_data_named_with_input_source_and_abort(
+                            net,
+                            output_node,
+                            reference_node.as_deref(),
+                            input_source,
+                            table_name,
+                            engine.config().temperature,
+                            abort,
+                        )
+                    })?;
+                    noise = Some(results.iter().map(PyNoiseResult::from_core).collect());
+                    noise_core = Some(results);
+                    records.push(PyAnalysisRecord::executed(
+                        "noise_data",
+                        format!(".noise V({output_node}) {input_source} DATA={table_name}"),
+                    ));
+                }
                 AnalysisCommand::Tf {
                     output_node,
                     reference_node,

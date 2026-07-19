@@ -305,6 +305,12 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             ".noise v({output_node}) {input_source} {} {points} {start_freq} {stop_freq}",
             format!("{variation:?}").to_lowercase()
         ),
+        AnalysisCommand::NoiseData {
+            output_node,
+            input_source,
+            table_name,
+            ..
+        } => format!(".noise v({output_node}) {input_source} data={table_name}"),
         AnalysisCommand::Tf {
             output_node,
             input_source,

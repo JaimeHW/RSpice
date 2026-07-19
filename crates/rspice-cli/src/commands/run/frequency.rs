@@ -511,14 +511,69 @@ pub(super) fn run_noise(
     }
 
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
-    match ctx.engine.run_noise_with_input_source(
+    let execution = ctx.engine.run_noise_with_input_source(
         ctx.netlist,
         output,
         output_neg,
         input_source,
         &frequencies,
         ctx.engine.config().temperature,
-    ) {
+    );
+    finish_noise(
+        ctx,
+        output_node,
+        reference_node,
+        input_source,
+        execution,
+        true,
+    )
+}
+
+pub(super) fn run_noise_data(
+    ctx: &RunContext<'_>,
+    output_node: &str,
+    reference_node: Option<&str>,
+    input_source: &str,
+    table_name: &str,
+) -> Result<(), CliError> {
+    if !ctx.quiet {
+        println!("Running Noise DATA analysis from table {table_name}...");
+    }
+    let execution = ctx
+        .engine
+        .run_noise_data_named_with_input_source(
+            ctx.netlist,
+            output_node,
+            reference_node,
+            input_source,
+            table_name,
+            ctx.engine.config().temperature,
+        )
+        .map(|(_, results)| results);
+    let integrate = execution.as_ref().is_ok_and(|results| {
+        results
+            .windows(2)
+            .all(|pair| pair[1].frequency > pair[0].frequency)
+    });
+    finish_noise(
+        ctx,
+        output_node,
+        reference_node,
+        input_source,
+        execution,
+        integrate,
+    )
+}
+
+fn finish_noise(
+    ctx: &RunContext<'_>,
+    output_node: &str,
+    reference_node: Option<&str>,
+    input_source: &str,
+    execution: Result<Vec<rspice_core::analysis::NoiseResult>, rspice_core::SimulationError>,
+    integrate: bool,
+) -> Result<(), CliError> {
+    match execution {
         Ok(results) => {
             if !ctx.args.allow_nonfinite {
                 for result in &results {
@@ -573,7 +628,13 @@ pub(super) fn run_noise(
                     );
                 }
 
-                print_noise_contribution_summary(&results, ctx.verbose);
+                if integrate {
+                    print_noise_contribution_summary(&results, ctx.verbose);
+                } else {
+                    println!(
+                        "  Total-noise integration disabled: DATA frequencies are not strictly increasing"
+                    );
+                }
             }
 
             if let Some(ref output_path) = ctx.output_path_for("noise") {

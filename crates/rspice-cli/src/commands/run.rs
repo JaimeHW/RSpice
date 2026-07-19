@@ -285,6 +285,18 @@ impl<'a> RunContext<'a> {
                 *start_freq,
                 *stop_freq,
             )?,
+            AnalysisCommand::NoiseData {
+                output_node,
+                reference_node,
+                input_source,
+                table_name,
+            } => frequency::run_noise_data(
+                self,
+                output_node,
+                reference_node.as_deref(),
+                input_source,
+                table_name,
+            )?,
             AnalysisCommand::Sensitivity {
                 output_node,
                 reference_node,
