@@ -4,22 +4,24 @@
 //! acquired from the canvas after the retained draft has been parsed and the
 //! immutable schematic authority has been revalidated.
 
-use egui::{
-    Align, Align2, Context, Frame, Layout, Margin, Response, Sense, Stroke, TextEdit, Ui, Vec2,
-    vec2,
-};
+use egui::{Align, Context, Frame, Layout, Margin, Ui, vec2};
 
 use crate::state::{
     Point, SchematicArrayCount, SchematicArrayKind, SchematicArrayNaming, SchematicArrayPlacement,
     SchematicArrayPlan, Tool,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
     select_mono_with_response,
 };
 
+use super::app_mockup_review::{
+    BODY_HEIGHT as MOCKUP_BODY_HEIGHT, CONTEXT_WIDTH as MOCKUP_CONTEXT_WIDTH,
+    SURFACE_HEIGHT as MOCKUP_SURFACE_HEIGHT, TRANSACTION_HEIGHT as MOCKUP_TRANSACTION_HEIGHT,
+    configure_field_validation, field_label, input_field, paint_body_dividers, purpose_line,
+    resolved_context,
+};
 use super::app_schematic_command_dialog::{DISCARD_DETAIL, DISCARD_TITLE};
 use super::{
     AppState, ArraySelectionDialogState, ConsoleMessage, RSpiceApp, SchematicEditAuthority,
@@ -32,12 +34,6 @@ const DESCRIPTION: &str =
     "Create a named linear or rectangular array with reference-designator and bus-index policies.";
 const DEFAULT_COUNT: &str = "8 \u{00d7} 1";
 const INVALID_DETAIL: &str = "Correct the highlighted values before this operation can continue. No project, result, or governed record has changed.";
-const MOCKUP_BODY_HEIGHT: f32 = 230.0;
-const MOCKUP_CONTEXT_WIDTH: f32 = 260.0;
-const MOCKUP_PURPOSE_HEIGHT: f32 = 35.0;
-const MOCKUP_SURFACE_HEIGHT: f32 = 370.0;
-const MOCKUP_TRANSACTION_HEIGHT: f32 = 37.0;
-const CONTEXT_EXPLANATION: &str = "The exact source identities, dependent artifacts, permission boundary, validation policy, and transactional commit point are reviewed before this action can complete.";
 
 #[derive(Debug)]
 enum DraftValidation {
@@ -386,7 +382,7 @@ fn array_dialog_body(
     project_name: &str,
     project_revision: &str,
 ) -> WorkflowFocus {
-    purpose_line(ui);
+    purpose_line(ui, DESCRIPTION);
     let (array_invalid, count_invalid, naming_invalid) = validation.field_errors();
     let (array_error, count_error, naming_error) = validation.field_error_details();
     let mut initial = None;
@@ -411,7 +407,7 @@ fn array_dialog_body(
                             ui.set_width((form_width - 24.0).max(1.0));
                             let labels =
                                 SchematicArrayKind::ALL.map(|kind| kind.label().to_owned());
-                            let array = mockup_field_label(ui, "Array", |ui| {
+                            let array = field_label(ui, "Array", |ui| {
                                 select_mono_with_response(
                                     ui,
                                     "array-selection-kind",
@@ -442,6 +438,7 @@ fn array_dialog_body(
                                 &mut draft.count,
                                 "8 \u{00d7} 1",
                                 count_error,
+                                "Array columns and rows, including the retained source member",
                             );
                             if count.changed() {
                                 draft.mark_edited();
@@ -453,6 +450,7 @@ fn array_dialog_body(
                                 &mut draft.naming,
                                 "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]",
                                 naming_error,
+                                "Reference-designator and bus-index range policy",
                             );
                             if naming.changed() {
                                 draft.mark_edited();
@@ -480,220 +478,10 @@ fn array_dialog_body(
             );
         },
     );
-    ui.painter().vline(
-        body.response.rect.left() + form_width,
-        body.response.rect.y_range(),
-        Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
-    );
-    ui.painter().hline(
-        body.response.rect.x_range(),
-        body.response.rect.bottom(),
-        Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
-    );
+    paint_body_dividers(ui, body.response.rect, form_width);
     WorkflowFocus {
         initial: initial.unwrap_or_else(|| ui.id().with("array-selection-kind")),
         first_invalid,
-    }
-}
-
-fn purpose_line(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let response = Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(12, 0))
-        .show(ui, |ui| {
-            let width = ui.available_width();
-            ui.allocate_ui_with_layout(
-                vec2(width, MOCKUP_PURPOSE_HEIGHT),
-                Layout::left_to_right(Align::Center),
-                |ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    let (icon_rect, icon_response) =
-                        ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                    ui.painter().circle_stroke(
-                        icon_rect.center(),
-                        5.0,
-                        Stroke::new(1.0, t.color.info),
-                    );
-                    ui.painter().text(
-                        icon_rect.center() + vec2(0.0, -0.25),
-                        Align2::CENTER_CENTER,
-                        "i",
-                        theme::mono(tokens::FS_0, FontWeight::Medium),
-                        t.color.info,
-                    );
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(DESCRIPTION)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        )
-                        .wrap(),
-                    );
-                    ui.ctx().accesskit_node_builder(icon_response.id, |node| {
-                        node.set_label("Workflow purpose");
-                        node.set_description(DESCRIPTION);
-                    });
-                },
-            );
-        });
-    paint_dashed_hline(
-        ui,
-        response.response.rect.x_range(),
-        response.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-}
-
-fn resolved_context(ui: &mut Ui, project_name: &str, project_revision: &str) {
-    let t = Tokens::get(ui.ctx());
-    Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.set_min_height(MOCKUP_BODY_HEIGHT);
-        ui.spacing_mut().item_spacing.y = 0.0;
-        context_heading(ui, "Resolved context");
-        context_row(ui, "Project", project_name);
-        context_row(ui, "Revision", project_revision);
-        context_row(ui, "Change boundary", "owned source + dependency graph");
-        Frame::NONE.inner_margin(Margin::same(10)).show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(CONTEXT_EXPLANATION)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
-    });
-}
-
-fn context_heading(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_elevated);
-    ui.painter().text(
-        rect.left_center() + vec2(10.0, 0.0),
-        Align2::LEFT_CENTER,
-        label.to_uppercase(),
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text_dim,
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Heading);
-        node.set_label(label);
-    });
-}
-
-fn context_row(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
-    let content = rect.shrink2(vec2(10.0, 0.0));
-    let value_x = content.left() + (content.width() * 0.37).max(76.0);
-    ui.painter().text(
-        content.left_center(),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
-    let value_rect = egui::Rect::from_min_max(
-        egui::pos2(value_x + 8.0, content.top()),
-        content.right_bottom(),
-    );
-    ui.painter().with_clip_rect(value_rect).text(
-        value_rect.left_center(),
-        Align2::LEFT_CENTER,
-        value,
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.text,
-    );
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(label);
-        node.set_value(value);
-    });
-}
-
-fn mockup_field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
-    ui.add_space(5.0);
-    content(ui)
-}
-
-fn paint_dashed_hline(ui: &Ui, range: egui::Rangef, y: f32, stroke: Stroke) {
-    let mut x = range.min;
-    while x < range.max {
-        let end = (x + 3.0).min(range.max);
-        ui.painter()
-            .line_segment([egui::pos2(x, y), egui::pos2(end, y)], stroke);
-        x += 6.0;
-    }
-}
-
-fn input_field(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut String,
-    hint: &str,
-    error: Option<&str>,
-) -> Response {
-    let t = Tokens::get(ui.ctx());
-    mockup_field_label(ui, label, |ui| {
-        let response = ui.add_sized(
-            Vec2::new(ui.available_width(), t.metrics.ctl_h),
-            TextEdit::singleline(value)
-                .font(egui::TextStyle::Monospace)
-                .hint_text(hint)
-                .margin(egui::Margin::symmetric(8, 4)),
-        );
-        let description = match label {
-            "Count" => "Array columns and rows, including the retained source member",
-            _ => "Reference-designator and bus-index range policy",
-        };
-        configure_field_validation(ui, &response, label, error, description);
-        response
-    })
-}
-
-fn configure_field_validation(
-    ui: &Ui,
-    response: &Response,
-    label: &str,
-    error: Option<&str>,
-    description: &str,
-) {
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(label);
-        node.set_description(if let Some(error) = error {
-            format!("{description}. {error}")
-        } else {
-            description.to_owned()
-        });
-        if error.is_some() {
-            node.set_invalid(egui::accesskit::Invalid::True);
-        } else {
-            node.clear_invalid();
-        }
-    });
-    if error.is_some() {
-        let t = Tokens::get(ui.ctx());
-        ui.painter().rect_stroke(
-            response.rect,
-            t.radius,
-            egui::Stroke::new(1.0, t.color.err),
-            egui::StrokeKind::Inside,
-        );
     }
 }
 
@@ -740,16 +528,12 @@ mod tests {
         assert_eq!(PRIMARY, "Create array");
         assert_eq!(DEFAULT_COUNT, "8 \u{00d7} 1");
         assert_eq!(MOCKUP_SURFACE_HEIGHT, 370.0);
-        assert_eq!(MOCKUP_PURPOSE_HEIGHT, 35.0);
+        assert_eq!(super::super::app_mockup_review::PURPOSE_HEIGHT, 35.0);
         assert_eq!(MOCKUP_BODY_HEIGHT, 230.0);
         assert_eq!(MOCKUP_CONTEXT_WIDTH, 260.0);
         assert_eq!(
             SchematicArrayKind::ALL.map(SchematicArrayKind::label),
             ["Linear", "Rectangular", "Radial documentation"]
-        );
-        assert_eq!(
-            CONTEXT_EXPLANATION,
-            "The exact source identities, dependent artifacts, permission boundary, validation policy, and transactional commit point are reviewed before this action can complete."
         );
     }
 

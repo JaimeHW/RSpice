@@ -89,6 +89,7 @@ pub enum Command {
     MoveSelection,
     StretchSelection,
     ArraySelection,
+    ReplaceInstance,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -277,6 +278,7 @@ impl Command {
             Self::MoveSelection => spec("move-selection", "Move selection", "Design"),
             Self::StretchSelection => spec("stretch-selection", "Stretch selection", "Design"),
             Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Design"),
+            Self::ReplaceInstance => spec("replace-instance", "Replace instance\u{2026}", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -631,6 +633,10 @@ impl Command {
                     && !state.schematic.read_only
                     && !state.active_view_read_only()
                     && state.schematic.validate_array_source_selection().is_ok()
+            }
+            Self::ReplaceInstance => {
+                active_schematic_editor(app)
+                    && crate::common::app::replace_instance_available(state)
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -1105,6 +1111,9 @@ impl Command {
             }
             Self::ArraySelection => {
                 crate::common::app::open_array_selection_dialog(&mut app.state);
+            }
+            Self::ReplaceInstance => {
+                crate::common::app::open_replace_instance_dialog(&mut app.state);
             }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
@@ -1698,6 +1707,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::MoveSelection,
     Command::StretchSelection,
     Command::ArraySelection,
+    Command::ReplaceInstance,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -2097,6 +2107,34 @@ mod tests {
         assert_eq!(
             COMMAND_REGISTRY[registry_index - 1],
             Command::StretchSelection
+        );
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index + 1],
+            Command::ReplaceInstance
+        );
+    }
+
+    #[test]
+    fn replace_instance_command_has_the_exact_mockup_identity_and_no_shortcut() {
+        assert_eq!(Command::ReplaceInstance.stable_id(), "replace-instance");
+        assert_eq!(
+            Command::ReplaceInstance.spec().label,
+            "Replace instance\u{2026}"
+        );
+        assert_eq!(Command::ReplaceInstance.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("replace-instance"),
+            Some(Command::ReplaceInstance)
+        );
+        assert!(Command::ReplaceInstance.shortcut_bindings().is_empty());
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::ReplaceInstance)
+            .expect("replace-instance must be registered");
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index - 1],
+            Command::ArraySelection
         );
         assert_eq!(COMMAND_REGISTRY[registry_index + 1], Command::SymbolPinTool);
     }

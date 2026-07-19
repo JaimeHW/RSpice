@@ -1529,6 +1529,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::PlaceShape => Icon::Grid,
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::ArraySelection => Icon::Grid,
+        Command::ReplaceInstance => Icon::Refresh,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
         Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,
@@ -1890,6 +1891,14 @@ mod tests {
         assert_eq!(
             row_icon(&PaletteEntry::Command(Command::ArraySelection)),
             Icon::Grid
+        );
+    }
+
+    #[test]
+    fn replace_instance_uses_the_exact_refresh_glyph() {
+        assert_eq!(
+            row_icon(&PaletteEntry::Command(Command::ReplaceInstance)),
+            Icon::Refresh
         );
     }
 

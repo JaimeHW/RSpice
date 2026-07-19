@@ -43,15 +43,11 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceText,
     Command::PlaceShape,
 ];
-const DESIGN_EDIT_COMMANDS: [Command; 8] = [
+const DESIGN_EDIT_COMMANDS: [Command; 4] = [
     Command::MoveSelection,
     Command::StretchSelection,
     Command::ArraySelection,
-    Command::RotateSelection,
-    Command::MirrorSelectionHorizontal,
-    Command::MirrorSelectionVertical,
-    Command::ObjectProperties,
-    Command::FindInDesign,
+    Command::ReplaceInstance,
 ];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -1194,6 +1190,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlaceShape => WorkbenchIcon::Grid,
         Command::MoveSelection | Command::StretchSelection => WorkbenchIcon::Select,
         Command::ArraySelection => WorkbenchIcon::Grid,
+        Command::ReplaceInstance => WorkbenchIcon::Refresh,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy => WorkbenchIcon::Folder,
         Command::RunSimulation => WorkbenchIcon::Run,
@@ -2373,18 +2370,14 @@ mod tests {
     }
 
     #[test]
-    fn design_edit_menu_starts_with_exact_move_stretch_and_array_sequence() {
+    fn design_edit_menu_is_exact_move_stretch_array_and_replace_group() {
         assert_eq!(
             DESIGN_EDIT_COMMANDS,
             [
                 Command::MoveSelection,
                 Command::StretchSelection,
                 Command::ArraySelection,
-                Command::RotateSelection,
-                Command::MirrorSelectionHorizontal,
-                Command::MirrorSelectionVertical,
-                Command::ObjectProperties,
-                Command::FindInDesign,
+                Command::ReplaceInstance,
             ]
         );
     }

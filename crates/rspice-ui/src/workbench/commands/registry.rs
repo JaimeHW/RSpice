@@ -513,6 +513,7 @@ impl Command {
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
+            | Self::ReplaceInstance
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -603,6 +604,7 @@ impl Command {
             Self::MoveSelection => MOVE_SELECTION,
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
+            Self::ReplaceInstance => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -674,6 +676,7 @@ impl Command {
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
+            | Self::ReplaceInstance
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",

@@ -904,7 +904,7 @@ fn orthogonalize_connected_rubber_bands(
     Ok(())
 }
 
-fn orthogonal_route_for_corresponding_points(
+pub(super) fn orthogonal_route_for_corresponding_points(
     wire_id: u64,
     original: &[Point],
     moved: &[Point],

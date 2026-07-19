@@ -662,6 +662,85 @@ fn equivalent_array_naming(left: &str, right: &str) -> bool {
             .is_some_and(|(left, right)| left == right)
 }
 
+/// Isolated authority and authored draft for the mockup-owned Replace
+/// instance transaction. The visible Current and Mapping values are resolved
+/// facts; Replacement is the only editable field. The selected component's
+/// stable identifier is retained so the commit cannot drift to a later
+/// selection.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReplaceInstanceDialogState {
+    pub(crate) open: bool,
+    pub(crate) source_component_id: u64,
+    pub(crate) current: String,
+    pub(crate) replacement: String,
+    pub(crate) mapping: String,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) replacement_authority: Option<crate::state::SchematicReplacementAuthority>,
+    pub(crate) initial_target_identity: String,
+    pub(crate) initial_target_spec: Option<crate::state::SchematicReplacementTargetSpec>,
+    pub(crate) initial_replacement: String,
+    pub(crate) preview_error: Option<String>,
+    pub(crate) validation_field_mask: u8,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+pub(crate) struct ReplaceInstanceOpen {
+    pub(crate) authority: SchematicEditAuthority,
+    pub(crate) replacement_authority: crate::state::SchematicReplacementAuthority,
+    pub(crate) source_component_id: u64,
+    pub(crate) current: String,
+    pub(crate) replacement: String,
+    pub(crate) initial_target_identity: String,
+    pub(crate) initial_target_spec: crate::state::SchematicReplacementTargetSpec,
+    pub(crate) mapping: String,
+}
+
+impl ReplaceInstanceDialogState {
+    pub(crate) fn open(&mut self, request: ReplaceInstanceOpen) {
+        let initial_replacement = request.replacement.clone();
+        *self = Self {
+            open: true,
+            source_component_id: request.source_component_id,
+            current: request.current,
+            replacement: request.replacement,
+            mapping: request.mapping,
+            authority: Some(request.authority),
+            replacement_authority: Some(request.replacement_authority),
+            initial_target_identity: request.initial_target_identity,
+            initial_target_spec: Some(request.initial_target_spec),
+            initial_replacement,
+            preview_error: None,
+            validation_field_mask: 0,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = !self
+            .replacement
+            .trim()
+            .eq_ignore_ascii_case(self.initial_replacement.trim());
+        self.discard_confirm = false;
+        self.preview_error = None;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
 /// Exact, isolated draft for a selected bus. The durable baseline is retained
 /// to guard the eventual commit against stale-object overwrite.
 #[derive(Debug, Clone)]
@@ -1192,6 +1271,9 @@ pub struct DialogState {
     /// Named linear, rectangular, or radial documentation array transaction.
     pub(crate) array_selection: ArraySelectionDialogState,
 
+    /// Pin-, parameter-, model-, and netlist-compatible instance replacement.
+    pub(crate) replace_instance: ReplaceInstanceDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -1252,6 +1334,7 @@ impl DialogState {
             || self.move_selection.open
             || self.stretch_selection.open
             || self.array_selection.open
+            || self.replace_instance.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
@@ -1366,6 +1449,43 @@ mod tests {
                 "8 \u{00d7} 1".to_owned(),
                 "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]".to_owned(),
             );
+        });
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs.replace_instance.open(ReplaceInstanceOpen {
+                authority: super::SchematicEditAuthority {
+                    design_execution_epoch: 0,
+                    active_schematic_epoch: 0,
+                    topology_version: 0,
+                    view_path: "user/top/schematic".to_owned(),
+                    grid_size: 10,
+                    document_policy: crate::state::SchematicDocumentPolicy::default(),
+                    snapshot: crate::state::SchematicSnapshot::capture(
+                        &crate::state::SchematicState::default(),
+                    ),
+                    selection: crate::state::Selection::default(),
+                },
+                replacement_authority: crate::state::SchematicReplacementAuthority {
+                    component_id: 1,
+                    topology_version: 0,
+                    source_component: crate::state::Component::new(
+                        1,
+                        crate::state::ComponentType::VoltageSource,
+                        crate::state::Point::origin(),
+                    ),
+                    source_spec: crate::state::SchematicReplacementSourceSpec::new(
+                        Vec::new(),
+                        Vec::<String>::new(),
+                    ),
+                },
+                source_component_id: 1,
+                current: "U1 \u{00b7} OPA189".to_owned(),
+                replacement: "OPA188 \u{00b7} 5 pin".to_owned(),
+                initial_target_identity: "work/OPA188/schematic".to_owned(),
+                initial_target_spec: crate::state::SchematicReplacementTargetSpec::primitive(
+                    crate::state::ComponentType::Resistor,
+                ),
+                mapping: "5 / 5 pins \u{00b7} 6 / 8 parameters".to_owned(),
+            });
         });
         assert_blocks_shortcuts(|dialogs| {
             let bus = crate::state::Bus::segment(

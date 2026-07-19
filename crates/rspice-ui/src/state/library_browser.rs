@@ -27,10 +27,14 @@
 mod cell;
 mod library;
 mod manager;
+mod placement;
 mod primitives;
 mod view;
 
 pub use cell::Cell;
 pub use library::Library;
 pub use manager::{LibraryManager, NavColumn};
+pub use placement::{
+    LibraryCellPlacementCandidate, LibraryCellPlacementParameter, library_cell_placement_candidates,
+};
 pub use view::{View, ViewType};

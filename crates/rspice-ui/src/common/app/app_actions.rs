@@ -252,7 +252,8 @@ impl RSpiceApp {
             | ShortcutCommand::PlaceShape
             | ShortcutCommand::MoveSelection
             | ShortcutCommand::StretchSelection
-            | ShortcutCommand::ArraySelection => command.execute(self),
+            | ShortcutCommand::ArraySelection
+            | ShortcutCommand::ReplaceInstance => command.execute(self),
             ShortcutCommand::SymbolPinTool
             | ShortcutCommand::SymbolPolylineTool
             | ShortcutCommand::SymbolCircleTool
@@ -569,6 +570,7 @@ impl RSpiceApp {
             | ShortcutCommand::MoveSelection
             | ShortcutCommand::StretchSelection
             | ShortcutCommand::ArraySelection
+            | ShortcutCommand::ReplaceInstance
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::PlaceInstance
             | ShortcutCommand::DescendHierarchy
@@ -903,6 +905,7 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::MoveSelection
             | ShortcutCommand::StretchSelection
             | ShortcutCommand::ArraySelection
+            | ShortcutCommand::ReplaceInstance
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::Place(_)

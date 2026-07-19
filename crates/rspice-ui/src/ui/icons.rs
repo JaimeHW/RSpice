@@ -63,6 +63,8 @@ pub enum Icon {
     Undo,
     /// Redo.
     Redo,
+    /// Refresh or replace the current identity.
+    Refresh,
     /// Design-check (ERC) checkmark.
     Check,
     /// Document / netlist file.
@@ -123,6 +125,7 @@ impl Icon {
             Self::GridDots => "Dot grid",
             Self::Undo => "Undo",
             Self::Redo => "Redo",
+            Self::Refresh => "Refresh",
             Self::Check => "Run checks",
             Self::File => "Document",
             Self::Folder => "Browse",
@@ -231,6 +234,12 @@ impl Icon {
                 Line(&[[21.0, 10.0], [10.0, 10.0]]),
                 Arc([10.0, 16.0], 6.0, -90.0, -180.0),
                 Line(&[[10.0, 22.0], [13.0, 22.0]]),
+            ],
+            Icon::Refresh => &[
+                Arc([12.0, 12.0], 7.0, -50.0, 205.0),
+                Line(&[[5.1, 12.8], [4.3, 17.1], [8.6, 16.5]]),
+                Arc([12.0, 12.0], 7.0, 130.0, 205.0),
+                Line(&[[18.9, 11.2], [19.7, 6.9], [15.4, 7.5]]),
             ],
             Icon::Check => &[Line(&[[20.0, 7.0], [10.0, 17.0], [6.0, 13.0]])],
             Icon::File => &[
@@ -402,6 +411,7 @@ mod tests {
             Icon::Grid,
             Icon::Undo,
             Icon::Redo,
+            Icon::Refresh,
             Icon::Check,
             Icon::File,
             Icon::Folder,

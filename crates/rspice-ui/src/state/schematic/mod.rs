@@ -29,6 +29,7 @@ mod net_highlight;
 mod net_label;
 mod point;
 mod port;
+mod replacement;
 mod rotation;
 mod selection;
 mod snap;
@@ -76,6 +77,15 @@ pub use point::{LabelPosition, Point};
 pub use port::{
     PendingPortPlacement, PortContract, PortDirection, PortDirectionType, PortDiscipline,
     PortPlacementAuthority, PortPlacementError, PortSignalType, PortSpec,
+};
+pub use replacement::{
+    SchematicReplacementAuthority, SchematicReplacementCompatibility, SchematicReplacementError,
+    SchematicReplacementImpact, SchematicReplacementMappingStatus, SchematicReplacementParameter,
+    SchematicReplacementParameterMapping, SchematicReplacementPreview,
+    SchematicReplacementSemanticStatus, SchematicReplacementSourceSpec,
+    SchematicReplacementTargetSpec, SchematicReplacementTerminal,
+    SchematicReplacementTerminalMapping, SchematicReplacementValuePolicy,
+    SchematicReplacementWireEdit,
 };
 pub use rotation::Rotation;
 pub use selection::{JunctionSelection, Selection, WireSegmentSelection, WireVertexSelection};

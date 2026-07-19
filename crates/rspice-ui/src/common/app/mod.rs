@@ -58,13 +58,20 @@ pub(crate) use app_dialog_state::{
     DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
     DocumentationShapeObjectPropertiesDraft, MoveSelectionDialogState,
     NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, PinPortDialogState,
-    RenameSelectionTarget, StretchSelectionDialogState,
+    RenameSelectionTarget, ReplaceInstanceOpen, StretchSelectionDialogState,
 };
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
 mod app_schematic_edit_authority;
 pub(crate) use app_schematic_edit_authority::SchematicEditAuthority;
 
+mod app_instance_catalog;
+mod app_mockup_operation;
+mod app_mockup_review;
+mod app_replace_instance_dialog;
+pub(crate) use app_replace_instance_dialog::{
+    open_replace_instance_dialog, replace_instance_available,
+};
 mod app_schematic_command_dialog;
 
 mod app_preference_runtime;
@@ -888,6 +895,7 @@ impl RSpiceApp {
         self.render_move_selection_dialog(ctx);
         self.render_stretch_selection_dialog(ctx);
         self.render_array_selection_dialog(ctx);
+        self.render_replace_instance_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);

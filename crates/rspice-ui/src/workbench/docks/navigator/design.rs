@@ -1,15 +1,14 @@
 //! Design navigator and component shelf from the workbench mockup.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
 
 use egui::{ScrollArea, Ui};
 
 use crate::common::RSpiceApp;
 use crate::schematic::{ComponentPaletteEntry, component_palette};
 use crate::state::{
-    CellViewRef, ComponentType, LibraryCellInstance, NetGraph, PortDirection, PortSpec, Tool,
-    ViewType,
+    ComponentType, LibraryCellInstance, LibraryCellPlacementCandidate, NetGraph, Tool,
+    library_cell_placement_candidates,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -673,131 +672,10 @@ fn catalog_group_row(
     open
 }
 
-#[derive(Clone)]
-struct CellCandidate {
-    library: String,
-    cell: String,
-    view: String,
-    binding: LibraryCellInstance,
-    ready: bool,
-    unavailable_reason: String,
-}
+type CellCandidate = LibraryCellPlacementCandidate;
 
 fn cell_candidates(app: &RSpiceApp) -> Vec<CellCandidate> {
-    let active = &app.state.workspace.active_view;
-    let mut candidates = Vec::new();
-    for library in app.state.library_manager.libraries_sorted() {
-        for cell in library.cells_sorted() {
-            let preferred = cell
-                .views_sorted()
-                .into_iter()
-                .find(|view| view.view_type == ViewType::Schematic)
-                .or_else(|| {
-                    cell.views_sorted()
-                        .into_iter()
-                        .find(|view| view.view_type == ViewType::VerilogA)
-                })
-                .or_else(|| {
-                    cell.views_sorted()
-                        .into_iter()
-                        .find(|view| view.view_type == ViewType::Spice)
-                });
-            let Some(view) = preferred else {
-                continue;
-            };
-            let mut binding = LibraryCellInstance::new(&library.name, &cell.name, &view.name);
-            let is_current = library.name == active.library && cell.name == active.cell;
-            let (ready, unavailable_reason) = match view.view_type {
-                ViewType::Schematic => {
-                    let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
-                    if let Some(master) =
-                        app.state.workspace.schematic_buffers.get(&reference.key())
-                    {
-                        binding.bind_interface(&master.interface_ports());
-                        (
-                            !is_current,
-                            if is_current {
-                                "current cell".to_owned()
-                            } else {
-                                String::new()
-                            },
-                        )
-                    } else {
-                        (false, "open master first".to_owned())
-                    }
-                }
-                ViewType::VerilogA | ViewType::Spice => {
-                    let source = view
-                        .file_path
-                        .clone()
-                        .or_else(|| metadata_path(&view.metadata))
-                        .or_else(|| metadata_path(&cell.metadata));
-                    let ports = metadata_ports(&view.metadata)
-                        .or_else(|| metadata_ports(&cell.metadata))
-                        .unwrap_or_default();
-                    if !ports.is_empty() {
-                        binding.bind_interface(&ports);
-                    }
-                    binding.source_path = source;
-                    binding.module_name = view
-                        .metadata
-                        .get("veriloga.module")
-                        .or_else(|| cell.metadata.get("veriloga.module"))
-                        .cloned();
-                    let ready = binding.source_path.is_some() && !binding.terminal_order.is_empty();
-                    (
-                        ready,
-                        if ready {
-                            String::new()
-                        } else {
-                            "missing source or ports".to_owned()
-                        },
-                    )
-                }
-                _ => unreachable!("candidate view was filtered"),
-            };
-            candidates.push(CellCandidate {
-                library: library.name.clone(),
-                cell: cell.name.clone(),
-                view: view.name.clone(),
-                binding,
-                ready,
-                unavailable_reason,
-            });
-        }
-    }
-    candidates
-}
-
-fn metadata_path(metadata: &std::collections::HashMap<String, String>) -> Option<PathBuf> {
-    metadata
-        .get("netlist.source_path")
-        .or_else(|| metadata.get("veriloga.source_path"))
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from)
-}
-
-fn metadata_ports(metadata: &std::collections::HashMap<String, String>) -> Option<Vec<PortSpec>> {
-    let encoded = metadata
-        .get("netlist.ports")
-        .or_else(|| metadata.get("netlist.terminals"))
-        .or_else(|| metadata.get("veriloga.ports"))?;
-    let names = serde_json::from_str::<Vec<String>>(encoded).unwrap_or_else(|_| {
-        encoded
-            .split([',', ' ', '\t', '\n'])
-            .filter(|name| !name.trim().is_empty())
-            .map(|name| name.trim().to_owned())
-            .collect()
-    });
-    Some(
-        names
-            .into_iter()
-            .map(|name| PortSpec {
-                name,
-                direction: PortDirection::InOut,
-            })
-            .collect(),
-    )
+    library_cell_placement_candidates(&app.state.library_manager, &app.state.workspace)
 }
 
 fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
@@ -920,14 +798,5 @@ mod tests {
         assert_eq!(app.state.schematic.tool, Tool::Select);
         assert!(app.state.schematic.pending_port.is_none());
         assert!(app.state.schematic.components.is_empty());
-    }
-
-    #[test]
-    fn veriloga_port_metadata_accepts_json_and_legacy_lists() {
-        let mut metadata = std::collections::HashMap::new();
-        metadata.insert("veriloga.ports".to_owned(), r#"["in","out"]"#.to_owned());
-        assert_eq!(metadata_ports(&metadata).unwrap().len(), 2);
-        metadata.insert("veriloga.ports".to_owned(), "in, out vss".to_owned());
-        assert_eq!(metadata_ports(&metadata).unwrap().len(), 3);
     }
 }
