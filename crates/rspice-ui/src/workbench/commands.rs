@@ -88,6 +88,7 @@ pub enum Command {
     PlaceShape,
     MoveSelection,
     StretchSelection,
+    ArraySelection,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -275,6 +276,7 @@ impl Command {
             Self::PlaceShape => spec("place-shape", "Draw documentation shape\u{2026}", "Design"),
             Self::MoveSelection => spec("move-selection", "Move selection", "Design"),
             Self::StretchSelection => spec("stretch-selection", "Stretch selection", "Design"),
+            Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -623,6 +625,12 @@ impl Command {
                     && !state.schematic.read_only
                     && !state.active_view_read_only()
                     && state.schematic.default_stretch_target().is_some()
+            }
+            Self::ArraySelection => {
+                active_schematic_editor(app)
+                    && !state.schematic.read_only
+                    && !state.active_view_read_only()
+                    && state.schematic.validate_array_source_selection().is_ok()
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -1095,6 +1103,9 @@ impl Command {
             Self::StretchSelection => {
                 crate::common::app::open_stretch_selection_dialog(&mut app.state);
             }
+            Self::ArraySelection => {
+                crate::common::app::open_array_selection_dialog(&mut app.state);
+            }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
                 let next = app
@@ -1157,6 +1168,8 @@ impl Command {
                     crate::common::app::cancel_armed_move_selection(&mut app.state);
                 } else if app.state.dialogs.stretch_selection.armed {
                     crate::common::app::cancel_armed_stretch_selection(&mut app.state);
+                } else if app.state.dialogs.array_selection.armed {
+                    crate::common::app::cancel_armed_array_selection(&mut app.state);
                 } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
                 } else if app.state.dialogs.object_properties.open {
@@ -1470,6 +1483,9 @@ fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     if app.state.dialogs.stretch_selection.armed && tool != Tool::StretchSelection {
         app.state.dialogs.stretch_selection.close();
     }
+    if app.state.dialogs.array_selection.armed && tool != Tool::ArraySelection {
+        app.state.dialogs.array_selection.close();
+    }
     arm_schematic_tool(&mut app.state.schematic, tool);
 }
 
@@ -1681,6 +1697,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PlaceShape,
     Command::MoveSelection,
     Command::StretchSelection,
+    Command::ArraySelection,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -2056,6 +2073,31 @@ mod tests {
             .position(|command| *command == Command::StretchSelection)
             .expect("stretch-selection must be registered");
         assert_eq!(COMMAND_REGISTRY[registry_index - 1], Command::MoveSelection);
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index + 1],
+            Command::ArraySelection
+        );
+    }
+
+    #[test]
+    fn array_selection_command_has_the_exact_mockup_identity_and_no_shortcut() {
+        assert_eq!(Command::ArraySelection.stable_id(), "array-selection");
+        assert_eq!(Command::ArraySelection.spec().label, "Create array\u{2026}");
+        assert_eq!(Command::ArraySelection.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("array-selection"),
+            Some(Command::ArraySelection)
+        );
+        assert!(Command::ArraySelection.shortcut_bindings().is_empty());
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::ArraySelection)
+            .expect("array-selection must be registered");
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index - 1],
+            Command::StretchSelection
+        );
         assert_eq!(COMMAND_REGISTRY[registry_index + 1], Command::SymbolPinTool);
     }
 
@@ -2128,6 +2170,53 @@ mod tests {
         app.state.schematic.read_only = false;
         app.state.workbench.workspace = Workspace::Results;
         assert!(!Command::StretchSelection.is_enabled(&app));
+    }
+
+    #[test]
+    fn array_selection_requires_a_live_eligible_editable_selection() {
+        use crate::state::{Component, Point};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state.schematic.selection.select_component(404);
+        assert!(
+            !Command::ArraySelection.is_enabled(&app),
+            "a stale selection identity cannot open the workflow"
+        );
+
+        app.state.schematic.components.push(Component::new(
+            404,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        assert!(Command::ArraySelection.is_enabled(&app));
+        assert_eq!(
+            Command::ArraySelection.availability(&app),
+            CommandAvailability::Available
+        );
+
+        app.state.schematic.read_only = true;
+        assert!(!Command::ArraySelection.is_enabled(&app));
+        assert_eq!(
+            Command::ArraySelection.availability(&app),
+            CommandAvailability::Disabled("select an editable object")
+        );
+
+        app.state.schematic.read_only = false;
+        app.state.workbench.workspace = Workspace::Results;
+        assert!(!Command::ArraySelection.is_enabled(&app));
+    }
+
+    #[test]
+    fn cancel_retires_an_armed_array_transaction_and_restores_select() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.dialogs.array_selection.armed = true;
+        app.state.schematic.tool = Tool::ArraySelection;
+
+        Command::Cancel.execute(&mut app);
+
+        assert!(!app.state.dialogs.array_selection.armed);
+        assert_eq!(app.state.schematic.tool, Tool::Select);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! This will be optimized for 60fps with direct GPU rendering.
 
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
@@ -14,6 +15,7 @@ use crate::state::{
 
 use super::symbols::SymbolLibrary;
 
+mod array_interaction;
 mod bus_interaction;
 mod context_menu;
 mod coordinates;
@@ -58,42 +60,69 @@ pub(crate) fn request_schematic_canvas_focus(ctx: &egui::Context) {
 #[derive(Default)]
 pub(crate) struct SchematicSymbolContext {
     resolved_by_component_id: HashMap<u64, ResolvedCellSymbol>,
+    resolved_by_binding: Vec<(crate::state::LibraryCellInstance, ResolvedCellSymbol)>,
     pending_library_symbol: Option<ResolvedCellSymbol>,
+    revision: u64,
 }
 
 impl SchematicSymbolContext {
     pub(crate) fn from_state(state: &AppState) -> Self {
         let resolver =
             SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
-        let resolved_by_component_id = state
+        let mut resolved_by_component_id = HashMap::new();
+        let mut resolved_by_binding = Vec::new();
+        for component in state
             .schematic
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
-            .filter_map(|component| {
-                let binding = component.library_cell.as_ref()?;
-                let resolved = resolver.resolve_binding(binding)?;
-                Some((component.id, resolved))
-            })
-            .collect();
+        {
+            let Some(binding) = component.library_cell.as_ref() else {
+                continue;
+            };
+            let Some(resolved) = resolver.resolve_binding(binding) else {
+                continue;
+            };
+            resolved_by_component_id.insert(component.id, resolved.clone());
+            if !resolved_by_binding
+                .iter()
+                .any(|(candidate, _)| candidate == binding)
+            {
+                resolved_by_binding.push((binding.clone(), resolved));
+            }
+        }
         let pending_library_symbol = state
             .schematic
             .pending_library_cell
             .as_ref()
             .and_then(|binding| resolver.resolve_binding(binding));
+        let revision = symbol_context_revision(state);
 
         Self {
             resolved_by_component_id,
+            resolved_by_binding,
             pending_library_symbol,
+            revision,
         }
     }
 
     pub(super) fn resolved_symbol(&self, component: &Component) -> Option<&ResolvedCellSymbol> {
-        self.resolved_by_component_id.get(&component.id)
+        self.resolved_by_component_id
+            .get(&component.id)
+            .or_else(|| {
+                let binding = component.library_cell.as_ref()?;
+                self.resolved_by_binding
+                    .iter()
+                    .find_map(|(candidate, symbol)| (candidate == binding).then_some(symbol))
+            })
     }
 
     pub(super) fn pending_library_symbol(&self) -> Option<&ResolvedCellSymbol> {
         self.pending_library_symbol.as_ref()
+    }
+
+    pub(super) const fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub(crate) fn terminal_points(&self, component: &Component) -> Vec<Point> {
@@ -101,6 +130,14 @@ impl SchematicSymbolContext {
             .terminal_positions_resolved(self.resolved_symbol(component))
             .into_iter()
             .map(|(_, position)| position)
+            .collect()
+    }
+
+    pub(crate) fn named_terminal_points(&self, component: &Component) -> Vec<(String, Point)> {
+        component
+            .terminal_positions_resolved(self.resolved_symbol(component))
+            .into_iter()
+            .map(|(name, position)| (name.to_owned(), position))
             .collect()
     }
 
@@ -357,6 +394,25 @@ impl SchematicSymbolContext {
     }
 }
 
+fn symbol_context_revision(state: &AppState) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    state.library_manager.revision().hash(&mut hasher);
+    state.workspace.schematic_buffers.len().hash(&mut hasher);
+    let mut folded_xor = 0_u64;
+    let mut folded_sum = 0_u64;
+    for (key, buffer) in &state.workspace.schematic_buffers {
+        let mut entry = DefaultHasher::new();
+        key.hash(&mut entry);
+        buffer.topology_version().hash(&mut entry);
+        let entry = entry.finish();
+        folded_xor ^= entry;
+        folded_sum = folded_sum.wrapping_add(entry.rotate_left(17));
+    }
+    folded_xor.hash(&mut hasher);
+    folded_sum.hash(&mut hasher);
+    hasher.finish()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SelectionWindow {
     min_x: i32,
@@ -487,6 +543,7 @@ fn schematic_accessibility_label(
             Command::PlaceShape,
             Command::MoveSelection,
             Command::StretchSelection,
+            Command::ArraySelection,
             Command::ZoomFit,
             Command::Cancel,
         ],
@@ -592,7 +649,9 @@ mod tests {
         resolved_by_component_id.insert(component.id, symbol);
         let context = SchematicSymbolContext {
             resolved_by_component_id,
+            resolved_by_binding: Vec::new(),
             pending_library_symbol: None,
+            revision: 0,
         };
 
         assert_eq!(
@@ -623,7 +682,9 @@ mod tests {
         resolved_by_component_id.insert(component.id, symbol);
         let context = SchematicSymbolContext {
             resolved_by_component_id,
+            resolved_by_binding: Vec::new(),
             pending_library_symbol: None,
+            revision: 0,
         };
         let mut schematic = SchematicState::default();
         schematic.components.push(component);
@@ -705,7 +766,9 @@ mod tests {
         resolved_by_component_id.insert(component.id, symbol);
         let context = SchematicSymbolContext {
             resolved_by_component_id,
+            resolved_by_binding: Vec::new(),
             pending_library_symbol: None,
+            revision: 0,
         };
         let mut schematic = SchematicState::default();
         schematic.components.push(component);
@@ -812,6 +875,30 @@ mod tests {
 
         assert!(refreshed);
         assert!(context.resolved_symbol(component).is_some());
+        let mut generated_preview = component.clone();
+        generated_preview.id = u64::MAX;
+        assert!(
+            context.resolved_symbol(&generated_preview).is_some(),
+            "generated array members resolve authored symbols by immutable binding"
+        );
+    }
+
+    #[test]
+    fn symbol_context_revision_tracks_library_and_schematic_interface_sources() {
+        let mut state = AppState::default();
+        let baseline = symbol_context_revision(&state);
+
+        state.library_manager.add_library(Library::new("work"));
+        let library_changed = symbol_context_revision(&state);
+        assert_ne!(library_changed, baseline);
+
+        let buffer = state
+            .workspace
+            .schematic_buffers
+            .entry("work/amp/schematic".to_owned())
+            .or_default();
+        buffer.add_component(ComponentType::Port, Point::origin());
+        assert_ne!(symbol_context_revision(&state), library_changed);
     }
 
     #[test]

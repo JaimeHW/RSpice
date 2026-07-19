@@ -32,8 +32,55 @@ pub(crate) fn select_with_response(
     options: &[String],
     width: f32,
 ) -> SelectOutput {
+    select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        false,
+    )
+}
+
+/// Mockup-authored engineering-field select. Field values and options use the
+/// same mono face as adjacent exact-value inputs without changing toolbar or
+/// navigation selects globally.
+pub(crate) fn select_mono_with_response(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    width: f32,
+) -> SelectOutput {
+    select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        true,
+    )
+}
+
+fn select_with_font(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    width: f32,
+    mono: bool,
+) -> SelectOutput {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let value_font = if mono {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    } else {
+        theme::sans(tokens::FS_0, FontWeight::Regular)
+    };
 
     let width = width.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
@@ -60,7 +107,7 @@ pub(crate) fn select_with_response(
             egui::pos2(rect.left() + 8.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             selected,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
+            value_font.clone(),
             c.text,
         );
     let cx = rect.right() - 11.0;
@@ -125,7 +172,7 @@ pub(crate) fn select_with_response(
                         egui::pos2(row.left() + 8.0, row.center().y),
                         egui::Align2::LEFT_CENTER,
                         option,
-                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                        value_font.clone(),
                         if is_current { c.accent } else { c.text },
                     );
                     theme::paint_focus_ring(ui, &row_response, row);

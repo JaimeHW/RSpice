@@ -872,6 +872,12 @@ mod tests {
             preferences.resolved_bindings(Command::StretchSelection)[0].display_label(),
             "S"
         );
+        assert!(
+            preferences
+                .resolved_bindings(Command::ArraySelection)
+                .is_empty(),
+            "Create array intentionally has no factory shortcut"
+        );
     }
 
     #[test]

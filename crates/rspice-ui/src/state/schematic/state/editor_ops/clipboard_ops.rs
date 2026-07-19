@@ -19,6 +19,29 @@ impl SchematicState {
             return;
         }
 
+        self.clipboard = self.capture_complete_selection_resolved(|component| {
+            component
+                .terminal_positions()
+                .into_iter()
+                .map(|(_, point)| point)
+                .collect()
+        });
+    }
+
+    /// Capture the current complete-object selection without modifying the
+    /// application clipboard.
+    ///
+    /// This is the common selection authority used by copy and by repeated
+    /// structure transactions.  The caller supplies resolved terminal
+    /// geometry so authored cell symbols are treated identically to generated
+    /// primitives.  Whole conductors explicitly selected by the user are
+    /// retained, as are conductors whose two endpoints terminate on selected
+    /// components.  Bus-tap ownership and explicit junction intent are closed
+    /// over in the same deterministic way as Copy.
+    pub(crate) fn capture_complete_selection_resolved(
+        &self,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) -> ClipboardData {
         let selected_comps: Vec<Component> = self
             .components
             .iter()
@@ -29,7 +52,7 @@ impl SchematicState {
         // Get all terminal positions for selected components
         let selected_terminals: Vec<Point> = selected_comps
             .iter()
-            .flat_map(|c| c.terminal_positions().into_iter().map(|(_, pos)| pos))
+            .flat_map(&mut terminal_points_for)
             .collect();
 
         // Find wires that have both endpoints at selected component terminals
@@ -114,7 +137,7 @@ impl SchematicState {
             .cloned()
             .collect();
 
-        self.clipboard = ClipboardData::from_complete_selection(ClipboardData {
+        ClipboardData::from_complete_selection(ClipboardData {
             components: selected_comps,
             wires: wires_to_copy,
             junctions: junctions_to_copy,
@@ -124,7 +147,7 @@ impl SchematicState {
             design_notes: design_notes_to_copy,
             documentation_shapes: documentation_shapes_to_copy,
             origin: Point::origin(),
-        });
+        })
     }
 
     /// Check if clipboard has content

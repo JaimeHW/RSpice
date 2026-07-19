@@ -43,9 +43,10 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceText,
     Command::PlaceShape,
 ];
-const DESIGN_EDIT_COMMANDS: [Command; 7] = [
+const DESIGN_EDIT_COMMANDS: [Command; 8] = [
     Command::MoveSelection,
     Command::StretchSelection,
+    Command::ArraySelection,
     Command::RotateSelection,
     Command::MirrorSelectionHorizontal,
     Command::MirrorSelectionVertical,
@@ -1192,6 +1193,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlaceText => WorkbenchIcon::Label,
         Command::PlaceShape => WorkbenchIcon::Grid,
         Command::MoveSelection | Command::StretchSelection => WorkbenchIcon::Select,
+        Command::ArraySelection => WorkbenchIcon::Grid,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy => WorkbenchIcon::Folder,
         Command::RunSimulation => WorkbenchIcon::Run,
@@ -2371,12 +2373,13 @@ mod tests {
     }
 
     #[test]
-    fn design_edit_menu_starts_with_exact_move_and_stretch_sequence() {
+    fn design_edit_menu_starts_with_exact_move_stretch_and_array_sequence() {
         assert_eq!(
             DESIGN_EDIT_COMMANDS,
             [
                 Command::MoveSelection,
                 Command::StretchSelection,
+                Command::ArraySelection,
                 Command::RotateSelection,
                 Command::MirrorSelectionHorizontal,
                 Command::MirrorSelectionVertical,

@@ -512,6 +512,7 @@ impl Command {
             | Self::PlaceShape
             | Self::MoveSelection
             | Self::StretchSelection
+            | Self::ArraySelection
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -601,6 +602,7 @@ impl Command {
             Self::PlaceShape => NONE,
             Self::MoveSelection => MOVE_SELECTION,
             Self::StretchSelection => STRETCH_SELECTION,
+            Self::ArraySelection => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -671,6 +673,7 @@ impl Command {
             | Self::Delete
             | Self::MoveSelection
             | Self::StretchSelection
+            | Self::ArraySelection
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",
@@ -952,6 +955,18 @@ mod tests {
                 binding_owners(STRETCH_SELECTION[0].chord, platform),
                 vec![Command::StretchSelection]
             );
+        }
+    }
+
+    #[test]
+    fn create_array_is_canvas_scoped_and_has_no_factory_shortcut() {
+        assert_eq!(
+            Command::ArraySelection.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        assert!(Command::ArraySelection.shortcut_bindings().is_empty());
+        for platform in CommandPlatform::ALL {
+            assert_eq!(Command::ArraySelection.default_shortcut_label(platform), "");
         }
     }
 }

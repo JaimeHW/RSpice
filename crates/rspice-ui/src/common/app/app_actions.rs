@@ -251,7 +251,8 @@ impl RSpiceApp {
             | ShortcutCommand::PlaceText
             | ShortcutCommand::PlaceShape
             | ShortcutCommand::MoveSelection
-            | ShortcutCommand::StretchSelection => command.execute(self),
+            | ShortcutCommand::StretchSelection
+            | ShortcutCommand::ArraySelection => command.execute(self),
             ShortcutCommand::SymbolPinTool
             | ShortcutCommand::SymbolPolylineTool
             | ShortcutCommand::SymbolCircleTool
@@ -291,6 +292,8 @@ impl RSpiceApp {
                     super::cancel_armed_move_selection(&mut self.state);
                 } else if self.state.dialogs.stretch_selection.armed {
                     super::cancel_armed_stretch_selection(&mut self.state);
+                } else if self.state.dialogs.array_selection.armed {
+                    super::cancel_armed_array_selection(&mut self.state);
                 } else if self.state.workbench.drawer.is_some() {
                     self.state.workbench.close_drawer();
                 } else if self.state.dialogs.object_properties.open {
@@ -565,6 +568,7 @@ impl RSpiceApp {
             | ShortcutCommand::PlaceShape
             | ShortcutCommand::MoveSelection
             | ShortcutCommand::StretchSelection
+            | ShortcutCommand::ArraySelection
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::PlaceInstance
             | ShortcutCommand::DescendHierarchy
@@ -898,6 +902,7 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::PlaceShape
             | ShortcutCommand::MoveSelection
             | ShortcutCommand::StretchSelection
+            | ShortcutCommand::ArraySelection
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::Place(_)

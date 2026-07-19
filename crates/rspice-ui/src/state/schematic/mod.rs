@@ -16,6 +16,7 @@
 //! - `net_label` - Net labels and junctions
 //! - `state` - Main SchematicState
 
+mod array;
 mod bus;
 mod canvas_cache;
 mod clipboard;
@@ -38,6 +39,11 @@ mod undo_history;
 mod wire;
 
 // Re-export all public types for backwards compatibility
+pub use array::{
+    MAX_SCHEMATIC_ARRAY_MEMBERS, SchematicArrayCount, SchematicArrayError, SchematicArrayImpact,
+    SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNameRange, SchematicArrayNaming,
+    SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
+};
 pub(crate) use bus::nearest_lattice_point_on_segment;
 pub use bus::{
     Bus, BusDeclaration, BusDirection, BusDrawing, BusMember, BusNotation, BusParseError,

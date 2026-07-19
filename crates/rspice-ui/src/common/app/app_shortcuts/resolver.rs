@@ -914,6 +914,12 @@ mod tests {
     #[test]
     fn plain_s_resolves_stretch_only_in_the_engineering_canvas() {
         let profile = ShortcutPreferences::default();
+        assert!(
+            profile
+                .effective_bindings(Command::ArraySelection)
+                .is_empty(),
+            "Create array has no factory shortcut to route through the resolver"
+        );
         let resolve = |environment| {
             ShortcutResolverState::default().resolve(
                 &snapshot(&[event(Key::S, Modifiers::NONE, false)], false),

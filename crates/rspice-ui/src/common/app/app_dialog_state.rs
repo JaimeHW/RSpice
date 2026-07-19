@@ -547,6 +547,121 @@ impl StretchSelectionDialogState {
     }
 }
 
+/// Isolated authority, typed draft, and canvas interaction state for the
+/// mockup-owned Create object array transaction. The complete replica set is
+/// validated as one candidate and the live document remains unchanged until
+/// the canvas commit boundary succeeds.
+#[derive(Debug, Clone)]
+pub(crate) struct ArraySelectionPreviewCache {
+    pub(crate) plan: crate::state::SchematicArrayPlan,
+    pub(crate) library_revision: u64,
+    pub(crate) symbol_revision: u64,
+    pub(crate) identity_cursor: u64,
+    pub(crate) preview: Result<crate::state::SchematicArrayPreview, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ArraySelectionDialogState {
+    pub(crate) open: bool,
+    pub(crate) armed: bool,
+    pub(crate) kind: crate::state::SchematicArrayKind,
+    pub(crate) count: String,
+    pub(crate) naming: String,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) anchor: Option<crate::state::Point>,
+    pub(crate) preview_delta: crate::state::Point,
+    pub(crate) pointer_drag: bool,
+    pub(crate) preview_error: Option<String>,
+    pub(crate) preview_cache: Option<ArraySelectionPreviewCache>,
+    pub(crate) initial_kind: crate::state::SchematicArrayKind,
+    pub(crate) initial_count: String,
+    pub(crate) initial_naming: String,
+    pub(crate) validation_field_mask: u8,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl ArraySelectionDialogState {
+    pub(crate) fn open(
+        &mut self,
+        authority: SchematicEditAuthority,
+        count: String,
+        naming: String,
+    ) {
+        let initial_count = count.clone();
+        let initial_naming = naming.clone();
+        *self = Self {
+            open: true,
+            armed: false,
+            kind: crate::state::SchematicArrayKind::default(),
+            count,
+            naming,
+            authority: Some(authority),
+            anchor: None,
+            preview_delta: crate::state::Point::origin(),
+            pointer_drag: false,
+            preview_error: None,
+            preview_cache: None,
+            initial_kind: crate::state::SchematicArrayKind::default(),
+            initial_count,
+            initial_naming,
+            validation_field_mask: 0,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn arm(&mut self) {
+        self.open = false;
+        self.armed = true;
+        self.anchor = None;
+        self.preview_delta = crate::state::Point::origin();
+        self.pointer_drag = false;
+        self.preview_error = None;
+        self.preview_cache = None;
+        self.dirty = false;
+        self.discard_confirm = false;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = self.kind != self.initial_kind
+            || !equivalent_array_count(&self.count, &self.initial_count)
+            || !equivalent_array_naming(&self.naming, &self.initial_naming);
+        self.discard_confirm = false;
+        self.preview_cache = None;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
+fn equivalent_array_count(left: &str, right: &str) -> bool {
+    left == right
+        || crate::state::SchematicArrayCount::parse(left)
+            .ok()
+            .zip(crate::state::SchematicArrayCount::parse(right).ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
+fn equivalent_array_naming(left: &str, right: &str) -> bool {
+    left == right
+        || crate::state::SchematicArrayNaming::parse(left)
+            .ok()
+            .zip(crate::state::SchematicArrayNaming::parse(right).ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
 /// Exact, isolated draft for a selected bus. The durable baseline is retained
 /// to guard the eventual commit against stale-object overwrite.
 #[derive(Debug, Clone)]
@@ -1074,6 +1189,9 @@ pub struct DialogState {
     /// Anchor-preserving conductor/documentation stretch transaction.
     pub(crate) stretch_selection: StretchSelectionDialogState,
 
+    /// Named linear, rectangular, or radial documentation array transaction.
+    pub(crate) array_selection: ArraySelectionDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -1133,6 +1251,7 @@ impl DialogState {
             || self.documentation_shape.open
             || self.move_selection.open
             || self.stretch_selection.open
+            || self.array_selection.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
@@ -1228,6 +1347,24 @@ mod tests {
                     wire_id: 1,
                     segment_index: 0,
                 },
+            );
+        });
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs.array_selection.open(
+                super::SchematicEditAuthority {
+                    design_execution_epoch: 0,
+                    active_schematic_epoch: 0,
+                    topology_version: 0,
+                    view_path: "user/top/schematic".to_owned(),
+                    grid_size: 10,
+                    document_policy: crate::state::SchematicDocumentPolicy::default(),
+                    snapshot: crate::state::SchematicSnapshot::capture(
+                        &crate::state::SchematicState::default(),
+                    ),
+                    selection: crate::state::Selection::default(),
+                },
+                "8 \u{00d7} 1".to_owned(),
+                "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]".to_owned(),
             );
         });
         assert_blocks_shortcuts(|dialogs| {

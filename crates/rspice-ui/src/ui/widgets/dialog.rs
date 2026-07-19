@@ -231,6 +231,7 @@ impl DialogSize {
 }
 
 const WORKFLOW_HEADER_MIN_HEIGHT: f32 = 57.0;
+const WORKFLOW_HEADER_TEXT_MIN_HEIGHT: f32 = 33.0;
 const WORKFLOW_HEADER_HORIZONTAL_MARGIN: i8 = 15;
 const WORKFLOW_FOOTER_HORIZONTAL_MARGIN: i8 = 12;
 const WORKFLOW_FOOTER_VERTICAL_MARGIN: i8 = 10;
@@ -470,6 +471,8 @@ pub struct Dialog<'a> {
     manual_body_scroll: bool,
     note_only_footer: bool,
     initial_focus: DialogInitialFocus,
+    retained_cancel_focus: Option<DialogInitialFocus>,
+    initial_height: Option<f32>,
 }
 
 impl<'a> Dialog<'a> {
@@ -496,6 +499,8 @@ impl<'a> Dialog<'a> {
             manual_body_scroll: false,
             note_only_footer: false,
             initial_focus: DialogInitialFocus::Container,
+            retained_cancel_focus: None,
+            initial_height: None,
         }
     }
 
@@ -505,9 +510,27 @@ impl<'a> Dialog<'a> {
         self
     }
 
+    /// Supply the mockup-authored total surface height for the first frame.
+    /// Content-height dialogs still measure and retain their actual height;
+    /// this removes the provisional max-height jump before that measurement.
+    pub fn initial_height(mut self, height: f32) -> Self {
+        self.initial_height = height.is_finite().then(|| height.max(1.0));
+        self
+    }
+
     /// Choose the control that receives focus when the dialog opens.
     pub fn initial_focus(mut self, target: DialogInitialFocus) -> Self {
         self.initial_focus = target;
+        self
+    }
+
+    /// Keep a dialog transaction open after its first cancel choice and move
+    /// focus to a control that explains the retained state. Dirty workflows
+    /// use this for their first Escape/Cancel pass; the following pass omits
+    /// this option so a confirmed dismissal restores the prior workspace
+    /// focus normally.
+    pub fn retain_on_cancel_focus(mut self, target: DialogInitialFocus) -> Self {
+        self.retained_cancel_focus = Some(target);
         self
     }
 
@@ -637,8 +660,11 @@ impl<'a> Dialog<'a> {
         let c = t.color;
         let screen = ctx.screen_rect();
         let id = Id::new(("rspice.dialog", self.title));
-        let measured_height_id = id.with("measured-surface-height");
-        let measured_height = ctx.data(|data| data.get_temp::<f32>(measured_height_id));
+        let measured_height_id =
+            id.with(("measured-surface-height", self.transaction_state.is_some()));
+        let measured_height = ctx
+            .data(|data| data.get_temp::<f32>(measured_height_id))
+            .or(self.initial_height);
         let layout = DialogLayout::resolve(self.size, screen, measured_height);
         let large_targets = layout.narrow
             || (self.size == DialogSize::AnalysisCatalog && screen.width() <= 820.0)
@@ -812,7 +838,7 @@ impl<'a> Dialog<'a> {
                             *offset = body_output.state.offset.y;
                         }
                     }
-                    self.transaction_strip(ui, &t);
+                    self.transaction_strip(ui, &t, width);
                     let footer = self.footer(ui, &t, hide_close_only_footer, large_targets, width);
                     rendered_focus.primary = footer.primary_id;
                     rendered_focus.secondary = footer.secondary_id;
@@ -884,7 +910,15 @@ impl<'a> Dialog<'a> {
             // Keeping a previous session's height could otherwise force a
             // later workflow state into an unnecessarily short scroll area.
             ctx.data_mut(|data| data.remove_temp::<f32>(measured_height_id));
-            restore_dialog_focus(ctx, focus_state_id, focus_id, modal_layer);
+            let retained_target = matches!(choice, DialogChoice::Ghost | DialogChoice::Cancelled)
+                .then_some(self.retained_cancel_focus)
+                .flatten();
+            if let Some(target) = retained_target {
+                let target = rendered_focus.requested(target).unwrap_or(focus_id);
+                ctx.memory_mut(|memory| memory.request_focus(target));
+            } else {
+                restore_dialog_focus(ctx, focus_state_id, focus_id, modal_layer);
+            }
         }
 
         choice
@@ -927,7 +961,13 @@ impl<'a> Dialog<'a> {
                             },
                         );
                         ui.allocate_ui_with_layout(
-                            vec2(text_width, 0.0),
+                            // A zero-height child is aligned by its empty
+                            // rectangle and then grows downward, which pushed
+                            // every two-line header below the mockup center and
+                            // enlarged the surface. Give the authored text
+                            // stack its real minimum height; wrapped narrow
+                            // titles may still grow it when necessary.
+                            vec2(text_width, WORKFLOW_HEADER_TEXT_MIN_HEIGHT),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui.set_width(text_width);
@@ -1011,7 +1051,7 @@ impl<'a> Dialog<'a> {
         required > (surface_width - 2.0 * WORKFLOW_FOOTER_HORIZONTAL_MARGIN as f32).max(1.0)
     }
 
-    fn transaction_strip(&self, ui: &mut Ui, t: &Tokens) {
+    fn transaction_strip(&self, ui: &mut Ui, t: &Tokens, surface_width: f32) {
         let Some(transaction) = self.transaction_state else {
             return;
         };
@@ -1020,57 +1060,62 @@ impl<'a> Dialog<'a> {
             DialogTransactionTone::Complete => t.color.ok,
             DialogTransactionTone::Error => t.color.err,
         };
-        let response = Frame::NONE
-            .fill(t.color.bg_panel)
-            .inner_margin(Margin::symmetric(12, 6))
-            .show(ui, |ui| {
-                let width = ui.available_width();
-                ui.allocate_ui_with_layout(
-                    vec2(width, 25.0),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        let (indicator, _) =
-                            ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                        ui.painter().circle_stroke(
-                            indicator.center(),
-                            4.0,
-                            Stroke::new(1.0, color),
-                        );
-                        if transaction.tone == DialogTransactionTone::Complete {
-                            ui.painter().circle_filled(indicator.center(), 2.0, color);
-                        }
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 1.0;
-                            ui.label(
-                                egui::RichText::new(transaction.title)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                                    .color(t.color.text),
-                            );
-                            ui.label(
-                                egui::RichText::new(transaction.detail)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text_faint),
-                            );
-                        });
-                    },
-                );
-            });
+        // A preceding split-pane body may leave `available_width()` at its
+        // first column's retained minimum. The transaction state is a dialog-
+        // level strip, so resolve its rectangle from the surface instead of
+        // inheriting the last body's content geometry.
+        let strip_rect = Rect::from_min_size(
+            egui::pos2(ui.max_rect().left(), ui.cursor().top()),
+            vec2(surface_width, 37.0),
+        );
+        let response = ui.allocate_rect(strip_rect, Sense::hover());
+        ui.painter().rect_filled(strip_rect, 0.0, t.color.bg_panel);
         ui.painter().hline(
-            response.response.rect.x_range(),
-            response.response.rect.top(),
+            strip_rect.x_range(),
+            strip_rect.top(),
             Stroke::new(1.0, t.color.border_strong),
         );
-        ui.ctx()
-            .accesskit_node_builder(response.response.id, |node| {
-                node.set_role(if transaction.tone == DialogTransactionTone::Error {
-                    egui::accesskit::Role::Alert
-                } else {
-                    egui::accesskit::Role::Status
-                });
-                node.set_label(transaction.title);
-                node.set_description(transaction.detail);
+        let content_rect = Rect::from_min_max(
+            strip_rect.min + vec2(12.0, 6.0),
+            strip_rect.max - vec2(12.0, 6.0),
+        );
+        let mut strip_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(content_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        strip_ui.spacing_mut().item_spacing.x = 8.0;
+        let (indicator, _) = strip_ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+        strip_ui
+            .painter()
+            .circle_stroke(indicator.center(), 4.0, Stroke::new(1.0, color));
+        if transaction.tone == DialogTransactionTone::Complete {
+            strip_ui
+                .painter()
+                .circle_filled(indicator.center(), 2.0, color);
+        }
+        strip_ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.label(
+                egui::RichText::new(transaction.title)
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.text),
+            );
+            ui.label(
+                egui::RichText::new(transaction.detail)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            );
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(if transaction.tone == DialogTransactionTone::Error {
+                egui::accesskit::Role::Alert
+            } else {
+                egui::accesskit::Role::Status
             });
+            node.set_label(transaction.title);
+            node.set_description(transaction.detail);
+        });
     }
 
     fn footer(
@@ -1582,6 +1627,17 @@ mod tests {
     }
 
     #[test]
+    fn authored_initial_height_avoids_the_content_dialog_first_frame_jump() {
+        let dialog = Dialog::new("Test", TEST_TITLE, "Accept").initial_height(370.0);
+        assert_eq!(dialog.initial_height, Some(370.0));
+
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 720.0));
+        let layout = DialogLayout::resolve(DialogSize::Transaction, screen, dialog.initial_height);
+        assert_eq!(layout.surface_rect.size(), vec2(760.0, 370.0));
+        assert_eq!(layout.surface_rect.center(), screen.center());
+    }
+
+    #[test]
     fn capability_review_desktop_layout_uses_mockup_caps_and_is_centered() {
         let screen = Rect::from_min_size(egui::pos2(20.0, 30.0), vec2(1_440.0, 900.0));
         let layout = DialogLayout::resolve(DialogSize::CapabilityReview, screen, None);
@@ -1767,6 +1823,106 @@ mod tests {
         assert!(dialog.manual_body_scroll);
         assert!(dialog.note_only_footer);
         assert_eq!(dialog.footer_height(false, false, 760.0), 48.0);
+    }
+
+    #[test]
+    fn retained_cancel_focus_is_an_explicit_one_pass_contract() {
+        let retained = Dialog::new("Test", TEST_TITLE, "Accept")
+            .ghost("Discard changes")
+            .retain_on_cancel_focus(DialogInitialFocus::Ghost);
+        assert_eq!(
+            retained.retained_cancel_focus,
+            Some(DialogInitialFocus::Ghost)
+        );
+        assert!(
+            Dialog::new("Test", TEST_TITLE, "Accept")
+                .retained_cancel_focus
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut underlying = String::new();
+        focus_underlying_editor(&ctx, &mut underlying);
+
+        let mut choice = DialogChoice::None;
+        let _ = ctx.run(raw_input(Vec::new()), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = ui.add(
+                    egui::TextEdit::singleline(&mut underlying)
+                        .id(underlying_id())
+                        .desired_width(240.0),
+                );
+            });
+            choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .ghost("Discard changes")
+                .retain_on_cancel_focus(DialogInitialFocus::Ghost)
+                .show(ctx, |ui| {
+                    ui.label("Dirty dialog");
+                });
+        });
+
+        let output = ctx.run(
+            raw_input(vec![key_event(Key::Escape, Modifiers::NONE)]),
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let _ = ui.add(
+                        egui::TextEdit::singleline(&mut underlying)
+                            .id(underlying_id())
+                            .desired_width(240.0),
+                    );
+                });
+                choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+                    .description(TEST_DESCRIPTION)
+                    .ghost("Discard changes")
+                    .retain_on_cancel_focus(DialogInitialFocus::Ghost)
+                    .show(ctx, |ui| {
+                        ui.label("Dirty dialog");
+                    });
+            },
+        );
+        assert_eq!(choice, DialogChoice::Cancelled);
+        let focused = ctx
+            .memory(|memory| memory.focused())
+            .expect("retained dialog keeps focus");
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+        let focused_node = nodes
+            .iter()
+            .find(|(id, _)| *id == focused.accesskit_id())
+            .map(|(_, node)| node)
+            .expect("focused discard node is published");
+        assert_eq!(focused_node.role(), egui::accesskit::Role::Button);
+        assert_eq!(focused_node.label(), Some("Discard changes"));
+
+        let _ = ctx.run(
+            raw_input(vec![key_event(Key::Escape, Modifiers::NONE)]),
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let _ = ui.add(
+                        egui::TextEdit::singleline(&mut underlying)
+                            .id(underlying_id())
+                            .desired_width(240.0),
+                    );
+                });
+                choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+                    .description(TEST_DESCRIPTION)
+                    .ghost("Discard changes")
+                    .show(ctx, |ui| {
+                        ui.label("Dirty dialog");
+                    });
+            },
+        );
+        assert_eq!(choice, DialogChoice::Cancelled);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(underlying_id()));
     }
 
     #[test]

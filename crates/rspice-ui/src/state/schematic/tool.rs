@@ -28,6 +28,10 @@ pub enum Tool {
     /// while keeping every unaffected anchor fixed.
     StretchSelection,
 
+    /// Create a deterministic repeated structure from the frozen current
+    /// selection using the mockup-owned array workflow.
+    ArraySelection,
+
     /// Draw wires
     ///
     /// Click to start/extend wire, right-click or Escape to finish.
@@ -71,6 +75,7 @@ impl Tool {
             Tool::Select => "Select",
             Tool::MoveSelection => "Move selection",
             Tool::StretchSelection => "Stretch selection",
+            Tool::ArraySelection => "Create array",
             Tool::Wire => "Wire",
             Tool::Bus => "Bus",
             Tool::BusTap => "Bus tap",
@@ -89,6 +94,7 @@ impl Tool {
             Tool::Select => None,
             Tool::MoveSelection => Some('m'),
             Tool::StretchSelection => Some('s'),
+            Tool::ArraySelection => None,
             Tool::Wire => Some('w'),
             Tool::Bus => Some('b'),
             Tool::BusTap => Some('t'),
@@ -151,6 +157,7 @@ impl Tool {
             Tool::Select => "default",
             Tool::MoveSelection => "move",
             Tool::StretchSelection => "move",
+            Tool::ArraySelection => "crosshair",
             Tool::Wire => "crosshair",
             Tool::Bus | Tool::BusTap => "crosshair",
             Tool::Junction => "crosshair",
@@ -166,3 +173,16 @@ impl Tool {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::Tool;
+
+    #[test]
+    fn array_selection_tool_has_exact_identity_and_no_shortcut() {
+        assert_eq!(Tool::ArraySelection.display_name(), "Create array");
+        assert_eq!(Tool::ArraySelection.shortcut(), None);
+        assert_eq!(Tool::ArraySelection.cursor(), "crosshair");
+        assert!(!Tool::ArraySelection.is_place_tool());
+    }
+}

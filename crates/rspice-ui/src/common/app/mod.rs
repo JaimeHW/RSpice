@@ -53,8 +53,9 @@ pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewR
 
 mod app_dialog_state;
 pub(crate) use app_dialog_state::{
-    BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft,
-    DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
+    ArraySelectionDialogState, ArraySelectionPreviewCache, BusObjectPropertiesDraft,
+    BusTapDialogState, BusTapObjectPropertiesDraft, DesignNoteDialogState,
+    DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
     DocumentationShapeObjectPropertiesDraft, MoveSelectionDialogState,
     NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, PinPortDialogState,
     RenameSelectionTarget, StretchSelectionDialogState,
@@ -98,6 +99,11 @@ mod app_stretch_selection_dialog;
 pub(crate) use app_stretch_selection_dialog::{
     armed_stretch_selection_authority, cancel_armed_stretch_selection,
     open_stretch_selection_dialog, stretch_delta_for_policy,
+};
+mod app_array_selection_dialog;
+pub(crate) use app_array_selection_dialog::{
+    armed_array_selection_authority, armed_array_selection_plan, cancel_armed_array_selection,
+    open_array_selection_dialog,
 };
 mod app_object_properties_dialog;
 mod app_pin_port_dialog;
@@ -881,6 +887,7 @@ impl RSpiceApp {
         self.render_documentation_shape_dialog(ctx);
         self.render_move_selection_dialog(ctx);
         self.render_stretch_selection_dialog(ctx);
+        self.render_array_selection_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);

@@ -36,7 +36,7 @@ pub use pill::{Pill, PillState};
 pub(crate) use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
 pub use section::section_header;
 pub use select::select;
-pub(crate) use select::select_with_response;
+pub(crate) use select::{select_mono_with_response, select_with_response};
 pub(crate) use selection_command::{
     SelectionImpact, SelectionPreview, selection_command_options_paint_width,
     selection_command_workflow, workflow_preview_status,

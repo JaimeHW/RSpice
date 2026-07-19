@@ -1528,6 +1528,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::PlaceText => Icon::NetLabel,
         Command::PlaceShape => Icon::Grid,
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
+        Command::ArraySelection => Icon::Grid,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
         Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,
@@ -1881,6 +1882,14 @@ mod tests {
         assert_eq!(
             row_icon(&PaletteEntry::Command(Command::StretchSelection)),
             Icon::Select
+        );
+    }
+
+    #[test]
+    fn create_array_uses_the_exact_grid_glyph() {
+        assert_eq!(
+            row_icon(&PaletteEntry::Command(Command::ArraySelection)),
+            Icon::Grid
         );
     }
 

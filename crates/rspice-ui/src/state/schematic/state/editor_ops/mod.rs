@@ -1,3 +1,4 @@
+mod array_ops;
 mod bus_ops;
 mod clipboard_ops;
 mod connection_ops;

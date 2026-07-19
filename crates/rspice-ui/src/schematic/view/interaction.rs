@@ -4,6 +4,7 @@ use crate::common::app::{AppState, ConsoleMessage, DragType};
 use crate::state::{ComponentType, NetGraph, Point, Tool};
 
 use super::SchematicSymbolContext;
+use super::array_interaction::handle_armed_array_selection;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate};
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::design_notes::design_note_at;
@@ -38,6 +39,12 @@ pub(super) fn handle_tool_interactions(
     } else if current_tool == Tool::StretchSelection && !state.dialogs.stretch_selection.armed {
         crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
         return;
+    } else if state.dialogs.array_selection.armed && current_tool != Tool::ArraySelection {
+        state.dialogs.array_selection.close();
+        return;
+    } else if current_tool == Tool::ArraySelection && !state.dialogs.array_selection.armed {
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
     }
     let shape_double_click = current_tool == Tool::DocumentationShape
         && response.double_clicked_by(egui::PointerButton::Primary);
@@ -57,6 +64,8 @@ pub(super) fn handle_tool_interactions(
         handle_armed_move_selection(ui, response, state, viewport, grid_size, symbol_context);
     } else if current_tool == Tool::StretchSelection {
         handle_armed_stretch_selection(ui, response, state, viewport, grid_size, symbol_context);
+    } else if current_tool == Tool::ArraySelection {
+        handle_armed_array_selection(ui, response, state, viewport, grid_size, symbol_context);
     }
 
     if shape_double_click && let Some(pos) = response.interact_pointer_pos() {
@@ -137,7 +146,7 @@ pub(super) fn handle_tool_interactions(
                     pos,
                 );
             }
-            Tool::MoveSelection | Tool::StretchSelection => {}
+            Tool::MoveSelection | Tool::StretchSelection | Tool::ArraySelection => {}
             Tool::Probe => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
                 handle_probe_click(ui, state, grid_pos, symbol_context);

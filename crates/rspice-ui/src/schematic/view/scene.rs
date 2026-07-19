@@ -580,7 +580,9 @@ mod tests {
         resolved_by_component_id.insert(component.id, symbol);
         let context = SchematicSymbolContext {
             resolved_by_component_id,
+            resolved_by_binding: Vec::new(),
             pending_library_symbol: None,
+            revision: 0,
         };
 
         assert_eq!(

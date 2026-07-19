@@ -66,6 +66,9 @@ pub(crate) fn open_move_selection_dialog(state: &mut AppState) {
     if state.dialogs.stretch_selection.armed {
         super::cancel_armed_stretch_selection(state);
     }
+    if state.dialogs.array_selection.armed {
+        super::cancel_armed_array_selection(state);
+    }
     state
         .dialogs
         .move_selection

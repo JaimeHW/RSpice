@@ -3,11 +3,12 @@ use egui::{Painter, Rect, Response, Stroke, Vec2};
 use crate::common::app::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
-    ResolvedCellSymbol, Tool, geometry_from_points,
+    ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, Tool, geometry_from_points,
 };
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
 use super::SchematicSymbolContext;
+use super::array_interaction::array_placement;
 use super::bus_interaction::resolve_bus_tap_candidate;
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::design_notes::draw_design_note;
@@ -46,6 +47,14 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     draw_stretch_selection_preview(painter, response, state, viewport, symbol_context);
+    draw_array_selection_preview(
+        painter,
+        response,
+        state,
+        viewport,
+        symbol_context,
+        symbol_library,
+    );
     draw_bus_preview(painter, response, state, viewport);
     draw_wire_preview(painter, response, state, viewport, symbol_context);
     draw_bus_tap_preview(painter, response, state, viewport);
@@ -299,6 +308,131 @@ fn draw_stretch_selection_preview(
                 policy.label()
             )
         });
+    draw_transform_feedback(painter, response, true, detail);
+}
+
+fn draw_array_selection_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &mut AppState,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+    symbol_library: Option<&SymbolLibrary>,
+) {
+    if state.schematic.tool != Tool::ArraySelection || !state.dialogs.array_selection.armed {
+        return;
+    }
+    let draft = &state.dialogs.array_selection;
+    if draft.kind != SchematicArrayKind::RadialDocumentation
+        && draft.preview_delta == Point::origin()
+    {
+        if let Some(detail) = draft.preview_error.clone() {
+            draw_transform_feedback(painter, response, false, detail);
+        }
+        return;
+    }
+    let placement = match array_placement(state) {
+        Ok(placement) => placement,
+        Err(message) => {
+            state.dialogs.array_selection.preview_error = Some(message.to_owned());
+            draw_transform_feedback(painter, response, false, message.to_owned());
+            return;
+        }
+    };
+    let plan = match crate::common::app::armed_array_selection_plan(state, placement) {
+        Ok(plan) => plan,
+        Err(message) => {
+            state.dialogs.array_selection.preview_error = Some(message.clone());
+            draw_transform_feedback(painter, response, false, message);
+            return;
+        }
+    };
+    let library_revision = state.library_manager.revision();
+    let symbol_revision = symbol_context.revision();
+    let identity_cursor = state.schematic.identity_cursor();
+    let mut cache = state.dialogs.array_selection.preview_cache.take();
+    let cache_matches = cache.as_ref().is_some_and(|cached| {
+        cached.plan == plan
+            && cached.library_revision == library_revision
+            && cached.symbol_revision == symbol_revision
+            && cached.identity_cursor == identity_cursor
+    });
+    if !cache_matches {
+        let preview = state
+            .schematic
+            .preview_array_selection_resolved(
+                &plan,
+                |component| symbol_context.named_terminal_points(component),
+                |component| symbol_context.component_bounds_tuple(component),
+            )
+            .map_err(|error| error.to_string());
+        cache = Some(crate::common::app::ArraySelectionPreviewCache {
+            plan,
+            library_revision,
+            symbol_revision,
+            identity_cursor,
+            preview,
+        });
+    }
+    let cache = cache.expect("array preview cache was populated");
+    let preview = match &cache.preview {
+        Ok(preview) => {
+            state.dialogs.array_selection.preview_error = None;
+            preview
+        }
+        Err(detail) => {
+            let detail = detail.clone();
+            state.dialogs.array_selection.preview_error = Some(detail.clone());
+            state.dialogs.array_selection.preview_cache = Some(cache);
+            draw_transform_feedback(painter, response, false, detail);
+            return;
+        }
+    };
+
+    for wire in preview.wires() {
+        draw_wire(painter, viewport, wire, true, false);
+    }
+    for bus in preview.buses() {
+        draw_bus(painter, viewport, bus, true);
+    }
+    for tap in preview.bus_taps() {
+        draw_bus_tap(painter, viewport, tap, true);
+    }
+    for component in preview.components() {
+        draw_component(
+            painter,
+            viewport,
+            component,
+            true,
+            symbol_library,
+            symbol_context,
+        );
+    }
+    for junction in preview.junctions() {
+        draw_junction(painter, viewport, junction.pos, state);
+    }
+    for label in preview.net_labels() {
+        draw_net_label(painter, viewport, label, true, false, true);
+    }
+    for note in preview.design_notes() {
+        draw_design_note(painter, viewport, note, state, true, false);
+    }
+    for shape in preview.documentation_shapes() {
+        draw_documentation_shape(painter, viewport, shape, true, false);
+    }
+
+    let impact = preview.impact();
+    let detail = match placement {
+        SchematicArrayPlacement::Pitch(delta) => format!(
+            "{} replicas \u{00b7} pitch \u{0394} {}, {}",
+            impact.replicas, delta.x, delta.y
+        ),
+        SchematicArrayPlacement::Center(center) => format!(
+            "{} radial replicas \u{00b7} center {}, {}",
+            impact.replicas, center.x, center.y
+        ),
+    };
+    state.dialogs.array_selection.preview_cache = Some(cache);
     draw_transform_feedback(painter, response, true, detail);
 }
 
