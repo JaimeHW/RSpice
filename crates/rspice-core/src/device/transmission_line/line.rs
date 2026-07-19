@@ -1455,6 +1455,7 @@ mod tests {
         let mut line = TransmissionLine::new("TLTRA".to_string(), 1, 0, 2, 0, 2.0, 1.0);
         line.set_distributed_rlgc(1.0, 1.0, 0.0, 1.0, 1.0);
         line.distributed_rlc.as_mut().unwrap().max_safe_step = 2.0;
+        line.set_ltra_timestep_policy(false, false);
         line.set_ltra_breakpoint_tolerances(0.0, 0.1);
         line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
         line.update_history(1.0, 0.0, 0.0, 2.0, -1.0);
