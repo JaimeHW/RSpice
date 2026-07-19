@@ -10933,6 +10933,7 @@ impl XyceTestRunner {
             || options.topology_supernode.is_some()
             || options.device_zero_resistance_tol.is_some()
             || options.b3soi_gmin_scaling.is_some()
+            || options.device_try_to_compact.is_some()
         {
             return Err(format!(
                 "{role} XDM REPLACEGROUND deck has unexpected effective option state; required only REPLACEGROUND={replace_ground} and DEVICE TNOM=25, got {options:?}"
@@ -12367,6 +12368,7 @@ impl XyceTestRunner {
             || options.topology_supernode.is_some()
             || options.device_zero_resistance_tol.is_some()
             || options.b3soi_gmin_scaling.is_some()
+            || options.device_try_to_compact.is_some()
         {
             return Err(format!(
                 "ADDRESISTORS record '{}' has unexpected exact options state: {options:?}",
@@ -13369,6 +13371,7 @@ impl XyceTestRunner {
             || options.topology_supernode.is_some()
             || options.device_zero_resistance_tol.is_some()
             || options.b3soi_gmin_scaling.is_some()
+            || options.device_try_to_compact.is_some()
         {
             return Err(format!(
                 "REMOVEUNUSED record '{}' has unexpected exact preprocessing/options state {:?}",
@@ -34202,6 +34205,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             topology_supernode,
             device_zero_resistance_tol,
             b3soi_gmin_scaling,
+            device_try_to_compact,
             hb_num_frequencies,
             nonlinear_continuation,
         } = options;
@@ -34246,6 +34250,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && topology_supernode.is_none()
             && device_zero_resistance_tol.is_none()
             && b3soi_gmin_scaling.is_none()
+            && device_try_to_compact.is_none()
             && nonlinear_continuation.is_none()
             && hb_num_frequencies.is_empty()
     }
@@ -49015,6 +49020,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     nl,
                     model,
                 } => Self::validate_lossless_transmission_line_contract(
+                    netlist,
                     &element.name,
                     element.nodes.len(),
                     *z0,
@@ -49461,6 +49467,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     nl,
                     model,
                 } => Self::validate_lossless_transmission_line_contract(
+                    netlist,
                     &element.name,
                     element.nodes.len(),
                     *z0,
@@ -49578,6 +49585,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn validate_lossless_transmission_line_contract(
+        netlist: &Netlist,
         element_name: &str,
         node_count: usize,
         z0: Option<Value>,
@@ -49591,10 +49599,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 "lossless transmission line '{element_name}' requires four electrical terminals, found {node_count}"
             ));
         }
-        if let Some(model) = model {
-            return Err(format!(
-                "native static .PRINT TRAN comparison does not yet admit model-backed transmission line '{element_name}' using model '{model}'"
-            ));
+        if let Some(model_name) = model {
+            if z0.is_some() || td.is_some() || freq.is_some() || nl.is_some() {
+                return Err(format!(
+                    "model-backed LTRA element '{element_name}' cannot combine its model with instance Z0, TD, F, or NL overrides"
+                ));
+            }
+            return crate::engine::validate_native_xyce_ltra_model_contract(netlist, model_name)
+                .map_err(|error| {
+                    format!(
+                        "model-backed LTRA element '{element_name}' using model '{model_name}' is not oracle-qualified: {error}"
+                    )
+                });
         }
         let z0 = z0.ok_or_else(|| {
             format!("lossless transmission line '{element_name}' requires an explicit Z0")
