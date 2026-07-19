@@ -1,5 +1,7 @@
 //! Verification evidence, specifications, checks, reliability, and history.
 
+mod tuning;
+
 use egui::{ScrollArea, Ui};
 use sha2::{Digest as _, Sha256};
 
@@ -12,6 +14,10 @@ use crate::ui::widgets::Button;
 use super::super::commands::Command;
 use super::super::design_system::{card, heading, property_row, status_dot, workspace_title_row};
 use super::super::state::VerificationPage;
+use tuning::{
+    revert_tuning_session, sync_tuning_session, tuning, tuning_commit_block_reason,
+    tuning_is_dirty, tuning_is_valid, tuning_review_dialog,
+};
 
 const VERIFY_RESPONSIVE_BREAKPOINT: f32 = 820.0;
 const VERIFY_KPI_BREAKPOINT: f32 = 1_260.0;
@@ -27,6 +33,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // an interactive verification page.
     if !app.state.workbench.verification_page.is_operational() {
         app.state.workbench.verification_page = VerificationPage::Yield;
+    }
+    if app.state.workbench.verification_page == VerificationPage::Tuning {
+        sync_tuning_session(app);
     }
     let ctx = ui.ctx().clone();
     let t = Tokens::get(ui.ctx());
@@ -51,7 +60,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 match app.state.workbench.verification_page {
                     VerificationPage::Yield => cockpit(ui, app, body_viewport_height),
                     VerificationPage::Corners => corners(ui, app),
-                    VerificationPage::Tuning => tuning_unavailable(ui),
+                    VerificationPage::Tuning => tuning(ui, app),
                     VerificationPage::Optimization => optimization(ui, app),
                     VerificationPage::Reliability => reliability(ui, app),
                     VerificationPage::Regression => regression(ui, app, body_viewport_height),
@@ -60,6 +69,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             });
     });
     regression_baseline_picker(&ctx, app);
+    tuning_review_dialog(&ctx, app);
 }
 
 fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -92,9 +102,9 @@ fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
             "Retained corner sweep values and source-attributed execution state from the active immutable dataset.",
         ),
         VerificationPage::Tuning => (
-            "PARAMETER TUNER · CAPABILITY UNAVAILABLE".to_owned(),
-            "Parameter tuning unavailable",
-            "Tuning remains inaccessible until variables are discovered from the active design and every change is transactionally netlisted, simulated, and retained.",
+            "PARAMETER TUNER · NOMINAL SANDBOX · NON-DESTRUCTIVE".to_owned(),
+            "Live design-space exploration",
+            "Explore bounded active-plan variables without changing authoritative design data; review commits one plan revision and dispatches a retained production run.",
         ),
         VerificationPage::Optimization => (
             run.map_or_else(
@@ -127,6 +137,7 @@ fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
     let available = ui.available_width().max(1.0);
     let action_width = match page {
         VerificationPage::Corners | VerificationPage::Regression => 238.0,
+        VerificationPage::Tuning => 284.0,
         _ => 0.0,
     };
     if action_width > 0.0 && available > VERIFY_PHONE_BREAKPOINT {
@@ -217,8 +228,31 @@ fn verification_header_actions(ui: &mut Ui, app: &mut RSpiceApp, page: Verificat
                     .regression_baseline_picker_open = true;
             }
         }
+        VerificationPage::Tuning => {
+            let dirty = tuning_is_dirty(app);
+            let valid = tuning_is_valid(app);
+            let commit = Button::new("Review & commit changes").enabled(dirty && valid);
+            let commit = if dirty && valid {
+                commit.accent()
+            } else {
+                commit
+            };
+            if commit
+                .show(ui)
+                .on_disabled_hover_text(tuning_commit_block_reason(app))
+                .clicked()
+            {
+                app.state.workbench.verification.tuning_review_open = true;
+            }
+            if Button::new("Revert to committed")
+                .enabled(dirty)
+                .show(ui)
+                .clicked()
+            {
+                revert_tuning_session(app);
+            }
+        }
         VerificationPage::Yield
-        | VerificationPage::Tuning
         | VerificationPage::Optimization
         | VerificationPage::Reliability
         | VerificationPage::Drc => {}
@@ -2098,17 +2132,6 @@ fn corner_evidence_details(
         ui.add_space(1.0);
         render_reproducibility(ui);
     }
-}
-
-fn tuning_unavailable(ui: &mut Ui) {
-    card(ui, "Capability boundary", |ui| {
-        status_dot(
-            ui,
-            Tokens::get(ui.ctx()).color.warn,
-            "Parameter tuning is not available",
-        );
-        ui.label("RSpice does not expose a tuning surface until it can discover real design parameters, apply edits transactionally, regenerate the netlist, execute the configured analyses, and retain dataset-owned results for every candidate.");
-    });
 }
 
 fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -5221,6 +5244,181 @@ mod tests {
         let mut run = SimulationRun::new_prepared(run_number, receipt);
         run.add_analysis(attributed_with_id(analysis, source_instance_id));
         run
+    }
+
+    fn add_tuning_variable(app: &mut RSpiceApp) -> crate::product::DesignVariableId {
+        let plan_id = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default plan")
+            .id();
+        let variable = crate::state::DesignVariable::new(
+            "RGAIN",
+            "499 ohm",
+            crate::state::DesignVariableQuantity::Resistance,
+            crate::state::DesignVariableScope::Project,
+            "Closed-loop gain-setting resistor",
+            Some(crate::state::DesignVariableRange {
+                minimum: "350 ohm".to_owned(),
+                maximum: "750 ohm".to_owned(),
+            }),
+            crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+        )
+        .expect("valid tuning variable");
+        let id = variable.id;
+        app.state
+            .workspace
+            .add_design_variable(plan_id, variable)
+            .expect("variable enters active plan payload");
+        id
+    }
+
+    #[test]
+    fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
+        let mut app = RSpiceApp::test_instance();
+        let variable_id = add_tuning_variable(&mut app);
+        let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+        sync_tuning_session(&mut app);
+
+        assert_eq!(app.state.workbench.verification.tuning_variables.len(), 1);
+        let draft = &mut app.state.workbench.verification.tuning_variables[0];
+        assert_eq!(draft.variable_id, variable_id);
+        draft.candidate_expression = "620 ohm".to_owned();
+        assert!(tuning_is_dirty(&app));
+
+        revert_tuning_session(&mut app);
+
+        assert!(!tuning_is_dirty(&app));
+        assert_eq!(
+            app.state
+                .workspace
+                .active_plan_data(plan_id)
+                .unwrap()
+                .design_variables[0]
+                .expression,
+            "499 ohm"
+        );
+    }
+
+    #[test]
+    fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workspace.project_sources = Default::default();
+        app.state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        let variable_id = add_tuning_variable(&mut app);
+        let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+        let source_plan_revision = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .revision();
+        sync_tuning_session(&mut app);
+        app.state.workbench.verification.tuning_variables[0].candidate_expression =
+            "620 ohm".to_owned();
+
+        tuning::commit_tuning_and_run(&mut app).expect("valid candidate commits and dispatches");
+
+        let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+        assert_eq!(plan.revision(), source_plan_revision.next().unwrap());
+        let variable = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .unwrap()
+            .design_variables
+            .iter()
+            .find(|variable| variable.id == variable_id)
+            .unwrap();
+        assert_eq!(variable.expression, "620 ohm");
+        assert_eq!(variable.revision, ObjectRevision::INITIAL.next().unwrap());
+        assert!(app.state.simulation.trigger_simulation);
+        assert!(!tuning_is_dirty(&app));
+    }
+
+    #[test]
+    fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
+        let mut app = RSpiceApp::test_instance();
+        add_tuning_variable(&mut app);
+        let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+        let before = serde_json::to_vec(&app.state.workspace).unwrap();
+        sync_tuning_session(&mut app);
+        let draft = &mut app.state.workbench.verification.tuning_variables[0];
+        draft.candidate_expression = "2 kohm".to_owned();
+        let mut candidate = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .unwrap()
+            .design_variables[0]
+            .clone();
+        candidate.expression.clone_from(&draft.candidate_expression);
+        draft.validation_error = candidate.validate().err();
+
+        assert!(tuning::commit_tuning_and_run(&mut app).is_err());
+        assert_eq!(serde_json::to_vec(&app.state.workspace).unwrap(), before);
+        assert!(!app.state.simulation.trigger_simulation);
+    }
+
+    #[test]
+    fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
+        let mut app = RSpiceApp::test_instance();
+        add_tuning_variable(&mut app);
+        let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+        let source_plan_revision = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .revision();
+        app.state.workbench.preflight.open = true;
+        app.state.workbench.preflight.pending_toast =
+            Some(crate::workbench::state::PreflightToast {
+                message: "Retain this preflight state".to_owned(),
+                warning: true,
+            });
+        sync_tuning_session(&mut app);
+        app.state.workbench.verification.tuning_variables[0].candidate_expression =
+            "620 ohm".to_owned();
+
+        let error = tuning::commit_tuning_and_run(&mut app)
+            .expect_err("an empty schematic must block the required run");
+
+        assert!(error.contains("required run is blocked"));
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .unwrap()
+                .revision(),
+            source_plan_revision
+        );
+        assert_eq!(
+            app.state
+                .workspace
+                .active_plan_data(plan_id)
+                .unwrap()
+                .design_variables[0]
+                .expression,
+            "499 ohm"
+        );
+        assert!(app.state.workbench.preflight.open);
+        assert_eq!(
+            app.state
+                .workbench
+                .preflight
+                .pending_toast
+                .as_ref()
+                .map(|toast| toast.message.as_str()),
+            Some("Retain this preflight state")
+        );
+        assert!(tuning_is_dirty(&app));
+        assert!(!app.state.simulation.trigger_simulation);
     }
 
     #[test]

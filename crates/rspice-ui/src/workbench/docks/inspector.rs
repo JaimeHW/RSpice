@@ -886,10 +886,43 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         }
         VerificationPage::Tuning => {
-            section_header(ui, "Parameter tuning", Some("unavailable"));
-            property_row(ui, "Design parameters", "not integrated");
-            property_row(ui, "Transactional execution", "not integrated");
-            property_row(ui, "Evidence", "unavailable");
+            let session = &app.state.workbench.verification;
+            let variable_count = session.tuning_variables.len();
+            let dirty_count = session
+                .tuning_variables
+                .iter()
+                .filter(|draft| draft.is_dirty())
+                .count();
+            let invalid_count = session
+                .tuning_variables
+                .iter()
+                .filter(|draft| draft.validation_error.is_some())
+                .count();
+            section_header(
+                ui,
+                "Parameter tuning",
+                Some(if dirty_count == 0 {
+                    "committed baseline"
+                } else {
+                    "provisional"
+                }),
+            );
+            property_row(ui, "Design variables", &variable_count.to_string());
+            property_row(ui, "Provisional changes", &dirty_count.to_string());
+            property_row(
+                ui,
+                "Validation",
+                if invalid_count == 0 {
+                    "ready"
+                } else {
+                    "blocked"
+                },
+            );
+            property_row(
+                ui,
+                "Commit contract",
+                "one plan revision + retained production run",
+            );
         }
         VerificationPage::Optimization => {
             section_header(ui, "Optimization details", None);

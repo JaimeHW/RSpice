@@ -677,9 +677,6 @@ impl Command {
                 "an active simulation execution still owns result history"
             }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
-            Self::VerificationPage(crate::workbench::state::VerificationPage::Tuning) => {
-                "design-parameter discovery and transactional tuning are not implemented"
-            }
             Self::VerificationPage(crate::workbench::state::VerificationPage::Drc) => {
                 "no retained layout, qualified rule deck, or immutable marker database is available"
             }

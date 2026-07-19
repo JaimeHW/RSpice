@@ -386,7 +386,7 @@ impl Command {
                 spec("corners", "Corner matrix", "Verify")
             }
             Self::VerificationPage(VerificationPage::Tuning) => {
-                spec("tuning", "Parameter tuning unavailable", "Verify")
+                spec("tuning", "Parameter tuning sandbox", "Verify")
             }
             Self::VerificationPage(VerificationPage::Optimization) => {
                 spec("optimization", "Optimization", "Verify")
@@ -1188,13 +1188,6 @@ impl Command {
                 app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
                 crate::workbench::result_document::open_specification_editor(&mut app.state);
                 activate_workspace(app, Workspace::Results);
-            }
-            Self::VerificationPage(VerificationPage::Tuning) => {
-                app.state.push_user_message(
-                    crate::common::app::ConsoleMessage::warning(
-                        "Parameter tuning is unavailable until real design-parameter discovery and transactional simulation integration are implemented.",
-                    ),
-                );
             }
             Self::VerificationPage(VerificationPage::Drc) => {
                 app.state.push_user_message(
@@ -2098,25 +2091,20 @@ mod tests {
     }
 
     #[test]
-    fn tuning_command_is_inaccessible_until_transactional_execution_exists() {
+    fn tuning_command_opens_the_transactional_sandbox() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Project;
         app.state.workbench.verification_page = VerificationPage::Yield;
         let command = Command::VerificationPage(VerificationPage::Tuning);
 
-        assert!(!command.is_enabled(&app));
-        assert_eq!(
-            command.availability(&app),
-            CommandAvailability::Disabled(
-                "design-parameter discovery and transactional tuning are not implemented"
-            )
-        );
+        assert!(command.is_enabled(&app));
+        assert_eq!(command.availability(&app), CommandAvailability::Available);
         command.execute(&mut app);
 
-        assert_eq!(app.state.workbench.workspace, Workspace::Project);
+        assert_eq!(app.state.workbench.workspace, Workspace::Verify);
         assert_eq!(
             app.state.workbench.verification_page,
-            VerificationPage::Yield
+            VerificationPage::Tuning
         );
     }
 

@@ -1920,6 +1920,27 @@ pub enum SimulationConfigurationError {
         plan_id: SimulationPlanId,
         name: String,
     },
+    #[error("simulation plan {plan_id} has no design variable with identity {variable_id}")]
+    DesignVariableNotFound {
+        plan_id: SimulationPlanId,
+        variable_id: DesignVariableId,
+    },
+    #[error(
+        "design variable {variable_id} in simulation plan {plan_id} could not advance its revision: {source}"
+    )]
+    DesignVariableRevision {
+        plan_id: SimulationPlanId,
+        variable_id: DesignVariableId,
+        #[source]
+        source: RevisionError,
+    },
+    #[error(
+        "design variable {variable_id} is repeated in one update transaction for simulation plan {plan_id}"
+    )]
+    DuplicateDesignVariableUpdate {
+        plan_id: SimulationPlanId,
+        variable_id: DesignVariableId,
+    },
     #[error("simulation plan {plan_id} already owns a saved output named '{name}'")]
     SavedOutputNameConflict {
         plan_id: SimulationPlanId,
@@ -2972,6 +2993,81 @@ impl ProjectWorkspace {
         }
         payload.design_variables.push(variable);
         Ok(())
+    }
+
+    /// Replace the expression of one plan-owned design variable as a single
+    /// validated workspace transaction.
+    ///
+    /// The stable identity and all engineering metadata are retained. The
+    /// variable revision advances exactly once for every committed update.
+    /// Validation runs against a complete cloned workspace before assignment,
+    /// so a malformed expression, range violation, revision exhaustion, or
+    /// unrelated configuration invariant leaves the source workspace intact.
+    pub fn update_design_variable_expression(
+        &mut self,
+        plan_id: SimulationPlanId,
+        variable_id: DesignVariableId,
+        expression: impl Into<String>,
+    ) -> Result<ObjectRevision, SimulationConfigurationError> {
+        let revisions =
+            self.update_design_variable_expressions(plan_id, &[(variable_id, expression.into())])?;
+        Ok(revisions[0].1)
+    }
+
+    /// Atomically replace multiple expressions in one active-plan payload.
+    /// Every target is resolved and validated in the same candidate workspace,
+    /// which avoids partial commits and scales independently of update count.
+    pub fn update_design_variable_expressions(
+        &mut self,
+        plan_id: SimulationPlanId,
+        updates: &[(DesignVariableId, String)],
+    ) -> Result<Vec<(DesignVariableId, ObjectRevision)>, SimulationConfigurationError> {
+        let mut candidate = self.clone();
+        let payload = candidate
+            .active_plan_data_mut(plan_id)
+            .ok_or(SimulationConfigurationError::PlanPayloadMissing { plan_id })?;
+        let mut seen = std::collections::HashSet::with_capacity(updates.len());
+        let mut revisions = Vec::with_capacity(updates.len());
+        for (variable_id, expression) in updates {
+            if !seen.insert(*variable_id) {
+                return Err(
+                    SimulationConfigurationError::DuplicateDesignVariableUpdate {
+                        plan_id,
+                        variable_id: *variable_id,
+                    },
+                );
+            }
+            let index = payload
+                .design_variables
+                .iter()
+                .position(|variable| variable.id == *variable_id)
+                .ok_or(SimulationConfigurationError::DesignVariableNotFound {
+                    plan_id,
+                    variable_id: *variable_id,
+                })?;
+            let variable = &mut payload.design_variables[index];
+            let next_revision = variable.revision.next().map_err(|source| {
+                SimulationConfigurationError::DesignVariableRevision {
+                    plan_id,
+                    variable_id: *variable_id,
+                    source,
+                }
+            })?;
+            variable.expression.clone_from(expression);
+            variable.revision = next_revision;
+            variable.validate().map_err(|message| {
+                SimulationConfigurationError::InvalidDesignVariable {
+                    plan_id,
+                    index,
+                    message,
+                }
+            })?;
+            revisions.push((*variable_id, next_revision));
+        }
+        candidate.validate_simulation_configuration()?;
+
+        *self = candidate;
+        Ok(revisions)
     }
 
     pub fn add_saved_output(
@@ -4271,6 +4367,169 @@ mod tests {
         let mut outside = variable;
         outside.expression = "2 Mohm".to_owned();
         assert!(outside.validate().unwrap_err().contains("outside"));
+    }
+
+    #[test]
+    fn design_variable_expression_update_preserves_identity_and_metadata() {
+        let plan_id = SimulationPlanId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let original = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let variable_id = original.id;
+        workspace
+            .add_design_variable(plan_id, original.clone())
+            .expect("fixture variable is accepted");
+
+        workspace
+            .update_design_variable_expression(plan_id, variable_id, "22 kohm")
+            .expect("valid expression update commits");
+
+        let updated = &workspace
+            .active_plan_data(plan_id)
+            .expect("plan payload remains present")
+            .design_variables[0];
+        assert_eq!(updated.id, original.id);
+        assert_eq!(updated.name, original.name);
+        assert_eq!(updated.expression, "22 kohm");
+        assert_eq!(updated.quantity, original.quantity);
+        assert_eq!(updated.scope, original.scope);
+        assert_eq!(updated.description, original.description);
+        assert_eq!(updated.allowed_range, original.allowed_range);
+        assert_eq!(updated.sweep_eligibility, original.sweep_eligibility);
+        assert_eq!(updated.override_policy, original.override_policy);
+    }
+
+    #[test]
+    fn out_of_range_design_variable_update_is_rejected_atomically() {
+        let plan_id = SimulationPlanId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let variable_id = variable.id;
+        workspace
+            .add_design_variable(plan_id, variable)
+            .expect("fixture variable is accepted");
+        let before = serde_json::to_value(&workspace).expect("workspace serializes");
+
+        let error = workspace
+            .update_design_variable_expression(plan_id, variable_id, "2 Mohm")
+            .expect_err("out-of-range expression must be rejected");
+
+        assert!(matches!(
+            error,
+            SimulationConfigurationError::InvalidDesignVariable { message, .. }
+                if message.contains("outside the inclusive allowed range")
+        ));
+        assert_eq!(
+            serde_json::to_value(&workspace).expect("workspace still serializes"),
+            before
+        );
+    }
+
+    #[test]
+    fn design_variable_update_rejects_a_missing_stable_identity() {
+        let plan_id = SimulationPlanId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        workspace
+            .add_design_variable(plan_id, variable)
+            .expect("fixture variable is accepted");
+        let missing_id = DesignVariableId::new();
+        let before = serde_json::to_value(&workspace).expect("workspace serializes");
+
+        assert_eq!(
+            workspace.update_design_variable_expression(plan_id, missing_id, "22 kohm"),
+            Err(SimulationConfigurationError::DesignVariableNotFound {
+                plan_id,
+                variable_id: missing_id,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&workspace).expect("workspace still serializes"),
+            before
+        );
+    }
+
+    #[test]
+    fn committed_design_variable_update_advances_revision_once() {
+        let plan_id = SimulationPlanId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let variable_id = variable.id;
+        let initial_revision = variable.revision;
+        workspace
+            .add_design_variable(plan_id, variable)
+            .expect("fixture variable is accepted");
+
+        let committed_revision = workspace
+            .update_design_variable_expression(plan_id, variable_id, "22 kohm")
+            .expect("valid expression update commits");
+
+        assert_eq!(committed_revision.get(), initial_revision.get() + 1);
+        assert_eq!(
+            workspace
+                .active_plan_data(plan_id)
+                .expect("plan payload remains present")
+                .design_variables[0]
+                .revision,
+            committed_revision
+        );
+    }
+
+    #[test]
+    fn bulk_design_variable_update_is_all_or_nothing() {
+        let plan_id = SimulationPlanId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let first = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let second = resistance_variable("RBIAS", "15 kohm", DesignVariableScope::Project);
+        let updates = vec![
+            (first.id, "22 kohm".to_owned()),
+            (second.id, "2 Mohm".to_owned()),
+        ];
+        workspace
+            .add_design_variable(plan_id, first)
+            .expect("first fixture variable is accepted");
+        workspace
+            .add_design_variable(plan_id, second)
+            .expect("second fixture variable is accepted");
+        let before = serde_json::to_value(&workspace).expect("workspace serializes");
+
+        assert!(matches!(
+            workspace.update_design_variable_expressions(plan_id, &updates),
+            Err(SimulationConfigurationError::InvalidDesignVariable { index: 1, .. })
+        ));
+        assert_eq!(
+            serde_json::to_value(&workspace).expect("workspace still serializes"),
+            before
+        );
+    }
+
+    #[test]
+    fn bulk_design_variable_update_rejects_duplicate_identities_atomically() {
+        let plan_id = SimulationPlanId::new();
+        let mut workspace = ProjectWorkspace::default();
+        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let variable_id = variable.id;
+        workspace
+            .add_design_variable(plan_id, variable)
+            .expect("fixture variable is accepted");
+        let before = serde_json::to_value(&workspace).expect("workspace serializes");
+        let updates = vec![
+            (variable_id, "22 kohm".to_owned()),
+            (variable_id, "47 kohm".to_owned()),
+        ];
+
+        assert_eq!(
+            workspace.update_design_variable_expressions(plan_id, &updates),
+            Err(
+                SimulationConfigurationError::DuplicateDesignVariableUpdate {
+                    plan_id,
+                    variable_id,
+                }
+            )
+        );
+        assert_eq!(
+            serde_json::to_value(&workspace).expect("workspace still serializes"),
+            before
+        );
     }
 
     #[test]

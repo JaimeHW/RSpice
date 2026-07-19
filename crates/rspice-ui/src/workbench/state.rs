@@ -661,9 +661,9 @@ pub enum VerificationPage {
 }
 
 impl VerificationPage {
-    /// Persisted route catalog. `Tuning` is retained for backward-compatible
-    /// session decoding but is deliberately absent from `NAVIGATION` until a
-    /// real parameter-discovery/edit/netlist/simulate transaction exists.
+    /// Persisted route catalog. Physical DRC remains decodable for backward
+    /// compatibility but is absent from navigation until layout/rule-deck
+    /// evidence has a production executor.
     pub const ALL: [Self; 7] = [
         Self::Yield,
         Self::Corners,
@@ -674,9 +674,10 @@ impl VerificationPage {
         Self::Drc,
     ];
 
-    pub const NAVIGATION: [Self; 5] = [
+    pub const NAVIGATION: [Self; 6] = [
         Self::Yield,
         Self::Corners,
+        Self::Tuning,
         Self::Optimization,
         Self::Reliability,
         Self::Regression,
@@ -687,7 +688,7 @@ impl VerificationPage {
     /// remain visible where the mockup requires a capability boundary, but are
     /// never selectable.
     pub const fn is_operational(self) -> bool {
-        !matches!(self, Self::Tuning | Self::Drc)
+        !matches!(self, Self::Drc)
     }
 
     pub const fn label(self) -> &'static str {
@@ -703,10 +704,9 @@ impl VerificationPage {
     }
 }
 
-/// Verification-flow interaction state. Immutable evidence remains in result
-/// datasets; this owns only explicit review cursors and ephemeral receipts.
-/// Unknown legacy fields are ignored so sessions written by the removed
-/// synthetic tuning sandbox migrate without reviving that unavailable flow.
+/// Immutable regression comparison receipt retained only for the active
+/// verification review session. The source runs and datasets remain the
+/// authoritative evidence owners.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegressionComparisonReceipt {
     pub plan_id: crate::product::SimulationPlanId,
@@ -749,6 +749,23 @@ pub struct RegressionToleranceDraft {
     pub validation_error: Option<String>,
 }
 
+/// Runtime-only candidate value owned by the non-destructive parameter tuner.
+/// The persisted `DesignVariable` remains authoritative until the user commits
+/// the complete candidate set as one simulation-plan revision.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TuningVariableDraft {
+    pub variable_id: crate::product::DesignVariableId,
+    pub baseline_expression: String,
+    pub candidate_expression: String,
+    pub validation_error: Option<String>,
+}
+
+impl TuningVariableDraft {
+    pub fn is_dirty(&self) -> bool {
+        self.candidate_expression.trim() != self.baseline_expression.trim()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VerificationSessionState {
     #[serde(default)]
@@ -769,6 +786,23 @@ pub struct VerificationSessionState {
     pub regression_selected_target: Option<crate::state::RegressionTargetSelector>,
     #[serde(skip)]
     pub regression_tolerance_drafts: Vec<RegressionToleranceDraft>,
+    /// Stable plan/revision that owns `tuning_variables`. All three fields are
+    /// transient so an interrupted sandbox can never restore as project data.
+    #[serde(skip)]
+    pub tuning_plan_id: Option<crate::product::SimulationPlanId>,
+    #[serde(skip)]
+    pub tuning_plan_revision: Option<crate::product::ObjectRevision>,
+    #[serde(skip)]
+    pub tuning_variables: Vec<TuningVariableDraft>,
+    /// Immutable retained run selected when the sandbox was opened. This is
+    /// presentation state only; the run and dataset remain owned by
+    /// `SimulationState` and are never copied into the tuner.
+    #[serde(skip)]
+    pub tuning_baseline_run: Option<crate::product::RunId>,
+    /// Review gate opened by the mockup-specified tuning commit action. The
+    /// dialog is transient and never restores across an application session.
+    #[serde(skip)]
+    pub tuning_review_open: bool,
     #[serde(skip, default = "default_verification_action_receipt")]
     pub action_receipt: String,
 }
@@ -787,6 +821,11 @@ impl Default for VerificationSessionState {
             regression_baseline_picker_selection: None,
             regression_selected_target: None,
             regression_tolerance_drafts: Vec::new(),
+            tuning_plan_id: None,
+            tuning_plan_revision: None,
+            tuning_variables: Vec::new(),
+            tuning_baseline_run: None,
+            tuning_review_open: false,
             action_receipt: default_verification_action_receipt(),
         }
     }
@@ -1575,6 +1614,8 @@ impl WorkbenchState {
             || self.preflight.open
             || self.notification_center_open
             || self.simulation_workflow.is_some()
+            || self.verification.regression_baseline_picker_open
+            || self.verification.tuning_review_open
             || matches!(
                 self.current_route().surface_id(),
                 SurfaceId::ProjectLauncher
@@ -2660,6 +2701,12 @@ mod tests {
         state.preflight.open = true;
         assert!(state.application_modal_open());
         state.preflight.open = false;
+        state.verification.regression_baseline_picker_open = true;
+        assert!(state.application_modal_open());
+        state.verification.regression_baseline_picker_open = false;
+        state.verification.tuning_review_open = true;
+        assert!(state.application_modal_open());
+        state.verification.tuning_review_open = false;
         state
             .navigate(
                 SurfaceRoute::surface(SurfaceId::Preferences),
@@ -2899,9 +2946,9 @@ mod tests {
             VerificationPage::ALL
                 .into_iter()
                 .filter(|page| page.is_operational())
-                .all(|page| !matches!(page, VerificationPage::Tuning | VerificationPage::Drc))
+                .all(|page| page != VerificationPage::Drc)
         );
-        assert!(!VerificationPage::Tuning.is_operational());
+        assert!(VerificationPage::Tuning.is_operational());
         assert!(!VerificationPage::Drc.is_operational());
     }
 

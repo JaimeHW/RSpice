@@ -952,7 +952,7 @@ const fn verification_flow_label(page: VerificationPage) -> &'static str {
     match page {
         VerificationPage::Yield => "PVT & Monte Carlo",
         VerificationPage::Corners => "Process corners",
-        VerificationPage::Tuning => "Parameter tuning (unavailable)",
+        VerificationPage::Tuning => "Parameter tuning sandbox",
         VerificationPage::Optimization => "Optimization",
         VerificationPage::Reliability => "Electrical reliability & SOA",
         VerificationPage::Regression => "Regression · main",
@@ -1077,14 +1077,47 @@ fn verification_flow_presentation(
                 },
             }
         }
-        VerificationPage::Tuning => VerificationFlowPresentation {
-            label: verification_flow_label(page).to_owned(),
-            detail: "Capability unavailable".to_owned(),
-            status: "not exposed".to_owned(),
-            mark: VerificationFlowMark::Status(StatusMark::Neutral),
-            icon_tone: FlowTone::Neutral,
-            status_tone: FlowTone::Neutral,
-        },
+        VerificationPage::Tuning => {
+            let variable_count = app
+                .state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+                .map_or(0, |payload| payload.design_variables.len());
+            let dirty_count = app
+                .state
+                .workbench
+                .verification
+                .tuning_variables
+                .iter()
+                .filter(|draft| draft.is_dirty())
+                .count();
+            VerificationFlowPresentation {
+                label: verification_flow_label(page).to_owned(),
+                detail: if variable_count == 0 {
+                    "No active-plan design variables".to_owned()
+                } else {
+                    format!("{variable_count} typed active-plan variable(s)")
+                },
+                status: if dirty_count == 0 {
+                    "baseline".to_owned()
+                } else {
+                    format!("{dirty_count} provisional")
+                },
+                mark: VerificationFlowMark::Text("T"),
+                icon_tone: if dirty_count == 0 {
+                    FlowTone::Accent
+                } else {
+                    FlowTone::Warn
+                },
+                status_tone: if dirty_count == 0 {
+                    FlowTone::Accent
+                } else {
+                    FlowTone::Warn
+                },
+            }
+        }
         VerificationPage::Optimization => {
             let result = active_run
                 .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Optimization));
@@ -2350,14 +2383,15 @@ mod tests {
     }
 
     #[test]
-    fn verification_navigation_omits_unimplemented_tuning_route() {
-        assert_eq!(VerificationPage::NAVIGATION.len(), 5);
+    fn verification_navigation_exposes_the_operational_tuning_route() {
+        assert_eq!(VerificationPage::NAVIGATION.len(), 6);
         let labels = VerificationPage::NAVIGATION.map(verification_flow_label);
         assert_eq!(
             labels,
             [
                 "PVT & Monte Carlo",
                 "Process corners",
+                "Parameter tuning sandbox",
                 "Optimization",
                 "Electrical reliability & SOA",
                 "Regression · main",
@@ -2434,9 +2468,9 @@ mod tests {
 
     #[test]
     fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
-        assert!(verification_navigator_requires_scroll(440.0));
+        assert!(verification_navigator_requires_scroll(503.0));
+        assert!(!verification_navigator_requires_scroll(504.0));
         assert!(verification_navigator_requires_scroll(390.0));
-        assert!(!verification_navigator_requires_scroll(441.0));
         assert!(!verification_navigator_requires_scroll(560.0));
         assert!(!verification_navigator_requires_scroll(700.0));
     }
