@@ -1436,6 +1436,159 @@ impl Engine {
         )
     }
 
+    /// Execute a Xyce-style table-driven noise sweep. Every `.DATA` row is
+    /// applied atomically to a freshly resolved netlist, and rows are solved
+    /// in authored order at their literal `FREQ` or `HERTZ` value.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_data_named_with_input_source_and_abort(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        table_name: &str,
+        default_temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<Netlist>, Vec<NoiseResult>), SimulationError> {
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case(table_name))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    ".NOISE DATA references unknown .DATA table '{table_name}'"
+                ))
+            })?;
+        if table.params.is_empty() || table.rows.is_empty() {
+            return Err(SimulationError::Circuit(format!(
+                ".NOISE DATA table '{}' must contain columns and at least one row",
+                table.name
+            )));
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for name in &table.params {
+            if !names.insert(name.to_ascii_uppercase()) {
+                return Err(SimulationError::Circuit(format!(
+                    ".NOISE DATA table '{}' has duplicate column '{name}'",
+                    table.name
+                )));
+            }
+        }
+        let axes = table
+            .params
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                (name.eq_ignore_ascii_case("FREQ") || name.eq_ignore_ascii_case("HERTZ"))
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let frequency_column = match axes.as_slice() {
+            [index] => *index,
+            [] => {
+                return Err(SimulationError::Circuit(format!(
+                    ".NOISE DATA table '{}' has no FREQ or HERTZ column",
+                    table.name
+                )));
+            }
+            _ => {
+                return Err(SimulationError::Circuit(format!(
+                    ".NOISE DATA table '{}' has ambiguous frequency columns",
+                    table.name
+                )));
+            }
+        };
+
+        let mut row_netlists = Vec::with_capacity(table.rows.len());
+        let mut results = Vec::with_capacity(table.rows.len());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if row.len() != table.params.len() {
+                return Err(SimulationError::Circuit(format!(
+                    ".NOISE DATA table '{}' row {} has {} values, expected {}",
+                    table.name,
+                    row_index + 1,
+                    row.len(),
+                    table.params.len()
+                )));
+            }
+            if let Some((column, value)) =
+                row.iter().enumerate().find(|(_, value)| !value.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    ".NOISE DATA table '{}' row {} column '{}' must be finite, got {value}",
+                    table.name,
+                    row_index + 1,
+                    table.params[column]
+                )));
+            }
+            let frequency = row[frequency_column];
+            if frequency <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    ".NOISE DATA table '{}' row {} frequency must be positive, got {frequency}",
+                    table.name,
+                    row_index + 1
+                )));
+            }
+            let overrides = table
+                .params
+                .iter()
+                .cloned()
+                .zip(row.iter().copied())
+                .collect::<Vec<_>>();
+            let (row_netlist, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+            let temperature = row_netlist
+                .options
+                .temp
+                .map(|celsius| celsius + 273.15)
+                .unwrap_or(default_temperature);
+            let mut row_result = self.run_noise_named_with_input_source_and_abort(
+                &row_netlist,
+                output_pos,
+                output_neg,
+                input_source,
+                &[frequency],
+                temperature,
+                abort,
+            )?;
+            if row_result.len() != 1 {
+                return Err(SimulationError::Circuit(format!(
+                    ".NOISE DATA table '{}' row {} produced {} results, expected one",
+                    table.name,
+                    row_index + 1,
+                    row_result.len()
+                )));
+            }
+            row_netlists.push(row_netlist);
+            results.push(row_result.remove(0));
+        }
+        Ok((row_netlists, results))
+    }
+
+    /// Non-cancellable convenience wrapper for table-driven named-node noise.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_data_named_with_input_source(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        table_name: &str,
+        default_temperature: Value,
+    ) -> Result<(Vec<Netlist>, Vec<NoiseResult>), SimulationError> {
+        self.run_noise_data_named_with_input_source_and_abort(
+            netlist,
+            output_pos,
+            output_neg,
+            input_source,
+            table_name,
+            default_temperature,
+            &NoAbort,
+        )
+    }
+
     /// Compute the short-circuit port-current noise correlation matrix.
     ///
     /// Every entry is a complex cross-power spectral density in A²/Hz using
@@ -2226,6 +2379,39 @@ mod tests {
             crate::engine::SimulationConfig::default()
                 .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
         )
+    }
+
+    #[test]
+    fn noise_data_executor_preserves_rows_and_applies_bindings_atomically() {
+        let netlist = xyce_frequency_resistor_netlist(
+            "\
+noise data executor
+.GLOBAL_PARAM mag=1 phase=0
+V1 in 0 DC 0 AC {mag} {phase}
+R1 in out 1k
+R2 out 0 1k
+.NOISE V(out) V1 DATA=points
+.DATA points
++ mag phase HERTZ
++ 2 20 10
++ 1 10 1
+.ENDDATA
+.END
+",
+        );
+        let (rows, results) = xyce_engine()
+            .run_noise_data_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+            .expect("table-driven noise executes");
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].frequency, 10.0);
+        assert_eq!(results[1].frequency, 1.0);
+        assert_eq!(rows[0].params.get("mag"), Some(2.0));
+        assert_eq!(rows[0].params.get("phase"), Some(20.0));
+        assert_eq!(rows[0].params.get("HERTZ"), Some(10.0));
+        assert_eq!(rows[1].params.get("mag"), Some(1.0));
+        assert_eq!(rows[1].params.get("phase"), Some(10.0));
+        assert_eq!(rows[1].params.get("HERTZ"), Some(1.0));
     }
 
     #[test]

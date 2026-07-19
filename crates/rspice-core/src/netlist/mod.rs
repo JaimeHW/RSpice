@@ -7120,6 +7120,55 @@ mod tests {
     }
 
     #[test]
+    fn noise_data_table_analysis_is_retained() {
+        let netlist = Netlist::parse(
+            "noise data table\n\
+             .GLOBAL_PARAM mag=1 phase=0\n\
+             V1 in 0 AC {mag} {phase}\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .NOISE V(out) V1 DATA=pts 5\n\
+             .DATA pts\n\
+             + mag phase HERTZ\n\
+             + 2 0.2 10\n\
+             + 1 0.1 1\n\
+             .ENDDATA\n\
+             .PRINT NOISE V(out) INOISE ONOISE\n\
+             .END\n",
+        )
+        .expect(".NOISE DATA table should parse");
+
+        assert!(netlist.analyses.iter().any(|analysis| matches!(
+            analysis,
+            AnalysisCommand::NoiseData {
+                output_node,
+                reference_node: None,
+                input_source,
+                table_name,
+            } if output_node.eq_ignore_ascii_case("out")
+                && input_source.eq_ignore_ascii_case("V1")
+                && table_name.eq_ignore_ascii_case("pts")
+        )));
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case("pts"))
+            .expect(".DATA table retained");
+        assert_eq!(table.params, vec!["mag", "phase", "HERTZ"]);
+        assert_eq!(table.rows, vec![vec![2.0, 0.2, 10.0], vec![1.0, 0.1, 1.0]]);
+    }
+
+    #[test]
+    fn noise_data_requires_equals_and_a_table_name() {
+        for source in [
+            "bad noise data\nV1 in 0 AC 1\nR1 in 0 1k\n.NOISE V(in) V1 DATA pts\n.END\n",
+            "bad noise data\nV1 in 0 AC 1\nR1 in 0 1k\n.NOISE V(in) V1 DATA=\n.END\n",
+        ] {
+            assert!(Netlist::parse(source).is_err());
+        }
+    }
+
+    #[test]
     fn step_linear_source_target_without_type_keyword_parses() {
         let netlist = Netlist::parse(
             "xyce source step\n\

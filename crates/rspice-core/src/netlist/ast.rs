@@ -1890,6 +1890,15 @@ pub enum AnalysisCommand {
         stop_freq: Value,
     },
 
+    /// Xyce table-driven noise analysis: `.NOISE V(out) Vsource DATA=<table>`,
+    /// where each row supplies `FREQ` and may override circuit parameters.
+    NoiseData {
+        output_node: String,
+        reference_node: Option<String>,
+        input_source: String,
+        table_name: String,
+    },
+
     /// Pole-zero analysis: .PZ in+ in- out+ out- VOL|CUR PZ|POL|ZER
     PoleZero {
         input_pos: String,

@@ -443,10 +443,12 @@ fn analysis_owned_output_vector_exists(
             canonical,
             "INOISE_SPECTRUM" | "ONOISE_SPECTRUM" | "INOISE" | "ONOISE"
         )
-        || !netlist
-            .analyses
-            .iter()
-            .any(|analysis| matches!(analysis, AnalysisCommand::Noise { .. }))
+        || !netlist.analyses.iter().any(|analysis| {
+            matches!(
+                analysis,
+                AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. }
+            )
+        })
     {
         return false;
     }

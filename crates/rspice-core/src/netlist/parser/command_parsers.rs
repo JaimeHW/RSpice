@@ -517,6 +517,22 @@ pub(super) fn parse_noise_command(
 
     // Frequency sweep type
     let var_str = expect_ident(stream, line_num)?;
+    if var_str.eq_ignore_ascii_case("DATA") {
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".NOISE DATA requires DATA=<table-name>".to_string(),
+            });
+        }
+        let table_name = expect_ident(stream, line_num)?;
+        let _summary_interval = try_value(stream, params);
+        return Ok(AnalysisCommand::NoiseData {
+            output_node,
+            reference_node,
+            input_source,
+            table_name,
+        });
+    }
     let variation = match var_str.to_uppercase().as_str() {
         "LIN" => FreqVariation::Lin,
         "OCT" => FreqVariation::Oct,
