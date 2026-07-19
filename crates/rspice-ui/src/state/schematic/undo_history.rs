@@ -140,6 +140,22 @@ impl SchematicSnapshot {
             && self.documentation_shapes == other.documentation_shapes
             && self.connections == other.connections
     }
+
+    /// Compare the retained design baseline directly with live document data
+    /// without allocating another full snapshot. Modal authority checks run on
+    /// every preview frame, so an allocation-free comparison is essential for
+    /// large schematics.
+    pub fn is_equal_state(&self, state: &super::state::SchematicState) -> bool {
+        self.components == state.components
+            && self.wires == state.wires
+            && self.buses == state.buses
+            && self.bus_taps == state.bus_taps
+            && self.junctions == state.junctions
+            && self.net_labels == state.net_labels
+            && self.design_notes == state.design_notes
+            && self.documentation_shapes == state.documentation_shapes
+            && self.connections == state.connections
+    }
 }
 
 // =============================================================================

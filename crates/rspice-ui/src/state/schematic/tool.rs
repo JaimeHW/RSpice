@@ -24,6 +24,10 @@ pub enum Tool {
     /// the mockup-owned Move selection workflow.
     MoveSelection,
 
+    /// Stretch one selected conductor segment or documentation control point
+    /// while keeping every unaffected anchor fixed.
+    StretchSelection,
+
     /// Draw wires
     ///
     /// Click to start/extend wire, right-click or Escape to finish.
@@ -66,6 +70,7 @@ impl Tool {
         match self {
             Tool::Select => "Select",
             Tool::MoveSelection => "Move selection",
+            Tool::StretchSelection => "Stretch selection",
             Tool::Wire => "Wire",
             Tool::Bus => "Bus",
             Tool::BusTap => "Bus tap",
@@ -81,8 +86,9 @@ impl Tool {
     /// Get keyboard shortcut for this tool (if any)
     pub fn shortcut(&self) -> Option<char> {
         match self {
-            Tool::Select => Some('s'),
+            Tool::Select => None,
             Tool::MoveSelection => Some('m'),
+            Tool::StretchSelection => Some('s'),
             Tool::Wire => Some('w'),
             Tool::Bus => Some('b'),
             Tool::BusTap => Some('t'),
@@ -144,6 +150,7 @@ impl Tool {
         match self {
             Tool::Select => "default",
             Tool::MoveSelection => "move",
+            Tool::StretchSelection => "move",
             Tool::Wire => "crosshair",
             Tool::Bus | Tool::BusTap => "crosshair",
             Tool::Junction => "crosshair",

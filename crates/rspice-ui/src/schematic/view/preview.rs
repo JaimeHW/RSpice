@@ -45,6 +45,7 @@ pub(super) fn draw_interaction_previews(
         symbol_context,
         symbol_library,
     );
+    draw_stretch_selection_preview(painter, response, state, viewport, symbol_context);
     draw_bus_preview(painter, response, state, viewport);
     draw_wire_preview(painter, response, state, viewport, symbol_context);
     draw_bus_tap_preview(painter, response, state, viewport);
@@ -188,8 +189,6 @@ fn draw_move_selection_preview(
         }
     }
 
-    let palette = crate::ui::tokens::active_palette();
-    let color = if valid { palette.ok } else { palette.err };
     let detail = state
         .dialogs
         .move_selection
@@ -197,6 +196,117 @@ fn draw_move_selection_preview(
         .as_deref()
         .map(str::to_owned)
         .unwrap_or_else(|| format!("\u{0394} {}, {} \u{b7} {}", delta.x, delta.y, mode.label()));
+    draw_transform_feedback(painter, response, valid, detail);
+}
+
+fn draw_stretch_selection_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &mut AppState,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+) {
+    if state.schematic.tool != Tool::StretchSelection || !state.dialogs.stretch_selection.armed {
+        return;
+    }
+    let delta = state.dialogs.stretch_selection.preview_delta;
+    let Some(target) = state.dialogs.stretch_selection.target else {
+        return;
+    };
+    if delta == Point::origin() {
+        if let Some(detail) = state.dialogs.stretch_selection.preview_error.clone() {
+            draw_transform_feedback(painter, response, false, detail);
+        }
+        return;
+    }
+    let policy = state.dialogs.stretch_selection.policy;
+    let candidate = match state.schematic.preview_stretch_target_resolved(
+        delta,
+        target,
+        policy,
+        |component| symbol_context.terminal_points(component),
+        |component| symbol_context.component_bounds_tuple(component),
+    ) {
+        Ok(Some(candidate)) => {
+            state.dialogs.stretch_selection.preview_error = None;
+            candidate
+        }
+        Ok(None) => return,
+        Err(error) => {
+            state.dialogs.stretch_selection.preview_error = Some(error.to_string());
+            let detail = error.to_string();
+            draw_transform_feedback(painter, response, false, detail);
+            return;
+        }
+    };
+
+    for wire in candidate.wires.iter().filter(|candidate_wire| {
+        state
+            .schematic
+            .wires
+            .iter()
+            .find(|wire| wire.id == candidate_wire.id)
+            != Some(*candidate_wire)
+    }) {
+        draw_wire(painter, viewport, wire, true, false);
+    }
+    for bus in candidate.buses.iter().filter(|candidate_bus| {
+        state
+            .schematic
+            .buses
+            .iter()
+            .find(|bus| bus.id == candidate_bus.id)
+            != Some(*candidate_bus)
+    }) {
+        draw_bus(painter, viewport, bus, true);
+    }
+    for tap in candidate.bus_taps.iter().filter(|candidate_tap| {
+        state
+            .schematic
+            .bus_taps
+            .iter()
+            .find(|tap| tap.id == candidate_tap.id)
+            != Some(*candidate_tap)
+    }) {
+        draw_bus_tap(painter, viewport, tap, true);
+    }
+    for shape in candidate
+        .documentation_shapes
+        .iter()
+        .filter(|candidate_shape| {
+            state
+                .schematic
+                .documentation_shapes
+                .iter()
+                .find(|shape| shape.id == candidate_shape.id)
+                != Some(*candidate_shape)
+        })
+    {
+        draw_documentation_shape(painter, viewport, shape, true, false);
+    }
+
+    let detail = state
+        .dialogs
+        .stretch_selection
+        .preview_error
+        .as_deref()
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "\u{0394} {}, {} \u{b7} {}",
+                delta.x,
+                delta.y,
+                policy.label()
+            )
+        });
+    draw_transform_feedback(painter, response, true, detail);
+}
+
+fn draw_transform_feedback(painter: &Painter, response: &Response, valid: bool, detail: String) {
+    let palette = crate::ui::tokens::active_palette();
+    let color = if valid { palette.ok } else { palette.err };
+    let clip = painter.clip_rect();
+    let tooltip_width = (clip.width() * 0.7).clamp(80.0, 300.0);
     let galley = painter.layout(
         detail,
         crate::ui::theme::mono(
@@ -204,17 +314,27 @@ fn draw_move_selection_preview(
             crate::ui::theme::FontWeight::Medium,
         ),
         color,
-        300.0,
+        tooltip_width,
     );
-    let position = response
+    let requested = response
         .hover_pos()
         .or_else(|| response.interact_pointer_pos())
-        .unwrap_or_else(|| painter.clip_rect().center())
+        .unwrap_or_else(|| clip.center())
         + Vec2::new(12.0, 12.0);
-    let background = Rect::from_min_size(
-        position - Vec2::splat(5.0),
-        galley.size() + Vec2::splat(10.0),
+    let background_size = galley.size() + Vec2::splat(10.0);
+    let inset = clip.shrink(4.0);
+    let background_min = egui::pos2(
+        (requested.x - 5.0).clamp(
+            inset.left(),
+            (inset.right() - background_size.x).max(inset.left()),
+        ),
+        (requested.y - 5.0).clamp(
+            inset.top(),
+            (inset.bottom() - background_size.y).max(inset.top()),
+        ),
     );
+    let background = Rect::from_min_size(background_min, background_size);
+    let position = background.min + Vec2::splat(5.0);
     painter.rect_filled(background, 5.0, palette.bg_inset.gamma_multiply(0.96));
     painter.rect_stroke(
         background,

@@ -55,11 +55,16 @@ mod app_dialog_state;
 pub(crate) use app_dialog_state::{
     BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft,
     DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
-    DocumentationShapeObjectPropertiesDraft, MoveSelectionDialogContext, MoveSelectionDialogState,
+    DocumentationShapeObjectPropertiesDraft, MoveSelectionDialogState,
     NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, PinPortDialogState,
-    RenameSelectionTarget,
+    RenameSelectionTarget, StretchSelectionDialogState,
 };
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
+
+mod app_schematic_edit_authority;
+pub(crate) use app_schematic_edit_authority::SchematicEditAuthority;
+
+mod app_schematic_command_dialog;
 
 mod app_preference_runtime;
 mod app_serialization;
@@ -88,6 +93,11 @@ mod app_documentation_shape_dialog;
 mod app_move_selection_dialog;
 pub(crate) use app_move_selection_dialog::{
     armed_move_selection_authority, cancel_armed_move_selection, open_move_selection_dialog,
+};
+mod app_stretch_selection_dialog;
+pub(crate) use app_stretch_selection_dialog::{
+    armed_stretch_selection_authority, cancel_armed_stretch_selection,
+    open_stretch_selection_dialog, stretch_delta_for_policy,
 };
 mod app_object_properties_dialog;
 mod app_pin_port_dialog;
@@ -870,6 +880,7 @@ impl RSpiceApp {
         self.render_design_note_dialog(ctx);
         self.render_documentation_shape_dialog(ctx);
         self.render_move_selection_dialog(ctx);
+        self.render_stretch_selection_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);

@@ -328,7 +328,6 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num7, false, true, false, "Alt+7"), ALL)];
 const PLACE_INSTANCE: &[ShortcutBinding] =
     &[primary(chord(Key::I, false, false, true, "Shift+I"), ALL)];
-const SELECT_TOOL: &[ShortcutBinding] = &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const PLACE_WIRE: &[ShortcutBinding] = &[primary(chord(Key::W, false, false, false, "W"), ALL)];
 const PLACE_BUS: &[ShortcutBinding] = &[primary(chord(Key::B, false, false, false, "B"), ALL)];
 const PLACE_BUS_TAP: &[ShortcutBinding] = &[primary(chord(Key::T, false, false, false, "T"), ALL)];
@@ -339,6 +338,8 @@ const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true
 const PLACE_TEXT: &[ShortcutBinding] =
     &[primary(chord(Key::T, false, false, true, "Shift+T"), ALL)];
 const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
+const STRETCH_SELECTION: &[ShortcutBinding] =
+    &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const SYMBOL_POLYLINE: &[ShortcutBinding] =
     &[primary(chord(Key::W, false, false, false, "W"), ALL)];
@@ -510,6 +511,7 @@ impl Command {
             | Self::PlaceText
             | Self::PlaceShape
             | Self::MoveSelection
+            | Self::StretchSelection
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -586,7 +588,7 @@ impl Command {
             Self::ToggleInspector => TOGGLE_INSPECTOR,
             Self::ToggleConsole => TOGGLE_CONSOLE,
             Self::ToggleFocusMode => FOCUS_WORKSPACE,
-            Self::SelectTool => SELECT_TOOL,
+            Self::SelectTool => NONE,
             Self::PlaceInstance => PLACE_INSTANCE,
             Self::PlaceWire => PLACE_WIRE,
             Self::PlaceBus => PLACE_BUS,
@@ -598,6 +600,7 @@ impl Command {
             Self::PlaceText => PLACE_TEXT,
             Self::PlaceShape => NONE,
             Self::MoveSelection => MOVE_SELECTION,
+            Self::StretchSelection => STRETCH_SELECTION,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -667,6 +670,7 @@ impl Command {
             | Self::Duplicate
             | Self::Delete
             | Self::MoveSelection
+            | Self::StretchSelection
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",
@@ -928,6 +932,25 @@ mod tests {
             assert_eq!(
                 binding_owners(MOVE_SELECTION[0].chord, platform),
                 vec![Command::MoveSelection]
+            );
+        }
+    }
+
+    #[test]
+    fn stretch_selection_solely_owns_unmodified_s_in_the_engineering_canvas() {
+        assert_eq!(
+            Command::StretchSelection.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        assert!(Command::SelectTool.shortcut_bindings().is_empty());
+        for platform in CommandPlatform::ALL {
+            assert_eq!(
+                Command::StretchSelection.default_shortcut_label(platform),
+                "S"
+            );
+            assert_eq!(
+                binding_owners(STRETCH_SELECTION[0].chord, platform),
+                vec![Command::StretchSelection]
             );
         }
     }

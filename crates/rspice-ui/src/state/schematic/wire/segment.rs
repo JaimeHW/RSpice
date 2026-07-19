@@ -33,13 +33,15 @@ impl WireSegment {
     /// Get the length of the segment in grid units (Manhattan distance for orthogonal)
     #[inline]
     pub fn length(&self) -> i32 {
-        self.start.manhattan_distance(self.end)
+        let dx = (i64::from(self.end.x) - i64::from(self.start.x)).unsigned_abs();
+        let dy = (i64::from(self.end.y) - i64::from(self.start.y)).unsigned_abs();
+        i32::try_from(dx.saturating_add(dy)).unwrap_or(i32::MAX)
     }
 
     /// Get the Euclidean length of the segment
     pub fn euclidean_length(&self) -> f64 {
-        let dx = (self.end.x - self.start.x) as f64;
-        let dy = (self.end.y - self.start.y) as f64;
+        let dx = f64::from(self.end.x) - f64::from(self.start.x);
+        let dy = f64::from(self.end.y) - f64::from(self.start.y);
         (dx * dx + dy * dy).sqrt()
     }
 
@@ -86,7 +88,10 @@ impl WireSegment {
         self.start == self.end
     }
 
-    /// Check if a point lies exactly on this segment (for orthogonal segments)
+    /// Check if a point lies exactly on this segment.
+    ///
+    /// General diagonal geometry uses an integer cross product so extreme
+    /// document coordinates remain exact and overflow-free.
     pub fn contains_point(&self, p: Point) -> bool {
         if self.is_zero_length() {
             return p == self.start;
@@ -114,10 +119,10 @@ impl WireSegment {
 
         // For diagonal segments, use parametric line equation
         // Point is on segment if it's collinear and within bounds
-        let dx = self.end.x - self.start.x;
-        let dy = self.end.y - self.start.y;
-        let px = p.x - self.start.x;
-        let py = p.y - self.start.y;
+        let dx = i128::from(self.end.x) - i128::from(self.start.x);
+        let dy = i128::from(self.end.y) - i128::from(self.start.y);
+        let px = i128::from(p.x) - i128::from(self.start.x);
+        let py = i128::from(p.y) - i128::from(self.start.y);
 
         // Check collinearity: cross product should be zero
         if px * dy != py * dx {
@@ -125,16 +130,13 @@ impl WireSegment {
         }
 
         // Check if within parametric bounds [0, 1]
-        if dx != 0 {
-            let t = px as f64 / dx as f64;
-            return (0.0..=1.0).contains(&t);
-        }
-        if dy != 0 {
-            let t = py as f64 / dy as f64;
-            return (0.0..=1.0).contains(&t);
-        }
-
-        false
+        let min_x = i128::from(self.start.x.min(self.end.x));
+        let max_x = i128::from(self.start.x.max(self.end.x));
+        let min_y = i128::from(self.start.y.min(self.end.y));
+        let max_y = i128::from(self.start.y.max(self.end.y));
+        let point_x = i128::from(p.x);
+        let point_y = i128::from(p.y);
+        point_x >= min_x && point_x <= max_x && point_y >= min_y && point_y <= max_y
     }
 
     /// Check if a point is within tolerance of this segment
@@ -147,15 +149,15 @@ impl WireSegment {
     /// This is more efficient than distance_to_point when comparing distances
     pub fn squared_distance_to_point(&self, p: Point) -> f64 {
         if self.is_zero_length() {
-            let dx = (p.x - self.start.x) as f64;
-            let dy = (p.y - self.start.y) as f64;
+            let dx = f64::from(p.x) - f64::from(self.start.x);
+            let dy = f64::from(p.y) - f64::from(self.start.y);
             return dx * dx + dy * dy;
         }
 
-        let dx = (self.end.x - self.start.x) as f64;
-        let dy = (self.end.y - self.start.y) as f64;
-        let px = (p.x - self.start.x) as f64;
-        let py = (p.y - self.start.y) as f64;
+        let dx = f64::from(self.end.x) - f64::from(self.start.x);
+        let dy = f64::from(self.end.y) - f64::from(self.start.y);
+        let px = f64::from(p.x) - f64::from(self.start.x);
+        let py = f64::from(p.y) - f64::from(self.start.y);
 
         let len_sq = dx * dx + dy * dy;
         let t = ((px * dx + py * dy) / len_sq).clamp(0.0, 1.0);
@@ -180,10 +182,10 @@ impl WireSegment {
             return self.start;
         }
 
-        let dx = (self.end.x - self.start.x) as f64;
-        let dy = (self.end.y - self.start.y) as f64;
-        let px = (p.x - self.start.x) as f64;
-        let py = (p.y - self.start.y) as f64;
+        let dx = f64::from(self.end.x) - f64::from(self.start.x);
+        let dy = f64::from(self.end.y) - f64::from(self.start.y);
+        let px = f64::from(p.x) - f64::from(self.start.x);
+        let py = f64::from(p.y) - f64::from(self.start.y);
 
         let len_sq = dx * dx + dy * dy;
         let t = ((px * dx + py * dy) / len_sq).clamp(0.0, 1.0);
@@ -205,10 +207,10 @@ impl WireSegment {
         let c = other.start;
         let d = other.end;
 
-        let dx1 = (b.x - a.x) as i64;
-        let dy1 = (b.y - a.y) as i64;
-        let dx2 = (d.x - c.x) as i64;
-        let dy2 = (d.y - c.y) as i64;
+        let dx1 = i128::from(b.x) - i128::from(a.x);
+        let dy1 = i128::from(b.y) - i128::from(a.y);
+        let dx2 = i128::from(d.x) - i128::from(c.x);
+        let dy2 = i128::from(d.y) - i128::from(c.y);
 
         let denominator = dx1 * dy2 - dy1 * dx2;
 
@@ -227,8 +229,8 @@ impl WireSegment {
             return None;
         }
 
-        let dx3 = (c.x - a.x) as i64;
-        let dy3 = (c.y - a.y) as i64;
+        let dx3 = i128::from(c.x) - i128::from(a.x);
+        let dy3 = i128::from(c.y) - i128::from(a.y);
 
         let t_num = dx3 * dy2 - dy3 * dx2;
         let u_num = dx3 * dy1 - dy3 * dx1;
@@ -249,20 +251,20 @@ impl WireSegment {
     /// Check if this segment overlaps with another (shares more than a point)
     pub fn overlaps(&self, other: &WireSegment) -> bool {
         // Segments must be collinear
-        let dx1 = self.end.x - self.start.x;
-        let dy1 = self.end.y - self.start.y;
-        let dx2 = other.end.x - other.start.x;
-        let dy2 = other.end.y - other.start.y;
+        let dx1 = i128::from(self.end.x) - i128::from(self.start.x);
+        let dy1 = i128::from(self.end.y) - i128::from(self.start.y);
+        let dx2 = i128::from(other.end.x) - i128::from(other.start.x);
+        let dy2 = i128::from(other.end.y) - i128::from(other.start.y);
 
         // Cross product for collinearity check
-        if (dx1 as i64) * (dy2 as i64) != (dy1 as i64) * (dx2 as i64) {
+        if dx1 * dy2 != dy1 * dx2 {
             return false;
         }
 
         // Check if segments are on the same line
-        let dx3 = other.start.x - self.start.x;
-        let dy3 = other.start.y - self.start.y;
-        if (dx1 as i64) * (dy3 as i64) != (dy1 as i64) * (dx3 as i64) {
+        let dx3 = i128::from(other.start.x) - i128::from(self.start.x);
+        let dy3 = i128::from(other.start.y) - i128::from(self.start.y);
+        if dx1 * dy3 != dy1 * dx3 {
             return false;
         }
 
@@ -280,8 +282,8 @@ impl WireSegment {
         if len == 0.0 {
             return (0.0, 0.0);
         }
-        let dx = (self.end.x - self.start.x) as f64 / len;
-        let dy = (self.end.y - self.start.y) as f64 / len;
+        let dx = (f64::from(self.end.x) - f64::from(self.start.x)) / len;
+        let dy = (f64::from(self.end.y) - f64::from(self.start.y)) / len;
         (dx, dy)
     }
 
@@ -383,3 +385,36 @@ impl WireHitResult {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hit_geometry_is_safe_at_the_signed_coordinate_limits() {
+        let diagonal = WireSegment::new(
+            Point::new(i32::MIN + 1, i32::MIN + 1),
+            Point::new(i32::MAX, i32::MAX),
+        );
+        assert!(diagonal.contains_point(Point::origin()));
+        assert_eq!(diagonal.length(), i32::MAX);
+        assert!(diagonal.euclidean_length().is_finite());
+        assert_eq!(diagonal.closest_point(Point::origin()), Point::origin());
+        assert_eq!(diagonal.distance_to_point(Point::origin()), 0.0);
+
+        let crossing = WireSegment::new(
+            Point::new(i32::MIN + 1, i32::MAX),
+            Point::new(i32::MAX, i32::MIN + 1),
+        );
+        assert_eq!(diagonal.intersection(&crossing), Some(Point::origin()));
+        assert!(!diagonal.overlaps(&crossing));
+    }
+
+    #[test]
+    fn extreme_collinear_segments_overlap_without_integer_wraparound() {
+        let span = WireSegment::new(Point::new(i32::MIN, 7), Point::new(i32::MAX, 7));
+        let inner = WireSegment::new(Point::new(-10, 7), Point::new(10, 7));
+        assert!(span.overlaps(&inner));
+        assert_eq!(span.distance_to_point(Point::new(0, 8)), 1.0);
+    }
+}

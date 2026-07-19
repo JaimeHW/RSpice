@@ -881,7 +881,6 @@ mod tests {
         let profile = ShortcutPreferences::default();
         let mut state = ShortcutResolverState::default();
         for (time, key, expected) in [
-            (0, Key::S, Command::SelectTool),
             (1, Key::P, Command::SymbolPinTool),
             (2, Key::W, Command::SymbolPolylineTool),
             (3, Key::C, Command::SymbolCircleTool),
@@ -900,6 +899,37 @@ mod tests {
             );
             assert_eq!(resolved.command, Some(expected), "key {key:?}");
         }
+
+        let unbound_select = state.resolve(
+            &snapshot(&[event(Key::S, Modifiers::NONE, false)], false),
+            &profile,
+            CommandPlatform::Desktop,
+            models_symbol(true),
+            Duration::from_millis(8),
+            |_| true,
+        );
+        assert_eq!(unbound_select.command, None);
+    }
+
+    #[test]
+    fn plain_s_resolves_stretch_only_in_the_engineering_canvas() {
+        let profile = ShortcutPreferences::default();
+        let resolve = |environment| {
+            ShortcutResolverState::default().resolve(
+                &snapshot(&[event(Key::S, Modifiers::NONE, false)], false),
+                &profile,
+                CommandPlatform::Desktop,
+                environment,
+                Duration::ZERO,
+                |_| true,
+            )
+        };
+
+        assert_eq!(
+            resolve(design(true)).command,
+            Some(Command::StretchSelection)
+        );
+        assert_eq!(resolve(models_symbol(true)).command, None);
     }
 
     #[test]

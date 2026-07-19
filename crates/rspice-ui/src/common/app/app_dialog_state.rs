@@ -3,7 +3,7 @@
 //! Modal/dialog payload used by `AppState`. Analysis configuration lives
 //! in `SimSetupState`, not here.
 
-use super::{ConfirmationDialogState, ProjectReviewDialogState};
+use super::{ConfirmationDialogState, ProjectReviewDialogState, SchematicEditAuthority};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ShortcutEditorContext {
@@ -420,53 +420,28 @@ pub(crate) struct MoveSelectionDialogState {
     pub(crate) open: bool,
     pub(crate) armed: bool,
     pub(crate) mode: crate::state::MoveSelectionMode,
-    pub(crate) design_execution_epoch: u64,
-    pub(crate) active_schematic_epoch: u64,
-    pub(crate) topology_version: u64,
-    pub(crate) view_path: String,
-    pub(crate) grid_size: i32,
-    pub(crate) document_policy: crate::state::SchematicDocumentPolicy,
-    pub(crate) expected_snapshot: Option<crate::state::SchematicSnapshot>,
-    pub(crate) expected_selection: Option<crate::state::Selection>,
+    pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) anchor: Option<crate::state::Point>,
     pub(crate) preview_delta: crate::state::Point,
     pub(crate) pointer_drag: bool,
     pub(crate) preview_error: Option<String>,
-}
-
-/// Immutable authority captured when the Move selection transaction opens.
-/// Keeping the baseline in one value prevents command entry points from
-/// accidentally omitting an epoch, policy, or selection guard.
-#[derive(Debug, Clone)]
-pub(crate) struct MoveSelectionDialogContext {
-    pub(crate) design_execution_epoch: u64,
-    pub(crate) active_schematic_epoch: u64,
-    pub(crate) topology_version: u64,
-    pub(crate) view_path: String,
-    pub(crate) grid_size: i32,
-    pub(crate) document_policy: crate::state::SchematicDocumentPolicy,
-    pub(crate) snapshot: crate::state::SchematicSnapshot,
-    pub(crate) selection: crate::state::Selection,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
 }
 
 impl MoveSelectionDialogState {
-    pub(crate) fn open(&mut self, context: MoveSelectionDialogContext) {
+    pub(crate) fn open(&mut self, authority: SchematicEditAuthority) {
         *self = Self {
             open: true,
             armed: false,
             mode: crate::state::MoveSelectionMode::Connected,
-            design_execution_epoch: context.design_execution_epoch,
-            active_schematic_epoch: context.active_schematic_epoch,
-            topology_version: context.topology_version,
-            view_path: context.view_path,
-            grid_size: context.grid_size,
-            document_policy: context.document_policy,
-            expected_snapshot: Some(context.snapshot),
-            expected_selection: Some(context.selection),
+            authority: Some(authority),
             anchor: None,
             preview_delta: crate::state::Point::origin(),
             pointer_drag: false,
             preview_error: None,
+            dirty: false,
+            discard_confirm: false,
         };
     }
 
@@ -477,10 +452,98 @@ impl MoveSelectionDialogState {
         self.preview_delta = crate::state::Point::origin();
         self.pointer_drag = false;
         self.preview_error = None;
+        self.dirty = false;
+        self.discard_confirm = false;
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = true;
+        self.discard_confirm = false;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
+/// Isolated authority and interaction state for the mockup-owned Stretch
+/// selection transaction. The selected conductor segment or documentation
+/// control point is resolved before mutation and remains stable through the
+/// live canvas preview and atomic commit.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StretchSelectionDialogState {
+    pub(crate) open: bool,
+    pub(crate) armed: bool,
+    pub(crate) policy: crate::state::StretchOrthogonalPolicy,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) target: Option<crate::state::StretchTarget>,
+    pub(crate) anchor: Option<crate::state::Point>,
+    pub(crate) preview_delta: crate::state::Point,
+    pub(crate) pointer_drag: bool,
+    pub(crate) preview_error: Option<String>,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl StretchSelectionDialogState {
+    pub(crate) fn open(
+        &mut self,
+        authority: SchematicEditAuthority,
+        target: crate::state::StretchTarget,
+    ) {
+        *self = Self {
+            open: true,
+            armed: false,
+            policy: crate::state::StretchOrthogonalPolicy::default(),
+            authority: Some(authority),
+            target: Some(target),
+            anchor: None,
+            preview_delta: crate::state::Point::origin(),
+            pointer_drag: false,
+            preview_error: None,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn arm(&mut self) {
+        self.open = false;
+        self.armed = true;
+        self.anchor = None;
+        self.preview_delta = crate::state::Point::origin();
+        self.pointer_drag = false;
+        self.preview_error = None;
+        self.dirty = false;
+        self.discard_confirm = false;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = true;
+        self.discard_confirm = false;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
     }
 }
 
@@ -1008,6 +1071,9 @@ pub struct DialogState {
     /// Connectivity-aware selected-object movement transaction.
     pub(crate) move_selection: MoveSelectionDialogState,
 
+    /// Anchor-preserving conductor/documentation stretch transaction.
+    pub(crate) stretch_selection: StretchSelectionDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -1066,6 +1132,7 @@ impl DialogState {
             || self.design_note.open
             || self.documentation_shape.open
             || self.move_selection.open
+            || self.stretch_selection.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
@@ -1130,17 +1197,38 @@ mod tests {
                 .open(0, 0, 0, "user/top/schematic".to_owned(), Vec::new());
         });
         assert_blocks_shortcuts(|dialogs| {
-            let schematic = crate::state::SchematicState::default();
-            dialogs.move_selection.open(MoveSelectionDialogContext {
+            dialogs.move_selection.open(super::SchematicEditAuthority {
                 design_execution_epoch: 0,
                 active_schematic_epoch: 0,
-                topology_version: schematic.topology_version(),
+                topology_version: 0,
                 view_path: "user/top/schematic".to_owned(),
-                grid_size: schematic.grid_size,
-                document_policy: schematic.document_policy,
-                snapshot: crate::state::SchematicSnapshot::capture(&schematic),
-                selection: schematic.selection.clone(),
+                grid_size: 10,
+                document_policy: crate::state::SchematicDocumentPolicy::default(),
+                snapshot: crate::state::SchematicSnapshot::capture(
+                    &crate::state::SchematicState::default(),
+                ),
+                selection: crate::state::Selection::default(),
             });
+        });
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs.stretch_selection.open(
+                super::SchematicEditAuthority {
+                    design_execution_epoch: 0,
+                    active_schematic_epoch: 0,
+                    topology_version: 0,
+                    view_path: "user/top/schematic".to_owned(),
+                    grid_size: 10,
+                    document_policy: crate::state::SchematicDocumentPolicy::default(),
+                    snapshot: crate::state::SchematicSnapshot::capture(
+                        &crate::state::SchematicState::default(),
+                    ),
+                    selection: crate::state::Selection::default(),
+                },
+                crate::state::StretchTarget::WireSegment {
+                    wire_id: 1,
+                    segment_index: 0,
+                },
+            );
         });
         assert_blocks_shortcuts(|dialogs| {
             let bus = crate::state::Bus::segment(

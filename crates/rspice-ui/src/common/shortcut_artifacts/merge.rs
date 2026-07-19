@@ -1824,7 +1824,7 @@ mod tests {
             (
                 ShortcutConflictPolicy::KeepCurrentAndReport,
                 "F6",
-                "S",
+                "",
                 ShortcutImportDecision::KeptCurrent,
             ),
             (

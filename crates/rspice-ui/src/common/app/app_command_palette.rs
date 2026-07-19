@@ -1527,7 +1527,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::PlacePin => Icon::Pin,
         Command::PlaceText => Icon::NetLabel,
         Command::PlaceShape => Icon::Grid,
-        Command::MoveSelection => Icon::Select,
+        Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
         Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,
@@ -1873,6 +1873,14 @@ mod tests {
         assert_eq!(
             row_icon(&PaletteEntry::Command(Command::PlaceBusTap)),
             Icon::Bus
+        );
+    }
+
+    #[test]
+    fn stretch_selection_uses_the_exact_pointer_glyph() {
+        assert_eq!(
+            row_icon(&PaletteEntry::Command(Command::StretchSelection)),
+            Icon::Select
         );
     }
 

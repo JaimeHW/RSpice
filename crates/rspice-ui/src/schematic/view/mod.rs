@@ -29,6 +29,7 @@ mod net_labels;
 mod preview;
 pub(crate) mod resolved_symbol_render;
 mod scene;
+mod stretch_interaction;
 mod symbol_primitives;
 mod viewport;
 pub(crate) mod violations;
@@ -101,6 +102,14 @@ impl SchematicSymbolContext {
             .into_iter()
             .map(|(_, position)| position)
             .collect()
+    }
+
+    /// Authoritative world bounds of the rendered instance, including custom
+    /// symbol artwork. Geometry editors use this same extent so validation can
+    /// never route through shapes that the user can see on the canvas.
+    pub(crate) fn component_bounds_tuple(&self, component: &Component) -> (i32, i32, i32, i32) {
+        let (min, max) = self.component_bounds(component);
+        (min.x, min.y, max.x, max.y)
     }
 
     pub(super) fn component_at_resolved_terminal(
@@ -477,6 +486,7 @@ fn schematic_accessibility_label(
             Command::PlaceText,
             Command::PlaceShape,
             Command::MoveSelection,
+            Command::StretchSelection,
             Command::ZoomFit,
             Command::Cancel,
         ],
@@ -852,6 +862,7 @@ mod tests {
         assert!(label.contains("Arrow keys select the previous or next instance."));
         assert!(label.contains("Escape: Cancel active command"));
         assert!(label.contains("Shift+T: Place text or note"));
+        assert!(label.contains("S: Stretch selection"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

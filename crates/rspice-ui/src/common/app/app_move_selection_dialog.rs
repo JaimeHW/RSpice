@@ -4,26 +4,28 @@
 //! the document; the schematic interaction layer accumulates a snapped
 //! pointer/keyboard delta and commits the configured movement exactly once.
 
-use egui::{Context, Frame, Ui};
+use egui::{Context, Ui};
 
 use crate::schematic::view::SchematicSymbolContext;
-use crate::state::{MoveSelectionMode, Point, SchematicSnapshot, Tool};
+use crate::state::{MoveSelectionMode, Point, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, SchematicCommandPreview,
-    schematic_command_workflow, select_with_response,
+    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    SchematicCommandPreview, schematic_command_workflow, select_with_response,
 };
 
 use super::{
-    AppState, ConsoleMessage, MoveSelectionDialogContext, MoveSelectionDialogState, RSpiceApp,
+    AppState, ConsoleMessage, MoveSelectionDialogState, RSpiceApp, SchematicEditAuthority,
 };
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY PRESERVING";
 const TITLE: &str = "Move selection";
 const PRIMARY: &str = "Arm move tool";
 const DESCRIPTION: &str = "Move selected objects with connected wires following and preview any resulting geometry or hierarchy violations.";
-const FOOTER_NOTE: &str = "Pointer, touch, stylus, and keyboard entry resolve to the same exact coordinates. Escape cancels without modifying the document.";
+use super::app_schematic_command_dialog::{
+    DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE, field_label, read_only_value, snap_label,
+};
 
 #[derive(Debug)]
 enum DraftValidation {
@@ -61,20 +63,13 @@ pub(crate) fn open_move_selection_dialog(state: &mut AppState) {
         ));
         return;
     }
-    let snapshot = SchematicSnapshot::capture(&state.schematic);
+    if state.dialogs.stretch_selection.armed {
+        super::cancel_armed_stretch_selection(state);
+    }
     state
         .dialogs
         .move_selection
-        .open(MoveSelectionDialogContext {
-            design_execution_epoch: state.design_execution_epoch,
-            active_schematic_epoch: state.active_schematic_epoch,
-            topology_version: state.schematic.topology_version(),
-            view_path: state.workspace.active_view.display_path(),
-            grid_size: state.schematic.grid_size,
-            document_policy: state.schematic.document_policy,
-            snapshot,
-            selection: state.schematic.selection.clone(),
-        });
+        .open(SchematicEditAuthority::capture(state));
 }
 
 impl RSpiceApp {
@@ -86,13 +81,25 @@ impl RSpiceApp {
         let validation_message = validation.message().map(str::to_owned);
         let summary = selection_summary(&self.state);
         let snap = snap_label(self.state.schematic.document_policy.grid_pitch);
-        let dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let discard_confirm = self.state.dialogs.move_selection.discard_confirm;
+        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
-            .ghost("Cancel")
+            .ghost(if discard_confirm {
+                "Discard changes"
+            } else {
+                "Cancel"
+            })
             .primary_enabled(validation.can_commit())
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl);
+        if discard_confirm {
+            dialog = dialog.transaction_state(
+                DialogTransactionTone::Error,
+                DISCARD_TITLE,
+                DISCARD_DETAIL,
+            );
+        }
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             workflow_body(
                 ui,
@@ -119,7 +126,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.move_selection.close();
+                self.state.dialogs.move_selection.attempt_close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -131,49 +138,14 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
     }
     let draft = &state.dialogs.move_selection;
-    if draft.design_execution_epoch != state.design_execution_epoch {
-        return DraftValidation::Invalid(
-            "The design document changed. Close and reopen Move selection.".to_owned(),
-        );
-    }
-    if draft.active_schematic_epoch != state.active_schematic_epoch {
-        return DraftValidation::Invalid(
-            "The active schematic buffer changed. Close and reopen Move selection.".to_owned(),
-        );
-    }
-    if draft.topology_version != state.schematic.topology_version() {
-        return DraftValidation::Invalid(
-            "The schematic topology changed. Close and reopen Move selection.".to_owned(),
-        );
-    }
-    if draft.view_path != state.workspace.active_view.display_path() {
-        return DraftValidation::Invalid(
-            "The active cell/view changed. Close and reopen Move selection.".to_owned(),
-        );
-    }
-    if draft.grid_size != state.schematic.grid_size
-        || draft.document_policy != state.schematic.document_policy
-    {
-        return DraftValidation::Invalid(
-            "The schematic grid or editing policy changed. Close and reopen Move selection."
-                .to_owned(),
-        );
-    }
-    if draft.expected_selection.as_ref() != Some(&state.schematic.selection) {
-        return DraftValidation::Invalid(
-            "The selected-object set changed. Close and reopen Move selection.".to_owned(),
-        );
-    }
-    let Some(expected) = draft.expected_snapshot.as_ref() else {
+    let Some(authority) = draft.authority.as_ref() else {
         return DraftValidation::Invalid(
             "The retained design baseline is unavailable. Close and reopen Move selection."
                 .to_owned(),
         );
     };
-    if !expected.is_equal(&SchematicSnapshot::capture(&state.schematic)) {
-        return DraftValidation::Invalid(
-            "The schematic geometry changed. Close and reopen Move selection.".to_owned(),
-        );
+    if let Err(message) = authority.validate(state, TITLE) {
+        return DraftValidation::Invalid(message);
     }
     if !state.schematic.has_live_movable_selection() {
         return DraftValidation::Invalid("No movable selected object remains.".to_owned());
@@ -258,50 +230,13 @@ fn workflow_body(
         },
     );
     if let Some(index) = focus.picked {
-        draft.mode = MoveSelectionMode::ALL[index];
+        let next = MoveSelectionMode::ALL[index];
+        if next != draft.mode {
+            draft.mode = next;
+            draft.mark_edited();
+        }
     }
     Some(focus.response.id)
-}
-
-fn snap_label(pitch: crate::state::SchematicGridPitch) -> &'static str {
-    match pitch {
-        crate::state::SchematicGridPitch::Mil50 => "50 mil",
-        crate::state::SchematicGridPitch::Mil25 => "25 mil",
-        crate::state::SchematicGridPitch::Metric => "Metric",
-    }
-}
-
-fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label.to_ascii_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_dim),
-    );
-    ui.add_space(4.0);
-    content(ui)
-}
-
-fn read_only_value(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    field_label(ui, label, |ui| {
-        Frame::new()
-            .fill(t.color.bg_panel)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(5.0)
-            .inner_margin(egui::Margin::symmetric(8, 6))
-            .show(ui, |ui| {
-                ui.set_min_width((ui.available_width() - 16.0).max(1.0));
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(value)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text),
-                    )
-                    .wrap(),
-                );
-            });
-    });
 }
 
 fn selection_summary(state: &AppState) -> String {
@@ -340,7 +275,7 @@ fn selection_summary(state: &AppState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{ComponentType, Point};
+    use crate::state::{ComponentType, Point, SchematicSnapshot};
 
     #[test]
     fn open_freezes_selection_and_complete_design_snapshot() {
@@ -352,13 +287,13 @@ mod tests {
         open_move_selection_dialog(&mut state);
         let draft = &state.dialogs.move_selection;
         assert!(draft.open);
-        assert_eq!(
-            draft.expected_selection.as_ref(),
-            Some(&state.schematic.selection)
+        let authority = draft.authority.as_ref().expect("captured authority");
+        assert_eq!(authority.selection, state.schematic.selection);
+        assert!(
+            authority
+                .snapshot
+                .is_equal(&SchematicSnapshot::capture(&state.schematic))
         );
-        assert!(draft.expected_snapshot.as_ref().is_some_and(|snapshot| {
-            snapshot.is_equal(&SchematicSnapshot::capture(&state.schematic))
-        }));
     }
 
     #[test]
@@ -393,18 +328,16 @@ mod tests {
     }
 
     #[test]
-    fn snap_label_tracks_the_document_grid_contract() {
-        assert_eq!(
-            snap_label(crate::state::SchematicGridPitch::Mil50),
-            "50 mil"
-        );
-        assert_eq!(
-            snap_label(crate::state::SchematicGridPitch::Mil25),
-            "25 mil"
-        );
-        assert_eq!(
-            snap_label(crate::state::SchematicGridPitch::Metric),
-            "Metric"
-        );
+    fn edited_mode_requires_explicit_discard_confirmation() {
+        let mut draft = MoveSelectionDialogState {
+            open: true,
+            ..MoveSelectionDialogState::default()
+        };
+        draft.mark_edited();
+        assert!(!draft.attempt_close());
+        assert!(draft.open);
+        assert!(draft.discard_confirm);
+        assert!(draft.attempt_close());
+        assert!(!draft.open);
     }
 }

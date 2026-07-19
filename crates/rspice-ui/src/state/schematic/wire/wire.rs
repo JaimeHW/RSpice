@@ -43,33 +43,7 @@ impl Wire {
 
     /// Check if wire contains a point (on any segment)
     pub fn contains_point(&self, p: Point) -> bool {
-        // Check vertices
-        if self.points.contains(&p) {
-            return true;
-        }
-
-        // Check segments
-        for segment in self.points.windows(2) {
-            if Self::point_on_segment(p, segment[0], segment[1]) {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Check if point lies on a horizontal or vertical segment
-    fn point_on_segment(p: Point, a: Point, b: Point) -> bool {
-        // Horizontal segment
-        if a.y == b.y && p.y == a.y {
-            let (min_x, max_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
-            return p.x >= min_x && p.x <= max_x;
-        }
-        // Vertical segment
-        if a.x == b.x && p.x == a.x {
-            let (min_y, max_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
-            return p.y >= min_y && p.y <= max_y;
-        }
-        false
+        self.points.contains(&p) || self.segments().any(|segment| segment.contains_point(p))
     }
 
     /// Get the start point (first point)

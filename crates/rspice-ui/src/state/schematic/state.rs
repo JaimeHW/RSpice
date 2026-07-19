@@ -125,6 +125,146 @@ impl std::fmt::Display for MoveSelectionError {
 
 impl std::error::Error for MoveSelectionError {}
 
+/// Geometry policy applied while stretching one selected schematic segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StretchOrthogonalPolicy {
+    /// Retain orthogonal source and affected geometry. The requested motion
+    /// must be perpendicular to the selected segment.
+    #[default]
+    PreserveOrthogonal,
+    /// Permit diagonal adjacent segments while retaining every fixed anchor.
+    AllowDiagonal,
+}
+
+impl StretchOrthogonalPolicy {
+    pub const ALL: [Self; 2] = [Self::PreserveOrthogonal, Self::AllowDiagonal];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::PreserveOrthogonal => "Preserve orthogonal",
+            Self::AllowDiagonal => "Allow diagonal",
+        }
+    }
+}
+
+/// Stable identity of the exact geometry handle stretched by one command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StretchTarget {
+    WireSegment {
+        wire_id: u64,
+        segment_index: usize,
+    },
+    BusSegment {
+        bus_id: u64,
+        segment_index: usize,
+    },
+    /// One typed control point of a documentation/parameterized shape.
+    DocumentationShapePoint {
+        shape_id: u64,
+        point_index: usize,
+    },
+}
+
+/// A stretch was rejected before any document mutation occurred.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StretchSelectionError {
+    StaleTarget,
+    CoordinateOverflow,
+    DegenerateGeometry { object_id: u64 },
+    NonOrthogonalSource { object_id: u64 },
+    PerpendicularDeltaRequired,
+    FixedAnchor { point: Point },
+    NetLabelAnchor { label_id: u64, point: Point },
+    ConnectedTerminal { component_id: u64, point: Point },
+    InvalidTapAttachment { tap_id: u64 },
+    ConductorOverlap { object_id: u64, other_id: u64 },
+    UnintendedConductorContact { object_id: u64, other_id: u64 },
+    UnintendedTerminalContact { object_id: u64, component_id: u64 },
+    ComponentBodyEntry { object_id: u64, component_id: u64 },
+    InvalidDocumentationGeometry { shape_id: u64 },
+}
+
+impl std::fmt::Display for StretchSelectionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StaleTarget => formatter
+                .write_str("The selected stretch handle no longer exists in the active schematic."),
+            Self::CoordinateOverflow => {
+                formatter.write_str("The requested stretch exceeds the schematic coordinate range.")
+            }
+            Self::DegenerateGeometry { object_id } => write!(
+                formatter,
+                "Stretching object {object_id} would create a zero-length or invalid segment."
+            ),
+            Self::NonOrthogonalSource { object_id } => write!(
+                formatter,
+                "Object {object_id} has non-orthogonal affected geometry; choose Allow diagonal to stretch it."
+            ),
+            Self::PerpendicularDeltaRequired => formatter.write_str(
+                "Preserve orthogonal requires motion perpendicular to the selected segment.",
+            ),
+            Self::FixedAnchor { point } => write!(
+                formatter,
+                "The selected segment contains a fixed conductor or junction anchor at ({}, {}).",
+                point.x, point.y
+            ),
+            Self::NetLabelAnchor { label_id, point } => write!(
+                formatter,
+                "Net label {label_id} is an electrical anchor at ({}, {}); stretch cannot move away from or under it.",
+                point.x, point.y
+            ),
+            Self::ConnectedTerminal {
+                component_id,
+                point,
+            } => write!(
+                formatter,
+                "Component {component_id} owns a connected terminal at ({}, {}); its anchor cannot be stretched.",
+                point.x, point.y
+            ),
+            Self::InvalidTapAttachment { tap_id } => write!(
+                formatter,
+                "Bus tap {tap_id} cannot retain both its declared source and destination attachments."
+            ),
+            Self::ConductorOverlap {
+                object_id,
+                other_id,
+            } => write!(
+                formatter,
+                "Stretching object {object_id} would overlap conductor {other_id}."
+            ),
+            Self::UnintendedConductorContact {
+                object_id,
+                other_id,
+            } => write!(
+                formatter,
+                "Stretching object {object_id} would create an unintended contact with conductor {other_id}."
+            ),
+            Self::UnintendedTerminalContact {
+                object_id,
+                component_id,
+            } => write!(
+                formatter,
+                "Stretching object {object_id} would contact a terminal on component {component_id}."
+            ),
+            Self::ComponentBodyEntry {
+                object_id,
+                component_id,
+            } => write!(
+                formatter,
+                "Stretching object {object_id} would route through component {component_id}."
+            ),
+            Self::InvalidDocumentationGeometry { shape_id } => write!(
+                formatter,
+                "Moving that control point would make documentation shape {shape_id} invalid."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for StretchSelectionError {}
+
 // =============================================================================
 // SchematicState
 // =============================================================================

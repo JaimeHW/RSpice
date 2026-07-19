@@ -10,6 +10,7 @@ use super::design_notes::design_note_at;
 use super::documentation_shapes::documentation_shape_at;
 use super::drawing::{bus_tap_at, nearest_bus_hit, nearest_terminal};
 use super::net_labels::net_label_at;
+use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
 
 pub(super) fn handle_tool_interactions(
@@ -31,6 +32,12 @@ pub(super) fn handle_tool_interactions(
     } else if current_tool == Tool::MoveSelection && !state.dialogs.move_selection.armed {
         crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
         return;
+    } else if state.dialogs.stretch_selection.armed && current_tool != Tool::StretchSelection {
+        state.dialogs.stretch_selection.close();
+        return;
+    } else if current_tool == Tool::StretchSelection && !state.dialogs.stretch_selection.armed {
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
     }
     let shape_double_click = current_tool == Tool::DocumentationShape
         && response.double_clicked_by(egui::PointerButton::Primary);
@@ -48,6 +55,8 @@ pub(super) fn handle_tool_interactions(
         handle_select_dragging(ui, response, state, viewport, grid_size, symbol_context);
     } else if current_tool == Tool::MoveSelection {
         handle_armed_move_selection(ui, response, state, viewport, grid_size, symbol_context);
+    } else if current_tool == Tool::StretchSelection {
+        handle_armed_stretch_selection(ui, response, state, viewport, grid_size, symbol_context);
     }
 
     if shape_double_click && let Some(pos) = response.interact_pointer_pos() {
@@ -128,7 +137,7 @@ pub(super) fn handle_tool_interactions(
                     pos,
                 );
             }
-            Tool::MoveSelection => {}
+            Tool::MoveSelection | Tool::StretchSelection => {}
             Tool::Probe => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
                 handle_probe_click(ui, state, grid_pos, symbol_context);
@@ -251,7 +260,9 @@ fn handle_armed_move_selection(
     }
 
     if response.drag_started_by(egui::PointerButton::Primary)
-        && let Some(position) = response.interact_pointer_pos()
+        && let Some(position) = ui
+            .input(|input| input.pointer.press_origin())
+            .or_else(|| response.interact_pointer_pos())
     {
         let anchor = screen_to_grid(viewport, grid_size, position);
         if pointer_is_in_frozen_move_selection(

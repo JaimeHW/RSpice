@@ -87,6 +87,7 @@ pub enum Command {
     PlaceText,
     PlaceShape,
     MoveSelection,
+    StretchSelection,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -273,6 +274,7 @@ impl Command {
             Self::PlaceText => spec("place-text", "Place text or note\u{2026}", "Design"),
             Self::PlaceShape => spec("place-shape", "Draw documentation shape\u{2026}", "Design"),
             Self::MoveSelection => spec("move-selection", "Move selection", "Design"),
+            Self::StretchSelection => spec("stretch-selection", "Stretch selection", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -615,6 +617,12 @@ impl Command {
                     && !state.schematic.read_only
                     && !state.active_view_read_only()
                     && state.schematic.has_live_movable_selection()
+            }
+            Self::StretchSelection => {
+                active_schematic_editor(app)
+                    && !state.schematic.read_only
+                    && !state.active_view_read_only()
+                    && state.schematic.default_stretch_target().is_some()
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -1084,6 +1092,9 @@ impl Command {
             Self::MoveSelection => {
                 crate::common::app::open_move_selection_dialog(&mut app.state);
             }
+            Self::StretchSelection => {
+                crate::common::app::open_stretch_selection_dialog(&mut app.state);
+            }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
                 let next = app
@@ -1144,6 +1155,8 @@ impl Command {
             Self::Cancel => {
                 if app.state.dialogs.move_selection.armed {
                     crate::common::app::cancel_armed_move_selection(&mut app.state);
+                } else if app.state.dialogs.stretch_selection.armed {
+                    crate::common::app::cancel_armed_stretch_selection(&mut app.state);
                 } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
                 } else if app.state.dialogs.object_properties.open {
@@ -1454,6 +1467,9 @@ fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     if app.state.dialogs.move_selection.armed && tool != Tool::MoveSelection {
         app.state.dialogs.move_selection.close();
     }
+    if app.state.dialogs.stretch_selection.armed && tool != Tool::StretchSelection {
+        app.state.dialogs.stretch_selection.close();
+    }
     arm_schematic_tool(&mut app.state.schematic, tool);
 }
 
@@ -1664,6 +1680,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PlaceText,
     Command::PlaceShape,
     Command::MoveSelection,
+    Command::StretchSelection,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -2018,6 +2035,27 @@ mod tests {
             .position(|command| *command == Command::MoveSelection)
             .expect("move-selection must be registered");
         assert_eq!(COMMAND_REGISTRY[registry_index - 1], Command::PlaceShape);
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index + 1],
+            Command::StretchSelection
+        );
+    }
+
+    #[test]
+    fn stretch_selection_command_has_the_exact_mockup_identity() {
+        assert_eq!(Command::StretchSelection.stable_id(), "stretch-selection");
+        assert_eq!(Command::StretchSelection.spec().label, "Stretch selection");
+        assert_eq!(Command::StretchSelection.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("stretch-selection"),
+            Some(Command::StretchSelection)
+        );
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::StretchSelection)
+            .expect("stretch-selection must be registered");
+        assert_eq!(COMMAND_REGISTRY[registry_index - 1], Command::MoveSelection);
         assert_eq!(COMMAND_REGISTRY[registry_index + 1], Command::SymbolPinTool);
     }
 
@@ -2056,6 +2094,40 @@ mod tests {
         app.state.schematic.read_only = false;
         app.state.workbench.workspace = Workspace::Results;
         assert!(!Command::MoveSelection.is_enabled(&app));
+    }
+
+    #[test]
+    fn stretch_selection_requires_one_live_eligible_geometry_target() {
+        use crate::state::{Point, Wire};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state.schematic.selection.select_wire_segment(17, 0);
+        assert!(
+            !Command::StretchSelection.is_enabled(&app),
+            "a stale segment identity cannot open the workflow"
+        );
+
+        app.state
+            .schematic
+            .wires
+            .push(Wire::new(17, vec![Point::new(0, 0), Point::new(40, 0)]));
+        assert!(Command::StretchSelection.is_enabled(&app));
+        assert_eq!(
+            Command::StretchSelection.availability(&app),
+            CommandAvailability::Available
+        );
+
+        app.state.schematic.read_only = true;
+        assert!(!Command::StretchSelection.is_enabled(&app));
+        assert_eq!(
+            Command::StretchSelection.availability(&app),
+            CommandAvailability::Disabled("select an editable object")
+        );
+
+        app.state.schematic.read_only = false;
+        app.state.workbench.workspace = Workspace::Results;
+        assert!(!Command::StretchSelection.is_enabled(&app));
     }
 
     #[test]

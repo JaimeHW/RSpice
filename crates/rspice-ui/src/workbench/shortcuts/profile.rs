@@ -848,7 +848,6 @@ mod tests {
         assert!(audit.is_valid(), "default shortcut profile: {audit:#?}");
 
         for command in [
-            Command::SelectTool,
             Command::SymbolPinTool,
             Command::SymbolPolylineTool,
             Command::SymbolCircleTool,
@@ -863,6 +862,16 @@ mod tests {
                 "missing effective symbol-editor binding: {command:?}"
             );
         }
+        assert!(
+            preferences
+                .effective_bindings(Command::SelectTool)
+                .is_empty(),
+            "Select tool intentionally has no factory key; Escape remains the universal return path"
+        );
+        assert_eq!(
+            preferences.resolved_bindings(Command::StretchSelection)[0].display_label(),
+            "S"
+        );
     }
 
     #[test]
