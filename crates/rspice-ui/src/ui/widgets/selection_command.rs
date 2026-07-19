@@ -6,7 +6,7 @@
 
 use egui::{Align, Frame, Layout, Margin, Rect, Stroke, Ui, Vec2};
 
-use crate::state::Point;
+use crate::state::{DesignNoteKind, Point};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
@@ -42,6 +42,11 @@ pub(crate) enum SelectionPreview {
     NetLabel {
         position: Point,
         label: String,
+    },
+    DesignNote {
+        position: Point,
+        label: String,
+        kind: DesignNoteKind,
     },
 }
 
@@ -269,7 +274,8 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
         SelectionPreview::Component { label }
         | SelectionPreview::Bus { label, .. }
         | SelectionPreview::BusTap { label, .. }
-        | SelectionPreview::NetLabel { label, .. } => label,
+        | SelectionPreview::NetLabel { label, .. }
+        | SelectionPreview::DesignNote { label, .. } => label,
     };
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_description(format!("{code}: {accessible_description}"));
@@ -436,6 +442,37 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
             );
             let text_pos = anchor + Vec2::new(10.0, -galley.size().y - 7.0);
             painter.galley(text_pos, galley.clone(), t.color.text);
+            Rect::from_two_pos(anchor, text_pos + galley.size()).expand(10.0)
+        }
+        SelectionPreview::DesignNote {
+            position,
+            label,
+            kind,
+        } => {
+            let anchor = map_points(&[*position], content)[0];
+            let color = match kind {
+                DesignNoteKind::PlainText => t.color.text_dim,
+                DesignNoteKind::PropertyDisplay | DesignNoteKind::RequirementLink => t.color.accent,
+                DesignNoteKind::ReviewNote => t.color.warn,
+            };
+            painter.circle_filled(anchor, 3.0, color);
+            let galley = painter.layout(
+                label.clone(),
+                theme::mono(tokens::FS_1, FontWeight::Regular),
+                color,
+                content.width() * 0.72,
+            );
+            let text_pos = anchor + Vec2::new(10.0, -galley.size().y * 0.5);
+            painter.galley(text_pos, galley.clone(), color);
+            if *kind == DesignNoteKind::RequirementLink {
+                painter.line_segment(
+                    [
+                        text_pos + Vec2::new(0.0, galley.size().y),
+                        text_pos + galley.size(),
+                    ],
+                    Stroke::new(1.0, color),
+                );
+            }
             Rect::from_two_pos(anchor, text_pos + galley.size()).expand(10.0)
         }
     }

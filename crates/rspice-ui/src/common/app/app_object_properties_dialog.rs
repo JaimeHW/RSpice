@@ -8,8 +8,8 @@
 use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
 
 use crate::state::{
-    Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, NetLabel, Point,
-    SchematicState,
+    Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, DesignNote,
+    DesignNoteKind, DesignNoteLayer, DesignReviewState, NetLabel, Point, SchematicState,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -21,7 +21,8 @@ use crate::ui::widgets::{
 
 use super::{
     BusObjectPropertiesDraft, BusTapObjectPropertiesDraft, ConsoleMessage,
-    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, RSpiceApp,
+    DesignNoteObjectPropertiesDraft, NetLabelObjectPropertiesDraft, ObjectPropertiesDraft,
+    RSpiceApp,
 };
 
 const EYEBROW: &str = "EDIT \u{00b7} TYPED PARAMETERS";
@@ -37,6 +38,8 @@ const TAP_SLICE_FIELD: &str = "tap-slice";
 const LABEL_NAME_FIELD: &str = "net-label-name";
 const LABEL_X_FIELD: &str = "net-label-x";
 const LABEL_Y_FIELD: &str = "net-label-y";
+const NOTE_KIND_FIELD: &str = "design-note-kind";
+const NOTE_TEXT_FIELD: &str = "design-note-text";
 const DIALOG_SIZE: DialogSize = DialogSize::SimulationWorkflow;
 
 #[derive(Debug, Clone)]
@@ -55,6 +58,12 @@ enum PropertyCommit {
         expected: NetLabel,
         name: String,
         position: Point,
+    },
+    DesignNote {
+        expected: DesignNote,
+        kind: DesignNoteKind,
+        text: String,
+        review_state: Option<DesignReviewState>,
     },
 }
 
@@ -148,6 +157,12 @@ enum DraftResolutionSource {
         x: String,
         y: String,
     },
+    DesignNote {
+        original: DesignNote,
+        kind: DesignNoteKind,
+        text: String,
+        review_state: Option<DesignReviewState>,
+    },
 }
 
 impl RSpiceApp {
@@ -195,6 +210,7 @@ impl RSpiceApp {
         let can_commit = self.state.dialogs.object_properties.dirty
             && !self.state.schematic.read_only
             && validation.can_commit();
+        let primary_on_enter = !matches!(draft, ObjectPropertiesDraft::DesignNote(_));
 
         let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
             .description(BODY)
@@ -205,6 +221,7 @@ impl RSpiceApp {
                 "Cancel"
             })
             .primary_enabled(can_commit)
+            .primary_on_enter(primary_on_enter)
             .initial_focus(DialogInitialFocus::BodyControl);
         if discard_confirm {
             dialog = dialog.transaction_state(
@@ -309,7 +326,9 @@ fn resolve_draft_for_repaint(
 
     let validation = validate_draft(&state.schematic, draft);
     let bus_choices = match draft {
-        ObjectPropertiesDraft::Bus(_) | ObjectPropertiesDraft::NetLabel(_) => Vec::new(),
+        ObjectPropertiesDraft::Bus(_)
+        | ObjectPropertiesDraft::NetLabel(_)
+        | ObjectPropertiesDraft::DesignNote(_) => Vec::new(),
         ObjectPropertiesDraft::BusTap(draft) => {
             bus_choices(&state.schematic, draft.original.bus_point)
         }
@@ -370,6 +389,20 @@ fn draft_resolution_key(
                 name: draft.name.clone(),
                 x: draft.x.clone(),
                 y: draft.y.clone(),
+            },
+        ),
+        ObjectPropertiesDraft::DesignNote(draft) => (
+            state
+                .schematic
+                .design_notes
+                .iter()
+                .find(|note| note.id == draft.original.id)
+                == Some(&draft.original),
+            DraftResolutionSource::DesignNote {
+                original: draft.original.clone(),
+                kind: draft.kind,
+                text: draft.text.clone(),
+                review_state: draft.review_state,
             },
         ),
     };
@@ -468,6 +501,47 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
                 }),
             )
         }
+        PropertyCommit::DesignNote {
+            expected,
+            kind,
+            text,
+            review_state,
+        } => {
+            let Some(current) = schematic
+                .design_notes
+                .iter()
+                .find(|note| note.id == expected.id)
+            else {
+                return Err("The selected design note no longer exists.".to_owned());
+            };
+            if current != &expected {
+                return Err("The selected design note changed before commit.".to_owned());
+            }
+            let mut candidate = expected.clone();
+            candidate
+                .update(kind, text)
+                .map_err(|error| error.to_string())?;
+            if let Some(review_state) = review_state {
+                candidate
+                    .set_review_state(review_state)
+                    .map_err(|error| error.to_string())?;
+            }
+            if candidate == expected {
+                return Ok(false);
+            }
+            Ok(
+                schematic.with_undo("edit design note properties", move |schematic| {
+                    if let Some(note) = schematic
+                        .design_notes
+                        .iter_mut()
+                        .find(|note| note.id == expected.id)
+                    {
+                        *note = candidate;
+                        schematic.is_dirty = true;
+                    }
+                }),
+            )
+        }
     }
 }
 
@@ -482,6 +556,49 @@ fn validate_draft(schematic: &SchematicState, draft: &ObjectPropertiesDraft) -> 
         ObjectPropertiesDraft::Bus(draft) => validate_bus_draft(schematic, draft),
         ObjectPropertiesDraft::BusTap(draft) => validate_tap_draft(schematic, draft),
         ObjectPropertiesDraft::NetLabel(draft) => validate_net_label_draft(schematic, draft),
+        ObjectPropertiesDraft::DesignNote(draft) => validate_design_note_draft(schematic, draft),
+    }
+}
+
+fn validate_design_note_draft(
+    schematic: &SchematicState,
+    draft: &DesignNoteObjectPropertiesDraft,
+) -> DraftValidation {
+    let Some(current) = schematic
+        .design_notes
+        .iter()
+        .find(|note| note.id == draft.original.id)
+    else {
+        return stale_validation("The selected design note no longer exists.");
+    };
+    if current != &draft.original {
+        return stale_validation("The selected design note changed while properties were open.");
+    }
+    let mut candidate = draft.original.clone();
+    match candidate.update(draft.kind, draft.text.clone()) {
+        Ok(()) => {
+            if let Some(review_state) = draft.review_state
+                && let Err(error) = candidate.set_review_state(review_state)
+            {
+                return DraftValidation::Invalid {
+                    field: None,
+                    message: error.to_string(),
+                };
+            }
+            DraftValidation::Valid(
+                PropertyCommit::DesignNote {
+                    expected: draft.original.clone(),
+                    kind: draft.kind,
+                    text: draft.text.trim().to_owned(),
+                    review_state: draft.review_state,
+                },
+                None,
+            )
+        }
+        Err(error) => DraftValidation::Invalid {
+            field: Some(NOTE_TEXT_FIELD),
+            message: error.to_string(),
+        },
     }
 }
 
@@ -774,6 +891,28 @@ fn object_summary(
                 ),
             }
         }
+        ObjectPropertiesDraft::DesignNote(draft) => ObjectSummary {
+            object: format!("NOTE-{} · {}", draft.original.id, draft.kind.label()),
+            preview: SelectionPreview::DesignNote {
+                position: draft.original.pos,
+                label: draft.text.trim().to_owned(),
+                kind: draft.kind,
+            },
+            scope: "one selected non-electrical design note".to_owned(),
+            effect: if legal {
+                "documentation type, content, and review metadata transaction".to_owned()
+            } else {
+                "no document change until validation passes".to_owned()
+            },
+            recovery: "one semantic undo record".to_owned(),
+            geometry: format!(
+                "Stable note ID {} and anchor ({}, {}) remain unchanged on {}",
+                draft.original.id,
+                draft.original.pos.x,
+                draft.original.pos.y,
+                DesignNoteLayer::DrawingAnnotation.label()
+            ),
+        },
     }
 }
 
@@ -934,6 +1073,62 @@ fn fields_pane(
                 "The stable label ID is preserved. Name and attachment coordinates publish together as one connectivity edit.",
             );
         }
+        ObjectPropertiesDraft::DesignNote(draft) => {
+            field_label(ui, "Type");
+            let options = DesignNoteKind::ALL.map(|kind| kind.label().to_owned());
+            edited |= select(
+                ui,
+                NOTE_KIND_FIELD,
+                "Design note type",
+                draft.kind.label(),
+                &options,
+                ui.available_width(),
+            )
+            .is_some_and(|index| {
+                let next = DesignNoteKind::ALL[index];
+                if next == draft.kind {
+                    false
+                } else {
+                    draft.kind = next;
+                    draft.review_state =
+                        (next == DesignNoteKind::ReviewNote).then_some(DesignReviewState::Open);
+                    true
+                }
+            });
+            ui.add_space(9.0);
+            let response =
+                design_note_text_field(ui, &mut draft.text, invalid_field == Some(NOTE_TEXT_FIELD));
+            focus = Some(response.id);
+            edited |= response.changed();
+            if draft.kind == DesignNoteKind::ReviewNote {
+                ui.add_space(9.0);
+                field_label(ui, "Review state");
+                let current = draft.review_state.unwrap_or(DesignReviewState::Open);
+                let options = DesignReviewState::ALL.map(|state| state.label().to_owned());
+                edited |= select(
+                    ui,
+                    "design-note-review-state",
+                    "Review state",
+                    current.label(),
+                    &options,
+                    ui.available_width(),
+                )
+                .is_some_and(|index| {
+                    let next = DesignReviewState::ALL[index];
+                    if draft.review_state == Some(next) {
+                        false
+                    } else {
+                        draft.review_state = Some(next);
+                        true
+                    }
+                });
+            }
+            read_only_value(ui, "Layer", DesignNoteLayer::DrawingAnnotation.label());
+            field_note(
+                ui,
+                "This object remains on the non-electrical annotation layer. Type, text, and governed review state publish together without changing connectivity.",
+            );
+        }
     }
     (focus, edited)
 }
@@ -985,6 +1180,33 @@ fn text_field(
             "Required typed engineering value"
         } else {
             "Typed engineering value"
+        });
+        if invalid {
+            node.set_invalid(egui::accesskit::Invalid::True);
+        } else {
+            node.clear_invalid();
+        }
+    });
+    ui.add_space(9.0);
+    response
+}
+
+fn design_note_text_field(ui: &mut Ui, value: &mut String, invalid: bool) -> Response {
+    field_label(ui, "Text");
+    let response = ui.add_sized(
+        Vec2::new(ui.available_width(), 72.0),
+        TextEdit::multiline(value)
+            .id_source(("object-properties", NOTE_TEXT_FIELD))
+            .font(egui::TextStyle::Monospace)
+            .hint_text("Bias network")
+            .margin(egui::Margin::symmetric(8, 6)),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Text");
+        node.set_description(if invalid {
+            "Required design-note text with a validation error"
+        } else {
+            "Required design-note text"
         });
         if invalid {
             node.set_invalid(egui::accesskit::Invalid::True);
@@ -1324,6 +1546,64 @@ mod tests {
             validate_net_label_draft(&schematic, &invalid_x),
             DraftValidation::Invalid {
                 field: Some(LABEL_X_FIELD),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn design_note_properties_commit_typed_text_without_changing_topology() {
+        let original = DesignNote::new(
+            18,
+            Point::new(10, 20),
+            DesignNoteKind::ReviewNote,
+            "Review bias path",
+        )
+        .unwrap();
+        let review_id = original.review.as_ref().unwrap().record_id.clone();
+        let mut schematic = SchematicState::default();
+        schematic.design_notes.push(original.clone());
+        schematic.init_undo_history();
+        let topology = schematic.topology_version();
+        let draft = DesignNoteObjectPropertiesDraft {
+            original: original.clone(),
+            kind: DesignNoteKind::ReviewNote,
+            text: "Review updated bias path".to_owned(),
+            review_state: Some(DesignReviewState::Resolved),
+        };
+
+        let DraftValidation::Valid(commit, None) = validate_design_note_draft(&schematic, &draft)
+        else {
+            panic!("valid design-note properties were rejected")
+        };
+        assert!(apply_commit(&mut schematic, commit).unwrap());
+        assert_eq!(schematic.design_notes[0].text, "Review updated bias path");
+        assert_eq!(
+            schematic.design_notes[0].review.as_ref().unwrap().state,
+            DesignReviewState::Resolved
+        );
+        assert_eq!(
+            schematic.design_notes[0].review.as_ref().unwrap().record_id,
+            review_id
+        );
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(
+            schematic.undo_description(),
+            Some("edit design note properties")
+        );
+        assert!(schematic.undo());
+        assert_eq!(schematic.design_notes, vec![original]);
+
+        let invalid = DesignNoteObjectPropertiesDraft {
+            original: schematic.design_notes[0].clone(),
+            kind: DesignNoteKind::RequirementLink,
+            text: "REQ 19".to_owned(),
+            review_state: None,
+        };
+        assert!(matches!(
+            validate_design_note_draft(&schematic, &invalid),
+            DraftValidation::Invalid {
+                field: Some(NOTE_TEXT_FIELD),
                 ..
             }
         ));

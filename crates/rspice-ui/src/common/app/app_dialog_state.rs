@@ -300,6 +300,61 @@ impl PinPortDialogState {
     }
 }
 
+/// Isolated draft for the mockup-owned Place text or design note transaction.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DesignNoteDialogState {
+    pub(crate) open: bool,
+    pub(crate) kind: crate::state::DesignNoteKind,
+    pub(crate) text: String,
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) topology_version: u64,
+    pub(crate) view_path: String,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl DesignNoteDialogState {
+    pub(crate) fn open(
+        &mut self,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            kind: crate::state::DesignNoteKind::PlainText,
+            text: "Bias network".to_owned(),
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = true;
+        self.discard_confirm = false;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
 /// Exact, isolated draft for a selected bus. The durable baseline is retained
 /// to guard the eventual commit against stale-object overwrite.
 #[derive(Debug, Clone)]
@@ -328,11 +383,21 @@ pub(crate) struct NetLabelObjectPropertiesDraft {
     pub(crate) y: String,
 }
 
+/// Exact isolated draft for one non-electrical schematic documentation object.
+#[derive(Debug, Clone)]
+pub(crate) struct DesignNoteObjectPropertiesDraft {
+    pub(crate) original: crate::state::DesignNote,
+    pub(crate) kind: crate::state::DesignNoteKind,
+    pub(crate) text: String,
+    pub(crate) review_state: Option<crate::state::DesignReviewState>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum ObjectPropertiesDraft {
     Bus(BusObjectPropertiesDraft),
     BusTap(BusTapObjectPropertiesDraft),
     NetLabel(NetLabelObjectPropertiesDraft),
+    DesignNote(DesignNoteObjectPropertiesDraft),
 }
 
 /// Retained owner for the mockup's generic Object properties transaction.
@@ -507,6 +572,34 @@ impl ObjectPropertiesDialogState {
         };
     }
 
+    pub(crate) fn open_design_note(
+        &mut self,
+        note: &crate::state::DesignNote,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::DesignNote(
+                DesignNoteObjectPropertiesDraft {
+                    original: note.clone(),
+                    kind: note.kind,
+                    text: note.text.clone(),
+                    review_state: note.review.as_ref().map(|review| review.state),
+                },
+            )),
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            dirty: false,
+            discard_confirm: false,
+            validation_error: None,
+        };
+    }
+
     pub(crate) fn mark_edited(&mut self) {
         self.dirty = self
             .draft
@@ -585,6 +678,22 @@ impl ObjectPropertiesDraft {
                     },
                     |candidate| candidate != draft.original,
                 )
+            }
+            Self::DesignNote(draft) => {
+                let mut candidate = draft.original.clone();
+                candidate
+                    .update(draft.kind, draft.text.clone())
+                    .map_or_else(
+                        |_| true,
+                        |_| {
+                            if let Some(review_state) = draft.review_state
+                                && candidate.set_review_state(review_state).is_err()
+                            {
+                                return true;
+                            }
+                            candidate != draft.original
+                        },
+                    )
             }
         }
     }
@@ -705,6 +814,9 @@ pub struct DialogState {
     /// Typed interface-port placement transaction.
     pub(crate) pin_port: PinPortDialogState,
 
+    /// Non-electrical typed design-note placement transaction.
+    pub(crate) design_note: DesignNoteDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -760,6 +872,7 @@ impl DialogState {
             || self.command_palette.open
             || self.bus_tap.open
             || self.pin_port.open
+            || self.design_note.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
@@ -812,6 +925,11 @@ mod tests {
                 0,
                 "user/top/schematic".to_owned(),
             );
+        });
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs
+                .design_note
+                .open(0, 0, 0, "user/top/schematic".to_owned());
         });
         assert_blocks_shortcuts(|dialogs| {
             let bus = crate::state::Bus::segment(

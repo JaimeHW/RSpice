@@ -24,6 +24,7 @@ impl SchematicState {
             || self.net_labels.iter().any(|item| item.id == id)
             || self.buses.iter().any(|item| item.id == id)
             || self.bus_taps.iter().any(|item| item.id == id)
+            || self.design_notes.iter().any(|item| item.id == id)
     }
 
     /// Get the current topology version
@@ -64,12 +65,19 @@ impl SchematicState {
         let max_label_id = self.net_labels.iter().map(|l| l.id).max().unwrap_or(0);
         let max_bus_id = self.buses.iter().map(|bus| bus.id).max().unwrap_or(0);
         let max_bus_tap_id = self.bus_taps.iter().map(|tap| tap.id).max().unwrap_or(0);
+        let max_design_note_id = self
+            .design_notes
+            .iter()
+            .map(|note| note.id)
+            .max()
+            .unwrap_or(0);
         let max_id = max_component_id
             .max(max_wire_id)
             .max(max_junction_id)
             .max(max_label_id)
             .max(max_bus_id)
-            .max(max_bus_tap_id);
+            .max(max_bus_tap_id)
+            .max(max_design_note_id);
         self.next_id = max_id.checked_add(1).unwrap_or(1);
 
         // Repair duplicate component IDs left behind by earlier counter
@@ -207,6 +215,33 @@ impl SchematicState {
             self.bump_topology_version();
         }
 
+        // Documentation IDs share the same stable document namespace but do
+        // not alter electrical topology. Repair collisions deterministically
+        // and keep review record IDs aligned with the repaired object ID.
+        let mut occupied_ids: HashSet<u64> = self
+            .components
+            .iter()
+            .map(|item| item.id)
+            .chain(self.wires.iter().map(|item| item.id))
+            .chain(self.junctions.iter().map(|item| item.id))
+            .chain(self.net_labels.iter().map(|item| item.id))
+            .chain(self.buses.iter().map(|item| item.id))
+            .chain(self.bus_taps.iter().map(|item| item.id))
+            .collect();
+        for index in 0..self.design_notes.len() {
+            let id = self.design_notes[index].id;
+            if !occupied_ids.insert(id) {
+                let replacement = self.next_id();
+                occupied_ids.insert(replacement);
+                self.design_notes[index].id = replacement;
+            }
+            let note_id = self.design_notes[index].id;
+            if let Some(review) = self.design_notes[index].review.as_mut() {
+                review.record_id = format!("NOTE-{note_id:04}");
+            }
+        }
+        self.design_notes.retain(|note| note.validate().is_ok());
+
         // Rebuild component counters from existing component names
         self.component_counters.clear();
         for comp in &self.components {
@@ -241,6 +276,7 @@ impl SchematicState {
         let net_label_ids: HashSet<u64> = self.net_labels.iter().map(|label| label.id).collect();
         let bus_ids: HashSet<u64> = self.buses.iter().map(|bus| bus.id).collect();
         let bus_tap_ids: HashSet<u64> = self.bus_taps.iter().map(|tap| tap.id).collect();
+        let design_note_ids: HashSet<u64> = self.design_notes.iter().map(|note| note.id).collect();
 
         self.selection
             .components
@@ -268,6 +304,9 @@ impl SchematicState {
         self.selection
             .bus_taps
             .retain(|id| bus_tap_ids.contains(id));
+        self.selection
+            .design_notes
+            .retain(|id| design_note_ids.contains(id));
 
         self.connections.retain(|connection| {
             component_ids.contains(&connection.component_id)
@@ -293,7 +332,7 @@ impl SchematicState {
 mod tests {
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        Junction, NetLabel, Point, SchematicState,
+        DesignNote, DesignNoteKind, Junction, NetLabel, Point, SchematicState,
     };
     use std::collections::HashSet;
 
@@ -403,6 +442,38 @@ mod tests {
     }
 
     #[test]
+    fn recalculate_repairs_review_note_identity_and_lifecycle_record_together() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .components
+            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
+        schematic.design_notes.push(
+            DesignNote::new(
+                59,
+                Point::new(5, 6),
+                DesignNoteKind::ReviewNote,
+                "Review bias path",
+            )
+            .unwrap(),
+        );
+        schematic.selection.select_design_note(59);
+        schematic.selection.select_design_note(999);
+        let topology = schematic.topology_version();
+
+        schematic.recalculate_runtime_state();
+
+        let note = &schematic.design_notes[0];
+        assert_ne!(note.id, 59);
+        assert_eq!(
+            note.review.as_ref().unwrap().record_id,
+            format!("NOTE-{:04}", note.id)
+        );
+        assert!(!schematic.selection.has_design_note(59));
+        assert!(!schematic.selection.has_design_note(999));
+        assert_eq!(schematic.topology_version(), topology);
+    }
+
+    #[test]
     fn recalculate_repairs_bus_identity_and_preserves_tap_ownership() {
         let declaration = BusDeclaration::parse("DATA[3:0]").unwrap();
         let bus = Bus::segment(1, Point::new(0, 0), Point::new(10, 0), Some(declaration)).unwrap();
@@ -493,9 +564,11 @@ mod tests {
         object.remove("buses");
         object.remove("bus_taps");
         object.remove("net_labels");
+        object.remove("design_notes");
         let migrated: SchematicState = serde_json::from_value(value).unwrap();
         assert!(migrated.buses.is_empty());
         assert!(migrated.bus_taps.is_empty());
         assert!(migrated.net_labels.is_empty());
+        assert!(migrated.design_notes.is_empty());
     }
 }

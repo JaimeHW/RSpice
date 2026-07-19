@@ -1,5 +1,5 @@
 #[cfg(test)]
-use super::super::{BusDeclaration, BusSlice, BusTapOrientation};
+use super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::*;
 
 impl SchematicState {
@@ -81,6 +81,18 @@ impl SchematicState {
             }
         }
 
+        for note in &self.design_notes {
+            if note.pos.x >= min_x
+                && note.pos.x <= max_x
+                && note.pos.y >= min_y
+                && note.pos.y <= max_y
+                && !self.selection.has_design_note(note.id)
+            {
+                self.selection.select_design_note(note.id);
+                count += 1;
+            }
+        }
+
         // Select buses whose routed polyline intersects the rectangle, even
         // when both segment endpoints are outside it.
         for bus in &self.buses {
@@ -158,6 +170,16 @@ impl SchematicState {
             }
         }
 
+        for note in &self.design_notes {
+            if note.pos.x >= min_x
+                && note.pos.x <= max_x
+                && note.pos.y >= min_y
+                && note.pos.y <= max_y
+            {
+                self.selection.select_design_note(note.id);
+            }
+        }
+
         for bus in &self.buses {
             if polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y) {
                 self.selection.select_bus(bus.id);
@@ -207,10 +229,32 @@ impl SchematicState {
             || self
                 .bus_taps
                 .iter()
-                .any(|tap| selection.has_bus_tap(tap.id));
+                .any(|tap| selection.has_bus_tap(tap.id))
+            || self
+                .design_notes
+                .iter()
+                .any(|note| selection.has_design_note(note.id));
         if !has_live_object {
             return false;
         }
+        let removes_electrical_object = self
+            .components
+            .iter()
+            .any(|component| selection.has_component(component.id))
+            || self.wires.iter().any(|wire| selection.has_wire(wire.id))
+            || self
+                .junctions
+                .iter()
+                .any(|junction| selection.has_junction(junction.pos))
+            || self
+                .net_labels
+                .iter()
+                .any(|label| selection.has_net_label(label.id))
+            || self.buses.iter().any(|bus| selection.has_bus(bus.id))
+            || self
+                .bus_taps
+                .iter()
+                .any(|tap| selection.has_bus_tap(tap.id));
 
         self.with_undo("delete selection", move |schematic| {
             schematic
@@ -232,16 +276,23 @@ impl SchematicState {
             // A wire deletion may invalidate connection markers that were not
             // explicitly selected. Keep that lifecycle cleanup inside this
             // same undo transaction and topology update.
-            schematic.remove_orphan_junctions_untracked();
+            if removes_electrical_object {
+                schematic.remove_orphan_junctions_untracked();
+            }
             schematic
                 .junctions
                 .retain(|junction| !selection.has_junction(junction.pos));
             schematic
                 .net_labels
                 .retain(|label| !selection.has_net_label(label.id));
+            schematic
+                .design_notes
+                .retain(|note| !selection.has_design_note(note.id));
             schematic.selection.clear();
             schematic.is_dirty = true;
-            schematic.bump_topology_version();
+            if removes_electrical_object {
+                schematic.bump_topology_version();
+            }
         })
     }
 
@@ -253,6 +304,7 @@ impl SchematicState {
         self.selection.buses = self.buses.iter().map(|item| item.id).collect();
         self.selection.bus_taps = self.bus_taps.iter().map(|item| item.id).collect();
         self.selection.net_labels = self.net_labels.iter().map(|item| item.id).collect();
+        self.selection.design_notes = self.design_notes.iter().map(|item| item.id).collect();
         for position in self.junctions.iter().map(|item| item.pos) {
             self.selection.select_junction(position);
         }
@@ -439,6 +491,15 @@ mod tests {
         schematic
             .net_labels
             .push(NetLabel::new(32, Point::new(50, 60), "outside"));
+        schematic.design_notes.push(
+            DesignNote::new(
+                33,
+                Point::new(100, 100),
+                DesignNoteKind::PlainText,
+                "documentation",
+            )
+            .unwrap(),
+        );
 
         schematic.preview_selection_in_rect(0, 0, 10, 10);
         assert!(schematic.selection.has_net_label(31));
@@ -451,7 +512,8 @@ mod tests {
         schematic.select_all_objects();
         assert!(schematic.selection.has_net_label(31));
         assert!(schematic.selection.has_net_label(32));
-        assert_eq!(schematic.selection.count(), 2);
+        assert!(schematic.selection.has_design_note(33));
+        assert_eq!(schematic.selection.count(), 3);
     }
 
     #[test]
@@ -471,5 +533,32 @@ mod tests {
         assert!(!schematic.can_undo());
         assert!(schematic.redo());
         assert_eq!(schematic.net_labels.len(), 1);
+    }
+
+    #[test]
+    fn design_note_deletion_never_cleans_or_versions_electrical_objects() {
+        let point = Point::new(90, 90);
+        let note = DesignNote::new(
+            42,
+            Point::new(2, 2),
+            DesignNoteKind::PlainText,
+            "Bias network",
+        )
+        .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic.junctions.push(Junction::new(7, point));
+        schematic.design_notes.push(note.clone());
+        schematic.init_undo_history();
+        schematic.selection.select_only_design_note(note.id);
+        let topology = schematic.topology_version();
+
+        assert!(schematic.delete_selection());
+        assert!(schematic.design_notes.is_empty());
+        assert_eq!(schematic.junctions, vec![Junction::new(7, point)]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(schematic.undo());
+        assert_eq!(schematic.design_notes, vec![note]);
+        assert_eq!(schematic.junctions, vec![Junction::new(7, point)]);
+        assert_eq!(schematic.topology_version(), topology);
     }
 }

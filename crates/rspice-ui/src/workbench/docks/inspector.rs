@@ -417,6 +417,19 @@ fn design(ui: &mut Ui, app: &mut RSpiceApp) {
     let model_evidence = selected
         .as_ref()
         .map(|component| component_model_evidence(&app.state, component));
+    let selected_note = app
+        .state
+        .schematic
+        .selection
+        .single_design_note()
+        .and_then(|id| {
+            app.state
+                .schematic
+                .design_notes
+                .iter()
+                .find(|note| note.id == id)
+                .cloned()
+        });
     inspector_hero(ui, app, selected.as_ref(), model_evidence.as_ref());
     if let Some(component) = selected.as_ref() {
         section_header(ui, "Identity", Some("editable"));
@@ -463,6 +476,17 @@ fn design(ui: &mut Ui, app: &mut RSpiceApp) {
 
         operating_point(ui, app, component);
         component_checks(ui, app, component);
+    } else if let Some(note) = selected_note.as_ref() {
+        section_header(ui, "Documentation object", Some("editable"));
+        property_row(ui, "Stable ID", &format!("NOTE-{}", note.id));
+        property_row(ui, "Type", note.kind.label());
+        property_row(ui, "Text", &note.text);
+        property_row(ui, "Layer", note.layer.label());
+        property_row(ui, "Anchor", &format!("{}, {}", note.pos.x, note.pos.y));
+        if let Some(review) = note.review.as_ref() {
+            property_row(ui, "Review record", &review.record_id);
+            property_row(ui, "Review state", review.state.keyword());
+        }
     } else {
         section_header(ui, "Active document", None);
         property_row(ui, "Library", &app.state.workspace.active_view.library);
@@ -492,6 +516,11 @@ fn design(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             "Net labels",
             &app.state.schematic.net_labels.len().to_string(),
+        );
+        property_row(
+            ui,
+            "Design notes",
+            &app.state.schematic.design_notes.len().to_string(),
         );
     }
 }

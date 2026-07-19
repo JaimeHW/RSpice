@@ -23,6 +23,13 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .iter()
             .any(|label| label.id == id);
     }
+    if let Some(id) = state.schematic.selection.single_design_note() {
+        return state
+            .schematic
+            .design_notes
+            .iter()
+            .any(|note| note.id == id);
+    }
     if let Some(id) = state.schematic.selection.single_bus_tap() {
         return state.schematic.bus_taps.iter().any(|tap| tap.id == id);
     }
@@ -111,6 +118,22 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         );
         return true;
     }
+    if let Some(note_id) = state.schematic.selection.single_design_note()
+        && let Some(note) = state
+            .schematic
+            .design_notes
+            .iter()
+            .find(|note| note.id == note_id)
+    {
+        state.dialogs.object_properties.open_design_note(
+            note,
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            state.schematic.topology_version(),
+            state.workspace.active_view.display_path(),
+        );
+        return true;
+    }
     if let Some(tap_id) = state.schematic.selection.single_bus_tap()
         && let Some(tap) = state.schematic.bus_taps.iter().find(|tap| tap.id == tap_id)
     {
@@ -141,7 +164,10 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, NetLabel, Point};
+    use crate::state::{
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, DesignNote, DesignNoteKind,
+        NetLabel, Point,
+    };
 
     #[test]
     fn selected_bus_and_tap_open_the_generic_transaction() {
@@ -200,6 +226,29 @@ mod tests {
     }
 
     #[test]
+    fn selected_design_note_opens_the_guarded_object_properties_transaction() {
+        let mut state = AppState::default();
+        let note = DesignNote::new(
+            44,
+            Point::new(-12, 34),
+            DesignNoteKind::ReviewNote,
+            "Review bias path",
+        )
+        .unwrap();
+        state.schematic.design_notes.push(note.clone());
+        state.schematic.selection.select_only_design_note(note.id);
+
+        assert!(open_selected_object_properties(&mut state));
+        assert!(matches!(
+            state.dialogs.object_properties.draft,
+            Some(super::super::ObjectPropertiesDraft::DesignNote(ref draft))
+                if draft.original == note
+                    && draft.kind == DesignNoteKind::ReviewNote
+                    && draft.text == "Review bias path"
+        ));
+    }
+
+    #[test]
     fn generic_properties_refuses_read_only_schematics() {
         let mut state = AppState::default();
         state
@@ -225,6 +274,10 @@ mod tests {
         assert!(!state.dialogs.object_properties.open);
 
         state.schematic.selection.select_only_net_label(9003);
+        assert!(!open_selected_object_properties(&mut state));
+        assert!(!state.dialogs.object_properties.open);
+
+        state.schematic.selection.select_only_design_note(9004);
         assert!(!open_selected_object_properties(&mut state));
         assert!(!state.dialogs.object_properties.open);
     }

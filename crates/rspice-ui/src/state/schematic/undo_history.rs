@@ -35,6 +35,7 @@ use std::sync::Arc;
 
 use super::bus::{Bus, BusTap};
 use super::component::Component;
+use super::design_note::DesignNote;
 use super::net_label::{Junction, NetLabel};
 use super::wire::{Wire, WireConnection};
 
@@ -68,6 +69,8 @@ pub struct SchematicSnapshot {
     pub junctions: Vec<Junction>,
     /// Net labels for naming nodes
     pub net_labels: Vec<NetLabel>,
+    /// Durable non-electrical design notes.
+    pub design_notes: Vec<DesignNote>,
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
 }
@@ -82,6 +85,7 @@ impl SchematicSnapshot {
             bus_taps: state.bus_taps.clone(),
             junctions: state.junctions.clone(),
             net_labels: state.net_labels.clone(),
+            design_notes: state.design_notes.clone(),
             connections: state.connections.clone(),
         }
     }
@@ -90,16 +94,25 @@ impl SchematicSnapshot {
     ///
     /// Restores undoable fields without touching view state.
     pub fn apply(&self, state: &mut super::state::SchematicState) {
+        let electrical_changed = self.components != state.components
+            || self.wires != state.wires
+            || self.buses != state.buses
+            || self.bus_taps != state.bus_taps
+            || self.junctions != state.junctions
+            || self.net_labels != state.net_labels
+            || self.connections != state.connections;
         state.components = self.components.clone();
         state.wires = self.wires.clone();
         state.buses = self.buses.clone();
         state.bus_taps = self.bus_taps.clone();
         state.junctions = self.junctions.clone();
         state.net_labels = self.net_labels.clone();
+        state.design_notes = self.design_notes.clone();
         state.connections = self.connections.clone();
 
-        // Invalidate caches since topology changed
-        state.bump_topology_version();
+        if electrical_changed {
+            state.bump_topology_version();
+        }
 
         // Mark as dirty since we're restoring to a different state
         state.is_dirty = true;
@@ -118,6 +131,7 @@ impl SchematicSnapshot {
             && self.bus_taps == other.bus_taps
             && self.junctions == other.junctions
             && self.net_labels == other.net_labels
+            && self.design_notes == other.design_notes
             && self.connections == other.connections
     }
 }
@@ -405,6 +419,7 @@ mod tests {
             bus_taps: Vec::new(),
             junctions: Vec::new(),
             net_labels: Vec::new(),
+            design_notes: Vec::new(),
             connections: Vec::new(),
         }
     }

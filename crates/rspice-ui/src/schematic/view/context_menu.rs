@@ -345,6 +345,12 @@ fn select_pointer_target(
             }
             ContextTarget::Component(id)
         }
+        PointerTarget::DesignNote(id) => {
+            if !state.schematic.selection.has_design_note(id) {
+                state.schematic.selection.select_only_design_note(id);
+            }
+            ContextTarget::Canvas
+        }
         PointerTarget::NetLabel(id) => {
             if !state.schematic.selection.has_net_label(id) {
                 state.schematic.selection.select_only_net_label(id);
@@ -510,7 +516,8 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.junctions.len()
         + selection.buses.len()
         + selection.bus_taps.len()
-        + selection.net_labels.len();
+        + selection.net_labels.len()
+        + selection.design_notes.len();
     let path = format!("/{}", state.workspace.active_view.display_path());
     if count > 1 {
         return format!("{count} selected objects · {path}");
@@ -545,6 +552,15 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
                 &label.name
             }
         );
+    }
+    if let Some(id) = selection.single_design_note()
+        && let Some(note) = state
+            .schematic
+            .design_notes
+            .iter()
+            .find(|note| note.id == id)
+    {
+        return format!("{} · {} · {path}", note.kind.label(), note.text);
     }
     let target = selection
         .single_component()
@@ -837,12 +853,18 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .net_labels
         .iter()
         .any(|label| selection.has_net_label(label.id));
+    let has_live_design_note = state
+        .schematic
+        .design_notes
+        .iter()
+        .any(|note| selection.has_design_note(note.id));
     let has_copyable_object = has_live_component
         || has_live_wire
         || has_live_junction
         || has_live_bus
         || has_live_bus_tap
-        || has_live_net_label;
+        || has_live_net_label
+        || has_live_design_note;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
@@ -867,6 +889,13 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                 .net_labels
                 .iter()
                 .any(|label| label.id == *id)
+        })
+        && selection.design_notes.iter().all(|id| {
+            state
+                .schematic
+                .design_notes
+                .iter()
+                .any(|note| note.id == *id)
         });
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
@@ -887,7 +916,8 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_wire
         || has_live_bus
         || has_live_bus_tap
-        || has_live_net_label)
+        || has_live_net_label
+        || has_live_design_note)
         && all_whole_object_ids_are_live
         && all_junctions_are_live
         && !has_wire_sub_object;
@@ -900,7 +930,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     match action {
         ContextAction::Properties => (
             crate::common::app::selected_object_properties_available(state),
-            "Select one editable component, bus, bus tap, or net label to open its properties",
+            "Select one editable component, bus, bus tap, net label, or design note to open its properties",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
             writable && has_component,
@@ -908,15 +938,15 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Copy => (
             copyable_objects_only,
-            "Select at least one component, wire, bus, tap, junction, or net label",
+            "Select at least one component, wire, bus, tap, junction, net label, or design note",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
-            "Select at least one editable component, wire, bus, tap, or net label",
+            "Select at least one editable component, wire, bus, tap, net label, or design note",
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, wire, bus, tap, junction, or net label",
+            "Select at least one editable component, wire, bus, tap, junction, net label, or design note",
         ),
         ContextAction::Probe => (true, ""),
         ContextAction::OperatingPoint => (
@@ -1091,6 +1121,11 @@ fn delete_review(
             objects.push(format!("net label {}", label.name));
         }
     }
+    for note in &state.schematic.design_notes {
+        if request.selection.has_design_note(note.id) {
+            objects.push(format!("{} {}", note.kind.label(), note.text));
+        }
+    }
     let selection = if objects.is_empty() {
         "No live schematic objects".to_owned()
     } else {
@@ -1223,7 +1258,12 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
             .schematic
             .net_labels
             .iter()
-            .any(|label| request.selection.has_net_label(label.id));
+            .any(|label| request.selection.has_net_label(label.id))
+        || state
+            .schematic
+            .design_notes
+            .iter()
+            .any(|note| request.selection.has_design_note(note.id));
     if !has_live_object {
         state.push_user_message(ConsoleMessage::warning(
             "The reviewed selection no longer contains deletable objects.".to_owned(),
@@ -1369,7 +1409,7 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        Junction, LibraryCellInstance, NetLabel, Wire,
+        DesignNote, DesignNoteKind, Junction, LibraryCellInstance, NetLabel, Wire,
     };
 
     fn pointer_viewport() -> Viewport {
@@ -1636,6 +1676,50 @@ mod tests {
             state.dialogs.object_properties.draft,
             Some(crate::common::app::ObjectPropertiesDraft::NetLabel(ref draft))
                 if draft.original == label
+        ));
+    }
+
+    #[test]
+    fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
+        let mut state = AppState::default();
+        let note = DesignNote::new(
+            74,
+            Point::new(40, 40),
+            DesignNoteKind::ReviewNote,
+            "Review bias path",
+        )
+        .unwrap();
+        state.schematic.design_notes.push(note.clone());
+        state.schematic.selection.select_only_design_note(note.id);
+
+        assert!(action_availability(ContextAction::Properties, &state).0);
+        assert!(action_availability(ContextAction::Copy, &state).0);
+        assert!(action_availability(ContextAction::Duplicate, &state).0);
+        assert!(action_availability(ContextAction::Delete, &state).0);
+        assert!(!action_availability(ContextAction::Rotate, &state).0);
+        assert!(!action_availability(ContextAction::Mirror, &state).0);
+        let summary = selection_summary(&state, ContextTarget::Canvas);
+        assert!(summary.contains("Review note"));
+        assert!(summary.contains("Review bias path"));
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                execute_context_action(
+                    ContextAction::Properties,
+                    ui,
+                    &mut state,
+                    note.pos,
+                    &symbol_context,
+                );
+            });
+        });
+        assert!(matches!(
+            state.dialogs.object_properties.draft,
+            Some(crate::common::app::ObjectPropertiesDraft::DesignNote(ref draft))
+                if draft.original == note
         ));
     }
 

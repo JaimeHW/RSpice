@@ -28,9 +28,12 @@ use self::controlled_symbols::{
     write_cccs_symbol, write_ccvs_symbol, write_opamp_symbol, write_vccs_symbol, write_vcvs_symbol,
     write_vswitch_symbol,
 };
+#[cfg(test)]
+use self::geometry::calculate_bounds;
 use self::geometry::{
-    calculate_bounds, get_rotation_transform, include_bus_bounds, include_junction_bounds,
-    write_bus, write_bus_tap, write_junction, write_wire,
+    calculate_bounds_with_context, get_rotation_transform, include_bus_bounds,
+    include_design_note_bounds, include_junction_bounds, write_bus, write_bus_tap,
+    write_design_note, write_junction, write_wire,
 };
 use self::jfet_symbols::{write_njfet_symbol, write_pjfet_symbol};
 use self::mos_symbols::{write_nmos_symbol, write_pmos_symbol};
@@ -52,9 +55,25 @@ struct ResolvedSymbolExportEntry {
     symbol: ResolvedCellSymbol,
 }
 
+/// Document identity needed to resolve view-dependent design-note properties
+/// during export. Keeping it explicit prevents the exported annotation from
+/// silently claiming a generic or stale cell/view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SvgDesignContext<'a> {
+    pub view_path: &'a str,
+}
+
+impl Default for SvgDesignContext<'static> {
+    fn default() -> Self {
+        Self {
+            view_path: "schematic",
+        }
+    }
+}
+
 /// Export a schematic to SVG format
 pub fn export_to_svg(state: &SchematicState, config: &SvgExportConfig) -> String {
-    export_to_svg_with_resolved_symbol_entries(state, config, &[])
+    export_to_svg_with_resolved_symbol_entries(state, config, &[], SvgDesignContext::default())
 }
 
 pub fn export_to_svg_with_symbol_resolver(
@@ -74,7 +93,28 @@ pub fn export_to_svg_with_symbol_resolver(
             })
         })
         .collect();
-    export_to_svg_with_resolved_symbol_entries(state, config, &entries)
+    export_to_svg_with_resolved_symbol_entries(state, config, &entries, SvgDesignContext::default())
+}
+
+pub fn export_to_svg_with_symbol_resolver_and_context(
+    state: &SchematicState,
+    config: &SvgExportConfig,
+    resolver: &SymbolResolver<'_>,
+    context: SvgDesignContext<'_>,
+) -> String {
+    let entries: Vec<ResolvedSymbolExportEntry> = state
+        .components
+        .iter()
+        .filter_map(|component| {
+            let binding = component.library_cell.as_ref()?;
+            let resolved = resolver.resolve_binding(binding)?;
+            Some(ResolvedSymbolExportEntry {
+                component_id: component.id,
+                symbol: resolved,
+            })
+        })
+        .collect();
+    export_to_svg_with_resolved_symbol_entries(state, config, &entries, context)
 }
 
 pub fn export_to_svg_with_resolved_symbols(
@@ -89,19 +129,20 @@ pub fn export_to_svg_with_resolved_symbols(
             symbol: symbol.clone(),
         })
         .collect();
-    export_to_svg_with_resolved_symbol_entries(state, config, &entries)
+    export_to_svg_with_resolved_symbol_entries(state, config, &entries, SvgDesignContext::default())
 }
 
 fn export_to_svg_with_resolved_symbol_entries(
     state: &SchematicState,
     config: &SvgExportConfig,
     resolved_symbols: &[ResolvedSymbolExportEntry],
+    context: SvgDesignContext<'_>,
 ) -> String {
     let mut svg = String::new();
 
     // Calculate bounds
     let (min_x, min_y, max_x, max_y) =
-        calculate_bounds_with_resolved_symbols(state, config, resolved_symbols);
+        calculate_bounds_with_resolved_symbols(state, config, resolved_symbols, context);
     let width = max_x - min_x + 2.0 * config.margin;
     let height = max_y - min_y + 2.0 * config.margin;
 
@@ -117,6 +158,8 @@ fn export_to_svg_with_resolved_symbol_entries(
   .junction {{ fill: {wire_color}; stroke: none; }}\n\
   .component {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\
   .text {{ font-family: monospace; font-size: {font_size}px; fill: {text_color}; }}\n\
+  .design-note-anchor {{ fill: {text_color}; stroke: none; }}\n\
+  .design-note-requirement-link .text {{ text-decoration: underline; }}\n\
 </style>\n\
 <rect width=\"100%\" height=\"100%\" fill=\"#1a1a1a\"/>",
         vx = min_x - config.margin,
@@ -160,6 +203,10 @@ fn export_to_svg_with_resolved_symbol_entries(
         );
     }
 
+    for note in &state.design_notes {
+        write_design_note(&mut svg, state, note, config, context.view_path);
+    }
+
     // Close SVG
     svg.push_str("</svg>");
 
@@ -170,9 +217,10 @@ fn calculate_bounds_with_resolved_symbols(
     state: &SchematicState,
     config: &SvgExportConfig,
     resolved_symbols: &[ResolvedSymbolExportEntry],
+    context: SvgDesignContext<'_>,
 ) -> (f64, f64, f64, f64) {
     if resolved_symbols.is_empty() {
-        return calculate_bounds(state, config);
+        return calculate_bounds_with_context(state, config, context.view_path);
     }
 
     let mut min_x = f64::MAX;
@@ -220,6 +268,16 @@ fn calculate_bounds_with_resolved_symbols(
 
     include_junction_bounds(
         state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+    );
+
+    include_design_note_bounds(
+        state,
+        config,
+        context.view_path,
+        &mut min_x,
+        &mut min_y,
+        &mut max_x,
+        &mut max_y,
     );
 
     if min_x == f64::MAX {
@@ -380,6 +438,56 @@ fn escape_xml(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn note_only_svg_is_bounded_escaped_multiline_and_semantic() {
+        let mut schematic = SchematicState::default();
+        schematic.design_notes.push(
+            crate::state::DesignNote::new(
+                19,
+                crate::state::Point::new(30, 40),
+                crate::state::DesignNoteKind::ReviewNote,
+                "Check A < B & C\nSecond line",
+            )
+            .unwrap(),
+        );
+
+        let svg = export_to_svg(&schematic, &SvgExportConfig::default());
+        assert!(svg.contains("design-note-review-note"));
+        assert!(svg.contains("data-object-id=\"19\""));
+        assert!(svg.contains("data-review-id=\"NOTE-0019\""));
+        assert!(svg.contains("Check A &lt; B &amp; C"));
+        assert!(svg.contains("<tspan"));
+        assert!(svg.contains("Second line"));
+        assert!(!svg.contains("Check A < B & C"));
+        assert!(!svg.contains("viewBox=\"-20 -10 140 150\""));
+    }
+
+    #[test]
+    fn property_display_export_uses_the_explicit_active_view_context() {
+        let mut schematic = SchematicState::default();
+        schematic.design_notes.push(
+            crate::state::DesignNote::new(
+                20,
+                crate::state::Point::new(5, 6),
+                crate::state::DesignNoteKind::PropertyDisplay,
+                "${view} / ${component_count} components",
+            )
+            .unwrap(),
+        );
+
+        let svg = export_to_svg_with_resolved_symbol_entries(
+            &schematic,
+            &SvgExportConfig::default(),
+            &[],
+            SvgDesignContext {
+                view_path: "user/top/schematic",
+            },
+        );
+
+        assert!(svg.contains("user/top/schematic / 0 components"));
+        assert!(!svg.contains(">schematic / 0 components"));
+    }
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, Junction, Library,
         LibraryCellInstance, LibraryManager, Point, PortDirection, PortSpec, SymbolDocument,

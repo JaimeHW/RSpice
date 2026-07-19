@@ -937,6 +937,35 @@ mod tests {
     }
 
     #[test]
+    fn shift_t_resolves_schematic_text_without_breaking_plain_bus_tap() {
+        let profile = ShortcutPreferences::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::NONE
+        };
+        let resolve = |modifiers, environment| {
+            ShortcutResolverState::default().resolve(
+                &snapshot(&[event(Key::T, modifiers, false)], false),
+                &profile,
+                CommandPlatform::Desktop,
+                environment,
+                Duration::ZERO,
+                |_| true,
+            )
+        };
+
+        assert_eq!(
+            resolve(shift, design(true)).command,
+            Some(Command::PlaceText)
+        );
+        assert_eq!(
+            resolve(Modifiers::NONE, design(true)).command,
+            Some(Command::PlaceBusTap)
+        );
+        assert_eq!(resolve(shift, models_symbol(true)).command, None);
+    }
+
+    #[test]
     fn result_context_beats_global_only_when_enabled() {
         let mut profile = ShortcutPreferences::default();
         bind(

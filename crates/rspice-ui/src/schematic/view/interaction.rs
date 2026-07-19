@@ -6,6 +6,7 @@ use crate::state::{ComponentType, NetGraph, Point, Tool};
 use super::SchematicSymbolContext;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate};
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
+use super::design_notes::design_note_at;
 use super::drawing::{bus_tap_at, nearest_bus_hit, nearest_terminal};
 use super::net_labels::net_label_at;
 use super::viewport::Viewport;
@@ -34,6 +35,7 @@ pub(super) fn handle_tool_interactions(
             | Tool::Bus
             | Tool::BusTap
             | Tool::Junction
+            | Tool::DesignNote
             | Tool::Label
                 if state.schematic.read_only =>
             {
@@ -71,6 +73,10 @@ pub(super) fn handle_tool_interactions(
             Tool::Junction => {
                 let grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
                 handle_junction_click(ui, state, grid_pos);
+            }
+            Tool::DesignNote => {
+                let grid_pos = screen_to_grid(viewport, grid_size, pos);
+                place_pending_design_note(state, grid_pos);
             }
             Tool::Select => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
@@ -122,15 +128,31 @@ pub(super) fn handle_tool_interactions(
             state.schematic.selection.select_component(id);
             state.open_selected_instance_master();
         } else {
-            open_object_properties(
+            let hit = PointerHit::new(grid_pos, hit_pos);
+            let target = pointer_target(
                 state,
-                PointerHit::new(grid_pos, hit_pos),
+                hit,
                 hit_radius,
                 symbol_context,
                 ui.ctx(),
                 viewport,
                 pos,
             );
+            if let Some(PointerTarget::DesignNote(id)) = target
+                && activate_requirement_link(state, id, ui.ctx())
+            {
+                state.schematic.selection.select_only_design_note(id);
+            } else {
+                open_object_properties(
+                    state,
+                    hit,
+                    hit_radius,
+                    symbol_context,
+                    ui.ctx(),
+                    viewport,
+                    pos,
+                );
+            }
         }
     }
 
@@ -142,6 +164,38 @@ pub(super) fn handle_tool_interactions(
         {
             report_bus_error(ui, state, "Bus could not be committed", error.to_string());
         }
+    }
+}
+
+fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Context) -> bool {
+    let target = state
+        .schematic
+        .design_notes
+        .iter()
+        .find(|note| note.id == note_id)
+        .and_then(|note| note.requirement_target());
+    match target {
+        Some(crate::state::RequirementTarget::ExternalUri(uri)) => {
+            let uri = uri.to_owned();
+            ctx.open_url(egui::OpenUrl::new_tab(&uri));
+            state.push_user_message(ConsoleMessage::info(format!(
+                "Opened requirement link {uri}."
+            )));
+            true
+        }
+        Some(crate::state::RequirementTarget::ProjectSpecification(reference)) => {
+            let reference = reference.to_owned();
+            state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
+            crate::workbench::result_document::open_specification_editor(state);
+            state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Results);
+            state.push_user_message(ConsoleMessage::info(format!(
+                "Opened project specifications for requirement {reference}."
+            )));
+            true
+        }
+        None => false,
     }
 }
 
@@ -267,6 +321,12 @@ fn handle_select_dragging(
                     if !state.schematic.selection.has_component(id) {
                         state.schematic.selection.clear();
                         state.schematic.selection.select_component(id);
+                    }
+                    start_selection_drag(state, grid_pos);
+                }
+                Some(PointerTarget::DesignNote(id)) => {
+                    if !state.schematic.selection.has_design_note(id) {
+                        state.schematic.selection.select_only_design_note(id);
                     }
                     start_selection_drag(state, grid_pos);
                 }
@@ -484,6 +544,49 @@ fn place_pending_port(state: &mut AppState, grid_pos: Point) {
     }
 }
 
+fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
+    let Some(pending) = state.schematic.pending_design_note.clone() else {
+        state.push_user_message(ConsoleMessage::warning(
+            "Design-note placement requires a validated documentation contract; reopen Place text or note."
+                .to_owned(),
+        ));
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
+    };
+    let authority_matches = pending
+        .document_authority
+        .as_ref()
+        .is_some_and(|authority| {
+            authority.design_execution_epoch == state.design_execution_epoch
+                && authority.active_schematic_epoch == state.active_schematic_epoch
+                && authority.view_path == state.workspace.active_view.display_path()
+        });
+    if state.schematic.read_only || state.active_view_read_only() || !authority_matches {
+        state.push_user_message(ConsoleMessage::warning(
+            "Design note was not placed: the active schematic authority changed; reopen Place text or note."
+                .to_owned(),
+        ));
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
+    }
+    let kind = pending.kind.label();
+    match state.schematic.place_pending_design_note(grid_pos, pending) {
+        Ok(stable_id) => {
+            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.sync_active_schematic_to_workspace();
+            state.push_user_message(ConsoleMessage::info(format!(
+                "Placed {kind} as stable non-electrical object {stable_id}."
+            )));
+        }
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "Design note was not placed: {error}"
+            )));
+            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JunctionPlacementOutcome {
     Placed(Point),
@@ -567,6 +670,7 @@ fn handle_junction_click(ui: &Ui, state: &mut AppState, requested: Point) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PointerTarget {
     Component(u64),
+    DesignNote(u64),
     NetLabel(u64),
     BusTap(u64),
     Junction(Point),
@@ -595,29 +699,38 @@ pub(super) fn pointer_target(
     viewport: &Viewport,
     pointer_pos: egui::Pos2,
 ) -> Option<PointerTarget> {
-    net_label_at(ctx, viewport, &state.schematic.net_labels, pointer_pos)
-        .map(PointerTarget::NetLabel)
-        .or_else(|| {
-            symbol_context
-                .component_at_resolved_symbol(&state.schematic.components, hit.grid)
-                .or_else(|| state.schematic.component_at(hit.grid))
-                .map(PointerTarget::Component)
-        })
-        .or_else(|| {
-            bus_tap_at(&state.schematic.bus_taps, hit.schematic, hit_radius)
-                .map(PointerTarget::BusTap)
-        })
-        .or_else(|| {
-            state
-                .schematic
-                .junction_at(hit.grid)
-                .map(|_| PointerTarget::Junction(hit.grid))
-        })
-        .or_else(|| {
-            nearest_bus_hit(&state.schematic.buses, hit.schematic, hit_radius)
-                .map(|hit| PointerTarget::Bus(hit.bus_id))
-        })
-        .or_else(|| state.schematic.wire_at(hit.grid).map(PointerTarget::Wire))
+    design_note_at(
+        ctx,
+        viewport,
+        &state.schematic.design_notes,
+        state,
+        pointer_pos,
+    )
+    .map(PointerTarget::DesignNote)
+    .or_else(|| {
+        net_label_at(ctx, viewport, &state.schematic.net_labels, pointer_pos)
+            .map(PointerTarget::NetLabel)
+    })
+    .or_else(|| {
+        symbol_context
+            .component_at_resolved_symbol(&state.schematic.components, hit.grid)
+            .or_else(|| state.schematic.component_at(hit.grid))
+            .map(PointerTarget::Component)
+    })
+    .or_else(|| {
+        bus_tap_at(&state.schematic.bus_taps, hit.schematic, hit_radius).map(PointerTarget::BusTap)
+    })
+    .or_else(|| {
+        state
+            .schematic
+            .junction_at(hit.grid)
+            .map(|_| PointerTarget::Junction(hit.grid))
+    })
+    .or_else(|| {
+        nearest_bus_hit(&state.schematic.buses, hit.schematic, hit_radius)
+            .map(|hit| PointerTarget::Bus(hit.bus_id))
+    })
+    .or_else(|| state.schematic.wire_at(hit.grid).map(PointerTarget::Wire))
 }
 
 fn handle_select_click(
@@ -650,6 +763,14 @@ fn handle_select_click(
             } else {
                 state.schematic.selection.clear();
                 state.schematic.selection.select_component(id);
+            }
+        }
+        Some(PointerTarget::DesignNote(id)) => {
+            state.schematic.net_highlight.clear();
+            if additive {
+                state.schematic.selection.toggle_design_note(id);
+            } else {
+                state.schematic.selection.select_only_design_note(id);
             }
         }
         Some(PointerTarget::NetLabel(id)) => {
@@ -880,6 +1001,9 @@ fn open_object_properties(
         Some(PointerTarget::Component(id)) => {
             state.schematic.selection.select_only_component(id);
         }
+        Some(PointerTarget::DesignNote(id)) => {
+            state.schematic.selection.select_only_design_note(id);
+        }
         Some(PointerTarget::NetLabel(id)) => {
             state.schematic.selection.select_only_net_label(id);
         }
@@ -899,8 +1023,8 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        Junction, NetLabel, PendingPortPlacement, PortDirection, PortDirectionType, PortDiscipline,
-        PortSignalType, Tool, Wire,
+        DesignNoteKind, Junction, NetLabel, PendingDesignNotePlacement, PendingPortPlacement,
+        PortDirection, PortDirectionType, PortDiscipline, PortSignalType, Tool, Wire,
     };
 
     fn pointer_viewport() -> Viewport {
@@ -951,6 +1075,63 @@ mod tests {
         assert!(state.schematic.components.is_empty());
         assert!(state.schematic.redo());
         assert_eq!(state.schematic.components, [placed]);
+    }
+
+    #[test]
+    fn validated_design_note_contract_places_once_without_changing_topology() {
+        let mut state = AppState::default();
+        let pending = PendingDesignNotePlacement::new(
+            DesignNoteKind::PlainText,
+            "Bias network",
+            state.schematic.topology_version(),
+            &state.schematic.design_notes,
+        )
+        .unwrap()
+        .with_document_authority(
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            state.workspace.active_view.display_path(),
+        );
+        let topology = state.schematic.topology_version();
+        state.schematic.pending_design_note = Some(pending);
+        state.schematic.tool = Tool::DesignNote;
+
+        place_pending_design_note(&mut state, Point::new(20, 30));
+
+        assert_eq!(state.schematic.design_notes.len(), 1);
+        assert_eq!(state.schematic.design_notes[0].pos, Point::new(20, 30));
+        assert_eq!(state.schematic.topology_version(), topology);
+        assert!(state.schematic.pending_design_note.is_none());
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(state.schematic.undo());
+        assert!(state.schematic.design_notes.is_empty());
+    }
+
+    #[test]
+    fn stale_design_note_authority_is_consumed_without_document_mutation() {
+        let mut state = AppState::default();
+        let pending = PendingDesignNotePlacement::new(
+            DesignNoteKind::ReviewNote,
+            "Review bias path",
+            state.schematic.topology_version(),
+            &state.schematic.design_notes,
+        )
+        .unwrap()
+        .with_document_authority(
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            state.workspace.active_view.display_path(),
+        );
+        state.schematic.pending_design_note = Some(pending);
+        state.schematic.tool = Tool::DesignNote;
+        state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
+
+        place_pending_design_note(&mut state, Point::new(20, 30));
+
+        assert!(state.schematic.design_notes.is_empty());
+        assert!(state.schematic.pending_design_note.is_none());
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(!state.schematic.can_undo());
     }
 
     #[test]
@@ -1235,6 +1416,56 @@ mod tests {
             ),
             Some(PointerTarget::Component(10)),
             "once the visually topmost label is absent the component receives the pointer"
+        );
+    }
+
+    #[test]
+    fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() {
+        let mut state = AppState::default();
+        state.schematic.design_notes.push(
+            crate::state::DesignNote::new(
+                32,
+                Point::new(20, 20),
+                DesignNoteKind::RequirementLink,
+                "REQ-19",
+            )
+            .unwrap(),
+        );
+        let ctx = egui::Context::default();
+        assert!(activate_requirement_link(&mut state, 32, &ctx));
+        assert_eq!(
+            state.workbench.workspace,
+            crate::workbench::state::Workspace::Results
+        );
+        assert_eq!(
+            state.ui.results.viewer,
+            crate::workbench::ResultViewer::Specs
+        );
+        assert!(state.ui.results.spec_drafts.is_some());
+
+        state.schematic.design_notes.push(
+            crate::state::DesignNote::new(
+                33,
+                Point::new(30, 20),
+                DesignNoteKind::RequirementLink,
+                "https://tracker.example/item?id=19&from=schematic%20note",
+            )
+            .unwrap(),
+        );
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            assert!(activate_requirement_link(&mut state, 33, ctx));
+        });
+        assert!(
+            output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(
+                    command,
+                    egui::OutputCommand::OpenUrl(open)
+                        if open.url == "https://tracker.example/item?id=19&from=schematic%20note"
+                            && open.new_tab
+                ))
         );
     }
 

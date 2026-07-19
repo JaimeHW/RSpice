@@ -247,6 +247,10 @@ pub struct Selection {
     /// Selected net-label stable IDs.
     #[serde(default)]
     pub net_labels: HashSet<u64>,
+
+    /// Selected non-electrical design-note stable IDs.
+    #[serde(default)]
+    pub design_notes: HashSet<u64>,
 }
 
 impl Selection {
@@ -265,6 +269,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
     }
 
     /// Get total number of selected items
@@ -277,6 +282,7 @@ impl Selection {
             + self.buses.len()
             + self.bus_taps.len()
             + self.net_labels.len()
+            + self.design_notes.len()
     }
 
     /// Clear all selections
@@ -289,6 +295,7 @@ impl Selection {
         self.buses.clear();
         self.bus_taps.clear();
         self.net_labels.clear();
+        self.design_notes.clear();
     }
 
     // =========================================================================
@@ -335,6 +342,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
         {
             self.components.iter().next().copied()
         } else {
@@ -386,6 +394,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
         {
             self.wires.iter().next().copied()
         } else {
@@ -435,6 +444,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
         {
             Some(&self.wire_segments[0])
         } else {
@@ -484,6 +494,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
         {
             Some(&self.wire_vertices[0])
         } else {
@@ -528,6 +539,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
         {
             Some(self.junctions[0].pos)
         } else {
@@ -637,6 +649,39 @@ impl Selection {
     }
 
     // =========================================================================
+    // Design-Note Selection
+    // =========================================================================
+
+    pub fn has_design_note(&self, id: u64) -> bool {
+        self.design_notes.contains(&id)
+    }
+
+    pub fn select_design_note(&mut self, id: u64) {
+        self.design_notes.insert(id);
+    }
+
+    pub fn deselect_design_note(&mut self, id: u64) {
+        self.design_notes.remove(&id);
+    }
+
+    pub fn toggle_design_note(&mut self, id: u64) {
+        if !self.design_notes.remove(&id) {
+            self.design_notes.insert(id);
+        }
+    }
+
+    pub fn select_only_design_note(&mut self, id: u64) {
+        self.clear();
+        self.design_notes.insert(id);
+    }
+
+    pub fn single_design_note(&self) -> Option<u64> {
+        (self.design_notes.len() == 1 && self.count() == 1)
+            .then(|| self.design_notes.iter().next().copied())
+            .flatten()
+    }
+
+    // =========================================================================
     // Query Methods
     // =========================================================================
 
@@ -655,6 +700,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
     }
 
     /// Check if only wires are selected (no components or other items)
@@ -667,6 +713,7 @@ impl Selection {
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
     }
 
     /// Check if any wire-related items are selected

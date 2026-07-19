@@ -639,9 +639,9 @@ fn chrono_lite_timestamp() -> String {
 mod tests {
     use super::*;
     use crate::state::{
-        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, CellViewRef, Library,
-        LibraryCellInstance, LibraryManager, NetLabel, PortDirection, PortSpec, SymbolDocument,
-        SymbolPin, View, ViewType,
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, CellViewRef, DesignNote,
+        DesignNoteKind, Library, LibraryCellInstance, LibraryManager, NetLabel, PortDirection,
+        PortSpec, SymbolDocument, SymbolPin, View, ViewType,
     };
     use std::collections::HashMap;
 
@@ -801,6 +801,36 @@ mod tests {
             "instance lines should reference the labeled node:\n{}",
             result.netlist
         );
+    }
+
+    #[test]
+    fn design_notes_never_change_generated_spice_or_connectivity() {
+        let mut baseline = SchematicState::default();
+        crate::common::examples::load_example("RC Lowpass Filter", &mut baseline);
+        let expected = generate_netlist(&baseline);
+        let mut documented = baseline;
+        documented.design_notes.push(
+            DesignNote::new(
+                90_001,
+                Point::new(25, 30),
+                DesignNoteKind::PropertyDisplay,
+                "${component_count} components",
+            )
+            .unwrap(),
+        );
+
+        let actual = generate_netlist(&documented);
+        assert_eq!(actual.netlist, expected.netlist);
+        assert_eq!(actual.nets.len(), expected.nets.len());
+        for (name, expected_points) in &expected.nets {
+            let mut expected_points = expected_points.clone();
+            expected_points.sort_by_key(|point| (point.x, point.y));
+            let mut actual_points = actual.nets.get(name).cloned().unwrap_or_default();
+            actual_points.sort_by_key(|point| (point.x, point.y));
+            assert_eq!(actual_points, expected_points, "net {name}");
+        }
+        assert_eq!(actual.warnings, expected.warnings);
+        assert_eq!(actual.errors, expected.errors);
     }
 
     /// Labels sharing a name connect otherwise-disjoint nets.

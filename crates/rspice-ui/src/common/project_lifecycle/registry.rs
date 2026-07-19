@@ -228,18 +228,20 @@ struct SchematicDocumentContent<'a> {
     buses: &'a [crate::state::Bus],
     bus_taps: &'a [crate::state::BusTap],
     net_labels: &'a [crate::state::NetLabel],
+    design_notes: &'a [crate::state::DesignNote],
     junctions: &'a [crate::state::Junction],
 }
 
 impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a> {
     fn from(schematic: &'a crate::state::SchematicState) -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             components: &schematic.components,
             wires: &schematic.wires,
             buses: &schematic.buses,
             bus_taps: &schematic.bus_taps,
             net_labels: &schematic.net_labels,
+            design_notes: &schematic.design_notes,
             junctions: &schematic.junctions,
         }
     }
@@ -398,8 +400,8 @@ mod tests {
     use super::*;
     use crate::common::app::AppState;
     use crate::state::{
-        BusDeclaration, BusSlice, BusTapOrientation, ComponentType, DesignVariable,
-        DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        BusDeclaration, BusSlice, BusTapOrientation, ComponentType, DesignNote, DesignNoteKind,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
         DesignVariableSweepEligibility, Point, SimulationPlanPayloadRecord,
     };
 
@@ -496,6 +498,35 @@ mod tests {
             .expect("place tap");
         let with_tap = super::super::snapshot(&state).expect("tap snapshot");
         registry.rebuild(&with_tap, Some(&with_bus)).unwrap();
+        assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
+    }
+
+    #[test]
+    fn design_note_edits_participate_in_the_schematic_document_digest() {
+        let mut state = AppState::default();
+        let active = state.workspace.active_view.clone();
+        let baseline = super::super::snapshot(&state).expect("baseline snapshot");
+        state.schematic.design_notes.push(
+            DesignNote::new(
+                71,
+                Point::new(4, 6),
+                DesignNoteKind::PlainText,
+                "Bias network",
+            )
+            .unwrap(),
+        );
+
+        let current = super::super::snapshot(&state).expect("design-note snapshot");
+        let mut registry = DocumentRegistry::default();
+        registry.rebuild(&current, Some(&baseline)).unwrap();
+        assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
+
+        let mut edited_state = state;
+        edited_state.schematic.design_notes[0]
+            .update(DesignNoteKind::PlainText, "Updated bias network")
+            .unwrap();
+        let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
+        registry.rebuild(&edited, Some(&current)).unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 

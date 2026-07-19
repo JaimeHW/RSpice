@@ -84,6 +84,7 @@ pub enum Command {
     PlaceLabel,
     PlaceProbe,
     PlacePin,
+    PlaceText,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -267,6 +268,7 @@ impl Command {
             Self::PlaceLabel => spec("place-label", "Place net label", "Design"),
             Self::PlaceProbe => spec("place-probe", "Place probe", "Design"),
             Self::PlacePin => spec("place-pin", "Place pin or port\u{2026}", "Design"),
+            Self::PlaceText => spec("place-text", "Place text or note\u{2026}", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -629,7 +631,8 @@ impl Command {
             | Self::PlaceBusTap
             | Self::PlaceJunction
             | Self::PlaceProbe
-            | Self::PlacePin => {
+            | Self::PlacePin
+            | Self::PlaceText => {
                 active_schematic_editor(app)
                     && !state.schematic.read_only
                     && !state.active_view_read_only()
@@ -1039,6 +1042,19 @@ impl Command {
                     view_path,
                 );
             }
+            Self::PlaceText => {
+                activate_workspace(app, Workspace::Design);
+                let design_execution_epoch = app.state.design_execution_epoch;
+                let active_schematic_epoch = app.state.active_schematic_epoch;
+                let topology_version = app.state.schematic.topology_version();
+                let view_path = app.state.workspace.active_view.display_path();
+                app.state.dialogs.design_note.open(
+                    design_execution_epoch,
+                    active_schematic_epoch,
+                    topology_version,
+                    view_path,
+                );
+            }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
                 let next = app
@@ -1361,6 +1377,10 @@ fn schematic_selection_has_live_object(schematic: &crate::state::SchematicState)
             .bus_taps
             .iter()
             .any(|tap| selection.has_bus_tap(tap.id))
+        || schematic
+            .design_notes
+            .iter()
+            .any(|note| selection.has_design_note(note.id))
 }
 
 fn schematic_selection_has_duplicable_object(schematic: &crate::state::SchematicState) -> bool {
@@ -1383,7 +1403,11 @@ fn schematic_selection_has_duplicable_object(schematic: &crate::state::Schematic
             || schematic
                 .bus_taps
                 .iter()
-                .any(|tap| selection.has_bus_tap(tap.id)))
+                .any(|tap| selection.has_bus_tap(tap.id))
+            || schematic
+                .design_notes
+                .iter()
+                .any(|note| selection.has_design_note(note.id)))
 }
 
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {
@@ -1404,6 +1428,9 @@ pub(crate) fn arm_schematic_tool(schematic: &mut crate::state::SchematicState, t
     if tool != Tool::Place(ComponentType::Port) {
         schematic.pending_port = None;
     }
+    if tool != Tool::DesignNote {
+        schematic.pending_design_note = None;
+    }
     schematic.tool = tool;
 }
 
@@ -1413,6 +1440,7 @@ pub(crate) fn cancel_schematic_tool(schematic: &mut crate::state::SchematicState
     schematic.cancel_routing_gestures();
     schematic.pending_bus_tap = None;
     schematic.pending_port = None;
+    schematic.pending_design_note = None;
     schematic.tool = Tool::Select;
 }
 
@@ -1585,6 +1613,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PlaceLabel,
     Command::PlaceProbe,
     Command::PlacePin,
+    Command::PlaceText,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -1896,6 +1925,20 @@ mod tests {
     }
 
     #[test]
+    fn place_text_command_has_the_exact_mockup_identity() {
+        assert_eq!(Command::PlaceText.stable_id(), "place-text");
+        assert_eq!(
+            Command::PlaceText.spec().label,
+            "Place text or note\u{2026}"
+        );
+        assert_eq!(Command::PlaceText.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("place-text"),
+            Some(Command::PlaceText)
+        );
+    }
+
+    #[test]
     fn rename_command_has_mockup_identity_and_opens_the_stable_target_dialog() {
         use crate::state::Point;
 
@@ -1963,6 +2006,27 @@ mod tests {
     }
 
     #[test]
+    fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let notes = app.state.schematic.design_notes.clone();
+        let topology = app.state.schematic.topology_version();
+        let dirty = app.state.schematic.is_dirty;
+        let tool = app.state.schematic.tool;
+
+        Command::PlaceText.execute(&mut app);
+
+        assert!(app.state.dialogs.design_note.open);
+        assert_eq!(app.state.dialogs.design_note.text, "Bias network");
+        assert_eq!(app.state.schematic.design_notes, notes);
+        assert_eq!(app.state.schematic.topology_version(), topology);
+        assert_eq!(app.state.schematic.is_dirty, dirty);
+        assert_eq!(app.state.schematic.tool, tool);
+        assert!(app.state.schematic.pending_design_note.is_none());
+        assert!(!app.state.schematic.can_undo());
+    }
+
+    #[test]
     fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
@@ -2018,14 +2082,17 @@ mod tests {
         assert!(Command::PlaceBus.is_enabled(&app));
         assert!(Command::PlaceBusTap.is_enabled(&app));
         assert!(Command::PlacePin.is_enabled(&app));
+        assert!(Command::PlaceText.is_enabled(&app));
 
         app.state.schematic.read_only = true;
         assert!(!Command::PlaceBus.is_enabled(&app));
         assert!(!Command::PlaceBusTap.is_enabled(&app));
         assert!(!Command::PlacePin.is_enabled(&app));
+        assert!(!Command::PlaceText.is_enabled(&app));
         app.state.schematic.read_only = false;
         app.state.workbench.workspace = Workspace::Results;
         assert!(!Command::PlacePin.is_enabled(&app));
+        assert!(!Command::PlaceText.is_enabled(&app));
     }
 
     #[test]

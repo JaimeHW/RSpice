@@ -5,6 +5,9 @@ use crate::state::{Component, OperatingPointAnnotationPolicy, Point};
 
 use super::super::symbols::SymbolLibrary;
 use super::SchematicSymbolContext;
+use super::design_notes::{
+    conservative_world_bounds as design_note_world_bounds, draw_design_note, hovered_design_note,
+};
 use super::drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire};
 use super::grid::draw_grid;
 use super::net_labels::{
@@ -57,6 +60,7 @@ pub(super) fn draw_scene(
         && state.schematic.wires.is_empty()
         && state.schematic.buses.is_empty()
         && state.schematic.net_labels.is_empty()
+        && state.schematic.design_notes.is_empty()
     {
         draw_empty_hint(painter, available);
     }
@@ -198,6 +202,36 @@ pub(super) fn draw_scene(
             selected,
             hovered_label == Some(label.id),
             false,
+        );
+    }
+
+    // Documentation objects are painted above electrical names but below
+    // validation markers. They never participate in conductor rendering.
+    let hovered_note = if state.schematic.tool == crate::state::Tool::Select {
+        hovered_design_note(painter, viewport, state, available)
+    } else {
+        None
+    };
+    for note in &state.schematic.design_notes {
+        let (min, max) = design_note_world_bounds(note);
+        if (max.x as f32) < wx0
+            || (min.x as f32) > wx1
+            || (max.y as f32) < wy0
+            || (min.y as f32) > wy1
+        {
+            continue;
+        }
+        let mut selected = state.schematic.selection.has_design_note(note.id);
+        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
+        }
+        draw_design_note(
+            painter,
+            viewport,
+            note,
+            state,
+            selected,
+            hovered_note == Some(note.id),
         );
     }
 

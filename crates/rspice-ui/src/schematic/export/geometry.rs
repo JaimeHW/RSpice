@@ -1,12 +1,24 @@
 use std::fmt::Write;
 
-use crate::state::{Bus, BusTap, Junction, Rotation, SchematicState, Wire};
+use crate::state::{
+    Bus, BusTap, DesignNote, DesignNoteKind, DesignNoteRenderContext, Junction, Rotation,
+    SchematicState, Wire,
+};
 
 use super::SvgExportConfig;
 
+#[cfg(test)]
 pub(super) fn calculate_bounds(
     state: &SchematicState,
     config: &SvgExportConfig,
+) -> (f64, f64, f64, f64) {
+    calculate_bounds_with_context(state, config, "schematic")
+}
+
+pub(super) fn calculate_bounds_with_context(
+    state: &SchematicState,
+    config: &SvgExportConfig,
+    view_path: &str,
 ) -> (f64, f64, f64, f64) {
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
@@ -40,11 +52,98 @@ pub(super) fn calculate_bounds(
         state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
     );
 
+    include_design_note_bounds(
+        state, config, view_path, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+    );
+
     if min_x == f64::MAX {
         (0.0, 0.0, 100.0, 100.0)
     } else {
         (min_x, min_y, max_x, max_y)
     }
+}
+
+fn design_note_export_text(state: &SchematicState, note: &DesignNote, view_path: &str) -> String {
+    note.rendered_text(&DesignNoteRenderContext::for_schematic(view_path, state))
+}
+
+pub(super) fn include_design_note_bounds(
+    state: &SchematicState,
+    config: &SvgExportConfig,
+    view_path: &str,
+    min_x: &mut f64,
+    min_y: &mut f64,
+    max_x: &mut f64,
+    max_y: &mut f64,
+) {
+    for note in &state.design_notes {
+        let text = design_note_export_text(state, note, view_path);
+        let lines: Vec<&str> = text.split('\n').collect();
+        let x = note.pos.x as f64 * config.grid_size + 6.0;
+        let y = note.pos.y as f64 * config.grid_size + config.font_size;
+        let width = lines
+            .iter()
+            .map(|line| estimated_text_width(line, config))
+            .fold(0.0, f64::max);
+        let height = lines.len().max(1) as f64 * config.font_size * 1.35;
+        *min_x = (*min_x).min(note.pos.x as f64 * config.grid_size);
+        *min_y = (*min_y).min(note.pos.y as f64 * config.grid_size);
+        *max_x = (*max_x).max(x + width);
+        *max_y = (*max_y).max(y + height);
+    }
+}
+
+pub(super) fn write_design_note(
+    svg: &mut String,
+    state: &SchematicState,
+    note: &DesignNote,
+    config: &SvgExportConfig,
+    view_path: &str,
+) {
+    let x = note.pos.x as f64 * config.grid_size + 6.0;
+    let y = note.pos.y as f64 * config.grid_size + config.font_size;
+    let kind = match note.kind {
+        DesignNoteKind::PlainText => "plain-text",
+        DesignNoteKind::PropertyDisplay => "property-display",
+        DesignNoteKind::RequirementLink => "requirement-link",
+        DesignNoteKind::ReviewNote => "review-note",
+    };
+    let review_attributes = note.review.as_ref().map_or_else(String::new, |review| {
+        format!(
+            " data-review-id=\"{}\" data-review-state=\"{}\"",
+            super::escape_xml(&review.record_id),
+            review.state.keyword()
+        )
+    });
+    writeln!(
+        svg,
+        "<g class=\"design-note design-note-{kind}\" data-object-id=\"{}\" data-layer=\"drawing-annotation\"{review_attributes}>",
+        note.id
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<circle class=\"design-note-anchor\" cx=\"{}\" cy=\"{}\" r=\"2\"/>",
+        note.pos.x as f64 * config.grid_size,
+        note.pos.y as f64 * config.grid_size
+    )
+    .unwrap();
+    let text = design_note_export_text(state, note, view_path);
+    writeln!(svg, "<text class=\"text\" x=\"{x}\" y=\"{y}\">").unwrap();
+    for (index, line) in text.split('\n').enumerate() {
+        let dy = if index == 0 {
+            0.0
+        } else {
+            config.font_size * 1.35
+        };
+        writeln!(
+            svg,
+            "<tspan x=\"{x}\" dy=\"{dy}\">{}</tspan>",
+            super::escape_xml(line)
+        )
+        .unwrap();
+    }
+    svg.push_str("</text>\n</g>\n");
 }
 
 pub(super) fn include_bus_bounds(

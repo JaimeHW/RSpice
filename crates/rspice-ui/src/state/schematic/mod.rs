@@ -21,6 +21,7 @@ mod canvas_cache;
 mod clipboard;
 mod component;
 mod component_type;
+mod design_note;
 mod document_policy;
 mod net_highlight;
 mod net_label;
@@ -46,6 +47,11 @@ pub use canvas_cache::CanvasCache;
 pub use clipboard::ClipboardData;
 pub use component::{Component, LibraryCellInstance};
 pub use component_type::ComponentType;
+pub use design_note::{
+    DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, DesignNotePlacementAuthority,
+    DesignNoteRenderContext, DesignReviewRecord, DesignReviewState, MAX_DESIGN_NOTE_TEXT_LEN,
+    PendingDesignNotePlacement, RequirementTarget,
+};
 pub use document_policy::{
     NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
     SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,

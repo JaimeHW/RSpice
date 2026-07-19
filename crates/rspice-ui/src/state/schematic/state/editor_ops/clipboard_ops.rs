@@ -1,5 +1,5 @@
 #[cfg(test)]
-use super::super::super::{BusDeclaration, BusSlice, BusTapOrientation};
+use super::super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::super::*;
 
 impl SchematicState {
@@ -100,14 +100,21 @@ impl SchematicState {
             .filter(|label| self.selection.has_net_label(label.id))
             .cloned()
             .collect();
+        let design_notes_to_copy: Vec<DesignNote> = self
+            .design_notes
+            .iter()
+            .filter(|note| self.selection.has_design_note(note.id))
+            .cloned()
+            .collect();
 
-        self.clipboard = ClipboardData::from_selection_with_labels_and_buses(
+        self.clipboard = ClipboardData::from_complete_selection(
             selected_comps,
             wires_to_copy,
             junctions_to_copy,
             net_labels_to_copy,
             buses_to_copy,
             bus_taps_to_copy,
+            design_notes_to_copy,
         );
     }
 
@@ -126,7 +133,8 @@ impl SchematicState {
             && self.clipboard.wires.is_empty()
             && self.clipboard.buses.is_empty()
             && self.clipboard.bus_taps.is_empty()
-            && self.clipboard.net_labels.is_empty();
+            && self.clipboard.net_labels.is_empty()
+            && self.clipboard.design_notes.is_empty();
         // A junction-only clipboard is a connectivity edit, not decoration.
         // Snap its anchor through the same ambiguous-crossing candidate set as
         // the junction tool, then reject it before opening an undo transaction
@@ -168,6 +176,7 @@ impl SchematicState {
             let clipboard_net_labels = s.clipboard.net_labels.clone();
             let clipboard_buses = s.clipboard.buses.clone();
             let clipboard_bus_taps = s.clipboard.bus_taps.clone();
+            let clipboard_design_notes = s.clipboard.design_notes.clone();
             let origin = s.clipboard.origin;
 
             if clipboard_components.is_empty()
@@ -176,6 +185,7 @@ impl SchematicState {
                 && clipboard_net_labels.is_empty()
                 && clipboard_buses.is_empty()
                 && clipboard_bus_taps.is_empty()
+                && clipboard_design_notes.is_empty()
             {
                 return;
             }
@@ -184,9 +194,11 @@ impl SchematicState {
             let offset_y = paste_pos.y.saturating_sub(origin.y);
 
             let mut committed = false;
+            let mut electrical_committed = false;
 
             // Paste components with new IDs
             for comp in clipboard_components {
+                electrical_committed = true;
                 if !committed {
                     s.selection.clear();
                     committed = true;
@@ -203,6 +215,7 @@ impl SchematicState {
 
             // Paste wires with new IDs
             for wire in clipboard_wires {
+                electrical_committed = true;
                 if !committed {
                     s.selection.clear();
                     committed = true;
@@ -220,6 +233,7 @@ impl SchematicState {
             // Labels retain their user-facing net names while receiving new
             // document identities and translated attachment anchors.
             for mut label in clipboard_net_labels {
+                electrical_committed = true;
                 if !committed {
                     s.selection.clear();
                     committed = true;
@@ -234,6 +248,28 @@ impl SchematicState {
                 s.selection.select_net_label(new_id);
             }
 
+            // Documentation objects retain their typed semantics and source
+            // text, but receive a fresh stable document/review identity.
+            for note in clipboard_design_notes {
+                if note.validate().is_err() {
+                    continue;
+                }
+                let target = Point::new(
+                    note.pos.x.saturating_add(offset_x),
+                    note.pos.y.saturating_add(offset_y),
+                );
+                let new_id = s.next_id();
+                let Ok(new_note) = DesignNote::new(new_id, target, note.kind, note.text) else {
+                    continue;
+                };
+                if !committed {
+                    s.selection.clear();
+                    committed = true;
+                }
+                s.design_notes.push(new_note);
+                s.selection.select_design_note(new_id);
+            }
+
             // Paste buses before taps so every source reference can be
             // remapped to a fresh stable document identity.
             let mut bus_id_map = std::collections::HashMap::new();
@@ -243,6 +279,7 @@ impl SchematicState {
                 if bus.validate().is_err() {
                     continue;
                 }
+                electrical_committed = true;
                 if !committed {
                     s.selection.clear();
                     committed = true;
@@ -264,6 +301,7 @@ impl SchematicState {
                     continue;
                 };
                 if tap.validate_against_bus(source).is_ok() {
+                    electrical_committed = true;
                     if !committed {
                         s.selection.clear();
                         committed = true;
@@ -295,6 +333,7 @@ impl SchematicState {
                         >= 2
                 };
                 if valid_target && !s.has_junction(target) {
+                    electrical_committed = true;
                     if !committed {
                         s.selection.clear();
                         committed = true;
@@ -306,7 +345,9 @@ impl SchematicState {
 
             if committed {
                 s.is_dirty = true;
-                s.bump_topology_version();
+                if electrical_committed {
+                    s.bump_topology_version();
+                }
             }
         })
     }
@@ -315,6 +356,40 @@ impl SchematicState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn note_only_clipboard_pastes_at_exact_target_without_junction_constraints() {
+        let mut schematic = SchematicState::default();
+        let note = DesignNote::new(
+            77,
+            Point::new(10, 20),
+            DesignNoteKind::ReviewNote,
+            "Check bias path",
+        )
+        .unwrap();
+        schematic.design_notes.push(note.clone());
+        schematic.selection.select_only_design_note(note.id);
+        schematic.copy_selection();
+        assert_eq!(schematic.clipboard.origin, note.pos);
+        assert_eq!(schematic.clipboard.design_notes, vec![note.clone()]);
+
+        let topology = schematic.topology_version();
+        assert!(schematic.paste_at(Point::new(100, 120)));
+        assert_eq!(schematic.design_notes.len(), 2);
+        let pasted = schematic.design_notes.last().unwrap();
+        assert_ne!(pasted.id, note.id);
+        assert_eq!(pasted.pos, Point::new(100, 120));
+        assert_eq!(pasted.kind, DesignNoteKind::ReviewNote);
+        assert_eq!(pasted.text, note.text);
+        assert_eq!(
+            pasted.review.as_ref().unwrap().record_id,
+            format!("NOTE-{:04}", pasted.id)
+        );
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(schematic.undo());
+        assert_eq!(schematic.design_notes, vec![note]);
+        assert_eq!(schematic.topology_version(), topology);
+    }
 
     #[test]
     fn clipboard_drops_malformed_wires_from_corrupt_import_state() {

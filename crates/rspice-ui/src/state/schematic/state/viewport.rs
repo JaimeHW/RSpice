@@ -96,7 +96,11 @@ impl SchematicState {
     /// Returns (min_x, min_y, max_x, max_y) in schematic pixel coordinates, or None if empty.
     /// Note: These are pixel coordinates snapped to grid, not grid cell indices.
     pub fn content_bounds(&self) -> Option<(i32, i32, i32, i32)> {
-        if self.components.is_empty() && self.wires.is_empty() && self.junctions.is_empty() {
+        if self.components.is_empty()
+            && self.wires.is_empty()
+            && self.junctions.is_empty()
+            && self.design_notes.is_empty()
+        {
             return None;
         }
 
@@ -130,6 +134,21 @@ impl SchematicState {
             min_y = min_y.min(junction.pos.y);
             max_x = max_x.max(junction.pos.x);
             max_y = max_y.max(junction.pos.y);
+        }
+
+        for note in &self.design_notes {
+            let lines = note.text.lines().count().max(1) as i32;
+            let columns = note
+                .text
+                .lines()
+                .map(|line| line.chars().count())
+                .max()
+                .unwrap_or(1)
+                .min(i32::MAX as usize) as i32;
+            min_x = min_x.min(note.pos.x);
+            min_y = min_y.min(note.pos.y);
+            max_x = max_x.max(note.pos.x.saturating_add(columns.saturating_mul(8)));
+            max_y = max_y.max(note.pos.y.saturating_add(lines.saturating_mul(15)));
         }
 
         Some((min_x, min_y, max_x, max_y))

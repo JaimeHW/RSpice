@@ -336,6 +336,8 @@ const PLACE_JUNCTION: &[ShortcutBinding] = &[primary(chord(Key::J, false, false,
 const PLACE_LABEL: &[ShortcutBinding] = &[primary(chord(Key::N, false, false, false, "N"), ALL)];
 const PLACE_PROBE: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true, "Shift+P"), ALL)];
+const PLACE_TEXT: &[ShortcutBinding] =
+    &[primary(chord(Key::T, false, false, true, "Shift+T"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const SYMBOL_POLYLINE: &[ShortcutBinding] =
     &[primary(chord(Key::W, false, false, false, "W"), ALL)];
@@ -504,6 +506,7 @@ impl Command {
             | Self::PlaceLabel
             | Self::PlaceProbe
             | Self::PlacePin
+            | Self::PlaceText
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -589,6 +592,7 @@ impl Command {
             Self::PlaceLabel => PLACE_LABEL,
             Self::PlaceProbe => PLACE_PROBE,
             Self::PlacePin => PLACE_PIN,
+            Self::PlaceText => PLACE_TEXT,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -876,6 +880,33 @@ mod tests {
             assert_eq!(
                 binding_owners(PLACE_PROBE[0].chord, platform),
                 vec![Command::PlaceProbe, Command::SymbolPinTool]
+            );
+        }
+    }
+
+    #[test]
+    fn schematic_place_text_is_shift_t_without_displacing_bus_tap() {
+        assert_eq!(
+            Command::PlaceText.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        assert_eq!(
+            Command::PlaceBusTap.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        for platform in CommandPlatform::ALL {
+            assert_eq!(
+                Command::PlaceText.default_shortcut_label(platform),
+                "Shift+T"
+            );
+            assert_eq!(Command::PlaceBusTap.default_shortcut_label(platform), "T");
+            assert_eq!(
+                binding_owners(PLACE_TEXT[0].chord, platform),
+                vec![Command::PlaceText]
+            );
+            assert_eq!(
+                binding_owners(PLACE_BUS_TAP[0].chord, platform),
+                vec![Command::PlaceBusTap]
             );
         }
     }

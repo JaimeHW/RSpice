@@ -58,7 +58,7 @@ impl SchematicVersion {
     pub const fn current() -> Self {
         Self {
             major: 1,
-            minor: 0,
+            minor: 1,
             patch: 0,
         }
     }
@@ -406,6 +406,20 @@ fn prepare_loaded_schematic(
 ) -> Result<SchematicState, SchematicIoError> {
     file.validate()?;
 
+    for note in &file.schematic.design_notes {
+        note.validate().map_err(|error| {
+            SchematicIoError::ParseError(format!("invalid design note object {}: {error}", note.id))
+        })?;
+    }
+    for note in &file.schematic.clipboard.design_notes {
+        note.validate().map_err(|error| {
+            SchematicIoError::ParseError(format!(
+                "invalid clipboard design note object {}: {error}",
+                note.id
+            ))
+        })?;
+    }
+
     let mut schematic = file.schematic;
 
     // Recalculate runtime state (IDs, counters, etc.)
@@ -443,6 +457,84 @@ pub fn load_schematic_file(path: &Path) -> Result<SchematicFile, SchematicIoErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn design_notes_round_trip_and_legacy_documents_default_empty() {
+        let mut schematic = SchematicState::default();
+        let mut review = crate::state::DesignNote::new(
+            94,
+            crate::state::Point::new(10, 30),
+            crate::state::DesignNoteKind::ReviewNote,
+            "Review bias path\nSecond line",
+        )
+        .unwrap();
+        review
+            .set_review_state(crate::state::DesignReviewState::Resolved)
+            .unwrap();
+        let notes = vec![
+            crate::state::DesignNote::new(
+                91,
+                crate::state::Point::new(-20, 30),
+                crate::state::DesignNoteKind::PlainText,
+                "Bias network\nKeep clear",
+            )
+            .unwrap(),
+            crate::state::DesignNote::new(
+                92,
+                crate::state::Point::new(-10, 30),
+                crate::state::DesignNoteKind::PropertyDisplay,
+                "${component_count} components",
+            )
+            .unwrap(),
+            crate::state::DesignNote::new(
+                93,
+                crate::state::Point::new(0, 30),
+                crate::state::DesignNoteKind::RequirementLink,
+                "https://tracker.example/item?id=91&source=schematic",
+            )
+            .unwrap(),
+            review,
+        ];
+        schematic.design_notes = notes.clone();
+        schematic.selection.select_only_design_note(93);
+        schematic.copy_selection();
+        assert_eq!(schematic.clipboard.design_notes.len(), 1);
+        let clipboard = schematic.clipboard.design_notes.clone();
+        let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
+        let loaded = load_schematic_text(&json, None).unwrap();
+        assert_eq!(loaded.design_notes, notes);
+        assert_eq!(loaded.clipboard.design_notes, clipboard);
+
+        let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
+        legacy["schematic"]
+            .as_object_mut()
+            .unwrap()
+            .remove("design_notes");
+        let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
+        assert!(loaded.design_notes.is_empty());
+    }
+
+    #[test]
+    fn malformed_serialized_design_note_fails_closed() {
+        let mut schematic = SchematicState::default();
+        schematic.design_notes.push(
+            crate::state::DesignNote::new(
+                3,
+                crate::state::Point::origin(),
+                crate::state::DesignNoteKind::PlainText,
+                "valid",
+            )
+            .unwrap(),
+        );
+        let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value["schematic"]["design_notes"][0]["text"] = serde_json::json!("   ");
+
+        assert!(matches!(
+            load_schematic_text(&value.to_string(), None),
+            Err(SchematicIoError::ParseError(message)) if message.contains("invalid design note")
+        ));
+    }
 
     #[test]
     fn schematic_version_requires_current_major() {

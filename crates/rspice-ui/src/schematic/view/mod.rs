@@ -17,6 +17,7 @@ use super::symbols::SymbolLibrary;
 mod bus_interaction;
 mod context_menu;
 mod coordinates;
+mod design_notes;
 mod drawing;
 mod grid;
 mod interaction;
@@ -138,6 +139,7 @@ impl SchematicSymbolContext {
             && schematic.bus_taps.is_empty()
             && schematic.junctions.is_empty()
             && schematic.net_labels.is_empty()
+            && schematic.design_notes.is_empty()
         {
             return None;
         }
@@ -182,6 +184,11 @@ impl SchematicSymbolContext {
 
         for label in &schematic.net_labels {
             let (min, max) = net_labels::world_bounds(label);
+            include(min, max);
+        }
+
+        for note in &schematic.design_notes {
+            let (min, max) = design_notes::conservative_world_bounds(note);
             include(min, max);
         }
 
@@ -287,6 +294,19 @@ impl SchematicSymbolContext {
             };
             if matches && !schematic.selection.has_net_label(label.id) {
                 schematic.selection.net_labels.insert(label.id);
+                count += 1;
+            }
+        }
+
+        for note in &schematic.design_notes {
+            let (min, max) = design_notes::conservative_world_bounds(note);
+            let matches = if enclosed_only {
+                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
+            } else {
+                rects_intersect(min, max, min_x, min_y, max_x, max_y)
+            };
+            if matches && !schematic.selection.has_design_note(note.id) {
+                schematic.selection.select_design_note(note.id);
                 count += 1;
             }
         }
@@ -421,6 +441,7 @@ fn schematic_accessibility_label(
             Command::PlaceJunction,
             Command::PlaceProbe,
             Command::PlacePin,
+            Command::PlaceText,
             Command::ZoomFit,
             Command::Cancel,
         ],
@@ -465,13 +486,14 @@ fn schematic_accessibility_label(
         " Arrow keys select the previous or next instance."
     };
     format!(
-        "Schematic canvas. {}, {}, {}, {}, {}, {}; {}.{selected_instance}{traversal_instruction} Active tool: {}.{shortcuts}",
+        "Schematic canvas. {}, {}, {}, {}, {}, {}, {}; {}.{selected_instance}{traversal_instruction} Active tool: {}.{shortcuts}",
         counted(schematic.components.len(), "component", "components"),
         counted(schematic.wires.len(), "wire", "wires"),
         counted(schematic.buses.len(), "bus", "buses"),
         counted(schematic.bus_taps.len(), "bus tap", "bus taps"),
         counted(schematic.junctions.len(), "junction", "junctions"),
         counted(schematic.net_labels.len(), "net label", "net labels"),
+        counted(schematic.design_notes.len(), "design note", "design notes"),
         counted(
             schematic.selection.count(),
             "item selected",
@@ -578,6 +600,35 @@ mod tests {
             1
         );
         assert_eq!(schematic.selection.single_net_label(), Some(77));
+    }
+
+    #[test]
+    fn content_bounds_and_marquee_selection_include_design_note_text() {
+        let mut schematic = SchematicState::default();
+        let note = crate::state::DesignNote::new(
+            78,
+            Point::new(100, 80),
+            crate::state::DesignNoteKind::PlainText,
+            "Bias network\nKeep clear",
+        )
+        .unwrap();
+        let (min, max) = design_notes::conservative_world_bounds(&note);
+        schematic.design_notes.push(note);
+        let context = SchematicSymbolContext::default();
+
+        assert_eq!(
+            context.content_bounds(&schematic),
+            Some((min.x, min.y, max.x, max.y))
+        );
+        assert_eq!(
+            context.select_in_rect(
+                &mut schematic,
+                SelectionWindow::new(min.x, min.y, max.x, max.y, false),
+                false,
+            ),
+            1
+        );
+        assert_eq!(schematic.selection.single_design_note(), Some(78));
     }
 
     #[test]
@@ -733,6 +784,15 @@ mod tests {
             .schematic
             .net_labels
             .push(NetLabel::new(4, Point::new(10, 0), "OUT"));
+        state.schematic.design_notes.push(
+            crate::state::DesignNote::new(
+                5,
+                Point::new(20, 10),
+                crate::state::DesignNoteKind::PlainText,
+                "Bias network",
+            )
+            .unwrap(),
+        );
         state.schematic.selection.select_component(1);
         state.schematic.tool = crate::state::Tool::Wire;
 
@@ -743,12 +803,13 @@ mod tests {
         );
 
         assert!(label.starts_with(
-            "Schematic canvas. 1 component, 1 wire, 0 buses, 0 bus taps, 1 junction, 1 net label; 1 item selected."
+            "Schematic canvas. 1 component, 1 wire, 0 buses, 0 bus taps, 1 junction, 1 net label, 1 design note; 1 item selected."
         ));
         assert!(label.contains("Active tool: Wire."));
         assert!(label.contains("Selected instance:"));
         assert!(label.contains("Arrow keys select the previous or next instance."));
         assert!(label.contains("Escape: Cancel active command"));
+        assert!(label.contains("Shift+T: Place text or note"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

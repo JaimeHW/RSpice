@@ -883,6 +883,23 @@ mod tests {
     }
 
     #[test]
+    fn default_profile_keeps_place_text_on_the_mockup_binding() {
+        let preferences = ShortcutPreferences::default();
+        let audit = preferences.audit();
+        assert!(audit.is_valid(), "default shortcut profile: {audit:#?}");
+
+        for platform in CommandPlatform::ALL {
+            let labels = preferences
+                .resolved_bindings(Command::PlaceText)
+                .into_iter()
+                .filter(|binding| binding.supports(platform))
+                .map(|binding| binding.display_label())
+                .collect::<Vec<_>>();
+            assert_eq!(labels, ["Shift+T"]);
+        }
+    }
+
+    #[test]
     fn editing_one_slot_preserves_the_other_then_resets_to_defaults() {
         let mut preferences = ShortcutPreferences::default();
         let command = Command::Save;

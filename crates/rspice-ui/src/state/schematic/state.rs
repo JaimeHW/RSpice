@@ -11,6 +11,7 @@ use super::bus::{Bus, BusDrawing, BusTap, PendingBusTap};
 use super::clipboard::ClipboardData;
 use super::component::{Component, LibraryCellInstance};
 use super::component_type::ComponentType;
+use super::design_note::{DesignNote, PendingDesignNotePlacement};
 use super::document_policy::SchematicDocumentPolicy;
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
@@ -64,6 +65,10 @@ pub struct SchematicState {
     /// Typed scalar and slice taps attached to declared buses.
     #[serde(default)]
     pub bus_taps: Vec<BusTap>,
+
+    /// Durable non-electrical schematic documentation objects.
+    #[serde(default)]
+    pub design_notes: Vec<DesignNote>,
 
     /// Current selection
     pub selection: Selection,
@@ -135,6 +140,10 @@ pub struct SchematicState {
     /// Validated one-shot interface contract used while the port tool is armed.
     #[serde(skip)]
     pub pending_port: Option<PendingPortPlacement>,
+
+    /// Validated one-shot documentation object used while the text tool is armed.
+    #[serde(skip)]
+    pub pending_design_note: Option<PendingDesignNotePlacement>,
 
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
@@ -208,6 +217,7 @@ impl Default for SchematicState {
             wires: Vec::new(),
             buses: Vec::new(),
             bus_taps: Vec::new(),
+            design_notes: Vec::new(),
             selection: Selection::default(),
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
@@ -226,6 +236,7 @@ impl Default for SchematicState {
             pending_library_cell: None,
             pending_bus_tap: None,
             pending_port: None,
+            pending_design_note: None,
             connections: Vec::new(),
             net_mapping: HashMap::new(),
             is_dirty: false,

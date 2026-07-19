@@ -247,7 +247,7 @@ impl RSpiceApp {
                     Tool::Probe,
                 );
             }
-            ShortcutCommand::PlacePin => command.execute(self),
+            ShortcutCommand::PlacePin | ShortcutCommand::PlaceText => command.execute(self),
             ShortcutCommand::SymbolPinTool
             | ShortcutCommand::SymbolPolylineTool
             | ShortcutCommand::SymbolCircleTool
@@ -553,6 +553,7 @@ impl RSpiceApp {
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceProbe
             | ShortcutCommand::PlacePin
+            | ShortcutCommand::PlaceText
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::PlaceInstance
             | ShortcutCommand::DescendHierarchy
@@ -882,6 +883,7 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::PlaceBus
             | ShortcutCommand::PlaceBusTap
             | ShortcutCommand::PlacePin
+            | ShortcutCommand::PlaceText
             | ShortcutCommand::PlaceJunction
             | ShortcutCommand::PlaceLabel
             | ShortcutCommand::Place(_)

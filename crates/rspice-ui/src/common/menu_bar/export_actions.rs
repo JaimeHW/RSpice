@@ -5,14 +5,24 @@ pub(super) fn action_export_svg_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    use crate::schematic::export::{SvgExportConfig, export_to_svg_with_symbol_resolver};
+    use crate::schematic::export::{
+        SvgDesignContext, SvgExportConfig, export_to_svg_with_symbol_resolver_and_context,
+    };
 
     let config = SvgExportConfig::default();
     let resolver = crate::state::SymbolResolver::new(
         &state.library_manager,
         &state.workspace.schematic_buffers,
     );
-    let svg_content = export_to_svg_with_symbol_resolver(&state.schematic, &config, &resolver);
+    let view_path = state.workspace.active_view.display_path();
+    let svg_content = export_to_svg_with_symbol_resolver_and_context(
+        &state.schematic,
+        &config,
+        &resolver,
+        SvgDesignContext {
+            view_path: &view_path,
+        },
+    );
 
     let default_name = state
         .schematic

@@ -351,6 +351,9 @@ fn structural_delta(baseline: &SchematicState, recovered: &SchematicState) -> us
         + changed_objects_by_id(&baseline.wires, &recovered.wires, |item| item.id)
         + changed_objects_by_id(&baseline.net_labels, &recovered.net_labels, |item| item.id)
         + changed_objects_by_id(&baseline.junctions, &recovered.junctions, |item| item.id)
+        + changed_objects_by_id(&baseline.design_notes, &recovered.design_notes, |item| {
+            item.id
+        })
 }
 
 /// Count semantic additions, removals, and modifications while preserving a

@@ -91,6 +91,7 @@ impl SchematicState {
         if self.read_only || delta == Point::origin() || !has_live_movable_selection(self) {
             return;
         }
+        let electrical_selection = has_live_electrical_selection(self);
         let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
 
         // Terminal positions of every selected component, BEFORE moving.
@@ -161,6 +162,14 @@ impl SchematicState {
             label.pos = offset_point(label.pos, delta);
         }
 
+        for note in self
+            .design_notes
+            .iter_mut()
+            .filter(|note| self.selection.has_design_note(note.id))
+        {
+            note.translate(delta);
+        }
+
         // Move selected wires wholesale.
         for wire in self
             .wires
@@ -193,7 +202,9 @@ impl SchematicState {
         }
 
         self.is_dirty = true;
-        self.bump_topology_version();
+        if electrical_selection {
+            self.bump_topology_version();
+        }
     }
 
     /// Move all points of a wire by a delta
@@ -272,6 +283,7 @@ impl SchematicState {
         if self.read_only || delta == Point::origin() || !has_live_movable_selection(self) {
             return;
         }
+        let electrical_selection = has_live_electrical_selection(self);
         let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
         // Union of selected components' terminals, BEFORE moving.
         let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
@@ -333,6 +345,14 @@ impl SchematicState {
             label.pos = offset_point(label.pos, delta);
         }
 
+        for note in self
+            .design_notes
+            .iter_mut()
+            .filter(|note| self.selection.has_design_note(note.id))
+        {
+            note.translate(delta);
+        }
+
         // Move selected wires entirely, tracking endpoints for junctions.
         let mut wire_endpoints: Vec<Point> = Vec::new();
         for wire in self
@@ -361,7 +381,9 @@ impl SchematicState {
         }
 
         self.is_dirty = true;
-        self.bump_topology_version();
+        if electrical_selection {
+            self.bump_topology_version();
+        }
     }
 
     /// Move all wire points at a junction to a new position
@@ -430,6 +452,33 @@ fn has_live_movable_selection(state: &SchematicState) -> bool {
             .net_labels
             .iter()
             .any(|item| state.selection.has_net_label(item.id))
+        || state
+            .design_notes
+            .iter()
+            .any(|item| state.selection.has_design_note(item.id))
+}
+
+fn has_live_electrical_selection(state: &SchematicState) -> bool {
+    state
+        .components
+        .iter()
+        .any(|item| state.selection.has_component(item.id))
+        || state
+            .wires
+            .iter()
+            .any(|item| state.selection.has_wire(item.id))
+        || state
+            .buses
+            .iter()
+            .any(|item| state.selection.has_bus(item.id))
+        || state
+            .bus_taps
+            .iter()
+            .any(|item| state.selection.has_bus_tap(item.id))
+        || state
+            .net_labels
+            .iter()
+            .any(|item| state.selection.has_net_label(item.id))
 }
 
 fn move_selected_bus_geometry(
@@ -477,9 +526,9 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, Component, ComponentType,
-        Junction, Library, LibraryCellInstance, LibraryManager, PortDirection, PortSpec,
-        ResolvedCellSymbol, SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View,
-        ViewType, Wire,
+        DesignNote, DesignNoteKind, Junction, Library, LibraryCellInstance, LibraryManager,
+        PortDirection, PortSpec, ResolvedCellSymbol, SchematicState, SymbolDocument, SymbolPin,
+        SymbolResolver, View, ViewType, Wire,
     };
     use std::collections::HashMap;
 
@@ -705,6 +754,33 @@ mod tests {
         assert!(!schematic.can_undo(), "one drag must create one undo step");
         assert!(schematic.redo());
         assert_eq!(schematic.net_labels[0].pos, Point::new(i32::MAX, 0));
+    }
+
+    #[test]
+    fn selected_design_note_moves_as_one_non_electrical_drag_transaction() {
+        let original = DesignNote::new(
+            74,
+            Point::new(i32::MAX - 5, -10),
+            DesignNoteKind::PlainText,
+            "Bias network",
+        )
+        .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic.design_notes.push(original.clone());
+        schematic.selection.select_only_design_note(original.id);
+        schematic.init_undo_history();
+        let topology = schematic.topology_version();
+
+        schematic.begin_operation("move selection");
+        schematic.move_selection_with_rubber_band(Point::new(3, 4));
+        schematic.move_selection(Point::new(10, 6));
+        assert!(schematic.end_operation());
+
+        assert_eq!(schematic.design_notes[0].pos, Point::new(i32::MAX, 0));
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(schematic.undo());
+        assert_eq!(schematic.design_notes, vec![original]);
+        assert_eq!(schematic.topology_version(), topology);
     }
 
     #[test]
