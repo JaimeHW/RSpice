@@ -4117,6 +4117,8 @@ struct XyceStaticNoisePlan {
     reference_node: Option<String>,
     input_source: String,
     frequencies: Vec<Value>,
+    data_points: Option<Vec<XyceFrequencyDataPoint>>,
+    data_table_name: Option<String>,
     steps: Vec<StepCommand>,
     contract: XyceStaticNoiseContract,
 }
@@ -5529,7 +5531,7 @@ struct XyceTransientProblemSize {
 #[derive(Debug, Clone)]
 struct XyceAcAnalysis {
     frequencies: Vec<Value>,
-    data_points: Option<Vec<XyceAcDataPoint>>,
+    data_points: Option<Vec<XyceFrequencyDataPoint>>,
 }
 
 impl XyceAcAnalysis {
@@ -5537,15 +5539,25 @@ impl XyceAcAnalysis {
         self.frequencies.clone()
     }
 
-    fn data_points(&self) -> Option<&[XyceAcDataPoint]> {
+    fn data_points(&self) -> Option<&[XyceFrequencyDataPoint]> {
         self.data_points.as_deref()
     }
 }
 
 #[derive(Debug, Clone)]
-struct XyceAcDataPoint {
+struct XyceFrequencyDataPoint {
     frequency: Value,
     overrides: Vec<(String, Value)>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceNoiseAnalysis {
+    output_node: String,
+    reference_node: Option<String>,
+    input_source: String,
+    frequencies: Vec<Value>,
+    data_points: Option<Vec<XyceFrequencyDataPoint>>,
+    data_table_name: Option<String>,
 }
 
 impl XyceAcReferenceColumn {
@@ -20761,9 +20773,20 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 );
             }
         }
-        let (output_node, reference_node, input_source, frequencies) =
-            Self::noise_analysis_for_netlist(&netlist)?;
+        let noise_analysis = Self::noise_analysis_for_netlist(&netlist)?;
+        let output_node = noise_analysis.output_node.clone();
+        let reference_node = noise_analysis.reference_node.clone();
+        let input_source = noise_analysis.input_source.clone();
+        let frequencies = noise_analysis.frequencies.clone();
+        let data_points = noise_analysis.data_points.clone();
+        let data_table_name = noise_analysis.data_table_name.clone();
         let steps = Self::step_commands(&netlist)?;
+        if data_points.is_some() && !steps.is_empty() {
+            return Err(
+                ".STEP combined with .NOISE DATA is not implemented in the native Xyce oracle"
+                    .to_string(),
+            );
+        }
         let has_scalar_derivative = netlist.measurements.iter().any(|measurement| {
             measurement.analysis.eq_ignore_ascii_case("NOISE")
                 && matches!(
@@ -20882,6 +20905,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             reference_node,
             input_source,
             frequencies,
+            data_points,
+            data_table_name,
             steps,
             contract,
         })
@@ -23925,56 +23950,105 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if !plan.steps.is_empty() {
             return self.run_static_step_noise_measurement_plan(deck, plan, netlist, start);
         }
-        let temperature = netlist.options.temp.unwrap_or(27.0) + 273.15;
-        if !temperature.is_finite() || temperature <= 0.0 {
-            return self.failure_result(
-                deck,
-                start,
-                contract,
-                format!("NOISE temperature must be positive Kelvin, got {temperature}"),
-                Vec::new(),
-            );
-        }
         let engine = self.create_xyce_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let results = match engine.run_noise_named_with_input_source_and_abort(
-            &netlist,
-            &plan.output_node,
-            plan.reference_node.as_deref(),
-            &plan.input_source,
-            &plan.frequencies,
-            temperature,
-            &abort,
-        ) {
-            Ok(results) => results,
-            Err(SimulationError::Aborted) => {
+        let mut data_row_netlists = Vec::new();
+        let results = if let Some(table_name) = plan.data_table_name.as_deref() {
+            match engine.run_noise_data_named_with_input_source_and_abort(
+                &netlist,
+                &plan.output_node,
+                plan.reference_node.as_deref(),
+                &plan.input_source,
+                table_name,
+                netlist.options.temp.unwrap_or(27.0) + 273.15,
+                &abort,
+            ) {
+                Ok((row_netlists, results)) => {
+                    data_row_netlists = row_netlists;
+                    results
+                }
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation exceeded timeout ({}ms) during .NOISE DATA",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support this .NOISE DATA deck: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(".NOISE DATA simulation error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            }
+        } else {
+            let temperature = netlist.options.temp.unwrap_or(27.0) + 273.15;
+            if !temperature.is_finite() || temperature <= 0.0 {
                 return self.failure_result(
                     deck,
                     start,
                     contract,
-                    format!(
-                        "simulation exceeded timeout ({}ms)",
-                        self.config.max_time_per_test_ms
-                    ),
+                    format!("NOISE temperature must be positive Kelvin, got {temperature}"),
                     Vec::new(),
                 );
             }
-            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                return self.expected_unsupported_result(
-                    deck,
-                    start,
-                    "unsupported_xyce_runtime",
-                    &format!("RSpice runtime does not yet support this NOISE deck: {err}"),
-                );
-            }
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("NOISE simulation error: {err}"),
-                    Vec::new(),
-                );
+            match engine.run_noise_named_with_input_source_and_abort(
+                &netlist,
+                &plan.output_node,
+                plan.reference_node.as_deref(),
+                &plan.input_source,
+                &plan.frequencies,
+                temperature,
+                &abort,
+            ) {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this NOISE deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("NOISE simulation error: {err}"),
+                        Vec::new(),
+                    );
+                }
             }
         };
 
@@ -24001,13 +24075,25 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     );
                 }
             };
-            match self.compare_noise_prn_reference(
-                &reference,
-                print,
-                &netlist,
-                &plan.source,
-                &results,
-            ) {
+            let comparison = if plan.data_points.is_some() {
+                self.compare_noise_data_prn_reference(
+                    &reference,
+                    print,
+                    &netlist,
+                    &plan.source,
+                    &results,
+                    &data_row_netlists,
+                )
+            } else {
+                self.compare_noise_prn_reference(
+                    &reference,
+                    print,
+                    &netlist,
+                    &plan.source,
+                    &results,
+                )
+            };
+            match comparison {
                 Ok(waveform_mismatches) => mismatches.extend(waveform_mismatches),
                 Err(err) => {
                     return self.failure_result(
@@ -24037,13 +24123,25 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         );
                     }
                 };
-            match self.compare_noise_prn_reference(
-                &reference,
-                &side.print,
-                &netlist,
-                &plan.source,
-                &results,
-            ) {
+            let comparison = if plan.data_points.is_some() {
+                self.compare_noise_data_prn_reference(
+                    &reference,
+                    &side.print,
+                    &netlist,
+                    &plan.source,
+                    &results,
+                    &data_row_netlists,
+                )
+            } else {
+                self.compare_noise_prn_reference(
+                    &reference,
+                    &side.print,
+                    &netlist,
+                    &plan.source,
+                    &results,
+                )
+            };
+            match comparison {
                 Ok(mut side_mismatches) => {
                     for mismatch in &mut side_mismatches {
                         mismatch.probe = format!("{}:{}", side.file, mismatch.probe);
@@ -24302,28 +24400,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     Vec::new(),
                 );
             }
-            let (output_node, reference_node, input_source, frequencies) =
-                match Self::noise_analysis_for_netlist(&run.netlist) {
-                    Ok(analysis) => analysis,
-                    Err(err) => {
-                        return self.failure_result(
-                            deck,
-                            start,
-                            contract,
-                            format!(
-                                "NOISE analysis in step {} is invalid: {err}",
-                                step_index + 1
-                            ),
-                            Vec::new(),
-                        );
-                    }
-                };
+            let analysis = match Self::noise_analysis_for_netlist(&run.netlist) {
+                Ok(analysis) if analysis.data_points.is_none() => analysis,
+                Ok(_) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        ".STEP NOISE execution does not admit DATA sweeps".to_string(),
+                        Vec::new(),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "NOISE analysis in step {} is invalid: {err}",
+                            step_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
             let results = match engine.run_noise_named_with_input_source_and_abort(
                 &run.netlist,
-                &output_node,
-                reference_node.as_deref(),
-                &input_source,
-                &frequencies,
+                &analysis.output_node,
+                analysis.reference_node.as_deref(),
+                &analysis.input_source,
+                &analysis.frequencies,
                 temperature,
                 &abort,
             ) {
@@ -24609,9 +24715,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
-    fn noise_analysis_for_netlist(
-        netlist: &Netlist,
-    ) -> Result<(String, Option<String>, String, Vec<Value>), String> {
+    fn noise_analysis_for_netlist(netlist: &Netlist) -> Result<XyceNoiseAnalysis, String> {
         let analyses = netlist
             .analyses
             .iter()
@@ -24624,21 +24728,40 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     points,
                     start_freq,
                     stop_freq,
-                } => Some((
-                    output_node.clone(),
-                    reference_node.clone(),
-                    input_source.clone(),
-                    ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
-                )),
+                } => Some(Ok(XyceNoiseAnalysis {
+                    output_node: output_node.clone(),
+                    reference_node: reference_node.clone(),
+                    input_source: input_source.clone(),
+                    frequencies: ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
+                    data_points: None,
+                    data_table_name: None,
+                })),
+                AnalysisCommand::NoiseData {
+                    output_node,
+                    reference_node,
+                    input_source,
+                    table_name,
+                } => Some(
+                    Self::frequency_data_table_points(netlist, table_name, ".NOISE DATA").map(
+                        |data_points| XyceNoiseAnalysis {
+                            output_node: output_node.clone(),
+                            reference_node: reference_node.clone(),
+                            input_source: input_source.clone(),
+                            frequencies: data_points.iter().map(|point| point.frequency).collect(),
+                            data_points: Some(data_points),
+                            data_table_name: Some(table_name.clone()),
+                        },
+                    ),
+                ),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         let analysis = match analyses.as_slice() {
             [analysis] => analysis.clone(),
             [] => return Err("deck has no .NOISE analysis".to_string()),
             _ => return Err("deck has multiple .NOISE analyses".to_string()),
         };
-        if analysis.3.is_empty() {
+        if analysis.frequencies.is_empty() {
             return Err(".NOISE analysis produced no frequency points".to_string());
         }
         Ok(analysis)
@@ -45054,7 +45177,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         source: &str,
         results: &[crate::analysis::NoiseResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
-        self.compare_noise_prn_reference_with_step(reference, print, netlist, source, results, None)
+        self.compare_noise_prn_reference_with_contexts(
+            reference, print, netlist, source, results, None, None,
+        )
     }
 
     fn compare_noise_prn_reference_with_step(
@@ -45064,6 +45189,54 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         source: &str,
         results: &[crate::analysis::NoiseResult],
+        expected_step_index: Option<usize>,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_noise_prn_reference_with_contexts(
+            reference,
+            print,
+            netlist,
+            source,
+            results,
+            None,
+            expected_step_index,
+        )
+    }
+
+    fn compare_noise_data_prn_reference(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        results: &[crate::analysis::NoiseResult],
+        row_netlists: &[Netlist],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if row_netlists.len() != results.len() {
+            return Err(format!(
+                ".NOISE DATA context count ({}) does not match result count ({})",
+                row_netlists.len(),
+                results.len()
+            ));
+        }
+        self.compare_noise_prn_reference_with_contexts(
+            reference,
+            print,
+            netlist,
+            source,
+            results,
+            Some(row_netlists),
+            None,
+        )
+    }
+
+    fn compare_noise_prn_reference_with_contexts(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        results: &[crate::analysis::NoiseResult],
+        row_netlists: Option<&[Netlist]>,
         expected_step_index: Option<usize>,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         if reference.columns.is_empty() {
@@ -45130,6 +45303,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         let mut mismatches = Vec::new();
         for (row_index, (row, result)) in reference.rows.iter().zip(results).enumerate() {
+            let row_netlist = row_netlists
+                .and_then(|contexts| contexts.get(row_index))
+                .unwrap_or(netlist);
             if row.len() != reference.columns.len() {
                 return Err(format!(
                     "row {} has {} values, expected {}",
@@ -45206,7 +45382,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 } else if column.component() == XyceAcProbeComponent::Scalar
                     && let Some(value) = Self::evaluate_static_frequency_device_parameter_probe(
                         "NOISE",
-                        netlist,
+                        row_netlist,
                         &Self::normalize_probe(probe),
                     )
                 {
@@ -45220,7 +45396,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 } else if column.component() == XyceAcProbeComponent::Scalar
                     && let Some(expression) = Self::print_expression_inner(probe)
                 {
-                    let mut context = netlist.params.clone();
+                    let mut context = row_netlist.params.clone();
                     context.set("FREQ", result.frequency);
                     context.set("FREQUENCY", result.frequency);
                     context.set("HERTZ", result.frequency);
@@ -55506,7 +55682,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     data_points: None,
                 }),
                 AnalysisCommand::AcData { table_name } => {
-                    let data_points = Self::ac_data_table_points(netlist, table_name)?;
+                    let data_points =
+                        Self::frequency_data_table_points(netlist, table_name, ".AC DATA")?;
                     analyses.push(XyceAcAnalysis {
                         frequencies: data_points
                             .iter()
@@ -55529,35 +55706,55 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
-    fn ac_data_table_points(
+    fn frequency_data_table_points(
         netlist: &Netlist,
         table_name: &str,
-    ) -> Result<Vec<XyceAcDataPoint>, String> {
+        analysis: &str,
+    ) -> Result<Vec<XyceFrequencyDataPoint>, String> {
         let table = netlist
             .data_tables
             .iter()
             .find(|table| table.name.eq_ignore_ascii_case(table_name))
-            .ok_or_else(|| format!(".AC DATA references unknown .DATA table '{table_name}'"))?;
+            .ok_or_else(|| format!("{analysis} references unknown .DATA table '{table_name}'"))?;
         if table.params.is_empty() {
-            return Err(format!(".AC DATA table '{}' has no columns", table.name));
+            return Err(format!("{analysis} table '{}' has no columns", table.name));
         }
         if table.rows.is_empty() {
-            return Err(format!(".AC DATA table '{}' has no rows", table.name));
+            return Err(format!("{analysis} table '{}' has no rows", table.name));
         }
         let mut unique_params = BTreeSet::new();
         for param in &table.params {
             if !unique_params.insert(param.to_ascii_uppercase()) {
                 return Err(format!(
-                    ".AC DATA table '{}' has duplicate column '{}'",
+                    "{analysis} table '{}' has duplicate column '{}'",
                     table.name, param
                 ));
             }
         }
-        let freq_column = table
+        let frequency_columns = table
             .params
             .iter()
-            .position(|param| param.eq_ignore_ascii_case("FREQ"))
-            .ok_or_else(|| format!(".AC DATA table '{}' has no FREQ column", table.name))?;
+            .enumerate()
+            .filter_map(|(index, param)| {
+                (param.eq_ignore_ascii_case("FREQ") || param.eq_ignore_ascii_case("HERTZ"))
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let freq_column = match frequency_columns.as_slice() {
+            [index] => *index,
+            [] => {
+                return Err(format!(
+                    "{analysis} table '{}' has no FREQ or HERTZ column",
+                    table.name
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "{analysis} table '{}' has ambiguous frequency columns; expected exactly one FREQ or HERTZ column",
+                    table.name
+                ));
+            }
+        };
         let points = table
             .rows
             .iter()
@@ -55565,7 +55762,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .map(|(row_index, row)| {
                 if row.len() != table.params.len() {
                     return Err(format!(
-                        ".AC DATA table '{}' row {} has {} value(s), expected {}",
+                        "{analysis} table '{}' row {} has {} value(s), expected {}",
                         table.name,
                         row_index + 1,
                         row.len(),
@@ -55576,7 +55773,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     row.iter().enumerate().find(|(_, value)| !value.is_finite())
                 {
                     return Err(format!(
-                        ".AC DATA table '{}' row {} column '{}' must be finite, got {}",
+                        "{analysis} table '{}' row {} column '{}' must be finite, got {}",
                         table.name,
                         row_index + 1,
                         table.params[column_index],
@@ -55585,7 +55782,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 }
                 let frequency = row.get(freq_column).copied().ok_or_else(|| {
                     format!(
-                        ".AC DATA table '{}' row {} does not contain FREQ column {}",
+                        "{analysis} table '{}' row {} does not contain frequency column {}",
                         table.name,
                         row_index + 1,
                         freq_column + 1
@@ -55597,7 +55794,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .cloned()
                     .zip(row.iter().copied())
                     .collect::<Vec<_>>();
-                Ok(XyceAcDataPoint {
+                if !frequency.is_finite() || frequency <= 0.0 {
+                    return Err(format!(
+                        "{analysis} table '{}' row {} frequency must be positive and finite, got {frequency}",
+                        table.name,
+                        row_index + 1
+                    ));
+                }
+                Ok(XyceFrequencyDataPoint {
                     frequency,
                     overrides,
                 })
@@ -71537,6 +71741,59 @@ R1 1 0 1k
             data_points[1].overrides,
             vec![("FREQ".to_string(), 10.0), ("unused".to_string(), 8.0)]
         );
+    }
+
+    #[test]
+    fn noise_data_table_resolves_hertz_and_preserves_nonmonotonic_rows() {
+        let netlist = Netlist::parse(
+            "\
+xyce noise data
+.GLOBAL_PARAM mag=1 phase=0
+V1 in 0 AC {mag} {phase}
+R1 in out 1k
+R2 out 0 1k
+.NOISE V(out) V1 DATA=points
+.DATA points
++ mag phase HERTZ
++ 2 0.2 10
++ 3 0.3 100
++ 1 0.1 1
+.ENDDATA
+.PRINT NOISE V(out) INOISE ONOISE
+.END
+",
+        )
+        .expect(".NOISE DATA deck should parse");
+
+        let analysis = XyceTestRunner::noise_analysis_for_netlist(&netlist)
+            .expect(".NOISE DATA table should resolve");
+        assert_eq!(analysis.frequencies, vec![10.0, 100.0, 1.0]);
+        let rows = analysis.data_points.expect("DATA rows retained");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[2].overrides,
+            vec![
+                ("mag".to_string(), 1.0),
+                ("phase".to_string(), 0.1),
+                ("HERTZ".to_string(), 1.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn frequency_data_table_rejects_ambiguous_or_nonpositive_axes() {
+        for (columns, values, expected) in [
+            ("FREQ HERTZ", "1 1", "ambiguous frequency columns"),
+            ("FREQ", "0", "frequency must be positive and finite"),
+        ] {
+            let source = format!(
+                "table validation\nV1 1 0 AC 1\nR1 1 0 1k\n.AC DATA=points\n.DATA points\n+ {columns}\n+ {values}\n.ENDDATA\n.PRINT AC V(1)\n.END\n"
+            );
+            let netlist = Netlist::parse(&source).expect("table syntax parses");
+            let error = XyceTestRunner::single_ac_analysis(&netlist)
+                .expect_err("invalid frequency axis must fail closed");
+            assert!(error.contains(expected), "unexpected error: {error}");
+        }
     }
 
     #[test]
