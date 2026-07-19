@@ -166,11 +166,11 @@ fn workflow_body(
         .corner_radius(10.0)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            if workflow_uses_columns(ui.ctx().content_rect().width()) {
+            let viewport_width = crate::ui::viewport::root_viewport_width(ui.ctx());
+            if workflow_uses_columns(viewport_width) {
                 let divider = 1.0;
                 let content_width = (ui.available_width() - divider).max(1.0);
-                let (right_fraction, right_min_width) =
-                    workflow_right_track(ui.ctx().content_rect().width());
+                let (right_fraction, right_min_width) = workflow_right_track(viewport_width);
                 let right_width = (content_width * right_fraction)
                     .max(right_min_width)
                     .min((content_width - 1.0).max(1.0));

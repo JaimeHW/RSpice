@@ -23,6 +23,7 @@ mod component;
 mod component_type;
 mod design_note;
 mod document_policy;
+mod documentation_shape;
 mod net_highlight;
 mod net_label;
 mod point;
@@ -55,6 +56,13 @@ pub use design_note::{
 pub use document_policy::{
     NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
     SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,
+};
+pub(crate) use documentation_shape::clamped_documentation_shape_translation;
+pub use documentation_shape::{
+    DocumentationShape, DocumentationShapeDrawing, DocumentationShapeError,
+    DocumentationShapeGeometry, DocumentationShapeKind, DocumentationShapeLayer,
+    DocumentationShapePlacementAuthority, MAX_DOCUMENTATION_POLYGON_POINTS,
+    PendingDocumentationShapePlacement, arc_parameters, geometry_from_points,
 };
 pub use net_highlight::{NetGraph, NetHighlightState};
 pub use net_label::{Junction, NetLabel};

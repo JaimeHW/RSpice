@@ -9,7 +9,8 @@ use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
 
 use crate::state::{
     Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, DesignNote,
-    DesignNoteKind, DesignNoteLayer, DesignReviewState, NetLabel, Point, SchematicState,
+    DesignNoteKind, DesignNoteLayer, DesignReviewState, DocumentationShape,
+    DocumentationShapeGeometry, DocumentationShapeLayer, NetLabel, Point, SchematicState,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -21,8 +22,8 @@ use crate::ui::widgets::{
 
 use super::{
     BusObjectPropertiesDraft, BusTapObjectPropertiesDraft, ConsoleMessage,
-    DesignNoteObjectPropertiesDraft, NetLabelObjectPropertiesDraft, ObjectPropertiesDraft,
-    RSpiceApp,
+    DesignNoteObjectPropertiesDraft, DocumentationShapeObjectPropertiesDraft,
+    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, RSpiceApp,
 };
 
 const EYEBROW: &str = "EDIT \u{00b7} TYPED PARAMETERS";
@@ -64,6 +65,10 @@ enum PropertyCommit {
         kind: DesignNoteKind,
         text: String,
         review_state: Option<DesignReviewState>,
+    },
+    DocumentationShape {
+        expected: DocumentationShape,
+        geometry: DocumentationShapeGeometry,
     },
 }
 
@@ -162,6 +167,10 @@ enum DraftResolutionSource {
         kind: DesignNoteKind,
         text: String,
         review_state: Option<DesignReviewState>,
+    },
+    DocumentationShape {
+        original: DocumentationShape,
+        points: Vec<(String, String)>,
     },
 }
 
@@ -328,7 +337,8 @@ fn resolve_draft_for_repaint(
     let bus_choices = match draft {
         ObjectPropertiesDraft::Bus(_)
         | ObjectPropertiesDraft::NetLabel(_)
-        | ObjectPropertiesDraft::DesignNote(_) => Vec::new(),
+        | ObjectPropertiesDraft::DesignNote(_)
+        | ObjectPropertiesDraft::DocumentationShape(_) => Vec::new(),
         ObjectPropertiesDraft::BusTap(draft) => {
             bus_choices(&state.schematic, draft.original.bus_point)
         }
@@ -403,6 +413,18 @@ fn draft_resolution_key(
                 kind: draft.kind,
                 text: draft.text.clone(),
                 review_state: draft.review_state,
+            },
+        ),
+        ObjectPropertiesDraft::DocumentationShape(draft) => (
+            state
+                .schematic
+                .documentation_shapes
+                .iter()
+                .find(|shape| shape.id == draft.original.id)
+                == Some(&draft.original),
+            DraftResolutionSource::DocumentationShape {
+                original: draft.original.clone(),
+                points: draft.points.clone(),
             },
         ),
     };
@@ -542,6 +564,35 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
                 }),
             )
         }
+        PropertyCommit::DocumentationShape { expected, geometry } => {
+            let Some(current) = schematic
+                .documentation_shapes
+                .iter()
+                .find(|shape| shape.id == expected.id)
+            else {
+                return Err("The selected documentation shape no longer exists.".to_owned());
+            };
+            if current != &expected {
+                return Err("The selected documentation shape changed before commit.".to_owned());
+            }
+            let candidate = DocumentationShape::new(expected.id, geometry)
+                .map_err(|error| error.to_string())?;
+            if candidate == expected {
+                return Ok(false);
+            }
+            Ok(
+                schematic.with_undo("edit documentation shape properties", move |schematic| {
+                    if let Some(shape) = schematic
+                        .documentation_shapes
+                        .iter_mut()
+                        .find(|shape| shape.id == expected.id)
+                    {
+                        *shape = candidate;
+                        schematic.is_dirty = true;
+                    }
+                }),
+            )
+        }
     }
 }
 
@@ -557,6 +608,62 @@ fn validate_draft(schematic: &SchematicState, draft: &ObjectPropertiesDraft) -> 
         ObjectPropertiesDraft::BusTap(draft) => validate_tap_draft(schematic, draft),
         ObjectPropertiesDraft::NetLabel(draft) => validate_net_label_draft(schematic, draft),
         ObjectPropertiesDraft::DesignNote(draft) => validate_design_note_draft(schematic, draft),
+        ObjectPropertiesDraft::DocumentationShape(draft) => {
+            validate_documentation_shape_draft(schematic, draft)
+        }
+    }
+}
+
+fn validate_documentation_shape_draft(
+    schematic: &SchematicState,
+    draft: &DocumentationShapeObjectPropertiesDraft,
+) -> DraftValidation {
+    let Some(current) = schematic
+        .documentation_shapes
+        .iter()
+        .find(|shape| shape.id == draft.original.id)
+    else {
+        return stale_validation("The selected documentation shape no longer exists.");
+    };
+    if current != &draft.original {
+        return stale_validation(
+            "The selected documentation shape changed while properties were open.",
+        );
+    }
+    let mut points = Vec::with_capacity(draft.points.len());
+    for (index, (x, y)) in draft.points.iter().enumerate() {
+        let Ok(x) = x.trim().parse::<i32>() else {
+            return DraftValidation::Invalid {
+                field: None,
+                message: format!(
+                    "Point {} X must be a whole number in the signed 32-bit coordinate range.",
+                    index + 1
+                ),
+            };
+        };
+        let Ok(y) = y.trim().parse::<i32>() else {
+            return DraftValidation::Invalid {
+                field: None,
+                message: format!(
+                    "Point {} Y must be a whole number in the signed 32-bit coordinate range.",
+                    index + 1
+                ),
+            };
+        };
+        points.push(Point::new(x, y));
+    }
+    match crate::state::geometry_from_points(draft.original.kind(), &points) {
+        Ok(geometry) => DraftValidation::Valid(
+            PropertyCommit::DocumentationShape {
+                expected: draft.original.clone(),
+                geometry,
+            },
+            None,
+        ),
+        Err(error) => DraftValidation::Invalid {
+            field: None,
+            message: error.to_string(),
+        },
     }
 }
 
@@ -913,7 +1020,51 @@ fn object_summary(
                 DesignNoteLayer::DrawingAnnotation.label()
             ),
         },
+        ObjectPropertiesDraft::DocumentationShape(draft) => {
+            let geometry =
+                shape_candidate_geometry(draft).unwrap_or_else(|| draft.original.geometry.clone());
+            ObjectSummary {
+                object: format!(
+                    "SHAPE-{} \u{b7} {}",
+                    draft.original.id,
+                    draft.original.kind().label()
+                ),
+                preview: SelectionPreview::DocumentationShape {
+                    geometry,
+                    label: format!("{} documentation shape", draft.original.kind().label()),
+                },
+                scope: "one selected non-electrical documentation shape".to_owned(),
+                effect: if legal {
+                    "exact presentation geometry transaction".to_owned()
+                } else {
+                    "no document change until validation passes".to_owned()
+                },
+                recovery: "one semantic undo record".to_owned(),
+                geometry: format!(
+                    "Stable shape ID {} remains unchanged on {}",
+                    draft.original.id,
+                    DocumentationShapeLayer::DrawingDocumentation.label()
+                ),
+            }
+        }
     }
+}
+
+fn shape_candidate_geometry(
+    draft: &DocumentationShapeObjectPropertiesDraft,
+) -> Option<DocumentationShapeGeometry> {
+    let points: Option<Vec<_>> = draft
+        .points
+        .iter()
+        .map(|(x, y)| {
+            x.trim()
+                .parse::<i32>()
+                .ok()
+                .zip(y.trim().parse::<i32>().ok())
+                .map(|(x, y)| Point::new(x, y))
+        })
+        .collect();
+    crate::state::geometry_from_points(draft.original.kind(), &points?).ok()
 }
 
 fn bus_choices(
@@ -1129,8 +1280,73 @@ fn fields_pane(
                 "This object remains on the non-electrical annotation layer. Type, text, and governed review state publish together without changing connectivity.",
             );
         }
+        ObjectPropertiesDraft::DocumentationShape(draft) => {
+            read_only_value(ui, "Type", draft.original.kind().label());
+            read_only_value(
+                ui,
+                "Layer",
+                DocumentationShapeLayer::DrawingDocumentation.label(),
+            );
+            read_only_value(ui, "Electrical connectivity", "none");
+            let mut first_focus = None;
+            let kind = draft.original.kind();
+            for (index, (x, y)) in draft.points.iter_mut().enumerate() {
+                let point_name = documentation_point_name(kind, index);
+                field_label(ui, &point_name);
+                ui.columns(2, |columns| {
+                    let x_response = shape_coordinate_field(&mut columns[0], index, "X", x);
+                    let y_response = shape_coordinate_field(&mut columns[1], index, "Y", y);
+                    first_focus.get_or_insert(x_response.id);
+                    edited |= x_response.changed() || y_response.changed();
+                });
+                ui.add_space(9.0);
+            }
+            focus = first_focus;
+            field_note(
+                ui,
+                "Coordinates publish together as one exact non-electrical geometry transaction. Type, layer, and connectivity remain invariant.",
+            );
+        }
     }
     (focus, edited)
+}
+
+fn documentation_point_name(kind: crate::state::DocumentationShapeKind, index: usize) -> String {
+    match (kind, index) {
+        (crate::state::DocumentationShapeKind::Rectangle, 0) => "First corner".to_owned(),
+        (crate::state::DocumentationShapeKind::Rectangle, _) => "Opposite corner".to_owned(),
+        (crate::state::DocumentationShapeKind::Line, 0) => "Start".to_owned(),
+        (crate::state::DocumentationShapeKind::Line, _) => "End".to_owned(),
+        (crate::state::DocumentationShapeKind::Arc, 0) => "Start".to_owned(),
+        (crate::state::DocumentationShapeKind::Arc, 1) => "Through".to_owned(),
+        (crate::state::DocumentationShapeKind::Arc, _) => "End".to_owned(),
+        (crate::state::DocumentationShapeKind::Callout, 0) => "Target".to_owned(),
+        (crate::state::DocumentationShapeKind::Callout, 1) => "First box corner".to_owned(),
+        (crate::state::DocumentationShapeKind::Callout, _) => "Opposite box corner".to_owned(),
+        (crate::state::DocumentationShapeKind::Polygon, _) => format!("Vertex {}", index + 1),
+    }
+}
+
+fn shape_coordinate_field(
+    ui: &mut Ui,
+    index: usize,
+    axis: &'static str,
+    value: &mut String,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let response = ui.add_sized(
+        Vec2::new(ui.available_width(), t.metrics.ctl_h),
+        TextEdit::singleline(value)
+            .id_source(("documentation-shape-point", index, axis))
+            .font(egui::TextStyle::Monospace)
+            .hint_text("0")
+            .margin(egui::Margin::symmetric(8, 4)),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(format!("Point {} {axis}", index + 1));
+        node.set_description("Exact signed 32-bit schematic coordinate");
+    });
+    response
 }
 
 fn read_only_value(ui: &mut Ui, label: &str, value: &str) {
@@ -1606,6 +1822,70 @@ mod tests {
                 field: Some(NOTE_TEXT_FIELD),
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn documentation_shape_properties_commit_exact_geometry_as_one_non_electrical_undo_step() {
+        let original = DocumentationShape::new(
+            19,
+            DocumentationShapeGeometry::Arc {
+                start: Point::new(0, 10),
+                through: Point::new(10, 0),
+                end: Point::new(20, 10),
+            },
+        )
+        .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic.documentation_shapes.push(original.clone());
+        schematic.init_undo_history();
+        let topology = schematic.topology_version();
+        let draft = DocumentationShapeObjectPropertiesDraft {
+            original: original.clone(),
+            points: vec![
+                ("-5".to_owned(), "12".to_owned()),
+                ("10".to_owned(), "-3".to_owned()),
+                ("25".to_owned(), "12".to_owned()),
+            ],
+        };
+
+        let DraftValidation::Valid(commit, None) =
+            validate_documentation_shape_draft(&schematic, &draft)
+        else {
+            panic!("valid documentation-shape properties were rejected")
+        };
+        assert!(apply_commit(&mut schematic, commit).unwrap());
+        assert_eq!(schematic.documentation_shapes[0].id, original.id);
+        assert_eq!(schematic.documentation_shapes[0].layer, original.layer);
+        assert_eq!(
+            schematic.documentation_shapes[0].geometry,
+            DocumentationShapeGeometry::Arc {
+                start: Point::new(-5, 12),
+                through: Point::new(10, -3),
+                end: Point::new(25, 12),
+            }
+        );
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(
+            schematic.undo_description(),
+            Some("edit documentation shape properties")
+        );
+        assert!(schematic.undo());
+        assert_eq!(schematic.documentation_shapes, vec![original]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(!schematic.can_undo());
+
+        let invalid = DocumentationShapeObjectPropertiesDraft {
+            original: schematic.documentation_shapes[0].clone(),
+            points: vec![
+                ("0".to_owned(), "0".to_owned()),
+                ("10".to_owned(), "10".to_owned()),
+                ("20".to_owned(), "20".to_owned()),
+            ],
+        };
+        assert!(matches!(
+            validate_documentation_shape_draft(&schematic, &invalid),
+            DraftValidation::Invalid { field: None, .. }
         ));
     }
 

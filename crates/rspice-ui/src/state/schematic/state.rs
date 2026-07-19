@@ -13,6 +13,9 @@ use super::component::{Component, LibraryCellInstance};
 use super::component_type::ComponentType;
 use super::design_note::{DesignNote, PendingDesignNotePlacement};
 use super::document_policy::SchematicDocumentPolicy;
+use super::documentation_shape::{
+    DocumentationShape, DocumentationShapeDrawing, PendingDocumentationShapePlacement,
+};
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
 use super::port::PendingPortPlacement;
@@ -69,6 +72,10 @@ pub struct SchematicState {
     /// Durable non-electrical schematic documentation objects.
     #[serde(default)]
     pub design_notes: Vec<DesignNote>,
+
+    /// Durable non-electrical lines, boundaries, arcs, polygons, and callouts.
+    #[serde(default)]
+    pub documentation_shapes: Vec<DocumentationShape>,
 
     /// Current selection
     pub selection: Selection,
@@ -145,6 +152,14 @@ pub struct SchematicState {
     #[serde(skip)]
     pub pending_design_note: Option<PendingDesignNotePlacement>,
 
+    /// Validated shape kind and document authority used while the shape tool is armed.
+    #[serde(skip)]
+    pub pending_documentation_shape: Option<PendingDocumentationShapePlacement>,
+
+    /// Uncommitted click sequence for the active documentation-shape gesture.
+    #[serde(skip)]
+    pub documentation_shape_drawing: DocumentationShapeDrawing,
+
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
 
@@ -218,6 +233,7 @@ impl Default for SchematicState {
             buses: Vec::new(),
             bus_taps: Vec::new(),
             design_notes: Vec::new(),
+            documentation_shapes: Vec::new(),
             selection: Selection::default(),
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
@@ -237,6 +253,8 @@ impl Default for SchematicState {
             pending_bus_tap: None,
             pending_port: None,
             pending_design_note: None,
+            pending_documentation_shape: None,
+            documentation_shape_drawing: DocumentationShapeDrawing::default(),
             connections: Vec::new(),
             net_mapping: HashMap::new(),
             is_dirty: false,

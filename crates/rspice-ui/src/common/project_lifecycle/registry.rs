@@ -229,19 +229,21 @@ struct SchematicDocumentContent<'a> {
     bus_taps: &'a [crate::state::BusTap],
     net_labels: &'a [crate::state::NetLabel],
     design_notes: &'a [crate::state::DesignNote],
+    documentation_shapes: &'a [crate::state::DocumentationShape],
     junctions: &'a [crate::state::Junction],
 }
 
 impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a> {
     fn from(schematic: &'a crate::state::SchematicState) -> Self {
         Self {
-            schema_version: 3,
+            schema_version: 4,
             components: &schematic.components,
             wires: &schematic.wires,
             buses: &schematic.buses,
             bus_taps: &schematic.bus_taps,
             net_labels: &schematic.net_labels,
             design_notes: &schematic.design_notes,
+            documentation_shapes: &schematic.documentation_shapes,
             junctions: &schematic.junctions,
         }
     }
@@ -402,7 +404,8 @@ mod tests {
     use crate::state::{
         BusDeclaration, BusSlice, BusTapOrientation, ComponentType, DesignNote, DesignNoteKind,
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
-        DesignVariableSweepEligibility, Point, SimulationPlanPayloadRecord,
+        DesignVariableSweepEligibility, DocumentationShape, DocumentationShapeGeometry, Point,
+        SimulationPlanPayloadRecord,
     };
 
     #[test]
@@ -527,6 +530,39 @@ mod tests {
             .unwrap();
         let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
         registry.rebuild(&edited, Some(&current)).unwrap();
+        assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
+    }
+
+    #[test]
+    fn documentation_shape_edits_participate_in_the_schematic_document_digest() {
+        let mut state = AppState::default();
+        let active = state.workspace.active_view.clone();
+        state.schematic.documentation_shapes.push(
+            DocumentationShape::new(
+                72,
+                DocumentationShapeGeometry::Rectangle {
+                    first: Point::new(4, 6),
+                    opposite: Point::new(14, 12),
+                },
+            )
+            .unwrap(),
+        );
+        let baseline = super::super::snapshot(&state).expect("baseline snapshot");
+
+        state.schematic.documentation_shapes[0].translate(Point::new(3, -2));
+        let edited = super::super::snapshot(&state).expect("edited shape snapshot");
+        let baseline_digest = document_digests(&baseline)
+            .unwrap()
+            .remove(&ProjectDocumentId::CellView(active.clone()))
+            .unwrap();
+        let edited_digest = document_digests(&edited)
+            .unwrap()
+            .remove(&ProjectDocumentId::CellView(active.clone()))
+            .unwrap();
+
+        assert_ne!(baseline_digest, edited_digest);
+        let mut registry = DocumentRegistry::default();
+        registry.rebuild(&edited, Some(&baseline)).unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 

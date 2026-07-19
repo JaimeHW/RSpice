@@ -5,6 +5,7 @@
 use super::bus::{Bus, BusTap};
 use super::component::Component;
 use super::design_note::DesignNote;
+use super::documentation_shape::DocumentationShape;
 use super::net_label::NetLabel;
 use super::point::Point;
 use super::wire::Wire;
@@ -51,6 +52,10 @@ pub struct ClipboardData {
     #[serde(default)]
     pub design_notes: Vec<DesignNote>,
 
+    /// Copied non-electrical presentation geometry.
+    #[serde(default)]
+    pub documentation_shapes: Vec<DocumentationShape>,
+
     /// Origin point (center of copied selection)
     ///
     /// Used to calculate offsets when pasting at a new location.
@@ -72,6 +77,7 @@ impl ClipboardData {
             || !self.bus_taps.is_empty()
             || !self.net_labels.is_empty()
             || !self.design_notes.is_empty()
+            || !self.documentation_shapes.is_empty()
     }
 
     /// Check if clipboard is empty
@@ -83,6 +89,7 @@ impl ClipboardData {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
     }
 
     /// Get total number of items in clipboard
@@ -94,6 +101,7 @@ impl ClipboardData {
             + self.bus_taps.len()
             + self.net_labels.len()
             + self.design_notes.len()
+            + self.documentation_shapes.len()
     }
 
     /// Clear all clipboard content
@@ -105,6 +113,7 @@ impl ClipboardData {
         self.bus_taps.clear();
         self.net_labels.clear();
         self.design_notes.clear();
+        self.documentation_shapes.clear();
         self.origin = Point::origin();
     }
 
@@ -147,70 +156,39 @@ impl ClipboardData {
         buses: Vec<Bus>,
         bus_taps: Vec<BusTap>,
     ) -> Self {
-        Self::from_complete_selection(
+        Self::from_complete_selection(Self {
             components,
             wires,
             junctions,
-            net_labels,
             buses,
             bus_taps,
-            Vec::new(),
-        )
+            net_labels,
+            design_notes: Vec::new(),
+            documentation_shapes: Vec::new(),
+            origin: Point::origin(),
+        })
     }
 
     /// Create clipboard data for all selectable electrical and documentation
     /// object kinds.
-    pub fn from_complete_selection(
-        components: Vec<Component>,
-        wires: Vec<Wire>,
-        junctions: Vec<Point>,
-        net_labels: Vec<NetLabel>,
-        buses: Vec<Bus>,
-        bus_taps: Vec<BusTap>,
-        design_notes: Vec<DesignNote>,
-    ) -> Self {
-        let origin = Self::calculate_center(
-            &components,
-            &wires,
-            &junctions,
-            &net_labels,
-            &buses,
-            &bus_taps,
-            &design_notes,
-        );
-        Self {
-            components,
-            wires,
-            junctions,
-            buses,
-            bus_taps,
-            net_labels,
-            design_notes,
-            origin,
-        }
+    pub(crate) fn from_complete_selection(mut selection: Self) -> Self {
+        selection.origin = Self::calculate_center(&selection);
+        selection
     }
 
     /// Calculate the center point of every copied schematic object.
-    fn calculate_center(
-        components: &[Component],
-        wires: &[Wire],
-        junctions: &[Point],
-        net_labels: &[NetLabel],
-        buses: &[Bus],
-        bus_taps: &[BusTap],
-        design_notes: &[DesignNote],
-    ) -> Point {
+    fn calculate_center(selection: &Self) -> Point {
         let mut cx = 0i64;
         let mut cy = 0i64;
         let mut count = 0i64;
 
-        for comp in components {
+        for comp in &selection.components {
             cx = cx.saturating_add(i64::from(comp.pos.x));
             cy = cy.saturating_add(i64::from(comp.pos.y));
             count = count.saturating_add(1);
         }
 
-        for wire in wires {
+        for wire in &selection.wires {
             if let Some(first) = wire.points.first() {
                 cx = cx.saturating_add(i64::from(first.x));
                 cy = cy.saturating_add(i64::from(first.y));
@@ -218,19 +196,19 @@ impl ClipboardData {
             }
         }
 
-        for junction in junctions {
+        for junction in &selection.junctions {
             cx = cx.saturating_add(i64::from(junction.x));
             cy = cy.saturating_add(i64::from(junction.y));
             count = count.saturating_add(1);
         }
 
-        for label in net_labels {
+        for label in &selection.net_labels {
             cx = cx.saturating_add(i64::from(label.pos.x));
             cy = cy.saturating_add(i64::from(label.pos.y));
             count = count.saturating_add(1);
         }
 
-        for bus in buses {
+        for bus in &selection.buses {
             if let Some(first) = bus.points.first() {
                 cx = cx.saturating_add(i64::from(first.x));
                 cy = cy.saturating_add(i64::from(first.y));
@@ -238,15 +216,28 @@ impl ClipboardData {
             }
         }
 
-        for tap in bus_taps {
+        for tap in &selection.bus_taps {
             cx = cx.saturating_add(i64::from(tap.connection_point.x));
             cy = cy.saturating_add(i64::from(tap.connection_point.y));
             count = count.saturating_add(1);
         }
 
-        for note in design_notes {
+        for note in &selection.design_notes {
             cx = cx.saturating_add(i64::from(note.pos.x));
             cy = cy.saturating_add(i64::from(note.pos.y));
+            count = count.saturating_add(1);
+        }
+
+        for shape in &selection.documentation_shapes {
+            let points = shape.geometry.points();
+            if points.is_empty() {
+                continue;
+            }
+            let sx: i64 = points.iter().map(|point| i64::from(point.x)).sum();
+            let sy: i64 = points.iter().map(|point| i64::from(point.y)).sum();
+            let point_count = i64::try_from(points.len()).unwrap_or(i64::MAX).max(1);
+            cx = cx.saturating_add(sx / point_count);
+            cy = cy.saturating_add(sy / point_count);
             count = count.saturating_add(1);
         }
 

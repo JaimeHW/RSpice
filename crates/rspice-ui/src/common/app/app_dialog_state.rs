@@ -355,6 +355,62 @@ impl DesignNoteDialogState {
     }
 }
 
+/// Isolated draft for the mockup-owned Draw documentation shape transaction.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DocumentationShapeDialogState {
+    pub(crate) open: bool,
+    pub(crate) kind: crate::state::DocumentationShapeKind,
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) topology_version: u64,
+    pub(crate) view_path: String,
+    pub(crate) expected_shapes: Vec<crate::state::DocumentationShape>,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl DocumentationShapeDialogState {
+    pub(crate) fn open(
+        &mut self,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+        expected_shapes: Vec<crate::state::DocumentationShape>,
+    ) {
+        *self = Self {
+            open: true,
+            kind: crate::state::DocumentationShapeKind::Rectangle,
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            expected_shapes,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = true;
+        self.discard_confirm = false;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
 /// Exact, isolated draft for a selected bus. The durable baseline is retained
 /// to guard the eventual commit against stale-object overwrite.
 #[derive(Debug, Clone)]
@@ -393,11 +449,18 @@ pub(crate) struct DesignNoteObjectPropertiesDraft {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct DocumentationShapeObjectPropertiesDraft {
+    pub(crate) original: crate::state::DocumentationShape,
+    pub(crate) points: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum ObjectPropertiesDraft {
     Bus(BusObjectPropertiesDraft),
     BusTap(BusTapObjectPropertiesDraft),
     NetLabel(NetLabelObjectPropertiesDraft),
     DesignNote(DesignNoteObjectPropertiesDraft),
+    DocumentationShape(DocumentationShapeObjectPropertiesDraft),
 }
 
 /// Retained owner for the mockup's generic Object properties transaction.
@@ -600,6 +663,37 @@ impl ObjectPropertiesDialogState {
         };
     }
 
+    pub(crate) fn open_documentation_shape(
+        &mut self,
+        shape: &crate::state::DocumentationShape,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::DocumentationShape(
+                DocumentationShapeObjectPropertiesDraft {
+                    original: shape.clone(),
+                    points: shape
+                        .geometry
+                        .points()
+                        .into_iter()
+                        .map(|point| (point.x.to_string(), point.y.to_string()))
+                        .collect(),
+                },
+            )),
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            dirty: false,
+            discard_confirm: false,
+            validation_error: None,
+        };
+    }
+
     pub(crate) fn mark_edited(&mut self) {
         self.dirty = self
             .draft
@@ -694,6 +788,24 @@ impl ObjectPropertiesDraft {
                             candidate != draft.original
                         },
                     )
+            }
+            Self::DocumentationShape(draft) => {
+                let points: Option<Vec<_>> = draft
+                    .points
+                    .iter()
+                    .map(|(x, y)| {
+                        x.trim()
+                            .parse::<i32>()
+                            .ok()
+                            .zip(y.trim().parse::<i32>().ok())
+                            .map(|(x, y)| crate::state::Point::new(x, y))
+                    })
+                    .collect();
+                points
+                    .and_then(|points| {
+                        crate::state::geometry_from_points(draft.original.kind(), &points).ok()
+                    })
+                    .is_none_or(|geometry| geometry != draft.original.geometry)
             }
         }
     }
@@ -817,6 +929,9 @@ pub struct DialogState {
     /// Non-electrical typed design-note placement transaction.
     pub(crate) design_note: DesignNoteDialogState,
 
+    /// Non-electrical typed documentation-shape placement transaction.
+    pub(crate) documentation_shape: DocumentationShapeDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -873,6 +988,7 @@ impl DialogState {
             || self.bus_tap.open
             || self.pin_port.open
             || self.design_note.open
+            || self.documentation_shape.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
@@ -930,6 +1046,11 @@ mod tests {
             dialogs
                 .design_note
                 .open(0, 0, 0, "user/top/schematic".to_owned());
+        });
+        assert_blocks_shortcuts(|dialogs| {
+            dialogs
+                .documentation_shape
+                .open(0, 0, 0, "user/top/schematic".to_owned(), Vec::new());
         });
         assert_blocks_shortcuts(|dialogs| {
             let bus = crate::state::Bus::segment(

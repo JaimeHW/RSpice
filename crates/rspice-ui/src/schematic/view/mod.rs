@@ -18,6 +18,7 @@ mod bus_interaction;
 mod context_menu;
 mod coordinates;
 mod design_notes;
+mod documentation_shapes;
 mod drawing;
 mod grid;
 mod interaction;
@@ -140,6 +141,7 @@ impl SchematicSymbolContext {
             && schematic.junctions.is_empty()
             && schematic.net_labels.is_empty()
             && schematic.design_notes.is_empty()
+            && schematic.documentation_shapes.is_empty()
         {
             return None;
         }
@@ -189,6 +191,11 @@ impl SchematicSymbolContext {
 
         for note in &schematic.design_notes {
             let (min, max) = design_notes::conservative_world_bounds(note);
+            include(min, max);
+        }
+
+        for shape in &schematic.documentation_shapes {
+            let (min, max) = documentation_shapes::world_bounds(shape);
             include(min, max);
         }
 
@@ -307,6 +314,21 @@ impl SchematicSymbolContext {
             };
             if matches && !schematic.selection.has_design_note(note.id) {
                 schematic.selection.select_design_note(note.id);
+                count += 1;
+            }
+        }
+
+        for shape in &schematic.documentation_shapes {
+            let matches = documentation_shapes::shape_intersects_rect(
+                shape,
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+                enclosed_only,
+            );
+            if matches && !schematic.selection.has_documentation_shape(shape.id) {
+                schematic.selection.select_documentation_shape(shape.id);
                 count += 1;
             }
         }
@@ -442,6 +464,7 @@ fn schematic_accessibility_label(
             Command::PlaceProbe,
             Command::PlacePin,
             Command::PlaceText,
+            Command::PlaceShape,
             Command::ZoomFit,
             Command::Cancel,
         ],
@@ -475,7 +498,9 @@ fn schematic_accessibility_label(
             format!(" Selected instance: {name}, {value}.")
         })
         .unwrap_or_default();
-    let traversal_instruction = if schematic.components.is_empty()
+    let traversal_instruction = if schematic.tool == crate::state::Tool::DocumentationShape {
+        " Arrow keys move the exact shape cursor. Space places a point. Enter completes a legal polygon or places the current point. Backspace removes the last point. Escape cancels."
+    } else if schematic.components.is_empty()
         || !state
             .ui
             .preferences
@@ -486,7 +511,7 @@ fn schematic_accessibility_label(
         " Arrow keys select the previous or next instance."
     };
     format!(
-        "Schematic canvas. {}, {}, {}, {}, {}, {}, {}; {}.{selected_instance}{traversal_instruction} Active tool: {}.{shortcuts}",
+        "Schematic canvas. {}, {}, {}, {}, {}, {}, {}, {}; {}.{selected_instance}{traversal_instruction} Active tool: {}.{shortcuts}",
         counted(schematic.components.len(), "component", "components"),
         counted(schematic.wires.len(), "wire", "wires"),
         counted(schematic.buses.len(), "bus", "buses"),
@@ -494,6 +519,11 @@ fn schematic_accessibility_label(
         counted(schematic.junctions.len(), "junction", "junctions"),
         counted(schematic.net_labels.len(), "net label", "net labels"),
         counted(schematic.design_notes.len(), "design note", "design notes"),
+        counted(
+            schematic.documentation_shapes.len(),
+            "documentation shape",
+            "documentation shapes"
+        ),
         counted(
             schematic.selection.count(),
             "item selected",
@@ -803,7 +833,7 @@ mod tests {
         );
 
         assert!(label.starts_with(
-            "Schematic canvas. 1 component, 1 wire, 0 buses, 0 bus taps, 1 junction, 1 net label, 1 design note; 1 item selected."
+            "Schematic canvas. 1 component, 1 wire, 0 buses, 0 bus taps, 1 junction, 1 net label, 1 design note, 0 documentation shapes; 1 item selected."
         ));
         assert!(label.contains("Active tool: Wire."));
         assert!(label.contains("Selected instance:"));
@@ -901,8 +931,13 @@ pub fn render_schematic_view(
     // tool handler) and the context menu (here). Capture whether a run was
     // live before the tool handler so the click that finishes a wire can
     // never also open the menu.
-    let routing_was_active =
-        state.schematic.wire_drawing.active || state.schematic.bus_drawing.active;
+    let routing_was_active = state.schematic.wire_drawing.active
+        || state.schematic.bus_drawing.active
+        || !state
+            .schematic
+            .documentation_shape_drawing
+            .points
+            .is_empty();
     handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
     refresh_symbol_context_after_interactions(
         state,

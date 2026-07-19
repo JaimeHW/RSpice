@@ -148,6 +148,8 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
 struct DeleteSelectionRequest {
     selection: Selection,
     topology_version: u64,
+    expected_design_notes: Vec<crate::state::DesignNote>,
+    expected_documentation_shapes: Vec<crate::state::DocumentationShape>,
 }
 
 #[derive(Debug, Clone)]
@@ -351,6 +353,15 @@ fn select_pointer_target(
             }
             ContextTarget::Canvas
         }
+        PointerTarget::DocumentationShape(id) => {
+            if !state.schematic.selection.has_documentation_shape(id) {
+                state
+                    .schematic
+                    .selection
+                    .select_only_documentation_shape(id);
+            }
+            ContextTarget::Canvas
+        }
         PointerTarget::NetLabel(id) => {
             if !state.schematic.selection.has_net_label(id) {
                 state.schematic.selection.select_only_net_label(id);
@@ -517,7 +528,8 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.buses.len()
         + selection.bus_taps.len()
         + selection.net_labels.len()
-        + selection.design_notes.len();
+        + selection.design_notes.len()
+        + selection.documentation_shapes.len();
     let path = format!("/{}", state.workspace.active_view.display_path());
     if count > 1 {
         return format!("{count} selected objects · {path}");
@@ -561,6 +573,18 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
             .find(|note| note.id == id)
     {
         return format!("{} · {} · {path}", note.kind.label(), note.text);
+    }
+    if let Some(id) = selection.single_documentation_shape()
+        && let Some(shape) = state
+            .schematic
+            .documentation_shapes
+            .iter()
+            .find(|shape| shape.id == id)
+    {
+        return format!(
+            "{} \u{b7} drawing / documentation \u{b7} {path}",
+            shape.kind().label()
+        );
     }
     let target = selection
         .single_component()
@@ -858,13 +882,19 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .design_notes
         .iter()
         .any(|note| selection.has_design_note(note.id));
+    let has_live_documentation_shape = state
+        .schematic
+        .documentation_shapes
+        .iter()
+        .any(|shape| selection.has_documentation_shape(shape.id));
     let has_copyable_object = has_live_component
         || has_live_wire
         || has_live_junction
         || has_live_bus
         || has_live_bus_tap
         || has_live_net_label
-        || has_live_design_note;
+        || has_live_design_note
+        || has_live_documentation_shape;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
@@ -896,6 +926,13 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                 .design_notes
                 .iter()
                 .any(|note| note.id == *id)
+        })
+        && selection.documentation_shapes.iter().all(|id| {
+            state
+                .schematic
+                .documentation_shapes
+                .iter()
+                .any(|shape| shape.id == *id)
         });
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
@@ -917,7 +954,8 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_bus
         || has_live_bus_tap
         || has_live_net_label
-        || has_live_design_note)
+        || has_live_design_note
+        || has_live_documentation_shape)
         && all_whole_object_ids_are_live
         && all_junctions_are_live
         && !has_wire_sub_object;
@@ -930,7 +968,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     match action {
         ContextAction::Properties => (
             crate::common::app::selected_object_properties_available(state),
-            "Select one editable component, bus, bus tap, net label, or design note to open its properties",
+            "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
             writable && has_component,
@@ -938,11 +976,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Copy => (
             copyable_objects_only,
-            "Select at least one component, wire, bus, tap, junction, net label, or design note",
+            "Select at least one component, wire, bus, tap, junction, net label, design note, or documentation shape",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
-            "Select at least one editable component, wire, bus, tap, net label, or design note",
+            "Select at least one editable component, wire, bus, tap, net label, design note, or documentation shape",
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
@@ -1020,6 +1058,20 @@ fn request_delete_confirmation(ctx: &Context, state: &mut AppState) {
     selection.wire_segments.clear();
     selection.wire_vertices.clear();
     let request = DeleteSelectionRequest {
+        expected_design_notes: state
+            .schematic
+            .design_notes
+            .iter()
+            .filter(|note| selection.has_design_note(note.id))
+            .cloned()
+            .collect(),
+        expected_documentation_shapes: state
+            .schematic
+            .documentation_shapes
+            .iter()
+            .filter(|shape| selection.has_documentation_shape(shape.id))
+            .cloned()
+            .collect(),
         selection,
         topology_version: state.schematic.topology_version(),
     };
@@ -1126,6 +1178,15 @@ fn delete_review(
             objects.push(format!("{} {}", note.kind.label(), note.text));
         }
     }
+    for shape in &state.schematic.documentation_shapes {
+        if request.selection.has_documentation_shape(shape.id) {
+            objects.push(format!(
+                "{} documentation shape #{}",
+                shape.kind().label(),
+                shape.id
+            ));
+        }
+    }
     let selection = if objects.is_empty() {
         "No live schematic objects".to_owned()
     } else {
@@ -1216,7 +1277,24 @@ fn delete_review_row(ui: &mut Ui, label: &str, value: &str) {
 }
 
 fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
-    if state.schematic.topology_version() != request.topology_version {
+    let live_design_notes: Vec<_> = state
+        .schematic
+        .design_notes
+        .iter()
+        .filter(|note| request.selection.has_design_note(note.id))
+        .cloned()
+        .collect();
+    let live_documentation_shapes: Vec<_> = state
+        .schematic
+        .documentation_shapes
+        .iter()
+        .filter(|shape| request.selection.has_documentation_shape(shape.id))
+        .cloned()
+        .collect();
+    if state.schematic.topology_version() != request.topology_version
+        || live_design_notes != request.expected_design_notes
+        || live_documentation_shapes != request.expected_documentation_shapes
+    {
         state.push_user_message(ConsoleMessage::warning(
             "The schematic changed while deletion was being reviewed; nothing was deleted."
                 .to_owned(),
@@ -1263,7 +1341,12 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
             .schematic
             .design_notes
             .iter()
-            .any(|note| request.selection.has_design_note(note.id));
+            .any(|note| request.selection.has_design_note(note.id))
+        || state
+            .schematic
+            .documentation_shapes
+            .iter()
+            .any(|shape| request.selection.has_documentation_shape(shape.id));
     if !has_live_object {
         state.push_user_message(ConsoleMessage::warning(
             "The reviewed selection no longer contains deletable objects.".to_owned(),
@@ -1409,7 +1492,8 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        DesignNote, DesignNoteKind, Junction, LibraryCellInstance, NetLabel, Wire,
+        DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Junction,
+        LibraryCellInstance, NetLabel, Wire,
     };
 
     fn pointer_viewport() -> Viewport {
@@ -1724,6 +1808,53 @@ mod tests {
     }
 
     #[test]
+    fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
+        let mut state = AppState::default();
+        let shape = DocumentationShape::new(
+            75,
+            DocumentationShapeGeometry::Callout {
+                tip: Point::new(10, 10),
+                elbow: Point::new(30, 20),
+                box_corner: Point::new(80, 50),
+            },
+        )
+        .unwrap();
+        state.schematic.documentation_shapes.push(shape.clone());
+        state
+            .schematic
+            .selection
+            .select_only_documentation_shape(shape.id);
+
+        assert!(action_availability(ContextAction::Properties, &state).0);
+        assert!(action_availability(ContextAction::Copy, &state).0);
+        assert!(action_availability(ContextAction::Duplicate, &state).0);
+        assert!(action_availability(ContextAction::Delete, &state).0);
+        assert!(!action_availability(ContextAction::Rotate, &state).0);
+        assert!(!action_availability(ContextAction::Mirror, &state).0);
+        assert!(selection_summary(&state, ContextTarget::Canvas).contains("Callout"));
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                execute_context_action(
+                    ContextAction::Properties,
+                    ui,
+                    &mut state,
+                    Point::new(30, 20),
+                    &symbol_context,
+                );
+            });
+        });
+        assert!(matches!(
+            state.dialogs.object_properties.draft,
+            Some(crate::common::app::ObjectPropertiesDraft::DocumentationShape(ref draft))
+                if draft.original == shape
+        ));
+    }
+
+    #[test]
     fn duplicate_and_delete_are_real_undoable_transactions() {
         let mut state = AppState::default();
         state.schematic.components.clear();
@@ -1744,6 +1875,8 @@ mod tests {
         let request = DeleteSelectionRequest {
             selection: state.schematic.selection.clone(),
             topology_version: state.schematic.topology_version(),
+            expected_design_notes: Vec::new(),
+            expected_documentation_shapes: Vec::new(),
         };
         apply_delete_request(&mut state, request);
         assert!(state.schematic.components.is_empty());
@@ -1764,6 +1897,8 @@ mod tests {
         let request = DeleteSelectionRequest {
             selection: state.schematic.selection.clone(),
             topology_version: state.schematic.topology_version(),
+            expected_design_notes: Vec::new(),
+            expected_documentation_shapes: Vec::new(),
         };
         apply_delete_request(&mut state, request);
         assert!(state.schematic.net_labels.is_empty());
@@ -1781,12 +1916,43 @@ mod tests {
         let request = DeleteSelectionRequest {
             selection: state.schematic.selection.clone(),
             topology_version: state.schematic.topology_version(),
+            expected_design_notes: Vec::new(),
+            expected_documentation_shapes: Vec::new(),
         };
         state.schematic.bump_topology_version();
 
         apply_delete_request(&mut state, request);
 
         assert_eq!(state.schematic.components.len(), 1);
+    }
+
+    #[test]
+    fn documentation_shape_delete_review_fails_closed_on_non_topological_drift() {
+        let mut state = AppState::default();
+        let shape = DocumentationShape::new(
+            93,
+            DocumentationShapeGeometry::Line {
+                start: Point::new(0, 0),
+                end: Point::new(20, 10),
+            },
+        )
+        .unwrap();
+        state.schematic.documentation_shapes.push(shape.clone());
+        state
+            .schematic
+            .selection
+            .select_only_documentation_shape(shape.id);
+        let request = DeleteSelectionRequest {
+            selection: state.schematic.selection.clone(),
+            topology_version: state.schematic.topology_version(),
+            expected_design_notes: Vec::new(),
+            expected_documentation_shapes: vec![shape],
+        };
+        state.schematic.documentation_shapes[0].translate(Point::new(1, 0));
+
+        apply_delete_request(&mut state, request);
+
+        assert_eq!(state.schematic.documentation_shapes.len(), 1);
     }
 
     #[test]

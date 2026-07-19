@@ -430,6 +430,19 @@ fn design(ui: &mut Ui, app: &mut RSpiceApp) {
                 .find(|note| note.id == id)
                 .cloned()
         });
+    let selected_shape = app
+        .state
+        .schematic
+        .selection
+        .single_documentation_shape()
+        .and_then(|id| {
+            app.state
+                .schematic
+                .documentation_shapes
+                .iter()
+                .find(|shape| shape.id == id)
+                .cloned()
+        });
     inspector_hero(ui, app, selected.as_ref(), model_evidence.as_ref());
     if let Some(component) = selected.as_ref() {
         section_header(ui, "Identity", Some("editable"));
@@ -487,6 +500,23 @@ fn design(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Review record", &review.record_id);
             property_row(ui, "Review state", review.state.keyword());
         }
+    } else if let Some(shape) = selected_shape.as_ref() {
+        section_header(ui, "Documentation shape", Some("editable"));
+        property_row(ui, "Stable ID", &format!("SHAPE-{}", shape.id));
+        property_row(ui, "Type", shape.kind().label());
+        property_row(ui, "Layer", shape.layer.label());
+        property_row(ui, "Electrical connectivity", "none");
+        let (min, max) = shape.bounds();
+        property_row(
+            ui,
+            "Bounds",
+            &format!("{}, {} to {}, {}", min.x, min.y, max.x, max.y),
+        );
+        property_row(
+            ui,
+            "Control points",
+            &shape.geometry.points().len().to_string(),
+        );
     } else {
         section_header(ui, "Active document", None);
         property_row(ui, "Library", &app.state.workspace.active_view.library);
@@ -521,6 +551,11 @@ fn design(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             "Design notes",
             &app.state.schematic.design_notes.len().to_string(),
+        );
+        property_row(
+            ui,
+            "Documentation shapes",
+            &app.state.schematic.documentation_shapes.len().to_string(),
         );
     }
 }

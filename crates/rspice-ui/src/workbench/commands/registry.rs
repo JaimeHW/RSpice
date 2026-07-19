@@ -507,6 +507,7 @@ impl Command {
             | Self::PlaceProbe
             | Self::PlacePin
             | Self::PlaceText
+            | Self::PlaceShape
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -593,6 +594,7 @@ impl Command {
             Self::PlaceProbe => PLACE_PROBE,
             Self::PlacePin => PLACE_PIN,
             Self::PlaceText => PLACE_TEXT,
+            Self::PlaceShape => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,

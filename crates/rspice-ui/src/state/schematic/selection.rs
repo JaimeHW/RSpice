@@ -251,6 +251,10 @@ pub struct Selection {
     /// Selected non-electrical design-note stable IDs.
     #[serde(default)]
     pub design_notes: HashSet<u64>,
+
+    /// Selected non-electrical documentation-shape stable IDs.
+    #[serde(default)]
+    pub documentation_shapes: HashSet<u64>,
 }
 
 impl Selection {
@@ -270,6 +274,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
     }
 
     /// Get total number of selected items
@@ -283,6 +288,7 @@ impl Selection {
             + self.bus_taps.len()
             + self.net_labels.len()
             + self.design_notes.len()
+            + self.documentation_shapes.len()
     }
 
     /// Clear all selections
@@ -296,6 +302,7 @@ impl Selection {
         self.bus_taps.clear();
         self.net_labels.clear();
         self.design_notes.clear();
+        self.documentation_shapes.clear();
     }
 
     // =========================================================================
@@ -343,6 +350,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
         {
             self.components.iter().next().copied()
         } else {
@@ -395,6 +403,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
         {
             self.wires.iter().next().copied()
         } else {
@@ -445,6 +454,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
         {
             Some(&self.wire_segments[0])
         } else {
@@ -495,6 +505,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
         {
             Some(&self.wire_vertices[0])
         } else {
@@ -540,6 +551,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
         {
             Some(self.junctions[0].pos)
         } else {
@@ -682,6 +694,39 @@ impl Selection {
     }
 
     // =========================================================================
+    // Documentation-Shape Selection
+    // =========================================================================
+
+    pub fn has_documentation_shape(&self, id: u64) -> bool {
+        self.documentation_shapes.contains(&id)
+    }
+
+    pub fn select_documentation_shape(&mut self, id: u64) {
+        self.documentation_shapes.insert(id);
+    }
+
+    pub fn deselect_documentation_shape(&mut self, id: u64) {
+        self.documentation_shapes.remove(&id);
+    }
+
+    pub fn toggle_documentation_shape(&mut self, id: u64) {
+        if !self.documentation_shapes.remove(&id) {
+            self.documentation_shapes.insert(id);
+        }
+    }
+
+    pub fn select_only_documentation_shape(&mut self, id: u64) {
+        self.clear();
+        self.documentation_shapes.insert(id);
+    }
+
+    pub fn single_documentation_shape(&self) -> Option<u64> {
+        (self.documentation_shapes.len() == 1 && self.count() == 1)
+            .then(|| self.documentation_shapes.iter().next().copied())
+            .flatten()
+    }
+
+    // =========================================================================
     // Query Methods
     // =========================================================================
 
@@ -701,6 +746,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
     }
 
     /// Check if only wires are selected (no components or other items)
@@ -714,6 +760,7 @@ impl Selection {
             && self.bus_taps.is_empty()
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
     }
 
     /// Check if any wire-related items are selected

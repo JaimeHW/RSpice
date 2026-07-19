@@ -3,7 +3,7 @@ use egui::{Painter, Rect, Response, Stroke, Vec2};
 use crate::common::app::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
-    ResolvedCellSymbol, Tool,
+    ResolvedCellSymbol, Tool, geometry_from_points,
 };
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
@@ -11,6 +11,7 @@ use super::SchematicSymbolContext;
 use super::bus_interaction::resolve_bus_tap_candidate;
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::design_notes::draw_design_note;
+use super::documentation_shapes::{draw_geometry, preview_anchor_color, preview_stroke};
 use super::drawing::{draw_bus, draw_bus_tap, draw_port_symbol};
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
@@ -38,6 +39,7 @@ pub(super) fn draw_interaction_previews(
     draw_junction_preview(painter, response, state, viewport);
     draw_net_label_preview(painter, response, state, viewport);
     draw_design_note_preview(painter, response, state, viewport);
+    draw_documentation_shape_preview(painter, response, state, viewport);
     draw_component_preview(
         painter,
         response,
@@ -47,6 +49,73 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     draw_selection_rect(painter, state, viewport);
+}
+
+fn draw_documentation_shape_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &AppState,
+    viewport: &Viewport,
+) {
+    if state.schematic.read_only
+        || state.active_view_read_only()
+        || state.schematic.tool != Tool::DocumentationShape
+    {
+        return;
+    }
+    let Some(pending) = state.schematic.pending_documentation_shape.as_ref() else {
+        return;
+    };
+    let drawing = &state.schematic.documentation_shape_drawing;
+    let hover_point = if drawing.keyboard_active {
+        drawing.keyboard_cursor
+    } else {
+        response
+            .hover_pos()
+            .map(|position| screen_to_grid(viewport, state.schematic.grid_size, position))
+    };
+    let Some(hover_point) = hover_point else {
+        return;
+    };
+    let hover = viewport.schematic_to_screen(hover_point);
+    let mut points = state.schematic.documentation_shape_drawing.points.clone();
+    if points.last() != Some(&hover_point) {
+        points.push(hover_point);
+    }
+    let geometry = geometry_from_points(pending.kind, &points);
+    let valid = geometry.is_ok();
+    if let Ok(geometry) = geometry {
+        draw_geometry(painter, viewport, &geometry, preview_stroke(true));
+    } else if points.len() >= 2 {
+        let screen_points = points
+            .iter()
+            .map(|point| viewport.schematic_to_screen(*point))
+            .collect::<Vec<_>>();
+        painter.add(egui::Shape::line(screen_points, preview_stroke(false)));
+    }
+    let color = preview_anchor_color(valid);
+    for point in &points {
+        painter.circle_stroke(
+            viewport.schematic_to_screen(*point),
+            3.0,
+            Stroke::new(1.0, color),
+        );
+    }
+    let label = format!(
+        "{}, {} \u{b7} {} \u{b7} non-electrical",
+        hover_point.x,
+        hover_point.y,
+        pending.kind.label()
+    );
+    let galley = painter.layout_no_wrap(
+        label,
+        crate::ui::theme::mono(
+            crate::ui::tokens::FS_0,
+            crate::ui::theme::FontWeight::Regular,
+        ),
+        color,
+    );
+    painter.galley(hover + egui::vec2(10.0, 10.0), galley, color);
 }
 
 fn draw_design_note_preview(

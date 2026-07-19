@@ -25,6 +25,7 @@ impl SchematicState {
             || self.buses.iter().any(|item| item.id == id)
             || self.bus_taps.iter().any(|item| item.id == id)
             || self.design_notes.iter().any(|item| item.id == id)
+            || self.documentation_shapes.iter().any(|item| item.id == id)
     }
 
     /// Get the current topology version
@@ -52,6 +53,11 @@ impl SchematicState {
         self.wires.retain(|wire| wire.points.len() >= 2);
         self.clipboard.wires.retain(|wire| wire.points.len() >= 2);
         self.clipboard.buses.retain(|bus| bus.validate().is_ok());
+        self.documentation_shapes
+            .retain(|shape| shape.validate().is_ok());
+        self.clipboard
+            .documentation_shapes
+            .retain(|shape| shape.validate().is_ok());
         if self.wires.len() != wire_count_before_repair {
             self.bump_topology_version();
         }
@@ -71,13 +77,20 @@ impl SchematicState {
             .map(|note| note.id)
             .max()
             .unwrap_or(0);
+        let max_documentation_shape_id = self
+            .documentation_shapes
+            .iter()
+            .map(|shape| shape.id)
+            .max()
+            .unwrap_or(0);
         let max_id = max_component_id
             .max(max_wire_id)
             .max(max_junction_id)
             .max(max_label_id)
             .max(max_bus_id)
             .max(max_bus_tap_id)
-            .max(max_design_note_id);
+            .max(max_design_note_id)
+            .max(max_documentation_shape_id);
         self.next_id = max_id.checked_add(1).unwrap_or(1);
 
         // Repair duplicate component IDs left behind by earlier counter
@@ -242,6 +255,15 @@ impl SchematicState {
         }
         self.design_notes.retain(|note| note.validate().is_ok());
 
+        for index in 0..self.documentation_shapes.len() {
+            let id = self.documentation_shapes[index].id;
+            if !occupied_ids.insert(id) {
+                let replacement = self.next_id();
+                occupied_ids.insert(replacement);
+                self.documentation_shapes[index].id = replacement;
+            }
+        }
+
         // Rebuild component counters from existing component names
         self.component_counters.clear();
         for comp in &self.components {
@@ -277,6 +299,11 @@ impl SchematicState {
         let bus_ids: HashSet<u64> = self.buses.iter().map(|bus| bus.id).collect();
         let bus_tap_ids: HashSet<u64> = self.bus_taps.iter().map(|tap| tap.id).collect();
         let design_note_ids: HashSet<u64> = self.design_notes.iter().map(|note| note.id).collect();
+        let documentation_shape_ids: HashSet<u64> = self
+            .documentation_shapes
+            .iter()
+            .map(|shape| shape.id)
+            .collect();
 
         self.selection
             .components
@@ -307,6 +334,9 @@ impl SchematicState {
         self.selection
             .design_notes
             .retain(|id| design_note_ids.contains(id));
+        self.selection
+            .documentation_shapes
+            .retain(|id| documentation_shape_ids.contains(id));
 
         self.connections.retain(|connection| {
             component_ids.contains(&connection.component_id)
@@ -332,7 +362,8 @@ impl SchematicState {
 mod tests {
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        DesignNote, DesignNoteKind, Junction, NetLabel, Point, SchematicState,
+        DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Junction,
+        NetLabel, Point, SchematicState,
     };
     use std::collections::HashSet;
 
@@ -570,5 +601,53 @@ mod tests {
         assert!(migrated.bus_taps.is_empty());
         assert!(migrated.net_labels.is_empty());
         assert!(migrated.design_notes.is_empty());
+    }
+
+    #[test]
+    fn recalculate_repairs_documentation_shape_collisions_and_stale_selection() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .components
+            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
+        schematic.documentation_shapes = vec![
+            DocumentationShape::new(
+                59,
+                DocumentationShapeGeometry::Line {
+                    start: Point::new(0, 0),
+                    end: Point::new(10, 0),
+                },
+            )
+            .unwrap(),
+            DocumentationShape::new(
+                59,
+                DocumentationShapeGeometry::Rectangle {
+                    first: Point::new(20, 20),
+                    opposite: Point::new(30, 30),
+                },
+            )
+            .unwrap(),
+        ];
+        schematic.selection.select_documentation_shape(59);
+        schematic.selection.select_documentation_shape(999);
+        let topology = schematic.topology_version();
+
+        schematic.recalculate_runtime_state();
+
+        let ids: HashSet<_> = schematic
+            .documentation_shapes
+            .iter()
+            .map(|shape| shape.id)
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert!(
+            !ids.contains(&59),
+            "component identity retains namespace priority"
+        );
+        assert!(ids.iter().all(|id| *id != 0));
+        assert!(schematic.selection.documentation_shapes.is_empty());
+        assert_eq!(schematic.topology_version(), topology);
+        let fresh = schematic.next_id();
+        assert_ne!(fresh, 59);
+        assert!(!ids.contains(&fresh));
     }
 }

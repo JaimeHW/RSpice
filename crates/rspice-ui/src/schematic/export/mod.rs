@@ -32,8 +32,9 @@ use self::controlled_symbols::{
 use self::geometry::calculate_bounds;
 use self::geometry::{
     calculate_bounds_with_context, get_rotation_transform, include_bus_bounds,
-    include_design_note_bounds, include_junction_bounds, write_bus, write_bus_tap,
-    write_design_note, write_junction, write_wire,
+    include_design_note_bounds, include_documentation_shape_bounds, include_junction_bounds,
+    write_bus, write_bus_tap, write_design_note, write_documentation_shape, write_junction,
+    write_wire,
 };
 use self::jfet_symbols::{write_njfet_symbol, write_pjfet_symbol};
 use self::mos_symbols::{write_nmos_symbol, write_pmos_symbol};
@@ -160,6 +161,7 @@ fn export_to_svg_with_resolved_symbol_entries(
   .text {{ font-family: monospace; font-size: {font_size}px; fill: {text_color}; }}\n\
   .design-note-anchor {{ fill: {text_color}; stroke: none; }}\n\
   .design-note-requirement-link .text {{ text-decoration: underline; }}\n\
+  .documentation-shape {{ stroke: {text_color}; stroke-width: {comp_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
 </style>\n\
 <rect width=\"100%\" height=\"100%\" fill=\"#1a1a1a\"/>",
         vx = min_x - config.margin,
@@ -205,6 +207,10 @@ fn export_to_svg_with_resolved_symbol_entries(
 
     for note in &state.design_notes {
         write_design_note(&mut svg, state, note, config, context.view_path);
+    }
+
+    for shape in &state.documentation_shapes {
+        write_documentation_shape(&mut svg, shape, config);
     }
 
     // Close SVG
@@ -278,6 +284,10 @@ fn calculate_bounds_with_resolved_symbols(
         &mut min_y,
         &mut max_x,
         &mut max_y,
+    );
+
+    include_documentation_shape_bounds(
+        state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
     );
 
     if min_x == f64::MAX {
@@ -489,9 +499,10 @@ mod tests {
         assert!(!svg.contains(">schematic / 0 components"));
     }
     use crate::state::{
-        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, Junction, Library,
-        LibraryCellInstance, LibraryManager, Point, PortDirection, PortSpec, SymbolDocument,
-        SymbolPin, SymbolResolver, SymbolShape, View, ViewType,
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, DocumentationShape,
+        DocumentationShapeGeometry, Junction, Library, LibraryCellInstance, LibraryManager, Point,
+        PortDirection, PortSpec, SymbolDocument, SymbolPin, SymbolResolver, SymbolShape, View,
+        ViewType,
     };
     use std::collections::HashMap;
 
@@ -753,5 +764,86 @@ mod tests {
         assert!(svg.contains(r#">DATA[3]</text>"#));
         assert!(min_x <= -4.0 && min_y <= -20.0);
         assert!(max_x > 270.0 && max_y >= 100.0);
+    }
+
+    #[test]
+    fn svg_export_preserves_documentation_shape_identity_layer_and_kind() {
+        let mut schematic = SchematicState::default();
+        schematic.documentation_shapes = vec![
+            DocumentationShape::new(
+                101,
+                DocumentationShapeGeometry::Rectangle {
+                    first: Point::new(0, 0),
+                    opposite: Point::new(10, 8),
+                },
+            )
+            .unwrap(),
+            DocumentationShape::new(
+                102,
+                DocumentationShapeGeometry::Line {
+                    start: Point::new(12, 0),
+                    end: Point::new(20, 8),
+                },
+            )
+            .unwrap(),
+            DocumentationShape::new(
+                103,
+                DocumentationShapeGeometry::Polygon {
+                    points: vec![Point::new(22, 0), Point::new(30, 0), Point::new(26, 8)],
+                },
+            )
+            .unwrap(),
+            DocumentationShape::new(
+                104,
+                DocumentationShapeGeometry::Arc {
+                    start: Point::new(32, 8),
+                    through: Point::new(36, 4),
+                    end: Point::new(40, 8),
+                },
+            )
+            .unwrap(),
+            DocumentationShape::new(
+                105,
+                DocumentationShapeGeometry::Callout {
+                    tip: Point::new(42, 0),
+                    elbow: Point::new(46, 4),
+                    box_corner: Point::new(54, 10),
+                },
+            )
+            .unwrap(),
+        ];
+
+        let first = export_to_svg(&schematic, &SvgExportConfig::default());
+        let second = export_to_svg(&schematic, &SvgExportConfig::default());
+
+        assert_eq!(
+            first, second,
+            "unchanged documents must export deterministically"
+        );
+        for (id, kind) in [
+            (101, "rectangle"),
+            (102, "line"),
+            (103, "polygon"),
+            (104, "arc"),
+            (105, "callout"),
+        ] {
+            let metadata = format!(
+                "<g class=\"documentation-shape documentation-shape-{kind}\" data-object-id=\"{id}\" data-layer=\"drawing-documentation\" data-kind=\"{kind}\">"
+            );
+            assert!(
+                first.contains(&metadata),
+                "{kind} must retain its stable identity and semantic layer metadata"
+            );
+        }
+        assert_eq!(
+            first
+                .matches("data-layer=\"drawing-documentation\"")
+                .count(),
+            5
+        );
+        assert!(first.contains("<rect"));
+        assert!(first.contains("<line"));
+        assert!(first.contains("<polygon"));
+        assert!(first.contains("<path d=\"M "));
     }
 }

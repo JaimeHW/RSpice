@@ -8,6 +8,9 @@ use super::SchematicSymbolContext;
 use super::design_notes::{
     conservative_world_bounds as design_note_world_bounds, draw_design_note, hovered_design_note,
 };
+use super::documentation_shapes::{
+    documentation_shape_at, draw_documentation_shape, world_bounds as documentation_shape_bounds,
+};
 use super::drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire};
 use super::grid::draw_grid;
 use super::net_labels::{
@@ -61,6 +64,7 @@ pub(super) fn draw_scene(
         && state.schematic.buses.is_empty()
         && state.schematic.net_labels.is_empty()
         && state.schematic.design_notes.is_empty()
+        && state.schematic.documentation_shapes.is_empty()
     {
         draw_empty_hint(painter, available);
     }
@@ -174,6 +178,43 @@ pub(super) fn draw_scene(
     }
 
     draw_operating_point_annotations(painter, available, viewport, state);
+
+    // Presentation geometry is a background documentation layer. It remains
+    // selectable, but is intentionally painted below authored text and names.
+    let hovered_shape = if state.schematic.tool == crate::state::Tool::Select {
+        painter
+            .ctx()
+            .pointer_hover_pos()
+            .filter(|position| available.contains(*position))
+            .and_then(|position| {
+                documentation_shape_at(viewport, &state.schematic.documentation_shapes, position)
+            })
+    } else {
+        None
+    };
+    for shape in &state.schematic.documentation_shapes {
+        let (min, max) = documentation_shape_bounds(shape);
+        if (max.x as f32) < wx0
+            || (min.x as f32) > wx1
+            || (max.y as f32) < wy0
+            || (min.y as f32) > wy1
+        {
+            continue;
+        }
+        let mut selected = state.schematic.selection.has_documentation_shape(shape.id);
+        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+            selected = super::documentation_shapes::shape_intersects_rect(
+                shape, min_x, min_y, max_x, max_y, false,
+            );
+        }
+        draw_documentation_shape(
+            painter,
+            viewport,
+            shape,
+            selected,
+            hovered_shape == Some(shape.id),
+        );
+    }
 
     // Net labels are authored text, not derived annotations. Paint them after
     // junction and OP overlays so the source net name always remains legible.

@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
 use crate::state::{
-    Bus, BusTap, DesignNote, DesignNoteKind, DesignNoteRenderContext, Junction, Rotation,
-    SchematicState, Wire,
+    Bus, BusTap, DesignNote, DesignNoteKind, DesignNoteRenderContext, DocumentationShape,
+    DocumentationShapeGeometry, Junction, Rotation, SchematicState, Wire, arc_parameters,
 };
 
 use super::SvgExportConfig;
@@ -55,12 +55,133 @@ pub(super) fn calculate_bounds_with_context(
     include_design_note_bounds(
         state, config, view_path, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
     );
+    include_documentation_shape_bounds(
+        state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+    );
 
     if min_x == f64::MAX {
         (0.0, 0.0, 100.0, 100.0)
     } else {
         (min_x, min_y, max_x, max_y)
     }
+}
+
+pub(super) fn include_documentation_shape_bounds(
+    state: &SchematicState,
+    config: &SvgExportConfig,
+    min_x: &mut f64,
+    min_y: &mut f64,
+    max_x: &mut f64,
+    max_y: &mut f64,
+) {
+    for shape in &state.documentation_shapes {
+        let (min, max) = shape.bounds();
+        *min_x = (*min_x).min(f64::from(min.x) * config.grid_size);
+        *min_y = (*min_y).min(f64::from(min.y) * config.grid_size);
+        *max_x = (*max_x).max(f64::from(max.x) * config.grid_size);
+        *max_y = (*max_y).max(f64::from(max.y) * config.grid_size);
+    }
+}
+
+pub(super) fn write_documentation_shape(
+    svg: &mut String,
+    shape: &DocumentationShape,
+    config: &SvgExportConfig,
+) {
+    let kind = shape.kind().label().to_ascii_lowercase();
+    writeln!(
+        svg,
+        "<g class=\"documentation-shape documentation-shape-{kind}\" data-object-id=\"{}\" data-layer=\"drawing-documentation\" data-kind=\"{kind}\">",
+        shape.id
+    )
+    .unwrap();
+    let scale = config.grid_size;
+    match &shape.geometry {
+        DocumentationShapeGeometry::Rectangle { first, opposite } => {
+            let x = f64::from(first.x.min(opposite.x)) * scale;
+            let y = f64::from(first.y.min(opposite.y)) * scale;
+            let width = f64::from(first.x.abs_diff(opposite.x)) * scale;
+            let height = f64::from(first.y.abs_diff(opposite.y)) * scale;
+            writeln!(
+                svg,
+                "<rect x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" rx=\"{}\"/>",
+                6.0 * scale
+            )
+            .unwrap();
+        }
+        DocumentationShapeGeometry::Line { start, end } => {
+            writeln!(
+                svg,
+                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"/>",
+                f64::from(start.x) * scale,
+                f64::from(start.y) * scale,
+                f64::from(end.x) * scale,
+                f64::from(end.y) * scale
+            )
+            .unwrap();
+        }
+        DocumentationShapeGeometry::Polygon { points } => {
+            let points = points
+                .iter()
+                .map(|point| {
+                    format!(
+                        "{},{}",
+                        f64::from(point.x) * scale,
+                        f64::from(point.y) * scale
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            writeln!(svg, "<polygon points=\"{points}\"/>").unwrap();
+        }
+        DocumentationShapeGeometry::Arc {
+            start,
+            through,
+            end,
+        } => {
+            if let Some((_, _, radius, _, sweep)) = arc_parameters(*start, *through, *end) {
+                let large_arc = u8::from(sweep.abs() > std::f64::consts::PI);
+                let sweep_flag = u8::from(sweep >= 0.0);
+                writeln!(
+                    svg,
+                    "<path d=\"M {} {} A {} {} 0 {large_arc} {sweep_flag} {} {}\"/>",
+                    f64::from(start.x) * scale,
+                    f64::from(start.y) * scale,
+                    radius * scale,
+                    radius * scale,
+                    f64::from(end.x) * scale,
+                    f64::from(end.y) * scale
+                )
+                .unwrap();
+            }
+        }
+        DocumentationShapeGeometry::Callout {
+            tip,
+            elbow,
+            box_corner,
+        } => {
+            writeln!(
+                svg,
+                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"/>",
+                f64::from(tip.x) * scale,
+                f64::from(tip.y) * scale,
+                f64::from(elbow.x) * scale,
+                f64::from(elbow.y) * scale
+            )
+            .unwrap();
+            let x = f64::from(elbow.x.min(box_corner.x)) * scale;
+            let y = f64::from(elbow.y.min(box_corner.y)) * scale;
+            let width = f64::from(elbow.x.abs_diff(box_corner.x)) * scale;
+            let height = f64::from(elbow.y.abs_diff(box_corner.y)) * scale;
+            writeln!(
+                svg,
+                "<rect x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" rx=\"{}\"/>",
+                6.0 * scale
+            )
+            .unwrap();
+        }
+    }
+    svg.push_str("</g>\n");
 }
 
 fn design_note_export_text(state: &SchematicState, note: &DesignNote, view_path: &str) -> String {

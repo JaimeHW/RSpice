@@ -30,6 +30,13 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .iter()
             .any(|note| note.id == id);
     }
+    if let Some(id) = state.schematic.selection.single_documentation_shape() {
+        return state
+            .schematic
+            .documentation_shapes
+            .iter()
+            .any(|shape| shape.id == id);
+    }
     if let Some(id) = state.schematic.selection.single_bus_tap() {
         return state.schematic.bus_taps.iter().any(|tap| tap.id == id);
     }
@@ -127,6 +134,22 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         state.dialogs.object_properties.open_design_note(
             note,
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            state.schematic.topology_version(),
+            state.workspace.active_view.display_path(),
+        );
+        return true;
+    }
+    if let Some(shape_id) = state.schematic.selection.single_documentation_shape()
+        && let Some(shape) = state
+            .schematic
+            .documentation_shapes
+            .iter()
+            .find(|shape| shape.id == shape_id)
+    {
+        state.dialogs.object_properties.open_documentation_shape(
+            shape,
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),

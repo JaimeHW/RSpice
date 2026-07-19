@@ -1,3 +1,4 @@
+use super::super::super::clamped_documentation_shape_translation;
 #[cfg(test)]
 use super::super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::super::*;
@@ -106,16 +107,24 @@ impl SchematicState {
             .filter(|note| self.selection.has_design_note(note.id))
             .cloned()
             .collect();
+        let documentation_shapes_to_copy: Vec<DocumentationShape> = self
+            .documentation_shapes
+            .iter()
+            .filter(|shape| self.selection.has_documentation_shape(shape.id))
+            .cloned()
+            .collect();
 
-        self.clipboard = ClipboardData::from_complete_selection(
-            selected_comps,
-            wires_to_copy,
-            junctions_to_copy,
-            net_labels_to_copy,
-            buses_to_copy,
-            bus_taps_to_copy,
-            design_notes_to_copy,
-        );
+        self.clipboard = ClipboardData::from_complete_selection(ClipboardData {
+            components: selected_comps,
+            wires: wires_to_copy,
+            junctions: junctions_to_copy,
+            buses: buses_to_copy,
+            bus_taps: bus_taps_to_copy,
+            net_labels: net_labels_to_copy,
+            design_notes: design_notes_to_copy,
+            documentation_shapes: documentation_shapes_to_copy,
+            origin: Point::origin(),
+        });
     }
 
     /// Check if clipboard has content
@@ -134,7 +143,8 @@ impl SchematicState {
             && self.clipboard.buses.is_empty()
             && self.clipboard.bus_taps.is_empty()
             && self.clipboard.net_labels.is_empty()
-            && self.clipboard.design_notes.is_empty();
+            && self.clipboard.design_notes.is_empty()
+            && self.clipboard.documentation_shapes.is_empty();
         // A junction-only clipboard is a connectivity edit, not decoration.
         // Snap its anchor through the same ambiguous-crossing candidate set as
         // the junction tool, then reject it before opening an undo transaction
@@ -177,6 +187,7 @@ impl SchematicState {
             let clipboard_buses = s.clipboard.buses.clone();
             let clipboard_bus_taps = s.clipboard.bus_taps.clone();
             let clipboard_design_notes = s.clipboard.design_notes.clone();
+            let clipboard_documentation_shapes = s.clipboard.documentation_shapes.clone();
             let origin = s.clipboard.origin;
 
             if clipboard_components.is_empty()
@@ -186,12 +197,19 @@ impl SchematicState {
                 && clipboard_buses.is_empty()
                 && clipboard_bus_taps.is_empty()
                 && clipboard_design_notes.is_empty()
+                && clipboard_documentation_shapes.is_empty()
             {
                 return;
             }
 
             let offset_x = paste_pos.x.saturating_sub(origin.x);
             let offset_y = paste_pos.y.saturating_sub(origin.y);
+            let documentation_shape_offset = clamped_documentation_shape_translation(
+                clipboard_documentation_shapes
+                    .iter()
+                    .filter(|shape| shape.validate().is_ok()),
+                Point::new(offset_x, offset_y),
+            );
 
             let mut committed = false;
             let mut electrical_committed = false;
@@ -268,6 +286,24 @@ impl SchematicState {
                 }
                 s.design_notes.push(new_note);
                 s.selection.select_design_note(new_id);
+            }
+
+            for mut shape in clipboard_documentation_shapes {
+                if shape.validate().is_err() {
+                    continue;
+                }
+                shape.translate(documentation_shape_offset);
+                if shape.validate().is_err() {
+                    continue;
+                }
+                if !committed {
+                    s.selection.clear();
+                    committed = true;
+                }
+                let new_id = s.next_id();
+                shape.id = new_id;
+                s.documentation_shapes.push(shape);
+                s.selection.select_documentation_shape(new_id);
             }
 
             // Paste buses before taps so every source reference can be
@@ -356,6 +392,7 @@ impl SchematicState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::DocumentationShapeGeometry;
 
     #[test]
     fn note_only_clipboard_pastes_at_exact_target_without_junction_constraints() {
@@ -663,5 +700,59 @@ mod tests {
 
         assert!(schematic.paste_at(Point::new(123, 456)));
         assert_eq!(schematic.net_labels[0].pos, Point::new(123, 456));
+    }
+
+    #[test]
+    fn documentation_shape_copy_paste_translates_exactly_with_fresh_identity_and_one_undo() {
+        let original = DocumentationShape::new(
+            110,
+            DocumentationShapeGeometry::Rectangle {
+                first: Point::new(10, 20),
+                opposite: Point::new(30, 40),
+            },
+        )
+        .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic.documentation_shapes.push(original.clone());
+        schematic.recalculate_runtime_state();
+        schematic
+            .selection
+            .select_only_documentation_shape(original.id);
+        schematic.init_undo_history();
+        let topology = schematic.topology_version();
+
+        schematic.copy_selection();
+
+        assert_eq!(
+            schematic.clipboard.documentation_shapes,
+            vec![original.clone()]
+        );
+        assert_eq!(schematic.clipboard.origin, Point::new(20, 30));
+        assert!(schematic.paste_at(Point::new(100, 120)));
+        assert_eq!(schematic.documentation_shapes.len(), 2);
+        let pasted = schematic.documentation_shapes.last().unwrap();
+        assert_ne!(pasted.id, original.id);
+        assert_eq!(pasted.layer, original.layer);
+        assert_eq!(
+            pasted.geometry,
+            DocumentationShapeGeometry::Rectangle {
+                first: Point::new(90, 110),
+                opposite: Point::new(110, 130),
+            }
+        );
+        assert_eq!(
+            schematic.selection.single_documentation_shape(),
+            Some(pasted.id)
+        );
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(schematic.undo_description(), Some("paste"));
+
+        assert!(schematic.undo());
+        assert_eq!(schematic.documentation_shapes, vec![original]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(
+            !schematic.can_undo(),
+            "paste must create exactly one undo step"
+        );
     }
 }

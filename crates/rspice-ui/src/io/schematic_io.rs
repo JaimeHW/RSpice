@@ -58,7 +58,7 @@ impl SchematicVersion {
     pub const fn current() -> Self {
         Self {
             major: 1,
-            minor: 1,
+            minor: 2,
             patch: 0,
         }
     }
@@ -419,6 +419,22 @@ fn prepare_loaded_schematic(
             ))
         })?;
     }
+    for shape in &file.schematic.documentation_shapes {
+        shape.validate().map_err(|error| {
+            SchematicIoError::ParseError(format!(
+                "invalid documentation shape object {}: {error}",
+                shape.id
+            ))
+        })?;
+    }
+    for shape in &file.schematic.clipboard.documentation_shapes {
+        shape.validate().map_err(|error| {
+            SchematicIoError::ParseError(format!(
+                "invalid clipboard documentation shape object {}: {error}",
+                shape.id
+            ))
+        })?;
+    }
 
     let mut schematic = file.schematic;
 
@@ -457,6 +473,117 @@ pub fn load_schematic_file(path: &Path) -> Result<SchematicFile, SchematicIoErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn documentation_shape_fixture() -> Vec<crate::state::DocumentationShape> {
+        use crate::state::{DocumentationShape, DocumentationShapeGeometry, Point};
+
+        [
+            DocumentationShapeGeometry::Rectangle {
+                first: Point::new(-80, -40),
+                opposite: Point::new(20, 30),
+            },
+            DocumentationShapeGeometry::Line {
+                start: Point::new(-25, 70),
+                end: Point::new(65, 105),
+            },
+            DocumentationShapeGeometry::Polygon {
+                points: vec![
+                    Point::new(100, -20),
+                    Point::new(170, 10),
+                    Point::new(145, 85),
+                    Point::new(80, 45),
+                ],
+            },
+            DocumentationShapeGeometry::Arc {
+                start: Point::new(-100, 160),
+                through: Point::new(-50, 110),
+                end: Point::new(0, 160),
+            },
+            DocumentationShapeGeometry::Callout {
+                tip: Point::new(90, 150),
+                elbow: Point::new(130, 125),
+                box_corner: Point::new(230, 190),
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, geometry)| {
+            DocumentationShape::new(10_000 + index as u64, geometry)
+                .expect("documentation shape fixture is valid")
+        })
+        .collect()
+    }
+
+    #[test]
+    fn documentation_shapes_round_trip_and_legacy_documents_default_empty() {
+        let shapes = documentation_shape_fixture();
+        let mut schematic = SchematicState::default();
+        schematic.documentation_shapes = shapes.clone();
+        schematic.clipboard.documentation_shapes = shapes
+            .iter()
+            .cloned()
+            .map(|mut shape| {
+                shape.id += 100;
+                shape
+            })
+            .collect();
+        let clipboard_shapes = schematic.clipboard.documentation_shapes.clone();
+
+        let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
+        let loaded = load_schematic_text(&json, None).unwrap();
+        assert_eq!(loaded.documentation_shapes, shapes);
+        assert_eq!(loaded.clipboard.documentation_shapes, clipboard_shapes);
+
+        let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
+        legacy["version"]["minor"] = serde_json::json!(1);
+        legacy["schematic"]
+            .as_object_mut()
+            .unwrap()
+            .remove("documentation_shapes");
+        legacy["schematic"]["clipboard"]
+            .as_object_mut()
+            .unwrap()
+            .remove("documentation_shapes");
+        let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
+        assert!(loaded.documentation_shapes.is_empty());
+        assert!(loaded.clipboard.documentation_shapes.is_empty());
+    }
+
+    #[test]
+    fn malformed_serialized_live_and_clipboard_documentation_shapes_fail_closed() {
+        let shapes = documentation_shape_fixture();
+        let mut schematic = SchematicState::default();
+        schematic.documentation_shapes.push(shapes[0].clone());
+        schematic
+            .clipboard
+            .documentation_shapes
+            .push(shapes[1].clone());
+        let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
+
+        let mut malformed_live: serde_json::Value = serde_json::from_str(&json).unwrap();
+        malformed_live["schematic"]["documentation_shapes"][0]["geometry"] = serde_json::json!({
+            "kind": "rectangle",
+            "first": { "x": 10, "y": 20 },
+            "opposite": { "x": 10, "y": 80 }
+        });
+        assert!(matches!(
+            load_schematic_text(&malformed_live.to_string(), None),
+            Err(SchematicIoError::ParseError(message))
+                if message.contains("invalid documentation shape object")
+        ));
+
+        let mut malformed_clipboard: serde_json::Value = serde_json::from_str(&json).unwrap();
+        malformed_clipboard["schematic"]["clipboard"]["documentation_shapes"][0]["geometry"] = serde_json::json!({
+            "kind": "line",
+            "start": { "x": -5, "y": 12 },
+            "end": { "x": -5, "y": 12 }
+        });
+        assert!(matches!(
+            load_schematic_text(&malformed_clipboard.to_string(), None),
+            Err(SchematicIoError::ParseError(message))
+                if message.contains("invalid clipboard documentation shape object")
+        ));
+    }
 
     #[test]
     fn design_notes_round_trip_and_legacy_documents_default_empty() {

@@ -37,6 +37,9 @@ pub enum Tool {
     /// Place a durable non-electrical documentation object.
     DesignNote,
 
+    /// Draw durable non-electrical documentation geometry.
+    DocumentationShape,
+
     /// Place a specific component type
     ///
     /// Click to place component at cursor position. Press 'R' to rotate.
@@ -63,6 +66,7 @@ impl Tool {
             Tool::BusTap => "Bus tap",
             Tool::Junction => "Junction",
             Tool::DesignNote => "Text / note",
+            Tool::DocumentationShape => "Documentation shape",
             Tool::Place(kind) => kind.display_name(),
             Tool::Probe => "Probe",
             Tool::Label => "Label",
@@ -78,6 +82,7 @@ impl Tool {
             Tool::BusTap => Some('t'),
             Tool::Junction => Some('j'),
             Tool::DesignNote => None,
+            Tool::DocumentationShape => None,
             Tool::Place(ComponentType::Resistor) => None, // 'r' is for rotate
             Tool::Place(ComponentType::Capacitor) => Some('c'),
             Tool::Place(ComponentType::Inductor) => Some('l'),
@@ -97,7 +102,11 @@ impl Tool {
     pub fn is_place_tool(&self) -> bool {
         matches!(
             self,
-            Tool::Place(_) | Tool::Junction | Tool::BusTap | Tool::DesignNote
+            Tool::Place(_)
+                | Tool::Junction
+                | Tool::BusTap
+                | Tool::DesignNote
+                | Tool::DocumentationShape
         )
     }
 
@@ -132,6 +141,7 @@ impl Tool {
             Tool::Bus | Tool::BusTap => "crosshair",
             Tool::Junction => "crosshair",
             Tool::DesignNote => "text",
+            Tool::DocumentationShape => "crosshair",
             Tool::Place(_) => "copy",
             Tool::Probe => "crosshair",
             Tool::Label => "text",

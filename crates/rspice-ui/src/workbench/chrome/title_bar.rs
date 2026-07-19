@@ -31,7 +31,7 @@ const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
 const MENU_RENDER_STATE_ID: &str = "workbench.title_menu.render_state";
 const MENU_RETURN_FOCUS_ID: &str = "workbench.title_menu.return_focus";
 const MENU_TYPEAHEAD_ID: &str = "workbench.title_menu.typeahead";
-const DESIGN_PLACEMENT_COMMANDS: [Command; 9] = [
+const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceInstance,
     Command::PlaceWire,
     Command::PlaceBus,
@@ -41,6 +41,7 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 9] = [
     Command::PlaceProbe,
     Command::PlacePin,
     Command::PlaceText,
+    Command::PlaceShape,
 ];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -1180,6 +1181,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlaceProbe => WorkbenchIcon::Probe,
         Command::PlacePin => WorkbenchIcon::Component,
         Command::PlaceText => WorkbenchIcon::Label,
+        Command::PlaceShape => WorkbenchIcon::Grid,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy => WorkbenchIcon::Folder,
         Command::RunSimulation => WorkbenchIcon::Run,
@@ -2359,6 +2361,7 @@ mod tests {
                 Command::PlaceProbe,
                 Command::PlacePin,
                 Command::PlaceText,
+                Command::PlaceShape,
             ]
         );
     }

@@ -6,7 +6,7 @@
 
 use egui::{Align, Frame, Layout, Margin, Rect, Stroke, Ui, Vec2};
 
-use crate::state::{DesignNoteKind, Point};
+use crate::state::{DesignNoteKind, DocumentationShapeGeometry, Point, arc_parameters};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
@@ -47,6 +47,10 @@ pub(crate) enum SelectionPreview {
         position: Point,
         label: String,
         kind: DesignNoteKind,
+    },
+    DocumentationShape {
+        geometry: DocumentationShapeGeometry,
+        label: String,
     },
 }
 
@@ -121,7 +125,7 @@ pub(crate) fn selection_command_workflow<R>(
         .corner_radius(10.0)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let viewport_width = ui.ctx().content_rect().width();
+            let viewport_width = crate::ui::viewport::root_viewport_width(ui.ctx());
             if selection_workflow_uses_columns(viewport_width) {
                 let (right_fraction, right_minimum) =
                     selection_workflow_right_track(viewport_width);
@@ -275,7 +279,8 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
         | SelectionPreview::Bus { label, .. }
         | SelectionPreview::BusTap { label, .. }
         | SelectionPreview::NetLabel { label, .. }
-        | SelectionPreview::DesignNote { label, .. } => label,
+        | SelectionPreview::DesignNote { label, .. }
+        | SelectionPreview::DocumentationShape { label, .. } => label,
     };
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_description(format!("{code}: {accessible_description}"));
@@ -475,6 +480,42 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
             }
             Rect::from_two_pos(anchor, text_pos + galley.size()).expand(10.0)
         }
+        SelectionPreview::DocumentationShape { geometry, .. } => {
+            let points = documentation_preview_points(geometry);
+            let mapped = map_points(&points, content);
+            let stroke = Stroke::new(1.8, t.color.accent);
+            match geometry {
+                DocumentationShapeGeometry::Rectangle { .. } => {
+                    painter.rect_stroke(
+                        Rect::from_two_pos(mapped[0], mapped[1]),
+                        7.0,
+                        stroke,
+                        egui::StrokeKind::Middle,
+                    );
+                }
+                DocumentationShapeGeometry::Line { .. }
+                | DocumentationShapeGeometry::Arc { .. } => {
+                    painter.add(egui::Shape::line(mapped.clone(), stroke));
+                }
+                DocumentationShapeGeometry::Polygon { .. } => {
+                    let mut closed = mapped.clone();
+                    if let Some(first) = closed.first().copied() {
+                        closed.push(first);
+                    }
+                    painter.add(egui::Shape::line(closed, stroke));
+                }
+                DocumentationShapeGeometry::Callout { .. } => {
+                    painter.line_segment([mapped[0], mapped[1]], stroke);
+                    painter.rect_stroke(
+                        Rect::from_two_pos(mapped[1], mapped[2]),
+                        7.0,
+                        stroke,
+                        egui::StrokeKind::Middle,
+                    );
+                }
+            }
+            points_bounds(&mapped).expand(14.0)
+        }
     }
     .intersect(rect.shrink(8.0));
     paint_dashed_rect(ui, selection, Stroke::new(1.0, t.color.accent));
@@ -498,6 +539,31 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
         theme::mono(tokens::FS_0, FontWeight::SemiBold),
         t.color.accent,
     );
+}
+
+fn documentation_preview_points(geometry: &DocumentationShapeGeometry) -> Vec<Point> {
+    match geometry {
+        DocumentationShapeGeometry::Arc {
+            start,
+            through,
+            end,
+        } => {
+            let Some((cx, cy, radius, start_angle, sweep)) = arc_parameters(*start, *through, *end)
+            else {
+                return vec![*start, *through, *end];
+            };
+            (0..=48)
+                .map(|index| {
+                    let angle = start_angle + sweep * f64::from(index) / 48.0;
+                    Point::new(
+                        (cx + radius * angle.cos()).round() as i32,
+                        (cy + radius * angle.sin()).round() as i32,
+                    )
+                })
+                .collect()
+        }
+        _ => geometry.points(),
+    }
 }
 
 fn map_points(points: &[Point], rect: Rect) -> Vec<egui::Pos2> {

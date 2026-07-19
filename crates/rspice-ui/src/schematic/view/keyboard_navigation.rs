@@ -20,6 +20,7 @@ pub(super) fn handle_keyboard_instance_navigation(
     state: &mut AppState,
 ) -> bool {
     if !response.has_focus()
+        || state.schematic.tool != crate::state::Tool::Select
         || !state
             .ui
             .preferences

@@ -22,6 +22,7 @@ pub mod palette;
 pub mod plot;
 pub mod theme;
 pub mod tokens;
+pub(crate) mod viewport;
 pub mod widgets;
 
 pub use theme::{EngineeringCanvasTheme, FontWeight, Theme};

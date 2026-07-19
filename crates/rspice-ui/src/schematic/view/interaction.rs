@@ -7,6 +7,7 @@ use super::SchematicSymbolContext;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate};
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::design_notes::design_note_at;
+use super::documentation_shapes::documentation_shape_at;
 use super::drawing::{bus_tap_at, nearest_bus_hit, nearest_terminal};
 use super::net_labels::net_label_at;
 use super::viewport::Viewport;
@@ -20,12 +21,29 @@ pub(super) fn handle_tool_interactions(
 ) {
     let grid_size = state.schematic.grid_size;
     let current_tool = state.schematic.tool;
+    let shape_double_click = current_tool == Tool::DocumentationShape
+        && response.double_clicked_by(egui::PointerButton::Primary);
+
+    if current_tool == Tool::DocumentationShape
+        && ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO)
+        && let Some(pos) = response.hover_pos()
+    {
+        let drawing = &mut state.schematic.documentation_shape_drawing;
+        drawing.keyboard_cursor = Some(screen_to_grid(viewport, grid_size, pos));
+        drawing.keyboard_active = false;
+    }
 
     if matches!(current_tool, Tool::Select) {
         handle_select_dragging(ui, response, state, viewport, grid_size, symbol_context);
     }
 
+    if shape_double_click && let Some(pos) = response.interact_pointer_pos() {
+        let grid_pos = screen_to_grid(viewport, grid_size, pos);
+        handle_documentation_shape_click(ui, state, grid_pos, true);
+    }
+
     if response.clicked_by(egui::PointerButton::Primary)
+        && !shape_double_click
         && let Some(pos) = response.interact_pointer_pos()
     {
         match current_tool {
@@ -36,6 +54,7 @@ pub(super) fn handle_tool_interactions(
             | Tool::BusTap
             | Tool::Junction
             | Tool::DesignNote
+            | Tool::DocumentationShape
             | Tool::Label
                 if state.schematic.read_only =>
             {
@@ -77,6 +96,10 @@ pub(super) fn handle_tool_interactions(
             Tool::DesignNote => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
                 place_pending_design_note(state, grid_pos);
+            }
+            Tool::DocumentationShape => {
+                let grid_pos = screen_to_grid(viewport, grid_size, pos);
+                handle_documentation_shape_click(ui, state, grid_pos, false);
             }
             Tool::Select => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
@@ -163,7 +186,19 @@ pub(super) fn handle_tool_interactions(
             && let Err(error) = state.schematic.finish_bus()
         {
             report_bus_error(ui, state, "Bus could not be committed", error.to_string());
+        } else if state.schematic.tool == Tool::DocumentationShape
+            && !state
+                .schematic
+                .documentation_shape_drawing
+                .points
+                .is_empty()
+        {
+            finish_documentation_polygon(ui, state);
         }
+    }
+
+    if state.schematic.tool == Tool::DocumentationShape && response.has_focus() {
+        handle_documentation_shape_keyboard(ui, response, state, viewport, grid_size);
     }
 }
 
@@ -327,6 +362,15 @@ fn handle_select_dragging(
                 Some(PointerTarget::DesignNote(id)) => {
                     if !state.schematic.selection.has_design_note(id) {
                         state.schematic.selection.select_only_design_note(id);
+                    }
+                    start_selection_drag(state, grid_pos);
+                }
+                Some(PointerTarget::DocumentationShape(id)) => {
+                    if !state.schematic.selection.has_documentation_shape(id) {
+                        state
+                            .schematic
+                            .selection
+                            .select_only_documentation_shape(id);
                     }
                     start_selection_drag(state, grid_pos);
                 }
@@ -587,6 +631,218 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
     }
 }
 
+fn handle_documentation_shape_click(
+    ui: &Ui,
+    state: &mut AppState,
+    grid_pos: Point,
+    finish_polygon: bool,
+) {
+    state.schematic.documentation_shape_drawing.keyboard_cursor = Some(grid_pos);
+    state.schematic.documentation_shape_drawing.keyboard_active = false;
+    let Some(pending) = state.schematic.pending_documentation_shape.as_ref() else {
+        state.push_user_message(ConsoleMessage::warning(
+            "Documentation-shape placement requires a validated graphics contract; reopen Draw documentation shape."
+                .to_owned(),
+        ));
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
+    };
+    let authority_matches = pending
+        .document_authority
+        .as_ref()
+        .is_some_and(|authority| {
+            authority.design_execution_epoch == state.design_execution_epoch
+                && authority.active_schematic_epoch == state.active_schematic_epoch
+                && authority.view_path == state.workspace.active_view.display_path()
+        });
+    if state.schematic.read_only || state.active_view_read_only() || !authority_matches {
+        state.push_user_message(ConsoleMessage::warning(
+            "Documentation shape was not placed: the active schematic authority changed; reopen Draw documentation shape."
+                .to_owned(),
+        ));
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
+    }
+    let kind = pending.kind;
+    match state
+        .schematic
+        .documentation_shape_drawing
+        .add_point(kind, grid_pos)
+    {
+        Ok(auto_commit) if auto_commit || finish_polygon => {
+            finish_documentation_shape(ui, state, kind);
+        }
+        Ok(_) => {}
+        Err(error) => report_documentation_shape_error(ui, state, error),
+    }
+}
+
+fn handle_documentation_shape_keyboard(
+    ui: &Ui,
+    response: &Response,
+    state: &mut AppState,
+    viewport: &Viewport,
+    grid_size: i32,
+) {
+    let (left, right, up, down, place, finish, backspace) = ui.input_mut(|input| {
+        (
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Space),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+        )
+    });
+    let directional = left || right || up || down;
+    if directional {
+        let fallback = response
+            .hover_pos()
+            .map(|position| screen_to_grid(viewport, grid_size, position))
+            .or_else(|| {
+                state
+                    .schematic
+                    .documentation_shape_drawing
+                    .points
+                    .last()
+                    .copied()
+            })
+            .unwrap_or_else(Point::origin);
+        let drawing = &mut state.schematic.documentation_shape_drawing;
+        let mut cursor = drawing.keyboard_cursor.unwrap_or(fallback);
+        let step = grid_size.max(1);
+        if left {
+            cursor.x = cursor.x.saturating_sub(step);
+        }
+        if right {
+            cursor.x = cursor.x.saturating_add(step);
+        }
+        if up {
+            cursor.y = cursor.y.saturating_sub(step);
+        }
+        if down {
+            cursor.y = cursor.y.saturating_add(step);
+        }
+        drawing.keyboard_cursor = Some(cursor);
+        drawing.keyboard_active = true;
+    }
+    if backspace {
+        state.schematic.documentation_shape_drawing.points.pop();
+    }
+
+    let Some(cursor) = state
+        .schematic
+        .documentation_shape_drawing
+        .keyboard_cursor
+        .or_else(|| {
+            response
+                .hover_pos()
+                .map(|position| screen_to_grid(viewport, grid_size, position))
+        })
+    else {
+        return;
+    };
+    if place {
+        state.schematic.documentation_shape_drawing.keyboard_active = true;
+        handle_documentation_shape_click(ui, state, cursor, false);
+        if state.schematic.tool == Tool::DocumentationShape {
+            state.schematic.documentation_shape_drawing.keyboard_active = true;
+        }
+    } else if finish {
+        let can_finish_polygon = state
+            .schematic
+            .pending_documentation_shape
+            .as_ref()
+            .is_some_and(|pending| {
+                pending.kind == crate::state::DocumentationShapeKind::Polygon
+                    && state.schematic.documentation_shape_drawing.points.len() >= 3
+            });
+        if can_finish_polygon {
+            finish_documentation_polygon(ui, state);
+        } else {
+            state.schematic.documentation_shape_drawing.keyboard_active = true;
+            handle_documentation_shape_click(ui, state, cursor, false);
+            if state.schematic.tool == Tool::DocumentationShape {
+                state.schematic.documentation_shape_drawing.keyboard_active = true;
+            }
+        }
+    }
+}
+
+fn finish_documentation_polygon(ui: &Ui, state: &mut AppState) {
+    let Some(kind) = state
+        .schematic
+        .pending_documentation_shape
+        .as_ref()
+        .map(|pending| pending.kind)
+    else {
+        return;
+    };
+    if kind == crate::state::DocumentationShapeKind::Polygon {
+        finish_documentation_shape(ui, state, kind);
+    }
+}
+
+fn finish_documentation_shape(
+    ui: &Ui,
+    state: &mut AppState,
+    kind: crate::state::DocumentationShapeKind,
+) {
+    let geometry = match state.schematic.documentation_shape_drawing.geometry(kind) {
+        Ok(geometry) => geometry,
+        Err(error) => {
+            report_documentation_shape_error(ui, state, error);
+            return;
+        }
+    };
+    let Some(pending) = state.schematic.pending_documentation_shape.clone() else {
+        return;
+    };
+    match state
+        .schematic
+        .commit_documentation_shape(pending, geometry)
+    {
+        Ok(stable_id) => {
+            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.sync_active_schematic_to_workspace();
+            let message = format!(
+                "Placed {} as stable non-electrical documentation shape {stable_id}.",
+                kind.label()
+            );
+            state
+                .ui
+                .toasts
+                .success(ui.ctx(), "Documentation shape placed", message.clone());
+            state.push_user_message(ConsoleMessage::info(message));
+        }
+        Err(error) => {
+            report_documentation_shape_error(ui, state, error);
+            if matches!(
+                error,
+                crate::state::DocumentationShapeError::ReadOnly
+                    | crate::state::DocumentationShapeError::StaleDocument
+            ) {
+                crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            }
+        }
+    }
+}
+
+fn report_documentation_shape_error(
+    ui: &Ui,
+    state: &mut AppState,
+    error: crate::state::DocumentationShapeError,
+) {
+    let message = format!("Documentation shape was not placed: {error}");
+    state.ui.toasts.warn_with_title(
+        ui.ctx(),
+        "Documentation shape needs attention",
+        message.clone(),
+    );
+    state.push_user_message(ConsoleMessage::warning(message));
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JunctionPlacementOutcome {
     Placed(Point),
@@ -671,6 +927,7 @@ fn handle_junction_click(ui: &Ui, state: &mut AppState, requested: Point) {
 pub(super) enum PointerTarget {
     Component(u64),
     DesignNote(u64),
+    DocumentationShape(u64),
     NetLabel(u64),
     BusTap(u64),
     Junction(Point),
@@ -731,6 +988,10 @@ pub(super) fn pointer_target(
             .map(|hit| PointerTarget::Bus(hit.bus_id))
     })
     .or_else(|| state.schematic.wire_at(hit.grid).map(PointerTarget::Wire))
+    .or_else(|| {
+        documentation_shape_at(viewport, &state.schematic.documentation_shapes, pointer_pos)
+            .map(PointerTarget::DocumentationShape)
+    })
 }
 
 fn handle_select_click(
@@ -771,6 +1032,17 @@ fn handle_select_click(
                 state.schematic.selection.toggle_design_note(id);
             } else {
                 state.schematic.selection.select_only_design_note(id);
+            }
+        }
+        Some(PointerTarget::DocumentationShape(id)) => {
+            state.schematic.net_highlight.clear();
+            if additive {
+                state.schematic.selection.toggle_documentation_shape(id);
+            } else {
+                state
+                    .schematic
+                    .selection
+                    .select_only_documentation_shape(id);
             }
         }
         Some(PointerTarget::NetLabel(id)) => {
@@ -1004,6 +1276,12 @@ fn open_object_properties(
         Some(PointerTarget::DesignNote(id)) => {
             state.schematic.selection.select_only_design_note(id);
         }
+        Some(PointerTarget::DocumentationShape(id)) => {
+            state
+                .schematic
+                .selection
+                .select_only_documentation_shape(id);
+        }
         Some(PointerTarget::NetLabel(id)) => {
             state.schematic.selection.select_only_net_label(id);
         }
@@ -1023,8 +1301,9 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        DesignNoteKind, Junction, NetLabel, PendingDesignNotePlacement, PendingPortPlacement,
-        PortDirection, PortDirectionType, PortDiscipline, PortSignalType, Tool, Wire,
+        DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
+        PendingDocumentationShapePlacement, PendingPortPlacement, PortDirection, PortDirectionType,
+        PortDiscipline, PortSignalType, Tool, Wire,
     };
 
     fn pointer_viewport() -> Viewport {
@@ -1033,6 +1312,14 @@ mod tests {
             zoom: 1.0,
             bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(400.0)),
         }
+    }
+
+    fn with_test_ui(mut body: impl FnMut(&egui::Ui)) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| body(ui));
+        });
     }
 
     #[test]
@@ -1105,6 +1392,199 @@ mod tests {
         assert_eq!(state.schematic.tool, Tool::Select);
         assert!(state.schematic.undo());
         assert!(state.schematic.design_notes.is_empty());
+    }
+
+    #[test]
+    fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
+        let cases = [
+            (
+                DocumentationShapeKind::Rectangle,
+                vec![Point::new(0, 0), Point::new(20, 10)],
+                false,
+            ),
+            (
+                DocumentationShapeKind::Line,
+                vec![Point::new(0, 0), Point::new(20, 10)],
+                false,
+            ),
+            (
+                DocumentationShapeKind::Polygon,
+                vec![Point::new(0, 0), Point::new(20, 0), Point::new(10, 10)],
+                true,
+            ),
+            (
+                DocumentationShapeKind::Arc,
+                vec![Point::new(0, 10), Point::new(10, 0), Point::new(20, 10)],
+                false,
+            ),
+            (
+                DocumentationShapeKind::Callout,
+                vec![Point::new(0, 0), Point::new(10, 10), Point::new(30, 20)],
+                false,
+            ),
+        ];
+
+        for (kind, points, finish_on_last_click) in cases {
+            let mut state = AppState::default();
+            let topology = state.schematic.topology_version();
+            state.schematic.pending_documentation_shape = Some(
+                PendingDocumentationShapePlacement::new(
+                    kind,
+                    topology,
+                    &state.schematic.documentation_shapes,
+                )
+                .with_document_authority(
+                    state.design_execution_epoch,
+                    state.active_schematic_epoch,
+                    state.workspace.active_view.display_path(),
+                ),
+            );
+            state.schematic.tool = Tool::DocumentationShape;
+
+            for (index, point) in points.iter().copied().enumerate() {
+                let finish = finish_on_last_click && index + 1 == points.len();
+                with_test_ui(|ui| handle_documentation_shape_click(ui, &mut state, point, finish));
+            }
+
+            assert_eq!(state.schematic.documentation_shapes.len(), 1, "{kind:?}");
+            assert_eq!(state.schematic.documentation_shapes[0].kind(), kind);
+            assert_eq!(state.schematic.topology_version(), topology);
+            assert!(state.schematic.components.is_empty());
+            assert!(state.schematic.wires.is_empty());
+            assert_eq!(state.schematic.tool, Tool::Select);
+            assert!(state.schematic.pending_documentation_shape.is_none());
+            assert!(
+                state
+                    .schematic
+                    .documentation_shape_drawing
+                    .points
+                    .is_empty()
+            );
+            assert_eq!(
+                state.schematic.undo_description(),
+                Some("draw documentation shape")
+            );
+            assert!(state.schematic.undo());
+            assert!(state.schematic.documentation_shapes.is_empty());
+            assert!(
+                !state.schematic.can_undo(),
+                "{kind:?} must create one undo step"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
+        let mut state = AppState::default();
+        state.schematic.pending_documentation_shape = Some(
+            PendingDocumentationShapePlacement::new(
+                DocumentationShapeKind::Line,
+                state.schematic.topology_version(),
+                &state.schematic.documentation_shapes,
+            )
+            .with_document_authority(
+                state.design_execution_epoch,
+                state.active_schematic_epoch,
+                state.workspace.active_view.display_path(),
+            ),
+        );
+        state.schematic.tool = Tool::DocumentationShape;
+        state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
+
+        with_test_ui(|ui| {
+            handle_documentation_shape_click(ui, &mut state, Point::new(0, 0), false)
+        });
+
+        assert!(state.schematic.documentation_shapes.is_empty());
+        assert!(state.schematic.pending_documentation_shape.is_none());
+        assert!(
+            state
+                .schematic
+                .documentation_shape_drawing
+                .points
+                .is_empty()
+        );
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(!state.schematic.can_undo());
+    }
+
+    #[test]
+    fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
+        let mut state = AppState::default();
+        let grid = state.schematic.grid_size;
+        state.schematic.pending_documentation_shape = Some(
+            PendingDocumentationShapePlacement::new(
+                DocumentationShapeKind::Line,
+                state.schematic.topology_version(),
+                &state.schematic.documentation_shapes,
+            )
+            .with_document_authority(
+                state.design_execution_epoch,
+                state.active_schematic_epoch,
+                state.workspace.active_view.display_path(),
+            ),
+        );
+        state.schematic.tool = Tool::DocumentationShape;
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let keyboard_frame = |keys: &[egui::Key], state: &mut AppState| {
+            let input = egui::RawInput {
+                events: keys
+                    .iter()
+                    .copied()
+                    .map(|key| egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let response = ui.interact(
+                        ui.max_rect(),
+                        egui::Id::new("documentation-shape-keyboard-test"),
+                        egui::Sense::click_and_drag(),
+                    );
+                    let viewport = pointer_viewport();
+                    handle_documentation_shape_keyboard(ui, &response, state, &viewport, grid);
+                });
+            });
+        };
+
+        keyboard_frame(&[egui::Key::ArrowRight, egui::Key::Space], &mut state);
+        assert_eq!(
+            state.schematic.documentation_shape_drawing.points,
+            vec![Point::new(grid, 0)]
+        );
+        keyboard_frame(&[egui::Key::ArrowDown, egui::Key::Enter], &mut state);
+
+        assert_eq!(state.schematic.documentation_shapes.len(), 1);
+        assert_eq!(
+            state.schematic.documentation_shapes[0].geometry,
+            crate::state::DocumentationShapeGeometry::Line {
+                start: Point::new(grid, 0),
+                end: Point::new(grid, grid),
+            }
+        );
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(
+            state
+                .schematic
+                .documentation_shape_drawing
+                .points
+                .is_empty()
+        );
+        assert!(
+            state
+                .schematic
+                .documentation_shape_drawing
+                .keyboard_cursor
+                .is_none()
+        );
     }
 
     #[test]

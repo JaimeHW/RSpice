@@ -36,6 +36,7 @@ use std::sync::Arc;
 use super::bus::{Bus, BusTap};
 use super::component::Component;
 use super::design_note::DesignNote;
+use super::documentation_shape::DocumentationShape;
 use super::net_label::{Junction, NetLabel};
 use super::wire::{Wire, WireConnection};
 
@@ -71,6 +72,8 @@ pub struct SchematicSnapshot {
     pub net_labels: Vec<NetLabel>,
     /// Durable non-electrical design notes.
     pub design_notes: Vec<DesignNote>,
+    /// Durable non-electrical documentation geometry.
+    pub documentation_shapes: Vec<DocumentationShape>,
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
 }
@@ -86,6 +89,7 @@ impl SchematicSnapshot {
             junctions: state.junctions.clone(),
             net_labels: state.net_labels.clone(),
             design_notes: state.design_notes.clone(),
+            documentation_shapes: state.documentation_shapes.clone(),
             connections: state.connections.clone(),
         }
     }
@@ -108,6 +112,7 @@ impl SchematicSnapshot {
         state.junctions = self.junctions.clone();
         state.net_labels = self.net_labels.clone();
         state.design_notes = self.design_notes.clone();
+        state.documentation_shapes = self.documentation_shapes.clone();
         state.connections = self.connections.clone();
 
         if electrical_changed {
@@ -132,6 +137,7 @@ impl SchematicSnapshot {
             && self.junctions == other.junctions
             && self.net_labels == other.net_labels
             && self.design_notes == other.design_notes
+            && self.documentation_shapes == other.documentation_shapes
             && self.connections == other.connections
     }
 }
@@ -420,6 +426,7 @@ mod tests {
             junctions: Vec::new(),
             net_labels: Vec::new(),
             design_notes: Vec::new(),
+            documentation_shapes: Vec::new(),
             connections: Vec::new(),
         }
     }

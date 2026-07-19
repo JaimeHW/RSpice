@@ -354,6 +354,11 @@ fn structural_delta(baseline: &SchematicState, recovered: &SchematicState) -> us
         + changed_objects_by_id(&baseline.design_notes, &recovered.design_notes, |item| {
             item.id
         })
+        + changed_objects_by_id(
+            &baseline.documentation_shapes,
+            &recovered.documentation_shapes,
+            |item| item.id,
+        )
 }
 
 /// Count semantic additions, removals, and modifications while preserving a
@@ -1026,8 +1031,9 @@ fn reveal_directory(directory: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::state::{
-        AnalysisResult, AnalysisType, Component, ComponentType, Junction, NetLabel, Point,
-        SimulationRun, SimulationRunProvenance, Wire,
+        AnalysisResult, AnalysisType, Component, ComponentType, DocumentationShape,
+        DocumentationShapeGeometry, Junction, NetLabel, Point, SimulationRun,
+        SimulationRunProvenance, Wire,
     };
 
     #[test]
@@ -1099,6 +1105,45 @@ mod tests {
         recovered.junctions[0].pos = Point::new(20, 0);
 
         assert_eq!(structural_delta(&baseline, &recovered), 4);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn structural_delta_counts_documentation_shape_add_remove_and_edit() {
+        let mut baseline = SchematicState::default();
+        baseline.documentation_shapes = vec![
+            DocumentationShape::new(
+                81,
+                DocumentationShapeGeometry::Rectangle {
+                    first: Point::new(0, 0),
+                    opposite: Point::new(10, 8),
+                },
+            )
+            .unwrap(),
+            DocumentationShape::new(
+                82,
+                DocumentationShapeGeometry::Line {
+                    start: Point::new(12, 0),
+                    end: Point::new(20, 8),
+                },
+            )
+            .unwrap(),
+        ];
+
+        let mut recovered = baseline.clone();
+        recovered.documentation_shapes[0].translate(Point::new(2, 1));
+        recovered.documentation_shapes.remove(1);
+        recovered.documentation_shapes.push(
+            DocumentationShape::new(
+                83,
+                DocumentationShapeGeometry::Polygon {
+                    points: vec![Point::new(22, 0), Point::new(30, 0), Point::new(26, 8)],
+                },
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(structural_delta(&baseline, &recovered), 3);
     }
 
     #[test]

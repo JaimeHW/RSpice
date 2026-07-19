@@ -100,6 +100,7 @@ impl SchematicState {
             && self.wires.is_empty()
             && self.junctions.is_empty()
             && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
         {
             return None;
         }
@@ -149,6 +150,14 @@ impl SchematicState {
             min_y = min_y.min(note.pos.y);
             max_x = max_x.max(note.pos.x.saturating_add(columns.saturating_mul(8)));
             max_y = max_y.max(note.pos.y.saturating_add(lines.saturating_mul(15)));
+        }
+
+        for shape in &self.documentation_shapes {
+            let (min, max) = shape.bounds();
+            min_x = min_x.min(min.x);
+            min_y = min_y.min(min.y);
+            max_x = max_x.max(max.x);
+            max_y = max_y.max(max.y);
         }
 
         Some((min_x, min_y, max_x, max_y))

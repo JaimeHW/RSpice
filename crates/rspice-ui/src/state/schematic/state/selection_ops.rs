@@ -233,7 +233,11 @@ impl SchematicState {
             || self
                 .design_notes
                 .iter()
-                .any(|note| selection.has_design_note(note.id));
+                .any(|note| selection.has_design_note(note.id))
+            || self
+                .documentation_shapes
+                .iter()
+                .any(|shape| selection.has_documentation_shape(shape.id));
         if !has_live_object {
             return false;
         }
@@ -288,6 +292,9 @@ impl SchematicState {
             schematic
                 .design_notes
                 .retain(|note| !selection.has_design_note(note.id));
+            schematic
+                .documentation_shapes
+                .retain(|shape| !selection.has_documentation_shape(shape.id));
             schematic.selection.clear();
             schematic.is_dirty = true;
             if removes_electrical_object {
@@ -305,6 +312,11 @@ impl SchematicState {
         self.selection.bus_taps = self.bus_taps.iter().map(|item| item.id).collect();
         self.selection.net_labels = self.net_labels.iter().map(|item| item.id).collect();
         self.selection.design_notes = self.design_notes.iter().map(|item| item.id).collect();
+        self.selection.documentation_shapes = self
+            .documentation_shapes
+            .iter()
+            .map(|item| item.id)
+            .collect();
         for position in self.junctions.iter().map(|item| item.pos) {
             self.selection.select_junction(position);
         }
@@ -370,6 +382,7 @@ fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::DocumentationShapeGeometry;
 
     #[test]
     fn junction_deletion_is_one_undoable_transaction() {
@@ -560,5 +573,52 @@ mod tests {
         assert_eq!(schematic.design_notes, vec![note]);
         assert_eq!(schematic.junctions, vec![Junction::new(7, point)]);
         assert_eq!(schematic.topology_version(), topology);
+    }
+
+    #[test]
+    fn documentation_shape_select_all_delete_and_undo_are_non_electrical() {
+        let retained = DocumentationShape::new(
+            43,
+            DocumentationShapeGeometry::Line {
+                start: Point::new(0, 0),
+                end: Point::new(10, 10),
+            },
+        )
+        .unwrap();
+        let removed = DocumentationShape::new(
+            44,
+            DocumentationShapeGeometry::Callout {
+                tip: Point::new(20, 20),
+                elbow: Point::new(30, 20),
+                box_corner: Point::new(40, 30),
+            },
+        )
+        .unwrap();
+        let marker = Point::new(90, 90);
+        let mut schematic = SchematicState::default();
+        schematic.documentation_shapes = vec![retained.clone(), removed.clone()];
+        schematic.junctions.push(Junction::new(7, marker));
+
+        schematic.select_all_objects();
+        assert!(schematic.selection.has_documentation_shape(retained.id));
+        assert!(schematic.selection.has_documentation_shape(removed.id));
+        assert_eq!(schematic.selection.count(), 3);
+
+        schematic
+            .selection
+            .select_only_documentation_shape(removed.id);
+        schematic.init_undo_history();
+        let topology = schematic.topology_version();
+        assert!(schematic.delete_selection());
+        assert_eq!(schematic.documentation_shapes, vec![retained.clone()]);
+        assert_eq!(schematic.junctions, vec![Junction::new(7, marker)]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(schematic.undo_description(), Some("delete selection"));
+
+        assert!(schematic.undo());
+        assert_eq!(schematic.documentation_shapes, vec![retained, removed]);
+        assert_eq!(schematic.junctions, vec![Junction::new(7, marker)]);
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(!schematic.can_undo(), "deletion must create one undo step");
     }
 }

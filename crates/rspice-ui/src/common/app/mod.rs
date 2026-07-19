@@ -54,8 +54,9 @@ pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewR
 mod app_dialog_state;
 pub(crate) use app_dialog_state::{
     BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft,
-    DesignNoteDialogState, DesignNoteObjectPropertiesDraft, NetLabelObjectPropertiesDraft,
-    ObjectPropertiesDraft, PinPortDialogState, RenameSelectionTarget,
+    DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
+    DocumentationShapeObjectPropertiesDraft, NetLabelObjectPropertiesDraft, ObjectPropertiesDraft,
+    PinPortDialogState, RenameSelectionTarget,
 };
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
@@ -82,6 +83,7 @@ mod app_modal_workflows;
 
 mod app_bus_tap_dialog;
 mod app_design_note_dialog;
+mod app_documentation_shape_dialog;
 mod app_object_properties_dialog;
 mod app_pin_port_dialog;
 
@@ -861,6 +863,7 @@ impl RSpiceApp {
         self.render_bus_tap_dialog(ctx);
         self.render_pin_port_dialog(ctx);
         self.render_design_note_dialog(ctx);
+        self.render_documentation_shape_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);
@@ -1154,6 +1157,7 @@ impl eframe::App for RSpiceApp {
     /// Called on each frame
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        crate::ui::viewport::capture_root_viewport(&ctx, ui.max_rect());
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(enabled) = crate::common::browser_accessibility::spoken_feedback_override()

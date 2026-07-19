@@ -1,4 +1,4 @@
-use super::super::super::BusTargetKind;
+use super::super::super::{BusTargetKind, clamped_documentation_shape_translation};
 use super::super::*;
 
 impl SchematicState {
@@ -91,6 +91,12 @@ impl SchematicState {
         if self.read_only || delta == Point::origin() || !has_live_movable_selection(self) {
             return;
         }
+        let documentation_shape_delta = clamped_documentation_shape_translation(
+            self.documentation_shapes
+                .iter()
+                .filter(|shape| self.selection.has_documentation_shape(shape.id)),
+            delta,
+        );
         let electrical_selection = has_live_electrical_selection(self);
         let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
 
@@ -168,6 +174,14 @@ impl SchematicState {
             .filter(|note| self.selection.has_design_note(note.id))
         {
             note.translate(delta);
+        }
+
+        for shape in self
+            .documentation_shapes
+            .iter_mut()
+            .filter(|shape| self.selection.has_documentation_shape(shape.id))
+        {
+            shape.translate(documentation_shape_delta);
         }
 
         // Move selected wires wholesale.
@@ -283,6 +297,12 @@ impl SchematicState {
         if self.read_only || delta == Point::origin() || !has_live_movable_selection(self) {
             return;
         }
+        let documentation_shape_delta = clamped_documentation_shape_translation(
+            self.documentation_shapes
+                .iter()
+                .filter(|shape| self.selection.has_documentation_shape(shape.id)),
+            delta,
+        );
         let electrical_selection = has_live_electrical_selection(self);
         let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
         // Union of selected components' terminals, BEFORE moving.
@@ -351,6 +371,14 @@ impl SchematicState {
             .filter(|note| self.selection.has_design_note(note.id))
         {
             note.translate(delta);
+        }
+
+        for shape in self
+            .documentation_shapes
+            .iter_mut()
+            .filter(|shape| self.selection.has_documentation_shape(shape.id))
+        {
+            shape.translate(documentation_shape_delta);
         }
 
         // Move selected wires entirely, tracking endpoints for junctions.
@@ -456,6 +484,10 @@ fn has_live_movable_selection(state: &SchematicState) -> bool {
             .design_notes
             .iter()
             .any(|item| state.selection.has_design_note(item.id))
+        || state
+            .documentation_shapes
+            .iter()
+            .any(|item| state.selection.has_documentation_shape(item.id))
 }
 
 fn has_live_electrical_selection(state: &SchematicState) -> bool {
@@ -526,9 +558,9 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, Component, ComponentType,
-        DesignNote, DesignNoteKind, Junction, Library, LibraryCellInstance, LibraryManager,
-        PortDirection, PortSpec, ResolvedCellSymbol, SchematicState, SymbolDocument, SymbolPin,
-        SymbolResolver, View, ViewType, Wire,
+        DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Junction,
+        Library, LibraryCellInstance, LibraryManager, PortDirection, PortSpec, ResolvedCellSymbol,
+        SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View, ViewType, Wire,
     };
     use std::collections::HashMap;
 
@@ -781,6 +813,63 @@ mod tests {
         assert!(schematic.undo());
         assert_eq!(schematic.design_notes, vec![original]);
         assert_eq!(schematic.topology_version(), topology);
+    }
+
+    #[test]
+    fn documentation_shape_move_clamps_one_rigid_delta_for_the_entire_selection() {
+        let boundary_shape = DocumentationShape::new(
+            75,
+            DocumentationShapeGeometry::Rectangle {
+                first: Point::new(i32::MAX - 10, i32::MIN + 20),
+                opposite: Point::new(i32::MAX - 5, i32::MIN + 30),
+            },
+        )
+        .unwrap();
+        let companion_shape = DocumentationShape::new(
+            76,
+            DocumentationShapeGeometry::Line {
+                start: Point::new(i32::MAX - 100, i32::MIN + 200),
+                end: Point::new(i32::MAX - 90, i32::MIN + 210),
+            },
+        )
+        .unwrap();
+        let original = vec![boundary_shape.clone(), companion_shape.clone()];
+        let mut schematic = SchematicState::default();
+        schematic.documentation_shapes = original.clone();
+        schematic
+            .selection
+            .select_documentation_shape(boundary_shape.id);
+        schematic
+            .selection
+            .select_documentation_shape(companion_shape.id);
+        schematic.init_undo_history();
+        let topology = schematic.topology_version();
+
+        schematic.begin_operation("move selection");
+        schematic.move_selection(Point::new(100, -100));
+        assert!(schematic.end_operation());
+
+        assert_eq!(
+            schematic.documentation_shapes[0].geometry,
+            DocumentationShapeGeometry::Rectangle {
+                first: Point::new(i32::MAX - 5, i32::MIN),
+                opposite: Point::new(i32::MAX, i32::MIN + 10),
+            }
+        );
+        assert_eq!(
+            schematic.documentation_shapes[1].geometry,
+            DocumentationShapeGeometry::Line {
+                start: Point::new(i32::MAX - 95, i32::MIN + 180),
+                end: Point::new(i32::MAX - 85, i32::MIN + 190),
+            },
+            "every selected shape must receive the same clamped (+5, -20) delta"
+        );
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(schematic.undo_description(), Some("move selection"));
+        assert!(schematic.undo());
+        assert_eq!(schematic.documentation_shapes, original);
+        assert_eq!(schematic.topology_version(), topology);
+        assert!(!schematic.can_undo(), "one drag must create one undo step");
     }
 
     #[test]
