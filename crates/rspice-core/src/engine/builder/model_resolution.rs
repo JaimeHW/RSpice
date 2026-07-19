@@ -13,6 +13,7 @@ pub(super) use capacitors::*;
 pub(super) use inductors::*;
 pub(super) use magnetic::*;
 pub(super) use resistors::*;
+pub(crate) use transmission::validate_native_xyce_ltra_model_contract;
 pub(super) use transmission::*;
 pub(super) use xspice::*;
 

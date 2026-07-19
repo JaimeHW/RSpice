@@ -38,9 +38,9 @@ const TLINE_DC_SHORT_RESISTANCE: Value = 1e-3;
 /// full history convolution rather than a lossy tail truncation.
 const DISTRIBUTED_RLC_CHOP_RELTOL: Value = 0.0;
 /// Default relative tolerance for ngspice-style LTRA straight-line compaction.
-const DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT: Value = 1e-3;
+pub(crate) const DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT: Value = 1e-3;
 /// Default absolute tolerance for ngspice-style LTRA straight-line compaction.
-const DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT: Value = 1e-12;
+pub(crate) const DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT: Value = 1e-12;
 
 mod delay;
 mod distributed;

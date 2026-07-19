@@ -21,7 +21,10 @@
 mod ac;
 mod advanced;
 mod builder;
-pub(crate) use builder::{XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor};
+pub(crate) use builder::{
+    XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor,
+    validate_native_xyce_ltra_model_contract,
+};
 mod config;
 mod config_resolver;
 mod convergence;

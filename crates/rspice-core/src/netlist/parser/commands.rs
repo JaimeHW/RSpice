@@ -1136,6 +1136,10 @@ pub(super) fn parse_options_command(
                 options.b3soi_gmin_scaling =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
+            (Some("DEVICE"), "TRYTOCOMPACT" | "TRY_TO_COMPACT") => {
+                options.device_try_to_compact =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
             (None, "TOPOLOGY_SUPERNODE" | "TOPOLOGYSUPERNODE") => {
                 options.topology_supernode =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -1156,6 +1160,10 @@ pub(super) fn parse_options_command(
             }
             (None, "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING" | "DEVICE_B3SOIGMINSCALING") => {
                 options.b3soi_gmin_scaling =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (None, "TRYTOCOMPACT" | "TRY_TO_COMPACT" | "DEVICE_TRYTOCOMPACT") => {
+                options.device_try_to_compact =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
             (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
@@ -4663,6 +4671,24 @@ mod tests {
         };
         merged.merge(&override_options);
         assert!(!merged.measure_use_cont_files());
+    }
+
+    #[test]
+    fn device_try_to_compact_parses_boolean_forms_and_merges() {
+        let enabled = Netlist::parse(&deck_with_options(".options device trytocompact=1"))
+            .expect("scoped Xyce TRYTOCOMPACT parses");
+        assert_eq!(enabled.options.device_try_to_compact, Some(true));
+
+        let disabled = Netlist::parse(&deck_with_options(".options device try_to_compact=false"))
+            .expect("underscored scoped TRYTOCOMPACT parses");
+        assert_eq!(disabled.options.device_try_to_compact, Some(false));
+
+        let mut merged = crate::netlist::SimulationOptions {
+            device_try_to_compact: Some(true),
+            ..crate::netlist::SimulationOptions::default()
+        };
+        merged.merge(&disabled.options);
+        assert_eq!(merged.device_try_to_compact, Some(false));
     }
 
     #[test]

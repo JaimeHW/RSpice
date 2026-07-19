@@ -114,6 +114,7 @@ impl Engine {
                         warned_dynamic_breakpoint_cap,
                     );
                 }
+                tl.compact_ltra_history_if_straight();
                 continue;
             }
             let (_v1_ref, _v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
@@ -132,6 +133,7 @@ impl Engine {
                         warned_dynamic_breakpoint_cap,
                     );
                 }
+                tl.compact_ltra_history_if_straight();
             } else {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,

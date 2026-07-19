@@ -2855,6 +2855,10 @@ pub struct SimulationOptions {
     /// receives `GMIN * 1e-6` in its terminal GMIN branches. Xyce enables this
     /// by default and decks may set it to zero to request the full GMIN.
     pub b3soi_gmin_scaling: Option<bool>,
+    /// Xyce `.options device trytocompact=...`: compact redundant LTRA
+    /// accepted-history points. Xyce also forces linear LTRA interpolation
+    /// while this option is enabled.
+    pub device_try_to_compact: Option<bool>,
 }
 
 impl SimulationOptions {
@@ -3011,6 +3015,9 @@ impl SimulationOptions {
         }
         if other.b3soi_gmin_scaling.is_some() {
             self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;
+        }
+        if other.device_try_to_compact.is_some() {
+            self.device_try_to_compact = other.device_try_to_compact;
         }
         if other.nonlinear_continuation.is_some() {
             self.nonlinear_continuation = other.nonlinear_continuation;

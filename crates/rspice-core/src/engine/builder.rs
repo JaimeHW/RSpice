@@ -33,8 +33,10 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 mod model_resolution;
-pub(crate) use model_resolution::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
 use model_resolution::*;
+pub(crate) use model_resolution::{
+    XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
+};
 mod behavioral;
 mod builtin_models;
 mod transmission_lines;
@@ -6419,12 +6421,18 @@ impl Engine {
                             tline_model_loss_time_constant(p)
                         }
                     });
-                    let compact_reltol = model_params
-                        .and_then(|p| p.compactrel)
-                        .unwrap_or_else(|| self.voltage_reltol());
-                    let compact_abstol = model_params
-                        .and_then(|p| p.compactabs)
-                        .unwrap_or_else(|| self.voltage_abstol());
+                    let compact_reltol = match model_params.and_then(|p| p.compactrel) {
+                        Some(0.0) => self.voltage_reltol(),
+                        Some(value) => value,
+                        None => crate::device::DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
+                    };
+                    let compact_abstol = match model_params.and_then(|p| p.compactabs) {
+                        Some(0.0) => self.current_abstol(),
+                        Some(value) => value,
+                        None => crate::device::DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT,
+                    };
+                    let try_to_compact = self.config.spice_dialect == SpiceDialect::Xyce
+                        && netlist.options.device_try_to_compact.unwrap_or(false);
                     let dc_series_resistance = model_params
                         .and_then(|p| {
                             let r = p.r?;
@@ -6469,6 +6477,10 @@ impl Engine {
                                 params.abs.unwrap_or(1.0),
                             );
                             if !params.is_txl() {
+                                tline.set_ltra_timestep_policy(
+                                    params.ltra_step_limit,
+                                    params.ltra_trunc_dont_cut,
+                                );
                                 match params.ltra_interpolation {
                                     LtraInterpolationMode::Linear => {
                                         tline.set_ltra_linear_interpolation()
@@ -6511,6 +6523,11 @@ impl Engine {
                                 g,
                                 c,
                                 len,
+                                compact_reltol,
+                                compact_abstol,
+                            );
+                            tline.set_ltra_history_compaction(
+                                try_to_compact,
                                 compact_reltol,
                                 compact_abstol,
                             );

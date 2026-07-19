@@ -81,6 +81,16 @@ pub struct TransmissionLine {
     ltra_breakpoint_reltol: Value,
     /// Absolute derivative tolerance for ngspice-style LTRA breakpoints.
     ltra_breakpoint_abstol: Value,
+    /// Whether accepted LTRA histories use Xyce's straight-line compaction.
+    ltra_history_compaction: bool,
+    /// Relative area tolerance for accepted-history compaction.
+    ltra_compact_reltol: Value,
+    /// Absolute area tolerance for accepted-history compaction.
+    ltra_compact_abstol: Value,
+    /// Xyce LTRA propagation-delay step limiting policy.
+    ltra_step_limit: bool,
+    /// Disable the RLC impulse-response safe-step cut.
+    ltra_trunc_dont_cut: bool,
     /// Optional ngspice TXL branch-current runtime for non-lossless TXL cards.
     txl: Option<txl::TxlRuntime>,
     /// TXL branch-current ordinals allocated by the circuit builder.
@@ -283,6 +293,11 @@ impl TransmissionLine {
             lossless_interpolation_mode: DelayedInterpolationMode::Quadratic,
             ltra_breakpoint_reltol: 1.0,
             ltra_breakpoint_abstol: 1.0,
+            ltra_history_compaction: false,
+            ltra_compact_reltol: DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
+            ltra_compact_abstol: DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT,
+            ltra_step_limit: true,
+            ltra_trunc_dont_cut: false,
             txl: None,
             txl_branch_ordinals: None,
             ltra_branch_ordinals: None,
@@ -481,6 +496,104 @@ impl TransmissionLine {
         self.distributed_rlc_cache.set(None);
     }
 
+    /// Enable Xyce-compatible accepted-history compaction for a native LTRA.
+    ///
+    /// Xyce requires linear interpolation whenever compaction is enabled.
+    pub fn set_ltra_history_compaction(
+        &mut self,
+        enabled: bool,
+        compact_reltol: Value,
+        compact_abstol: Value,
+    ) {
+        self.ltra_history_compaction = enabled;
+        self.ltra_compact_reltol = compact_reltol;
+        self.ltra_compact_abstol = compact_abstol;
+        if enabled {
+            self.set_ltra_linear_interpolation();
+        }
+    }
+
+    /// Configure Xyce LTRA timestep flags from the resolved model card.
+    pub fn set_ltra_timestep_policy(&mut self, step_limit: bool, trunc_dont_cut: bool) {
+        self.ltra_step_limit = step_limit;
+        self.ltra_trunc_dont_cut = trunc_dont_cut;
+    }
+
+    #[inline]
+    fn ltra_straight_line_check(
+        first: (Value, Value),
+        middle: (Value, Value),
+        last: (Value, Value),
+        reltol: Value,
+        abstol: Value,
+    ) -> bool {
+        let (x1, y1) = first;
+        let (x2, y2) = middle;
+        let (x3, y3) = last;
+        if ![x1, y1, x2, y2, x3, y3, reltol, abstol]
+            .into_iter()
+            .all(Value::is_finite)
+            || !(x1 < x2 && x2 < x3)
+            || reltol < 0.0
+            || abstol < 0.0
+        {
+            return false;
+        }
+        let area1 = 0.5 * (y2.abs() + y1.abs()) * (x2 - x1);
+        let area2 = 0.5 * (y3.abs() + y2.abs()) * (x3 - x2);
+        let area3 = 0.5 * (y3.abs() + y1.abs()) * (x3 - x1);
+        let triangle_area = (area3 - area1 - area2).abs();
+        let middle_weight = (x2 - x1) / (x3 - x1);
+        let interpolated_middle = y1 + middle_weight * (y3 - y1);
+        // The upstream area metric is timestep-scaled and can become too
+        // permissive on dense per-device histories. Preserve the intended
+        // integral tolerance while also bounding the actual removed sample to
+        // COMPACTABS plus floating-point roundoff. This prevents cumulative
+        // waveform drift without disabling exact straight-segment compaction.
+        let pointwise_scale = y1.abs().max(y2.abs()).max(y3.abs());
+        let pointwise_tolerance = abstol + 16.0 * Value::EPSILON * pointwise_scale;
+        (area1 + area2) * reltol + abstol > triangle_area
+            && (y2 - interpolated_middle).abs() <= pointwise_tolerance
+    }
+
+    /// Compact the penultimate accepted LTRA point when all four terminal
+    /// histories satisfy Xyce's triangle-area straight-line criterion.
+    ///
+    /// Call this only after derivative-breakpoint detection has observed the
+    /// un-compacted three-point history.
+    pub(crate) fn compact_ltra_history_if_straight(&mut self) -> bool {
+        if !self.ltra_history_compaction
+            || self.distributed_rlc.is_none()
+            || self.state_history.len() < 3
+        {
+            return false;
+        }
+        let len = self.state_history.len();
+        let first = self.state_history[len - 3];
+        let middle = self.state_history[len - 2];
+        let last = self.state_history[len - 1];
+        let straight = |selector: fn(&TlineStateSample) -> Value| {
+            Self::ltra_straight_line_check(
+                (first.time, selector(&first)),
+                (middle.time, selector(&middle)),
+                (last.time, selector(&last)),
+                self.ltra_compact_reltol,
+                self.ltra_compact_abstol,
+            )
+        };
+        if !straight(|sample| sample.v1)
+            || !straight(|sample| sample.v2)
+            || !straight(|sample| sample.i1)
+            || !straight(|sample| sample.i2)
+        {
+            return false;
+        }
+
+        self.state_history.remove(len - 2);
+        self.distributed_rlc_cache.set(None);
+        true
+    }
+
     /// Use ngspice LTRA quadratic interpolation for delayed port states.
     pub fn set_ltra_quadratic_interpolation(&mut self) {
         self.ltra_interpolation_mode = DelayedInterpolationMode::Quadratic;
@@ -656,12 +769,23 @@ impl TransmissionLine {
         candidate_i2: Value,
     ) -> Option<Value> {
         let kernel = self.distributed_rlc.as_ref()?;
-        let mut limit = kernel.max_safe_step;
+        let safe_limit = if self.ltra_trunc_dont_cut {
+            Value::INFINITY
+        } else {
+            kernel.max_safe_step
+        };
 
         let len = self.state_history.len();
         if len < 2 {
+            let limit = self.td.min(safe_limit);
             return (limit.is_finite() && limit > 0.0).then_some(limit);
         }
+
+        let mut limit = if self.ltra_step_limit {
+            self.td.min(safe_limit)
+        } else {
+            safe_limit
+        };
 
         let curr = self.state_history.get(len - 1)?;
         let prev = self.state_history.get(len - 2)?;
@@ -1046,11 +1170,13 @@ impl TransmissionLine {
         self.launched_forward = raw_forward;
         self.launched_backward = raw_backward;
 
-        // Forward wave: V1 + Z0*I1 propagates to port 2
-        self.history_forward.push(time, self.launched_forward);
-
-        // Backward wave: V2 + Z0*I2 propagates to port 1
-        self.history_backward.push(time, self.launched_backward);
+        // Distributed LTRA uses the absolute terminal-state history below;
+        // its convolution is not horizon-limited. Ordinary lossless lines use
+        // these bounded traveling-wave delay buffers instead.
+        if self.distributed_rlc.is_none() {
+            self.history_forward.push(time, self.launched_forward);
+            self.history_backward.push(time, self.launched_backward);
+        }
         self.state_history.push_back(TlineStateSample {
             time,
             v1,
@@ -1199,6 +1325,63 @@ mod tests {
     }
 
     #[test]
+    fn ltra_history_compaction_removes_only_a_straight_middle_point() {
+        let mut line = TransmissionLine::new("TLTRA".to_string(), 1, 0, 2, 0, 2.0, 10.0);
+        line.set_distributed_rlgc(1.0, 1.0, 0.0, 1.0, 1.0);
+        line.set_ltra_history_compaction(true, 1.0e-3, 1.0e-12);
+        line.update_history(0.0, 0.0, 0.0, 2.0, 1.0);
+        line.update_history(1.0, 1.0, 0.5, 4.0, 2.0);
+        line.update_history(2.0, 2.0, 1.0, 6.0, 3.0);
+
+        assert!(line.compact_ltra_history_if_straight());
+        assert_eq!(line.state_history.len(), 2);
+        assert_eq!(line.state_history[0].time, 0.0);
+        assert_eq!(line.state_history[1].time, 2.0);
+    }
+
+    #[test]
+    fn ltra_history_compaction_requires_all_four_terminal_histories() {
+        let mut line = TransmissionLine::new("TLTRA".to_string(), 1, 0, 2, 0, 2.0, 10.0);
+        line.set_distributed_rlgc(1.0, 1.0, 0.0, 1.0, 1.0);
+        line.set_ltra_history_compaction(true, 0.0, 1.0e-12);
+        line.update_history(0.0, 0.0, 0.0, 0.0, 1.0);
+        line.update_history(1.0, 1.0, 0.5, 1.0, 2.0);
+        line.update_history(2.0, 2.0, 1.0, 2.0, 5.0);
+
+        assert!(!line.compact_ltra_history_if_straight());
+        assert_eq!(line.state_history.len(), 3);
+    }
+
+    #[test]
+    fn ltra_straight_line_boundary_is_strict() {
+        assert!(!TransmissionLine::ltra_straight_line_check(
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (2.0, 0.0),
+            0.0,
+            1.0,
+        ));
+        assert!(TransmissionLine::ltra_straight_line_check(
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (2.0, 0.0),
+            0.0,
+            1.0 + Value::EPSILON * 2.0,
+        ));
+    }
+
+    #[test]
+    fn ltra_compaction_rejects_dense_history_pointwise_drift() {
+        assert!(!TransmissionLine::ltra_straight_line_check(
+            (0.0, 0.0),
+            (1.0e-12, 1.0),
+            (2.0e-12, 0.0),
+            1.0e-3,
+            1.0e-12,
+        ));
+    }
+
+    #[test]
     fn ltra_steady_wave_guard_uses_current_abstol_floor() {
         let reltol = 0.0;
         let current_abstol = 1.0e-12;
@@ -1229,6 +1412,29 @@ mod tests {
             .unwrap();
 
         assert_close(limit, line.distributed_rlgc_max_safe_step().unwrap());
+    }
+
+    #[test]
+    fn ltra_nosteplimit_and_truncdontcut_remove_steady_state_caps() {
+        let mut line = distributed_line(&[(0.0, 0.0), (1.0, 1.0)]);
+        line.set_ltra_timestep_policy(false, true);
+
+        assert_eq!(
+            line.ltra_candidate_truncation_limit(2.0, 2.0, 0.0, 0.0, 0.0),
+            None
+        );
+    }
+
+    #[test]
+    fn ltra_nosteplimit_still_limits_a_derivative_change_to_delay() {
+        let mut line = distributed_line(&[(0.0, 0.0), (1.0, 0.0)]);
+        line.set_ltra_timestep_policy(false, true);
+        line.set_ltra_breakpoint_tolerances(0.0, 0.5);
+
+        assert_eq!(
+            line.ltra_candidate_truncation_limit(2.0, 2.0, 0.0, 0.0, 0.0),
+            Some(line.delay())
+        );
     }
 
     #[test]

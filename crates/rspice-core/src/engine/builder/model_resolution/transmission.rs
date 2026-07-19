@@ -14,7 +14,7 @@ pub(in crate::engine::builder) enum TransmissionLineModelKind {
 pub(in crate::engine::builder) enum LtraInterpolationMode {
     Linear,
     // Ngspice's no-flag setup uses quadratic unless global LTRA history
-    // compaction is enabled; RSpice does not implement that compaction yet.
+    // compaction is enabled.
     #[default]
     Quadratic,
     Mixed,
@@ -39,6 +39,8 @@ pub(in crate::engine::builder) struct TransmissionLineModelParams {
     pub(in crate::engine::builder) compactrel: Option<f64>,
     pub(in crate::engine::builder) compactabs: Option<f64>,
     pub(in crate::engine::builder) ltra_interpolation: LtraInterpolationMode,
+    pub(in crate::engine::builder) ltra_step_limit: bool,
+    pub(in crate::engine::builder) ltra_trunc_dont_cut: bool,
 }
 
 impl TransmissionLineModelParams {
@@ -83,6 +85,14 @@ fn resolve_ltra_interpolation_mode(params: &[(String, f64)]) -> LtraInterpolatio
     mode
 }
 
+fn enabled_model_flag(params: &[(String, f64)], name: &str) -> bool {
+    params
+        .iter()
+        .rev()
+        .find(|(param_name, _)| param_name.eq_ignore_ascii_case(name))
+        .is_some_and(|(_, value)| value.is_finite() && *value != 0.0)
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::engine::builder) struct CplModelParams {
     pub(in crate::engine::builder) r: Vec<Vec<f64>>,
@@ -106,6 +116,8 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         return Ok(None);
     };
 
+    let step_limit = enabled_model_flag(&model.params, "STEPLIMIT");
+    let no_step_limit = enabled_model_flag(&model.params, "NOSTEPLIMIT");
     let mut params = TransmissionLineModelParams {
         kind: if model.model_type.eq_ignore_ascii_case("TXL") {
             TransmissionLineModelKind::Txl
@@ -128,6 +140,8 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         compactrel: model_param(&model.params, &["COMPACTREL"]),
         compactabs: model_param(&model.params, &["COMPACTABS"]),
         ltra_interpolation: resolve_ltra_interpolation_mode(&model.params),
+        ltra_step_limit: step_limit || !no_step_limit,
+        ltra_trunc_dont_cut: enabled_model_flag(&model.params, "TRUNCDONTCUT"),
     };
 
     if params.kind == TransmissionLineModelKind::Txl {
@@ -165,6 +179,109 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
     }
 
     Ok(Some(params))
+}
+
+/// Validate the exact model-card subset implemented by the native scalar
+/// Xyce LTRA runtime before an external regression deck is oracle-qualified.
+pub(crate) fn validate_native_xyce_ltra_model_contract(
+    netlist: &Netlist,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    let model = netlist
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case(model_name))
+        .ok_or_else(|| {
+            SimulationError::Circuit(format!("LTRA model '{model_name}' is not defined"))
+        })?;
+    if !model.model_type.eq_ignore_ascii_case("LTRA") {
+        return Err(SimulationError::Circuit(format!(
+            "transmission-line model '{}' has type '{}', not native scalar LTRA",
+            model.name, model.model_type
+        )));
+    }
+    if !model.expr_params.is_empty()
+        || !model.string_params.is_empty()
+        || !model.string_vector_params.is_empty()
+        || !model.real_vector_params.is_empty()
+        || !model.real_vector_expr_params.is_empty()
+        || !model.integer_vector_params.is_empty()
+    {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' contains deferred, string, or vector parameters not supported by the native scalar runtime",
+            model.name
+        )));
+    }
+
+    const SUPPORTED: &[&str] = &[
+        "R",
+        "L",
+        "G",
+        "C",
+        "LEN",
+        "REL",
+        "ABS",
+        "STEPLIMIT",
+        "NOSTEPLIMIT",
+        "LININTERP",
+        "QUADINTERP",
+        "MIXEDINTERP",
+        "COMPACTREL",
+        "COMPACTABS",
+        "TRUNCDONTCUT",
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for (name, value) in &model.params {
+        let canonical = name.to_ascii_uppercase();
+        if !SUPPORTED.contains(&canonical.as_str()) {
+            return Err(SimulationError::Circuit(format!(
+                "LTRA model '{}' uses unsupported parameter '{}'",
+                model.name, name
+            )));
+        }
+        if !seen.insert(canonical) {
+            return Err(SimulationError::Circuit(format!(
+                "LTRA model '{}' repeats parameter '{}'",
+                model.name, name
+            )));
+        }
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "LTRA model '{}' has non-finite {}={}",
+                model.name, name, value
+            )));
+        }
+    }
+
+    let params = resolve_tline_model_params(netlist, model_name)?.ok_or_else(|| {
+        SimulationError::Circuit(format!("LTRA model '{model_name}' is not defined"))
+    })?;
+    let (Some(r), Some(l), Some(c), Some(len), Some(z0), Some(td)) = (
+        params.r, params.l, params.c, params.len, params.z0, params.td,
+    ) else {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' requires explicit finite R, L, C, and LEN parameters",
+            model.name
+        )));
+    };
+    let g = params.g.unwrap_or(0.0);
+    if params.is_txl()
+        || r < 0.0
+        || l <= 0.0
+        || c <= 0.0
+        || len <= 0.0
+        || g.abs() > LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS
+        || !z0.is_finite()
+        || z0 <= 0.0
+        || !td.is_finite()
+        || td <= 0.0
+    {
+        return Err(SimulationError::Circuit(format!(
+            "LTRA model '{}' is outside the native finite RLC, G=0 contract",
+            model.name
+        )));
+    }
+    Ok(())
 }
 
 fn require_txl_param(
@@ -702,6 +819,44 @@ mod tests {
             let source = format!("title\n{line}\n.end\n");
             let err = resolve_test_tline_err(&source);
             assert!(err.to_string().contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn native_xyce_ltra_contract_accepts_typed_rlc_flags() {
+        let netlist = crate::netlist::Netlist::parse(
+            r#"title
+.model cable1 ltra truncdontcut=1 nosteplimit=1
++ r=3 l=10n g=0 c=5p len=10 compactrel=1e-4 compactabs=1e-13
+.end
+"#,
+        )
+        .expect("canonical LTRA model parses");
+
+        validate_native_xyce_ltra_model_contract(&netlist, "cable1")
+            .expect("native scalar RLC flags are qualified");
+        let params = resolve_tline_model_params(&netlist, "cable1")
+            .unwrap()
+            .unwrap();
+        assert!(!params.ltra_step_limit);
+        assert!(params.ltra_trunc_dont_cut);
+    }
+
+    #[test]
+    fn native_xyce_ltra_contract_rejects_unimplemented_or_non_scalar_parameters() {
+        for model in [
+            ".model cable1 ltra r=3 l=10n c=5p len=10 truncnr=1",
+            ".model cable1 ltra r=3 l=10n c=5p len=10 complexstepcontrol=1",
+            ".model cable1 ltra r=3 l=10n c=5p len=10 z0=50",
+        ] {
+            let netlist = crate::netlist::Netlist::parse(&format!("title\n{model}\n.end\n"))
+                .expect("model parses before semantic qualification");
+            let error = validate_native_xyce_ltra_model_contract(&netlist, "cable1")
+                .expect_err("unsupported model parameter must fail closed");
+            assert!(
+                error.to_string().contains("unsupported parameter"),
+                "{error}"
+            );
         }
     }
 
