@@ -1527,6 +1527,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::PlacePin => Icon::Pin,
         Command::PlaceText => Icon::NetLabel,
         Command::PlaceShape => Icon::Grid,
+        Command::MoveSelection => Icon::Select,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
         Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,

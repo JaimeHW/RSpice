@@ -21,6 +21,17 @@ pub(super) fn handle_tool_interactions(
 ) {
     let grid_size = state.schematic.grid_size;
     let current_tool = state.schematic.tool;
+    if state.dialogs.move_selection.armed && current_tool != Tool::MoveSelection {
+        state.dialogs.move_selection.close();
+        // The pointer event that exposed an inconsistent tool/draft pair belongs
+        // to neither workflow. Do not hand it to Select after cancelling the
+        // transactional move or the same gesture could mutate geometry through
+        // the legacy direct-drag path.
+        return;
+    } else if current_tool == Tool::MoveSelection && !state.dialogs.move_selection.armed {
+        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        return;
+    }
     let shape_double_click = current_tool == Tool::DocumentationShape
         && response.double_clicked_by(egui::PointerButton::Primary);
 
@@ -35,6 +46,8 @@ pub(super) fn handle_tool_interactions(
 
     if matches!(current_tool, Tool::Select) {
         handle_select_dragging(ui, response, state, viewport, grid_size, symbol_context);
+    } else if current_tool == Tool::MoveSelection {
+        handle_armed_move_selection(ui, response, state, viewport, grid_size, symbol_context);
     }
 
     if shape_double_click && let Some(pos) = response.interact_pointer_pos() {
@@ -115,6 +128,7 @@ pub(super) fn handle_tool_interactions(
                     pos,
                 );
             }
+            Tool::MoveSelection => {}
             Tool::Probe => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
                 handle_probe_click(ui, state, grid_pos, symbol_context);
@@ -199,6 +213,258 @@ pub(super) fn handle_tool_interactions(
 
     if state.schematic.tool == Tool::DocumentationShape && response.has_focus() {
         handle_documentation_shape_keyboard(ui, response, state, viewport, grid_size);
+    }
+}
+
+fn handle_armed_move_selection(
+    ui: &Ui,
+    response: &Response,
+    state: &mut AppState,
+    viewport: &Viewport,
+    grid_size: i32,
+    symbol_context: &SchematicSymbolContext,
+) {
+    if let Err(message) = crate::common::app::armed_move_selection_authority(state) {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Move selection cancelled: {message}"
+        )));
+        crate::common::app::cancel_armed_move_selection(state);
+        return;
+    }
+
+    retain_move_canvas_focus_from_pointer(response);
+    let (keyboard_step, keyboard_commit) =
+        consume_armed_move_keyboard(ui, response.has_focus(), grid_size);
+    if keyboard_step != Point::origin() {
+        let draft = &mut state.dialogs.move_selection;
+        draft.anchor = None;
+        draft.pointer_drag = false;
+        draft.preview_error = None;
+        draft.preview_delta = Point::new(
+            draft.preview_delta.x.saturating_add(keyboard_step.x),
+            draft.preview_delta.y.saturating_add(keyboard_step.y),
+        );
+    }
+    if keyboard_commit {
+        commit_armed_move_selection(state, symbol_context);
+        return;
+    }
+
+    if response.drag_started_by(egui::PointerButton::Primary)
+        && let Some(position) = response.interact_pointer_pos()
+    {
+        let anchor = screen_to_grid(viewport, grid_size, position);
+        if pointer_is_in_frozen_move_selection(
+            state,
+            ui.ctx(),
+            viewport,
+            symbol_context,
+            position,
+            anchor,
+        ) {
+            let draft = &mut state.dialogs.move_selection;
+            draft.anchor = Some(anchor);
+            draft.preview_delta = Point::origin();
+            draft.pointer_drag = true;
+            draft.preview_error = None;
+        }
+    }
+
+    if response.dragged_by(egui::PointerButton::Primary)
+        && state.dialogs.move_selection.pointer_drag
+        && let (Some(anchor), Some(position)) = (
+            state.dialogs.move_selection.anchor,
+            response
+                .hover_pos()
+                .or_else(|| response.interact_pointer_pos()),
+        )
+    {
+        let destination = screen_to_grid(viewport, grid_size, position);
+        state.dialogs.move_selection.preview_delta = Point::new(
+            destination.x.saturating_sub(anchor.x),
+            destination.y.saturating_sub(anchor.y),
+        );
+    }
+
+    if response.drag_stopped_by(egui::PointerButton::Primary)
+        && state.dialogs.move_selection.pointer_drag
+    {
+        state.dialogs.move_selection.pointer_drag = false;
+        commit_armed_move_selection(state, symbol_context);
+        return;
+    }
+
+    if response.clicked_by(egui::PointerButton::Primary)
+        && let Some(position) = response.interact_pointer_pos()
+    {
+        let point = screen_to_grid(viewport, grid_size, position);
+        if let Some(anchor) = state.dialogs.move_selection.anchor {
+            state.dialogs.move_selection.preview_delta = Point::new(
+                point.x.saturating_sub(anchor.x),
+                point.y.saturating_sub(anchor.y),
+            );
+            commit_armed_move_selection(state, symbol_context);
+        } else if pointer_is_in_frozen_move_selection(
+            state,
+            ui.ctx(),
+            viewport,
+            symbol_context,
+            position,
+            point,
+        ) {
+            let draft = &mut state.dialogs.move_selection;
+            draft.anchor = Some(point);
+            draft.preview_delta = Point::origin();
+            draft.preview_error = None;
+        }
+    } else if !state.dialogs.move_selection.pointer_drag
+        && let (Some(anchor), Some(position)) =
+            (state.dialogs.move_selection.anchor, response.hover_pos())
+    {
+        let destination = screen_to_grid(viewport, grid_size, position);
+        state.dialogs.move_selection.preview_delta = Point::new(
+            destination.x.saturating_sub(anchor.x),
+            destination.y.saturating_sub(anchor.y),
+        );
+    }
+}
+
+fn retain_move_canvas_focus_from_pointer(response: &Response) {
+    // Touch taps are reported as primary clicks by egui. A drag claims focus as
+    // soon as it crosses the drag threshold so keyboard continuation works after
+    // either pointer interaction without stealing focus from unrelated controls.
+    if response.clicked_by(egui::PointerButton::Primary)
+        || response.drag_started_by(egui::PointerButton::Primary)
+    {
+        response.request_focus();
+    }
+}
+
+fn consume_armed_move_keyboard(ui: &Ui, canvas_has_focus: bool, grid_size: i32) -> (Point, bool) {
+    if !canvas_has_focus {
+        return (Point::origin(), false);
+    }
+
+    ui.input_mut(|input| {
+        let mut step = Point::origin();
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+            step.x = -grid_size;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+            step.x = grid_size;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            step.y = -grid_size;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            step.y = grid_size;
+        }
+        let commit = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+        (step, commit)
+    })
+}
+
+fn pointer_is_in_frozen_move_selection(
+    state: &AppState,
+    context: &egui::Context,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+    position: egui::Pos2,
+    grid_position: Point,
+) -> bool {
+    let hit_position = screen_to_schematic(viewport, position);
+    let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+    let Some(target) = pointer_target(
+        state,
+        PointerHit::new(grid_position, hit_position),
+        hit_radius,
+        symbol_context,
+        context,
+        viewport,
+        position,
+    ) else {
+        return false;
+    };
+    let selection = &state.schematic.selection;
+    match target {
+        PointerTarget::Component(id) => selection.has_component(id),
+        PointerTarget::Wire(id) => selection.has_wire(id),
+        PointerTarget::Bus(id) => selection.has_bus(id),
+        PointerTarget::BusTap(id) => selection.has_bus_tap(id),
+        PointerTarget::NetLabel(id) => selection.has_net_label(id),
+        PointerTarget::DesignNote(id) => selection.has_design_note(id),
+        PointerTarget::DocumentationShape(id) => selection.has_documentation_shape(id),
+        PointerTarget::Junction(_) => false,
+    }
+}
+
+fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
+    if let Err(message) = crate::common::app::armed_move_selection_authority(state) {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Move selection cancelled: {message}"
+        )));
+        crate::common::app::cancel_armed_move_selection(state);
+        return;
+    }
+    let delta = state.dialogs.move_selection.preview_delta;
+    let mode = state.dialogs.move_selection.mode;
+    if delta == Point::origin() {
+        state.push_user_message(ConsoleMessage::info(
+            "Move selection finished without changing geometry; no undo record was created."
+                .to_owned(),
+        ));
+        crate::common::app::cancel_armed_move_selection(state);
+        return;
+    }
+    state.schematic.begin_operation("move selection");
+    let movement = state
+        .schematic
+        .move_selection_with_mode_resolved(delta, mode, |component| {
+            symbol_context.terminal_points(component)
+        });
+    match movement {
+        Ok(true) => {
+            let automatic_junctions = state
+                .schematic
+                .document_policy
+                .wire_junctions
+                .automatic_junctions();
+            state
+                .schematic
+                .cleanup_wire_topology_with_junction_policy(automatic_junctions);
+            let recorded = state.schematic.end_operation();
+            state.sync_active_schematic_to_workspace();
+            state.push_user_message(ConsoleMessage::info(format!(
+                "Moved {} selected objects by ({}, {}) in {} mode; {}.",
+                state.schematic.live_movable_selection_count(),
+                delta.x,
+                delta.y,
+                mode.label(),
+                if recorded {
+                    "one undo record committed"
+                } else {
+                    "geometry was unchanged"
+                }
+            )));
+            crate::common::app::cancel_armed_move_selection(state);
+        }
+        Ok(false) => {
+            state.schematic.cancel_operation();
+            state.push_user_message(ConsoleMessage::info(
+                "Move selection produced no geometry change; no undo record was created."
+                    .to_owned(),
+            ));
+            crate::common::app::cancel_armed_move_selection(state);
+        }
+        Err(error) => {
+            state.schematic.cancel_operation();
+            state.dialogs.move_selection.preview_error = Some(error.to_string());
+            state.dialogs.move_selection.anchor = None;
+            state.dialogs.move_selection.preview_delta = Point::origin();
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "Move selection was not committed: {error}"
+            )));
+        }
     }
 }
 
@@ -317,6 +583,10 @@ fn handle_select_dragging(
     grid_size: i32,
     symbol_context: &SchematicSymbolContext,
 ) {
+    if !select_drag_is_authorized(state.schematic.tool, state.dialogs.move_selection.armed) {
+        return;
+    }
+
     if let Some(pos) = response.hover_pos() {
         let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
         if state.schematic.is_draggable_wire_point(wire_grid_pos) {
@@ -508,6 +778,10 @@ fn start_selection_drag(state: &mut AppState, position: Point) {
 
 fn select_drag_can_start(shift_pressed: bool) -> bool {
     !shift_pressed
+}
+
+fn select_drag_is_authorized(tool: Tool, move_selection_armed: bool) -> bool {
+    tool == Tool::Select && !move_selection_armed
 }
 
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
@@ -1320,6 +1594,162 @@ mod tests {
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| body(ui));
         });
+    }
+
+    fn arm_test_move(state: &mut AppState, mode: crate::state::MoveSelectionMode) {
+        crate::common::app::open_move_selection_dialog(state);
+        state.dialogs.move_selection.mode = mode;
+        state.dialogs.move_selection.arm();
+        crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::MoveSelection);
+    }
+
+    fn move_keyboard_input() -> egui::RawInput {
+        egui::RawInput {
+            events: [egui::Key::ArrowRight, egui::Key::Enter]
+                .into_iter()
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn armed_move_keyboard_leaves_keys_unconsumed_without_canvas_focus() {
+        let ctx = egui::Context::default();
+        let mut intent = None;
+        let mut keys_remain = None;
+
+        let _ = ctx.run(move_keyboard_input(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let response = ui.interact(
+                    ui.max_rect(),
+                    egui::Id::new("unfocused-move-canvas"),
+                    egui::Sense::click_and_drag(),
+                );
+                assert!(!response.has_focus());
+                intent = Some(consume_armed_move_keyboard(ui, response.has_focus(), 10));
+                keys_remain = Some(ui.input(|input| {
+                    (
+                        input.key_pressed(egui::Key::ArrowRight),
+                        input.key_pressed(egui::Key::Enter),
+                    )
+                }));
+            });
+        });
+
+        assert_eq!(intent, Some((Point::origin(), false)));
+        assert_eq!(keys_remain, Some((true, true)));
+    }
+
+    #[test]
+    fn armed_move_keyboard_consumes_keys_when_canvas_has_focus() {
+        let ctx = egui::Context::default();
+        let mut intent = None;
+        let mut keys_remain = None;
+
+        let _ = ctx.run(move_keyboard_input(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let response = ui.interact(
+                    ui.max_rect(),
+                    egui::Id::new("focused-move-canvas"),
+                    egui::Sense::click_and_drag(),
+                );
+                response.request_focus();
+                assert!(response.has_focus());
+                intent = Some(consume_armed_move_keyboard(ui, response.has_focus(), 10));
+                keys_remain = Some(ui.input(|input| {
+                    (
+                        input.key_pressed(egui::Key::ArrowRight),
+                        input.key_pressed(egui::Key::Enter),
+                    )
+                }));
+            });
+        });
+
+        assert_eq!(intent, Some((Point::new(10, 0), true)));
+        assert_eq!(keys_remain, Some((false, false)));
+    }
+
+    #[test]
+    fn armed_move_exclusively_owns_selection_drag_routing() {
+        assert!(select_drag_is_authorized(Tool::Select, false));
+        assert!(!select_drag_is_authorized(Tool::Select, true));
+        assert!(!select_drag_is_authorized(Tool::MoveSelection, true));
+        assert!(!select_drag_is_authorized(Tool::MoveSelection, false));
+    }
+
+    #[test]
+    fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
+        let mut state = AppState::default();
+        state.schematic.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        let terminal = state.schematic.components[0].terminal_positions()[0].1;
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(2, terminal, Point::new(20, 0)));
+        state.schematic.selection.select_only_component(1);
+        state.schematic.init_undo_history();
+        arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
+        state.dialogs.move_selection.preview_delta = Point::new(0, 10);
+        let symbols = SchematicSymbolContext::from_state(&state);
+
+        commit_armed_move_selection(&mut state, &symbols);
+
+        assert_eq!(state.schematic.components[0].pos, Point::new(0, 10));
+        assert_eq!(
+            state.schematic.wires[0].points[0],
+            Point::new(terminal.x, terminal.y + 10)
+        );
+        assert_eq!(state.schematic.undo_description(), Some("move selection"));
+        assert!(state.schematic.selection.has_component(1));
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(!state.dialogs.move_selection.armed);
+        assert_eq!(
+            state
+                .workspace
+                .active_schematic()
+                .expect("active workspace buffer")
+                .components[0]
+                .pos,
+            Point::new(0, 10)
+        );
+        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.components[0].pos, Point::origin());
+        assert!(
+            !state.schematic.can_undo(),
+            "the gesture owns one undo record"
+        );
+    }
+
+    #[test]
+    fn cancelling_armed_move_preserves_geometry_selection_and_history() {
+        let mut state = AppState::default();
+        state.schematic.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        state.schematic.selection.select_only_component(1);
+        state.schematic.init_undo_history();
+        arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
+        state.dialogs.move_selection.preview_delta = Point::new(40, 10);
+
+        crate::common::app::cancel_armed_move_selection(&mut state);
+
+        assert_eq!(state.schematic.components[0].pos, Point::origin());
+        assert!(state.schematic.selection.has_component(1));
+        assert_eq!(state.schematic.tool, Tool::Select);
+        assert!(!state.schematic.can_undo());
     }
 
     #[test]

@@ -74,7 +74,7 @@ pub use port::{
 pub use rotation::Rotation;
 pub use selection::{JunctionSelection, Selection, WireSegmentSelection, WireVertexSelection};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
-pub use state::SchematicState;
+pub use state::{MoveSelectionError, MoveSelectionMode, SchematicState};
 pub use symbol_gen::{GeneratedPin, GeneratedSymbol, generate_symbol};
 pub use tool::Tool;
 pub use undo_history::{MAX_UNDO_STEPS, SchematicSnapshot, UndoHistory};

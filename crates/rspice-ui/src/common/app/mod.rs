@@ -55,8 +55,9 @@ mod app_dialog_state;
 pub(crate) use app_dialog_state::{
     BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft,
     DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
-    DocumentationShapeObjectPropertiesDraft, NetLabelObjectPropertiesDraft, ObjectPropertiesDraft,
-    PinPortDialogState, RenameSelectionTarget,
+    DocumentationShapeObjectPropertiesDraft, MoveSelectionDialogContext, MoveSelectionDialogState,
+    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, PinPortDialogState,
+    RenameSelectionTarget,
 };
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
@@ -84,6 +85,10 @@ mod app_modal_workflows;
 mod app_bus_tap_dialog;
 mod app_design_note_dialog;
 mod app_documentation_shape_dialog;
+mod app_move_selection_dialog;
+pub(crate) use app_move_selection_dialog::{
+    armed_move_selection_authority, cancel_armed_move_selection, open_move_selection_dialog,
+};
 mod app_object_properties_dialog;
 mod app_pin_port_dialog;
 
@@ -864,6 +869,7 @@ impl RSpiceApp {
         self.render_pin_port_dialog(ctx);
         self.render_design_note_dialog(ctx);
         self.render_documentation_shape_dialog(ctx);
+        self.render_move_selection_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);

@@ -11,8 +11,12 @@ use super::SchematicSymbolContext;
 use super::bus_interaction::resolve_bus_tap_candidate;
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::design_notes::draw_design_note;
-use super::documentation_shapes::{draw_geometry, preview_anchor_color, preview_stroke};
-use super::drawing::{draw_bus, draw_bus_tap, draw_port_symbol};
+use super::documentation_shapes::{
+    draw_documentation_shape, draw_geometry, preview_anchor_color, preview_stroke,
+};
+use super::drawing::{
+    draw_bus, draw_bus_tap, draw_component, draw_junction, draw_port_symbol, draw_wire,
+};
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
 use super::symbol_primitives::{
@@ -33,6 +37,14 @@ pub(super) fn draw_interaction_previews(
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
+    draw_move_selection_preview(
+        painter,
+        response,
+        state,
+        viewport,
+        symbol_context,
+        symbol_library,
+    );
     draw_bus_preview(painter, response, state, viewport);
     draw_wire_preview(painter, response, state, viewport, symbol_context);
     draw_bus_tap_preview(painter, response, state, viewport);
@@ -49,6 +61,168 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     draw_selection_rect(painter, state, viewport);
+}
+
+fn draw_move_selection_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &mut AppState,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+    symbol_library: Option<&SymbolLibrary>,
+) {
+    if state.schematic.tool != Tool::MoveSelection || !state.dialogs.move_selection.armed {
+        return;
+    }
+    let delta = state.dialogs.move_selection.preview_delta;
+    if delta == Point::origin() {
+        return;
+    }
+    let mode = state.dialogs.move_selection.mode;
+    let mut candidate = state.schematic.clone();
+    let result = candidate.move_selection_with_mode_resolved(delta, mode, |component| {
+        symbol_context.terminal_points(component)
+    });
+    let valid = match result {
+        Ok(true) => {
+            state.dialogs.move_selection.preview_error = None;
+            true
+        }
+        Ok(false) => return,
+        Err(error) => {
+            state.dialogs.move_selection.preview_error = Some(error.to_string());
+            false
+        }
+    };
+
+    if valid {
+        for wire in candidate.wires.iter().filter(|candidate_wire| {
+            state
+                .schematic
+                .wires
+                .iter()
+                .find(|wire| wire.id == candidate_wire.id)
+                != Some(*candidate_wire)
+        }) {
+            draw_wire(painter, viewport, wire, true, false);
+        }
+        for bus in candidate.buses.iter().filter(|candidate_bus| {
+            state
+                .schematic
+                .buses
+                .iter()
+                .find(|bus| bus.id == candidate_bus.id)
+                != Some(*candidate_bus)
+        }) {
+            draw_bus(painter, viewport, bus, true);
+        }
+        for tap in candidate.bus_taps.iter().filter(|candidate_tap| {
+            state
+                .schematic
+                .bus_taps
+                .iter()
+                .find(|tap| tap.id == candidate_tap.id)
+                != Some(*candidate_tap)
+        }) {
+            draw_bus_tap(painter, viewport, tap, true);
+        }
+        for component in candidate.components.iter().filter(|candidate_component| {
+            state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.id == candidate_component.id)
+                != Some(*candidate_component)
+        }) {
+            draw_component(
+                painter,
+                viewport,
+                component,
+                true,
+                symbol_library,
+                symbol_context,
+            );
+        }
+        for junction in candidate.junctions.iter().filter(|candidate_junction| {
+            !state
+                .schematic
+                .junctions
+                .iter()
+                .any(|junction| junction == *candidate_junction)
+        }) {
+            draw_junction(painter, viewport, junction.pos, state);
+        }
+        for label in candidate.net_labels.iter().filter(|candidate_label| {
+            state
+                .schematic
+                .net_labels
+                .iter()
+                .find(|label| label.id == candidate_label.id)
+                != Some(*candidate_label)
+        }) {
+            draw_net_label(painter, viewport, label, true, false, true);
+        }
+        for note in candidate.design_notes.iter().filter(|candidate_note| {
+            state
+                .schematic
+                .design_notes
+                .iter()
+                .find(|note| note.id == candidate_note.id)
+                != Some(*candidate_note)
+        }) {
+            draw_design_note(painter, viewport, note, state, true, false);
+        }
+        for shape in candidate
+            .documentation_shapes
+            .iter()
+            .filter(|candidate_shape| {
+                state
+                    .schematic
+                    .documentation_shapes
+                    .iter()
+                    .find(|shape| shape.id == candidate_shape.id)
+                    != Some(*candidate_shape)
+            })
+        {
+            draw_documentation_shape(painter, viewport, shape, true, false);
+        }
+    }
+
+    let palette = crate::ui::tokens::active_palette();
+    let color = if valid { palette.ok } else { palette.err };
+    let detail = state
+        .dialogs
+        .move_selection
+        .preview_error
+        .as_deref()
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("\u{0394} {}, {} \u{b7} {}", delta.x, delta.y, mode.label()));
+    let galley = painter.layout(
+        detail,
+        crate::ui::theme::mono(
+            crate::ui::tokens::FS_0,
+            crate::ui::theme::FontWeight::Medium,
+        ),
+        color,
+        300.0,
+    );
+    let position = response
+        .hover_pos()
+        .or_else(|| response.interact_pointer_pos())
+        .unwrap_or_else(|| painter.clip_rect().center())
+        + Vec2::new(12.0, 12.0);
+    let background = Rect::from_min_size(
+        position - Vec2::splat(5.0),
+        galley.size() + Vec2::splat(10.0),
+    );
+    painter.rect_filled(background, 5.0, palette.bg_inset.gamma_multiply(0.96));
+    painter.rect_stroke(
+        background,
+        5.0,
+        Stroke::new(1.0, color.gamma_multiply(0.75)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(position, galley, color);
 }
 
 fn draw_documentation_shape_preview(

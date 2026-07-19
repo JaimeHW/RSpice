@@ -218,7 +218,7 @@ impl JunctionSelection {
 /// Tracks which components, wires, buses, taps, net labels, segments, vertices,
 /// and junctions are currently selected. Supports multi-selection for batch
 /// operations.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Selection {
     /// Selected component IDs. A set: membership is queried per element
     /// per frame by the paint loop, so lookups must be O(1).

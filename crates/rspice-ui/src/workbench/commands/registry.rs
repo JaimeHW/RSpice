@@ -338,6 +338,7 @@ const PLACE_PROBE: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, fa
 const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true, "Shift+P"), ALL)];
 const PLACE_TEXT: &[ShortcutBinding] =
     &[primary(chord(Key::T, false, false, true, "Shift+T"), ALL)];
+const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const SYMBOL_POLYLINE: &[ShortcutBinding] =
     &[primary(chord(Key::W, false, false, false, "W"), ALL)];
@@ -508,6 +509,7 @@ impl Command {
             | Self::PlacePin
             | Self::PlaceText
             | Self::PlaceShape
+            | Self::MoveSelection
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -595,6 +597,7 @@ impl Command {
             Self::PlacePin => PLACE_PIN,
             Self::PlaceText => PLACE_TEXT,
             Self::PlaceShape => NONE,
+            Self::MoveSelection => MOVE_SELECTION,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -663,6 +666,7 @@ impl Command {
             | Self::Copy
             | Self::Duplicate
             | Self::Delete
+            | Self::MoveSelection
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",
@@ -909,6 +913,21 @@ mod tests {
             assert_eq!(
                 binding_owners(PLACE_BUS_TAP[0].chord, platform),
                 vec![Command::PlaceBusTap]
+            );
+        }
+    }
+
+    #[test]
+    fn move_selection_is_unmodified_m_in_the_engineering_canvas() {
+        assert_eq!(
+            Command::MoveSelection.shortcut_context(),
+            ShortcutContext::EngineeringCanvas
+        );
+        for platform in CommandPlatform::ALL {
+            assert_eq!(Command::MoveSelection.default_shortcut_label(platform), "M");
+            assert_eq!(
+                binding_owners(MOVE_SELECTION[0].chord, platform),
+                vec![Command::MoveSelection]
             );
         }
     }

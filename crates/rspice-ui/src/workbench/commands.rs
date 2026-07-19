@@ -86,6 +86,7 @@ pub enum Command {
     PlacePin,
     PlaceText,
     PlaceShape,
+    MoveSelection,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -271,6 +272,7 @@ impl Command {
             Self::PlacePin => spec("place-pin", "Place pin or port\u{2026}", "Design"),
             Self::PlaceText => spec("place-text", "Place text or note\u{2026}", "Design"),
             Self::PlaceShape => spec("place-shape", "Draw documentation shape\u{2026}", "Design"),
+            Self::MoveSelection => spec("move-selection", "Move selection", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -607,6 +609,12 @@ impl Command {
                             .iter()
                             .any(|component| component.id == *id)
                     })
+            }
+            Self::MoveSelection => {
+                active_schematic_editor(app)
+                    && !state.schematic.read_only
+                    && !state.active_view_read_only()
+                    && state.schematic.has_live_movable_selection()
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -1073,6 +1081,9 @@ impl Command {
                     expected_shapes,
                 );
             }
+            Self::MoveSelection => {
+                crate::common::app::open_move_selection_dialog(&mut app.state);
+            }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
                 let next = app
@@ -1131,7 +1142,9 @@ impl Command {
                     });
             }
             Self::Cancel => {
-                if app.state.workbench.drawer.is_some() {
+                if app.state.dialogs.move_selection.armed {
+                    crate::common::app::cancel_armed_move_selection(&mut app.state);
+                } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
                 } else if app.state.dialogs.object_properties.open {
                     app.state.dialogs.object_properties.attempt_close();
@@ -1438,6 +1451,9 @@ fn schematic_selection_has_duplicable_object(schematic: &crate::state::Schematic
 
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     activate_workspace(app, Workspace::Design);
+    if app.state.dialogs.move_selection.armed && tool != Tool::MoveSelection {
+        app.state.dialogs.move_selection.close();
+    }
     arm_schematic_tool(&mut app.state.schematic, tool);
 }
 
@@ -1647,6 +1663,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::PlacePin,
     Command::PlaceText,
     Command::PlaceShape,
+    Command::MoveSelection,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -1984,6 +2001,61 @@ mod tests {
             Some(Command::PlaceShape)
         );
         assert!(Command::PlaceShape.shortcut_bindings().is_empty());
+    }
+
+    #[test]
+    fn move_selection_command_has_the_exact_mockup_identity() {
+        assert_eq!(Command::MoveSelection.stable_id(), "move-selection");
+        assert_eq!(Command::MoveSelection.spec().label, "Move selection");
+        assert_eq!(Command::MoveSelection.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("move-selection"),
+            Some(Command::MoveSelection)
+        );
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::MoveSelection)
+            .expect("move-selection must be registered");
+        assert_eq!(COMMAND_REGISTRY[registry_index - 1], Command::PlaceShape);
+        assert_eq!(COMMAND_REGISTRY[registry_index + 1], Command::SymbolPinTool);
+    }
+
+    #[test]
+    fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
+        use crate::state::{Component, Point};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        assert!(!Command::MoveSelection.is_enabled(&app));
+
+        app.state.schematic.selection.select_component(404);
+        assert!(
+            !Command::MoveSelection.is_enabled(&app),
+            "a stale selection identity is not a movable object"
+        );
+
+        app.state.schematic.components.push(Component::new(
+            404,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        assert!(Command::MoveSelection.is_enabled(&app));
+        assert_eq!(
+            Command::MoveSelection.availability(&app),
+            CommandAvailability::Available
+        );
+
+        app.state.schematic.read_only = true;
+        assert!(!Command::MoveSelection.is_enabled(&app));
+        assert_eq!(
+            Command::MoveSelection.availability(&app),
+            CommandAvailability::Disabled("select an editable object")
+        );
+
+        app.state.schematic.read_only = false;
+        app.state.workbench.workspace = Workspace::Results;
+        assert!(!Command::MoveSelection.is_enabled(&app));
     }
 
     #[test]

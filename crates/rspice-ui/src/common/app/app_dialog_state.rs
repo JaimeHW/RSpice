@@ -411,6 +411,79 @@ impl DocumentationShapeDialogState {
     }
 }
 
+/// Isolated authority and interaction state for the mockup-owned Move
+/// selection transaction. The design snapshot remains immutable while the
+/// dialog is open and while the tool is armed; pointer/keyboard movement is
+/// accumulated as a preview delta and committed only once.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MoveSelectionDialogState {
+    pub(crate) open: bool,
+    pub(crate) armed: bool,
+    pub(crate) mode: crate::state::MoveSelectionMode,
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) topology_version: u64,
+    pub(crate) view_path: String,
+    pub(crate) grid_size: i32,
+    pub(crate) document_policy: crate::state::SchematicDocumentPolicy,
+    pub(crate) expected_snapshot: Option<crate::state::SchematicSnapshot>,
+    pub(crate) expected_selection: Option<crate::state::Selection>,
+    pub(crate) anchor: Option<crate::state::Point>,
+    pub(crate) preview_delta: crate::state::Point,
+    pub(crate) pointer_drag: bool,
+    pub(crate) preview_error: Option<String>,
+}
+
+/// Immutable authority captured when the Move selection transaction opens.
+/// Keeping the baseline in one value prevents command entry points from
+/// accidentally omitting an epoch, policy, or selection guard.
+#[derive(Debug, Clone)]
+pub(crate) struct MoveSelectionDialogContext {
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) topology_version: u64,
+    pub(crate) view_path: String,
+    pub(crate) grid_size: i32,
+    pub(crate) document_policy: crate::state::SchematicDocumentPolicy,
+    pub(crate) snapshot: crate::state::SchematicSnapshot,
+    pub(crate) selection: crate::state::Selection,
+}
+
+impl MoveSelectionDialogState {
+    pub(crate) fn open(&mut self, context: MoveSelectionDialogContext) {
+        *self = Self {
+            open: true,
+            armed: false,
+            mode: crate::state::MoveSelectionMode::Connected,
+            design_execution_epoch: context.design_execution_epoch,
+            active_schematic_epoch: context.active_schematic_epoch,
+            topology_version: context.topology_version,
+            view_path: context.view_path,
+            grid_size: context.grid_size,
+            document_policy: context.document_policy,
+            expected_snapshot: Some(context.snapshot),
+            expected_selection: Some(context.selection),
+            anchor: None,
+            preview_delta: crate::state::Point::origin(),
+            pointer_drag: false,
+            preview_error: None,
+        };
+    }
+
+    pub(crate) fn arm(&mut self) {
+        self.open = false;
+        self.armed = true;
+        self.anchor = None;
+        self.preview_delta = crate::state::Point::origin();
+        self.pointer_drag = false;
+        self.preview_error = None;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// Exact, isolated draft for a selected bus. The durable baseline is retained
 /// to guard the eventual commit against stale-object overwrite.
 #[derive(Debug, Clone)]
@@ -932,6 +1005,9 @@ pub struct DialogState {
     /// Non-electrical typed documentation-shape placement transaction.
     pub(crate) documentation_shape: DocumentationShapeDialogState,
 
+    /// Connectivity-aware selected-object movement transaction.
+    pub(crate) move_selection: MoveSelectionDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -989,6 +1065,7 @@ impl DialogState {
             || self.pin_port.open
             || self.design_note.open
             || self.documentation_shape.open
+            || self.move_selection.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
@@ -1051,6 +1128,19 @@ mod tests {
             dialogs
                 .documentation_shape
                 .open(0, 0, 0, "user/top/schematic".to_owned(), Vec::new());
+        });
+        assert_blocks_shortcuts(|dialogs| {
+            let schematic = crate::state::SchematicState::default();
+            dialogs.move_selection.open(MoveSelectionDialogContext {
+                design_execution_epoch: 0,
+                active_schematic_epoch: 0,
+                topology_version: schematic.topology_version(),
+                view_path: "user/top/schematic".to_owned(),
+                grid_size: schematic.grid_size,
+                document_policy: schematic.document_policy,
+                snapshot: crate::state::SchematicSnapshot::capture(&schematic),
+                selection: schematic.selection.clone(),
+            });
         });
         assert_blocks_shortcuts(|dialogs| {
             let bus = crate::state::Bus::segment(

@@ -43,6 +43,14 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceText,
     Command::PlaceShape,
 ];
+const DESIGN_EDIT_COMMANDS: [Command; 6] = [
+    Command::MoveSelection,
+    Command::RotateSelection,
+    Command::MirrorSelectionHorizontal,
+    Command::MirrorSelectionVertical,
+    Command::ObjectProperties,
+    Command::FindInDesign,
+];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
@@ -1182,6 +1190,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::PlacePin => WorkbenchIcon::Component,
         Command::PlaceText => WorkbenchIcon::Label,
         Command::PlaceShape => WorkbenchIcon::Grid,
+        Command::MoveSelection => WorkbenchIcon::Select,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy => WorkbenchIcon::Folder,
         Command::RunSimulation => WorkbenchIcon::Run,
@@ -1330,13 +1339,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         command_item(ui, app, command);
     }
     menu_separator(ui);
-    for command in [
-        Command::RotateSelection,
-        Command::MirrorSelectionHorizontal,
-        Command::MirrorSelectionVertical,
-        Command::ObjectProperties,
-        Command::FindInDesign,
-    ] {
+    for command in DESIGN_EDIT_COMMANDS {
         command_item(ui, app, command);
     }
     menu_separator(ui);
@@ -2362,6 +2365,21 @@ mod tests {
                 Command::PlacePin,
                 Command::PlaceText,
                 Command::PlaceShape,
+            ]
+        );
+    }
+
+    #[test]
+    fn design_edit_menu_starts_with_move_selection_after_the_placement_separator() {
+        assert_eq!(
+            DESIGN_EDIT_COMMANDS,
+            [
+                Command::MoveSelection,
+                Command::RotateSelection,
+                Command::MirrorSelectionHorizontal,
+                Command::MirrorSelectionVertical,
+                Command::ObjectProperties,
+                Command::FindInDesign,
             ]
         );
     }

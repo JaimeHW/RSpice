@@ -12,6 +12,7 @@ mod docbar;
 mod form;
 mod pane;
 mod pill;
+mod schematic_command;
 mod section;
 mod select;
 mod selection_command;
@@ -32,6 +33,7 @@ pub use pane::{
     pane_section_label, two_pane,
 };
 pub use pill::{Pill, PillState};
+pub(crate) use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
 pub use section::section_header;
 pub use select::select;
 pub(crate) use select::select_with_response;

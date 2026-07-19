@@ -45,6 +45,86 @@ fn default_zoom() -> f64 {
 /// Snap distance in grid units for terminal connections
 const SNAP_DISTANCE: i32 = 1;
 
+/// Connectivity policy applied while translating a schematic selection.
+///
+/// The mode is an explicit command input rather than persistent document
+/// state: the same schematic can be edited under any mode without changing
+/// its serialized meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveSelectionMode {
+    /// Move attached conductor endpoints with the selected objects. This is
+    /// the historical RSpice rubber-band behavior.
+    #[default]
+    Connected,
+    /// Translate only selected objects. Attached unselected conductors remain
+    /// fixed, intentionally breaking those electrical connections.
+    BreakConnections,
+    /// Preserve connections by finding a deterministic, overlap-free
+    /// orthogonal route for every affected unselected wire.
+    Shove,
+}
+
+impl MoveSelectionMode {
+    pub const ALL: [Self; 3] = [Self::Connected, Self::BreakConnections, Self::Shove];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Connected => "Connected move",
+            Self::BreakConnections => "Break connections",
+            Self::Shove => "Move with shove",
+        }
+    }
+}
+
+/// A guarded move was rejected before any document mutation occurred.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoveSelectionError {
+    CoordinateOverflow,
+    InvalidTapAttachment { tap_id: u64 },
+    NonOrthogonalWire { wire_id: u64 },
+    UnsupportedInteriorConnection { wire_id: u64 },
+    AttachedTapCannotBePreserved { tap_id: u64 },
+    NoLegalShoveRoute { wire_id: u64 },
+    GeometryOverlap { object_id: u64 },
+}
+
+impl std::fmt::Display for MoveSelectionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CoordinateOverflow => {
+                formatter.write_str("The requested move exceeds the schematic coordinate range.")
+            }
+            Self::InvalidTapAttachment { tap_id } => write!(
+                formatter,
+                "Bus tap {tap_id} would no longer lie on its declared source bus."
+            ),
+            Self::NonOrthogonalWire { wire_id } => write!(
+                formatter,
+                "Wire {wire_id} is not orthogonal and cannot participate in a connectivity-preserving move."
+            ),
+            Self::UnsupportedInteriorConnection { wire_id } => write!(
+                formatter,
+                "Wire {wire_id} has an interior terminal connection that cannot be shoved safely."
+            ),
+            Self::AttachedTapCannotBePreserved { tap_id } => write!(
+                formatter,
+                "Bus tap {tap_id} cannot remain attached to the shoved conductor."
+            ),
+            Self::NoLegalShoveRoute { wire_id } => write!(
+                formatter,
+                "No bounded overlap-free orthogonal route is available for wire {wire_id}."
+            ),
+            Self::GeometryOverlap { object_id } => write!(
+                formatter,
+                "Moving object {object_id} would overlap existing routed geometry."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for MoveSelectionError {}
+
 // =============================================================================
 // SchematicState
 // =============================================================================

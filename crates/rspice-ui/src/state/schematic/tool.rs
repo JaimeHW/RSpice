@@ -20,6 +20,10 @@ pub enum Tool {
     #[default]
     Select,
 
+    /// Move the frozen current selection using the transaction configured by
+    /// the mockup-owned Move selection workflow.
+    MoveSelection,
+
     /// Draw wires
     ///
     /// Click to start/extend wire, right-click or Escape to finish.
@@ -61,6 +65,7 @@ impl Tool {
     pub fn display_name(&self) -> &'static str {
         match self {
             Tool::Select => "Select",
+            Tool::MoveSelection => "Move selection",
             Tool::Wire => "Wire",
             Tool::Bus => "Bus",
             Tool::BusTap => "Bus tap",
@@ -77,6 +82,7 @@ impl Tool {
     pub fn shortcut(&self) -> Option<char> {
         match self {
             Tool::Select => Some('s'),
+            Tool::MoveSelection => Some('m'),
             Tool::Wire => Some('w'),
             Tool::Bus => Some('b'),
             Tool::BusTap => Some('t'),
@@ -137,6 +143,7 @@ impl Tool {
     pub fn cursor(&self) -> &'static str {
         match self {
             Tool::Select => "default",
+            Tool::MoveSelection => "move",
             Tool::Wire => "crosshair",
             Tool::Bus | Tool::BusTap => "crosshair",
             Tool::Junction => "crosshair",

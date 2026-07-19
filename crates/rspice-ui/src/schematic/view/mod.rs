@@ -43,6 +43,17 @@ use self::scene::draw_scene;
 
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 
+const SCHEMATIC_CANVAS_INTERACTION_ID: &str = "rspice-schematic-canvas-interaction";
+
+/// Transfer keyboard ownership to the single active schematic canvas. Modal
+/// schematic commands call this when they arm so arrow/Enter entry is
+/// immediately available without consuming keys from unrelated controls.
+pub(crate) fn request_schematic_canvas_focus(ctx: &egui::Context) {
+    ctx.memory_mut(|memory| {
+        memory.request_focus(egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID));
+    });
+}
+
 #[derive(Default)]
 pub(crate) struct SchematicSymbolContext {
     resolved_by_component_id: HashMap<u64, ResolvedCellSymbol>,
@@ -465,6 +476,7 @@ fn schematic_accessibility_label(
             Command::PlacePin,
             Command::PlaceText,
             Command::PlaceShape,
+            Command::MoveSelection,
             Command::ZoomFit,
             Command::Cancel,
         ],
@@ -917,7 +929,12 @@ pub fn render_schematic_view(
             .center_view_on(target, available.width() as f64, available.height() as f64);
     }
 
-    let response = ui.allocate_rect(available, Sense::click_and_drag());
+    let response = ui.interact(
+        available,
+        egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID),
+        Sense::click_and_drag(),
+    );
+    ui.advance_cursor_after_rect(available);
     let painter = ui.painter_at(available);
 
     // Input first, painting second. Pan/zoom and tool edits apply BEFORE
