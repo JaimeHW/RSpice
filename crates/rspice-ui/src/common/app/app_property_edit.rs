@@ -2,11 +2,44 @@
 
 use super::AppState;
 
+/// Single authority for the schematic Object properties command. Availability
+/// requires a live target that the matching editor can actually open.
+pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
+    if state.schematic.read_only || state.active_view_read_only() {
+        return false;
+    }
+    if let Some(id) = state.schematic.selection.single_component() {
+        return state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .is_some_and(|component| state.property_registry.get(component.kind).is_some());
+    }
+    if let Some(id) = state.schematic.selection.single_net_label() {
+        return state
+            .schematic
+            .net_labels
+            .iter()
+            .any(|label| label.id == id);
+    }
+    if let Some(id) = state.schematic.selection.single_bus_tap() {
+        return state.schematic.bus_taps.iter().any(|tap| tap.id == id);
+    }
+    if let Some(id) = state.schematic.selection.single_bus() {
+        return state.schematic.buses.iter().any(|bus| bus.id == id);
+    }
+    false
+}
+
 /// Open the tabbed property editor for `component_id`, populated from the
 /// component's registry sheet and current values. Refused on read-only
 /// views — the editor is an edit path.
 pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
-    if state.tabbed_property_dialog.open || state.dialogs.object_properties.open {
+    if state.tabbed_property_dialog.open
+        || state.dialogs.object_properties.open
+        || state.dialogs.rename_selection.open
+    {
         return;
     }
     if state.deny_read_only_edit() {
@@ -49,15 +82,34 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
 /// buses and taps use the topology-aware generic transaction specified by the
 /// workbench mockup.
 pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
-    if state.tabbed_property_dialog.open || state.dialogs.object_properties.open {
+    if state.tabbed_property_dialog.open
+        || state.dialogs.object_properties.open
+        || state.dialogs.rename_selection.open
+    {
         return false;
     }
-    if state.deny_read_only_edit() {
+    if state.deny_read_only_edit() || !selected_object_properties_available(state) {
         return false;
     }
     if let Some(component_id) = state.schematic.selection.single_component() {
         open_property_editor(state, component_id);
         return state.tabbed_property_dialog.open;
+    }
+    if let Some(label_id) = state.schematic.selection.single_net_label()
+        && let Some(label) = state
+            .schematic
+            .net_labels
+            .iter()
+            .find(|label| label.id == label_id)
+    {
+        state.dialogs.object_properties.open_net_label(
+            label,
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            state.schematic.topology_version(),
+            state.workspace.active_view.display_path(),
+        );
+        return true;
     }
     if let Some(tap_id) = state.schematic.selection.single_bus_tap()
         && let Some(tap) = state.schematic.bus_taps.iter().find(|tap| tap.id == tap_id)
@@ -89,7 +141,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Point};
+    use crate::state::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, NetLabel, Point};
 
     #[test]
     fn selected_bus_and_tap_open_the_generic_transaction() {
@@ -130,6 +182,24 @@ mod tests {
     }
 
     #[test]
+    fn selected_net_label_opens_the_guarded_object_properties_transaction() {
+        let mut state = AppState::default();
+        let label = NetLabel::new(43, Point::new(-12, 34), "afe.out");
+        state.schematic.net_labels.push(label.clone());
+        state.schematic.selection.select_only_net_label(label.id);
+
+        assert!(open_selected_object_properties(&mut state));
+        assert!(matches!(
+            state.dialogs.object_properties.draft,
+            Some(super::super::ObjectPropertiesDraft::NetLabel(ref draft))
+                if draft.original == label
+                    && draft.name == "afe.out"
+                    && draft.x == "-12"
+                    && draft.y == "34"
+        ));
+    }
+
+    #[test]
     fn generic_properties_refuses_read_only_schematics() {
         let mut state = AppState::default();
         state
@@ -151,6 +221,10 @@ mod tests {
         assert!(!state.dialogs.object_properties.open);
 
         state.schematic.selection.select_only_bus_tap(9002);
+        assert!(!open_selected_object_properties(&mut state));
+        assert!(!state.dialogs.object_properties.open);
+
+        state.schematic.selection.select_only_net_label(9003);
         assert!(!open_selected_object_properties(&mut state));
         assert!(!state.dialogs.object_properties.open);
     }

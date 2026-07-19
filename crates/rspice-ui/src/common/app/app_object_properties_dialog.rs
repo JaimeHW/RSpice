@@ -8,7 +8,8 @@
 use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
 
 use crate::state::{
-    Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, SchematicState,
+    Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, NetLabel, Point,
+    SchematicState,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -19,8 +20,8 @@ use crate::ui::widgets::{
 };
 
 use super::{
-    BusObjectPropertiesDraft, BusTapObjectPropertiesDraft, ConsoleMessage, ObjectPropertiesDraft,
-    RSpiceApp,
+    BusObjectPropertiesDraft, BusTapObjectPropertiesDraft, ConsoleMessage,
+    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, RSpiceApp,
 };
 
 const EYEBROW: &str = "EDIT \u{00b7} TYPED PARAMETERS";
@@ -33,6 +34,9 @@ const FAILURE_TITLE: &str = "Properties were not applied";
 const BUS_DECLARATION_FIELD: &str = "bus-declaration";
 const TAP_SOURCE_FIELD: &str = "tap-source-bus";
 const TAP_SLICE_FIELD: &str = "tap-slice";
+const LABEL_NAME_FIELD: &str = "net-label-name";
+const LABEL_X_FIELD: &str = "net-label-x";
+const LABEL_Y_FIELD: &str = "net-label-y";
 const DIALOG_SIZE: DialogSize = DialogSize::SimulationWorkflow;
 
 #[derive(Debug, Clone)]
@@ -46,6 +50,11 @@ enum PropertyCommit {
         bus_id: u64,
         slice: BusSlice,
         orientation: BusTapOrientation,
+    },
+    NetLabel {
+        expected: NetLabel,
+        name: String,
+        position: Point,
     },
 }
 
@@ -132,6 +141,12 @@ enum DraftResolutionSource {
         source_bus_id: u64,
         slice: String,
         orientation: BusTapOrientation,
+    },
+    NetLabel {
+        original: NetLabel,
+        name: String,
+        x: String,
+        y: String,
     },
 }
 
@@ -294,7 +309,7 @@ fn resolve_draft_for_repaint(
 
     let validation = validate_draft(&state.schematic, draft);
     let bus_choices = match draft {
-        ObjectPropertiesDraft::Bus(_) => Vec::new(),
+        ObjectPropertiesDraft::Bus(_) | ObjectPropertiesDraft::NetLabel(_) => Vec::new(),
         ObjectPropertiesDraft::BusTap(draft) => {
             bus_choices(&state.schematic, draft.original.bus_point)
         }
@@ -343,6 +358,20 @@ fn draft_resolution_key(
                 orientation: draft.orientation,
             },
         ),
+        ObjectPropertiesDraft::NetLabel(draft) => (
+            state
+                .schematic
+                .net_labels
+                .iter()
+                .find(|label| label.id == draft.original.id)
+                == Some(&draft.original),
+            DraftResolutionSource::NetLabel {
+                original: draft.original.clone(),
+                name: draft.name.clone(),
+                x: draft.x.clone(),
+                y: draft.y.clone(),
+            },
+        ),
     };
     DraftResolutionKey {
         design_execution_epoch: state.design_execution_epoch,
@@ -383,28 +412,62 @@ fn object_property_session_error(state: &super::AppState) -> Option<String> {
     })
 }
 
-fn apply_commit(
-    schematic: &mut SchematicState,
-    commit: PropertyCommit,
-) -> Result<bool, crate::state::BusParseError> {
+fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Result<bool, String> {
     match commit {
         PropertyCommit::Bus {
             expected,
             declaration,
-        } => schematic.edit_bus_properties(&expected, declaration),
+        } => schematic
+            .edit_bus_properties(&expected, declaration)
+            .map_err(|error| error.to_string()),
         PropertyCommit::BusTap {
             expected,
             bus_id,
             slice,
             orientation,
-        } => schematic.edit_bus_tap_properties(
-            &expected,
-            bus_id,
-            expected.bus_point,
-            expected.connection_point,
-            slice,
-            orientation,
-        ),
+        } => schematic
+            .edit_bus_tap_properties(
+                &expected,
+                bus_id,
+                expected.bus_point,
+                expected.connection_point,
+                slice,
+                orientation,
+            )
+            .map_err(|error| error.to_string()),
+        PropertyCommit::NetLabel {
+            expected,
+            name,
+            position,
+        } => {
+            let Some(current) = schematic
+                .net_labels
+                .iter()
+                .find(|label| label.id == expected.id)
+            else {
+                return Err("The selected net label no longer exists.".to_owned());
+            };
+            if current != &expected {
+                return Err("The selected net label changed before commit.".to_owned());
+            }
+            if expected.name == name && expected.pos == position {
+                return Ok(false);
+            }
+            Ok(
+                schematic.with_undo("edit net label properties", move |schematic| {
+                    if let Some(label) = schematic
+                        .net_labels
+                        .iter_mut()
+                        .find(|label| label.id == expected.id)
+                    {
+                        label.name = name;
+                        label.pos = position;
+                        schematic.is_dirty = true;
+                        schematic.bump_topology_version();
+                    }
+                }),
+            )
+        }
     }
 }
 
@@ -418,6 +481,7 @@ fn validate_draft(schematic: &SchematicState, draft: &ObjectPropertiesDraft) -> 
     match draft {
         ObjectPropertiesDraft::Bus(draft) => validate_bus_draft(schematic, draft),
         ObjectPropertiesDraft::BusTap(draft) => validate_tap_draft(schematic, draft),
+        ObjectPropertiesDraft::NetLabel(draft) => validate_net_label_draft(schematic, draft),
     }
 }
 
@@ -553,6 +617,65 @@ fn validate_tap_draft(
     }
 }
 
+fn validate_net_label_draft(
+    schematic: &SchematicState,
+    draft: &NetLabelObjectPropertiesDraft,
+) -> DraftValidation {
+    let Some(current) = schematic
+        .net_labels
+        .iter()
+        .find(|label| label.id == draft.original.id)
+    else {
+        return stale_validation("The selected net label no longer exists.");
+    };
+    if current != &draft.original {
+        return stale_validation("The selected net label changed while properties were open.");
+    }
+
+    let name = draft.name.trim();
+    if name.is_empty() {
+        return DraftValidation::Incomplete {
+            field: LABEL_NAME_FIELD,
+            message: "Enter the electrical net name assigned at this attachment point.".to_owned(),
+        };
+    }
+    if let Err(reason) = NetLabel::validate_name(name, schematic.document_policy.net_naming) {
+        return DraftValidation::Invalid {
+            field: Some(LABEL_NAME_FIELD),
+            message: format!("Net name: {reason}."),
+        };
+    }
+    let x = match draft.x.trim().parse::<i32>() {
+        Ok(value) => value,
+        Err(_) => {
+            return DraftValidation::Invalid {
+                field: Some(LABEL_X_FIELD),
+                message: "Grid X must be a whole number in the signed 32-bit coordinate range."
+                    .to_owned(),
+            };
+        }
+    };
+    let y = match draft.y.trim().parse::<i32>() {
+        Ok(value) => value,
+        Err(_) => {
+            return DraftValidation::Invalid {
+                field: Some(LABEL_Y_FIELD),
+                message: "Grid Y must be a whole number in the signed 32-bit coordinate range."
+                    .to_owned(),
+            };
+        }
+    };
+
+    DraftValidation::Valid(
+        PropertyCommit::NetLabel {
+            expected: draft.original.clone(),
+            name: name.to_owned(),
+            position: Point::new(x, y),
+        },
+        None,
+    )
+}
+
 fn stale_validation(message: &str) -> DraftValidation {
     DraftValidation::Invalid {
         field: None,
@@ -624,6 +747,33 @@ fn object_summary(
                 draft.original.connection_point.y
             ),
         },
+        ObjectPropertiesDraft::NetLabel(draft) => {
+            let position = draft
+                .x
+                .trim()
+                .parse::<i32>()
+                .ok()
+                .zip(draft.y.trim().parse::<i32>().ok())
+                .map_or(draft.original.pos, |(x, y)| Point::new(x, y));
+            ObjectSummary {
+                object: format!("LABEL-{} \u{00b7} {}", draft.original.id, draft.name.trim()),
+                preview: SelectionPreview::NetLabel {
+                    position,
+                    label: draft.name.trim().to_owned(),
+                },
+                scope: "one selected electrical net label".to_owned(),
+                effect: if legal {
+                    "net identity and attachment-point transaction".to_owned()
+                } else {
+                    "no electrical change until validation passes".to_owned()
+                },
+                recovery: "one semantic undo record".to_owned(),
+                geometry: format!(
+                    "Stable label ID {} remains unchanged at grid coordinate ({}, {})",
+                    draft.original.id, position.x, position.y
+                ),
+            }
+        }
     }
 }
 
@@ -745,6 +895,43 @@ fn fields_pane(
             field_note(
                 ui,
                 "Stored route anchors are preserved exactly; this transaction changes only typed connectivity and display orientation.",
+            );
+        }
+        ObjectPropertiesDraft::NetLabel(draft) => {
+            let response = text_field(
+                ui,
+                LABEL_NAME_FIELD,
+                "Net name",
+                &mut draft.name,
+                "afe_out or DATA[7]",
+                true,
+                invalid_field == Some(LABEL_NAME_FIELD),
+            );
+            focus = Some(response.id);
+            edited |= response.changed();
+            edited |= text_field(
+                ui,
+                LABEL_X_FIELD,
+                "Grid X",
+                &mut draft.x,
+                "0",
+                true,
+                invalid_field == Some(LABEL_X_FIELD),
+            )
+            .changed();
+            edited |= text_field(
+                ui,
+                LABEL_Y_FIELD,
+                "Grid Y",
+                &mut draft.y,
+                "0",
+                true,
+                invalid_field == Some(LABEL_Y_FIELD),
+            )
+            .changed();
+            field_note(
+                ui,
+                "The stable label ID is preserved. Name and attachment coordinates publish together as one connectivity edit.",
             );
         }
     }
@@ -1093,6 +1280,56 @@ mod tests {
     }
 
     #[test]
+    fn net_label_properties_validate_and_commit_name_and_anchor_as_one_undo_step() {
+        let original = NetLabel::new(17, Point::new(10, 20), "afe.out");
+        let mut schematic = SchematicState::default();
+        schematic.net_labels.push(original.clone());
+        schematic.init_undo_history();
+        let draft = NetLabelObjectPropertiesDraft {
+            original: original.clone(),
+            name: "DATA[7]".to_owned(),
+            x: "-30".to_owned(),
+            y: "45".to_owned(),
+        };
+
+        let DraftValidation::Valid(commit, None) = validate_net_label_draft(&schematic, &draft)
+        else {
+            panic!("valid net-label properties were rejected")
+        };
+        assert!(apply_commit(&mut schematic, commit).unwrap());
+        assert_eq!(
+            schematic.net_labels,
+            vec![NetLabel::new(17, Point::new(-30, 45), "DATA[7]")]
+        );
+        assert_eq!(
+            schematic.undo_description(),
+            Some("edit net label properties")
+        );
+        assert!(schematic.undo());
+        assert_eq!(schematic.net_labels, vec![original.clone()]);
+        assert!(!schematic.can_undo());
+
+        let mut invalid_name = draft.clone();
+        invalid_name.name = "two nodes".to_owned();
+        assert!(matches!(
+            validate_net_label_draft(&schematic, &invalid_name),
+            DraftValidation::Invalid {
+                field: Some(LABEL_NAME_FIELD),
+                ..
+            }
+        ));
+        let mut invalid_x = draft;
+        invalid_x.x = "2147483648".to_owned();
+        assert!(matches!(
+            validate_net_label_draft(&schematic, &invalid_x),
+            DraftValidation::Invalid {
+                field: Some(LABEL_X_FIELD),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn apply_commit_propagates_read_only_without_mutation() {
         let mut schematic = SchematicState::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
@@ -1105,7 +1342,7 @@ mod tests {
                 declaration: Some(BusDeclaration::parse("ADDR[7:0]").unwrap()),
             },
         );
-        assert_eq!(result, Err(BusParseError::ReadOnly));
+        assert_eq!(result, Err(BusParseError::ReadOnly.to_string()));
         assert_eq!(schematic.buses[0], bus);
     }
 

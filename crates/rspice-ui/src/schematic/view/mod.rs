@@ -22,6 +22,7 @@ mod grid;
 mod interaction;
 mod mobile_controls;
 mod navigation;
+mod net_labels;
 mod preview;
 pub(crate) mod resolved_symbol_render;
 mod scene;
@@ -134,6 +135,7 @@ impl SchematicSymbolContext {
             && schematic.buses.is_empty()
             && schematic.bus_taps.is_empty()
             && schematic.junctions.is_empty()
+            && schematic.net_labels.is_empty()
         {
             return None;
         }
@@ -174,6 +176,11 @@ impl SchematicSymbolContext {
 
         for junction in &schematic.junctions {
             include(junction.pos, junction.pos);
+        }
+
+        for label in &schematic.net_labels {
+            let (min, max) = net_labels::world_bounds(label);
+            include(min, max);
         }
 
         Some((min_x, min_y, max_x, max_y))
@@ -265,6 +272,19 @@ impl SchematicSymbolContext {
                 && !schematic.selection.has_junction(junction.pos)
             {
                 schematic.selection.select_junction(junction.pos);
+                count += 1;
+            }
+        }
+
+        for label in &schematic.net_labels {
+            let (min, max) = net_labels::world_bounds(label);
+            let matches = if enclosed_only {
+                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
+            } else {
+                rects_intersect(min, max, min_x, min_y, max_x, max_y)
+            };
+            if matches && !schematic.selection.has_net_label(label.id) {
+                schematic.selection.net_labels.insert(label.id);
                 count += 1;
             }
         }
@@ -423,8 +443,8 @@ fn schematic_accessibility_label(
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, Library, LibraryCellInstance, PortDirection, PortSpec, SymbolDocument, SymbolPin,
-        SymbolShape, View, ViewType,
+        Cell, Library, LibraryCellInstance, NetLabel, PortDirection, PortSpec, SymbolDocument,
+        SymbolPin, SymbolShape, View, ViewType,
     };
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
@@ -493,6 +513,29 @@ mod tests {
         schematic.components.push(component);
 
         assert_eq!(context.content_bounds(&schematic), Some((80, 10, 220, 90)));
+    }
+
+    #[test]
+    fn content_bounds_and_marquee_selection_include_net_label_text() {
+        let mut schematic = SchematicState::default();
+        let label = NetLabel::new(77, Point::new(100, 80), "afe_out");
+        let (min, max) = net_labels::world_bounds(&label);
+        schematic.net_labels.push(label);
+        let context = SchematicSymbolContext::default();
+
+        assert_eq!(
+            context.content_bounds(&schematic),
+            Some((min.x, min.y, max.x, max.y))
+        );
+        assert_eq!(
+            context.select_in_rect(
+                &mut schematic,
+                SelectionWindow::new(min.x + 2, min.y + 2, max.x - 2, max.y - 2, false),
+                false,
+            ),
+            1
+        );
+        assert_eq!(schematic.selection.single_net_label(), Some(77));
     }
 
     #[test]

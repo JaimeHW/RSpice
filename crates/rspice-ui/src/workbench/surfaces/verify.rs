@@ -4794,10 +4794,12 @@ fn regression_baseline_contract(
         }
     } else {
         let t = Tokens::get(ui.ctx());
+        let available_width = ui.available_width();
         egui::Frame::new()
             .fill(t.color.bg_panel)
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
+                ui.set_min_width((available_width - 20.0).max(1.0));
                 status_dot(ui, t.color.warn, "No governed baseline selected");
                 ui.label(
                     "Retain two immutable runs, then select the baseline used for exact comparison.",

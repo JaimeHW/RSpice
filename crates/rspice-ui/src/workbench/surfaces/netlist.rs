@@ -21,6 +21,7 @@ use super::super::netlist_document::{ActiveNetlistDocument, source_content_diges
 const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
 const CODE_TOOLBAR_GAP: f32 = 5.0;
+const CODE_TOOLBAR_COMPACT_BREAKPOINT: f32 = 720.0;
 const PHONE_BREAKPOINT: f32 = 560.0;
 const PHONE_PRIMARY_WIDTH: f32 = 154.0;
 const PHONE_ACTION_WIDTH: f32 = PHONE_PRIMARY_WIDTH + CODE_TOOLBAR_GAP + 28.0;
@@ -456,7 +457,8 @@ fn source_line_component(
 fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
-    let compact = width <= PHONE_BREAKPOINT;
+    let compact = code_toolbar_compact(width);
+    let phone = width <= PHONE_BREAKPOINT;
     let (rect, _) = ui.allocate_exact_size(vec2(width, CODE_TOOLBAR_HEIGHT), egui::Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     ui.painter().hline(
@@ -525,7 +527,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         DocumentStatusTone::Warning => t.color.warn,
         DocumentStatusTone::Error => t.color.err,
     };
-    let status_visible = compact_status_is_visible(compact, status_tone);
+    let status_visible = toolbar_status_visible(phone, status_tone);
     let advisory_count = (!compact).then(|| {
         app.state
             .ui
@@ -811,6 +813,10 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+const fn code_toolbar_compact(width: f32) -> bool {
+    width <= CODE_TOOLBAR_COMPACT_BREAKPOINT
+}
+
 fn code_status(ui: &mut Ui, label: &str, color: egui::Color32) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -824,8 +830,8 @@ fn code_status(ui: &mut Ui, label: &str, color: egui::Color32) {
     });
 }
 
-const fn compact_status_is_visible(compact: bool, tone: DocumentStatusTone) -> bool {
-    !(compact && matches!(tone, DocumentStatusTone::Warning))
+const fn toolbar_status_visible(phone: bool, tone: DocumentStatusTone) -> bool {
+    !(phone && matches!(tone, DocumentStatusTone::Warning))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2094,17 +2100,15 @@ mod tests {
         assert_eq!(CODE_TOOLBAR_HEIGHT, 33.0);
         assert_eq!(CODE_TOOLBAR_PADDING_X, 8.0);
         assert_eq!(CODE_TOOLBAR_GAP, 5.0);
+        assert_eq!(CODE_TOOLBAR_COMPACT_BREAKPOINT, 720.0);
+        assert_eq!(PHONE_BREAKPOINT, 560.0);
         assert_eq!(PHONE_PRIMARY_WIDTH, 154.0);
         assert_eq!(PHONE_ACTION_WIDTH, 187.0);
-        assert!(!compact_status_is_visible(
-            true,
-            DocumentStatusTone::Warning
-        ));
-        assert!(compact_status_is_visible(true, DocumentStatusTone::Error));
-        assert!(compact_status_is_visible(
-            false,
-            DocumentStatusTone::Warning
-        ));
+        assert!(code_toolbar_compact(607.0));
+        assert!(!code_toolbar_compact(721.0));
+        assert!(!toolbar_status_visible(true, DocumentStatusTone::Warning));
+        assert!(toolbar_status_visible(true, DocumentStatusTone::Error));
+        assert!(toolbar_status_visible(false, DocumentStatusTone::Warning));
     }
 
     #[test]

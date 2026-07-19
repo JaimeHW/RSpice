@@ -424,32 +424,5 @@ fn validate_net_name(
     name: &str,
     policy: crate::state::NetNamingPolicy,
 ) -> Result<(), &'static str> {
-    if name.is_empty() {
-        return Err("name is empty");
-    }
-    if name.chars().any(char::is_whitespace) {
-        return Err("whitespace is not permitted");
-    }
-    if name.chars().any(char::is_control) {
-        return Err("control characters are not permitted");
-    }
-    if policy == crate::state::NetNamingPolicy::StrictCaseSensitive
-        && name.chars().any(|character| {
-            !character.is_ascii_alphanumeric() && "_.$:/![]<>-".find(character).is_none()
-        })
-    {
-        return Err("name contains a character outside the strict project syntax");
-    }
-    let opens = name
-        .chars()
-        .filter(|character| matches!(character, '[' | '<'))
-        .count();
-    let closes = name
-        .chars()
-        .filter(|character| matches!(character, ']' | '>'))
-        .count();
-    if opens != closes {
-        return Err("bus delimiters are unbalanced");
-    }
-    Ok(())
+    crate::state::NetLabel::validate_name(name, policy)
 }

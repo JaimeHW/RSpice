@@ -53,6 +53,7 @@ pub enum Command {
     Duplicate,
     Delete,
     SelectAll,
+    RenameSelection,
     ObjectProperties,
     FindInDesign,
     Preferences,
@@ -228,6 +229,7 @@ impl Command {
             Self::Duplicate => spec("duplicate-selection", "Duplicate selection", "Edit"),
             Self::Delete => spec("delete-selection", "Delete selection", "Edit"),
             Self::SelectAll => spec("select-all", "Select all in edit context", "Edit"),
+            Self::RenameSelection => spec("rename-selection", "Rename selected object…", "Edit"),
             Self::ObjectProperties => spec("object-properties", "Object properties…", "Edit"),
             Self::FindInDesign => spec("find-design", "Find in design…", "Edit"),
             Self::Preferences => spec("preferences", "Preferences…", "Edit"),
@@ -574,6 +576,10 @@ impl Command {
                 }
             }
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::RenameSelection => {
+                active_schematic_editor(app)
+                    && crate::common::app::rename_selection_available(state)
+            }
             Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
@@ -593,11 +599,7 @@ impl Command {
                     selection.pins.len() + selection.shapes.len() == 1
                 } else {
                     active_schematic_editor(app)
-                        && !state.schematic.read_only
-                        && !state.active_view_read_only()
-                        && (state.schematic.selection.single_component().is_some()
-                            || state.schematic.selection.single_bus().is_some()
-                            || state.schematic.selection.single_bus_tap().is_some())
+                        && crate::common::app::selected_object_properties_available(state)
                 }
             }
             Self::ZoomFit => {
@@ -864,6 +866,9 @@ impl Command {
                         app.state.schematic.selection.select_junction(pos);
                     }
                 }
+            }
+            Self::RenameSelection => {
+                crate::common::app::open_selected_object_rename(&mut app.state);
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -1501,6 +1506,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::Duplicate,
     Command::Delete,
     Command::SelectAll,
+    Command::RenameSelection,
     Command::ObjectProperties,
     Command::FindInDesign,
     Command::Preferences,
@@ -1734,6 +1740,37 @@ mod tests {
     }
 
     #[test]
+    fn rename_command_has_mockup_identity_and_opens_the_stable_target_dialog() {
+        use crate::state::Point;
+
+        assert_eq!(Command::RenameSelection.stable_id(), "rename-selection");
+        assert_eq!(
+            Command::RenameSelection.spec().label,
+            "Rename selected object…"
+        );
+        assert_eq!(
+            Command::from_stable_id("rename-selection"),
+            Some(Command::RenameSelection)
+        );
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let id = app
+            .state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        app.state.schematic.selection.select_only_component(id);
+        assert!(Command::RenameSelection.is_enabled(&app));
+        Command::RenameSelection.execute(&mut app);
+        assert!(app.state.dialogs.rename_selection.open);
+        assert!(matches!(
+            app.state.dialogs.rename_selection.target.as_ref(),
+            Some(crate::common::app::RenameSelectionTarget::Component(component))
+                if component.id == id
+        ));
+    }
+
+    #[test]
     fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
@@ -1806,6 +1843,34 @@ mod tests {
         assert!(!Command::ObjectProperties.is_enabled(&app));
         Command::ObjectProperties.execute(&mut app);
         assert!(!app.state.dialogs.object_properties.open);
+    }
+
+    #[test]
+    fn object_properties_availability_includes_one_selected_net_label() {
+        use crate::state::Point;
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let id = app
+            .state
+            .schematic
+            .add_net_label(Point::new(0, 0), "gain_node".to_owned());
+        app.state.schematic.selection.select_only_net_label(id);
+
+        assert!(Command::ObjectProperties.is_enabled(&app));
+        Command::ObjectProperties.execute(&mut app);
+        assert!(matches!(
+            app.state.dialogs.object_properties.draft,
+            Some(crate::common::app::ObjectPropertiesDraft::NetLabel(ref draft))
+                if draft.original.id == id
+        ));
+        app.state.dialogs.object_properties.close();
+        app.state.schematic.read_only = true;
+        assert!(!Command::ObjectProperties.is_enabled(&app));
+        app.state.schematic.read_only = false;
+        app.state.schematic.net_labels.clear();
+        assert!(app.state.schematic.selection.single_net_label().is_some());
+        assert!(!Command::ObjectProperties.is_enabled(&app));
     }
 
     #[test]

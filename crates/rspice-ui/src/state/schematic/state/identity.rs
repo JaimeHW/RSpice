@@ -131,6 +131,35 @@ impl SchematicState {
             self.bump_topology_version();
         }
 
+        // Net labels are edited and selected by stable ID. Components, wires,
+        // and junctions are retained first in the document-wide namespace;
+        // repair colliding labels and later label duplicates deterministically.
+        let mut occupied_label_ids: HashSet<u64> = self
+            .components
+            .iter()
+            .map(|item| item.id)
+            .chain(self.wires.iter().map(|item| item.id))
+            .chain(self.junctions.iter().map(|item| item.id))
+            .collect();
+        let mut seen_label_ids = HashSet::with_capacity(self.net_labels.len());
+        let colliding_label_ids: Vec<usize> = self
+            .net_labels
+            .iter()
+            .enumerate()
+            .filter(|(_, label)| {
+                !seen_label_ids.insert(label.id) || occupied_label_ids.contains(&label.id)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if !colliding_label_ids.is_empty() {
+            for index in colliding_label_ids {
+                let replacement = self.next_id();
+                self.net_labels[index].id = replacement;
+                occupied_label_ids.insert(replacement);
+            }
+            self.bump_topology_version();
+        }
+
         // Bus and tap IDs share the document-wide identity namespace. Repair
         // collisions with legacy object IDs and update tap ownership when the
         // first occurrence of a bus ID is reassigned.
@@ -209,6 +238,7 @@ impl SchematicState {
             .collect();
         let junction_positions: HashSet<Point> =
             self.junctions.iter().map(|junction| junction.pos).collect();
+        let net_label_ids: HashSet<u64> = self.net_labels.iter().map(|label| label.id).collect();
         let bus_ids: HashSet<u64> = self.buses.iter().map(|bus| bus.id).collect();
         let bus_tap_ids: HashSet<u64> = self.bus_taps.iter().map(|tap| tap.id).collect();
 
@@ -231,6 +261,9 @@ impl SchematicState {
         self.selection
             .junctions
             .retain(|junction| junction_positions.contains(&junction.pos));
+        self.selection
+            .net_labels
+            .retain(|id| net_label_ids.contains(id));
         self.selection.buses.retain(|id| bus_ids.contains(id));
         self.selection
             .bus_taps
@@ -259,8 +292,8 @@ impl SchematicState {
 #[cfg(test)]
 mod tests {
     use crate::state::{
-        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, ComponentType, Junction, Point,
-        SchematicState,
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
+        Junction, NetLabel, Point, SchematicState,
     };
     use std::collections::HashSet;
 
@@ -329,6 +362,44 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn recalculate_drops_stale_net_label_selection_ids() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .net_labels
+            .push(NetLabel::new(50, Point::new(1, 2), "live"));
+        schematic.selection.select_net_label(50);
+        schematic.selection.select_net_label(999);
+
+        schematic.recalculate_runtime_state();
+
+        assert!(schematic.selection.has_net_label(50));
+        assert!(!schematic.selection.has_net_label(999));
+        assert_eq!(schematic.selection.single_net_label(), Some(50));
+    }
+
+    #[test]
+    fn recalculate_repairs_duplicate_and_cross_class_net_label_ids() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .components
+            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
+        schematic.net_labels = vec![
+            NetLabel::new(60, Point::new(1, 2), "first"),
+            NetLabel::new(60, Point::new(3, 4), "second"),
+            NetLabel::new(59, Point::new(5, 6), "component_collision"),
+        ];
+
+        schematic.recalculate_runtime_state();
+
+        assert_eq!(schematic.net_labels[0].id, 60);
+        assert_ne!(schematic.net_labels[1].id, 60);
+        assert_ne!(schematic.net_labels[2].id, 59);
+        assert_ne!(schematic.net_labels[0].id, schematic.net_labels[1].id);
+        assert_ne!(schematic.net_labels[1].id, schematic.net_labels[2].id);
+        assert_eq!(schematic.components[0].id, 59);
     }
 
     #[test]
@@ -415,14 +486,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_state_without_bus_fields_migrates_to_empty_collections() {
+    fn legacy_state_without_new_object_fields_migrates_to_empty_collections() {
         let state = SchematicState::default();
         let mut value = serde_json::to_value(state).unwrap();
         let object = value.as_object_mut().unwrap();
         object.remove("buses");
         object.remove("bus_taps");
+        object.remove("net_labels");
         let migrated: SchematicState = serde_json::from_value(value).unwrap();
         assert!(migrated.buses.is_empty());
         assert!(migrated.bus_taps.is_empty());
+        assert!(migrated.net_labels.is_empty());
     }
 }

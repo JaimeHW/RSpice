@@ -259,10 +259,22 @@ pub(crate) struct BusTapObjectPropertiesDraft {
     pub(crate) orientation: crate::state::BusTapOrientation,
 }
 
+/// Exact, isolated draft for a selected net label. Coordinates are retained as
+/// text until Primary so incomplete or out-of-range edits never partially move
+/// the electrical attachment point.
+#[derive(Debug, Clone)]
+pub(crate) struct NetLabelObjectPropertiesDraft {
+    pub(crate) original: crate::state::NetLabel,
+    pub(crate) name: String,
+    pub(crate) x: String,
+    pub(crate) y: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum ObjectPropertiesDraft {
     Bus(BusObjectPropertiesDraft),
     BusTap(BusTapObjectPropertiesDraft),
+    NetLabel(NetLabelObjectPropertiesDraft),
 }
 
 /// Retained owner for the mockup's generic Object properties transaction.
@@ -285,6 +297,74 @@ pub(crate) struct ObjectPropertiesDialogState {
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
     pub(crate) validation_error: Option<String>,
+}
+
+/// Stable schematic object captured when Edit ▸ Rename selected object opens.
+///
+/// Retaining the complete source value is intentional: the primary action can
+/// distinguish the original object from a later object that happens to reuse
+/// the same numeric ID, and it can reject any concurrent edit without
+/// overwriting it.
+#[derive(Debug, Clone)]
+pub(crate) enum RenameSelectionTarget {
+    Component(Box<crate::state::Component>),
+    NetLabel(crate::state::NetLabel),
+    Bus(crate::state::Bus),
+}
+
+impl RenameSelectionTarget {
+    pub(crate) fn current_name(&self) -> &str {
+        match self {
+            Self::Component(component) => &component.name,
+            Self::NetLabel(label) => &label.name,
+            Self::Bus(bus) => bus
+                .declaration
+                .as_ref()
+                .map_or("", |declaration| declaration.name.as_str()),
+        }
+    }
+}
+
+/// Isolated draft and revision guard for the mockup-owned stable-identity
+/// rename workflow. No schematic field is changed until Primary validates and
+/// publishes the draft.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenameSelectionDialogState {
+    pub(crate) open: bool,
+    pub(crate) target: Option<RenameSelectionTarget>,
+    pub(crate) draft: String,
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) topology_version: u64,
+    pub(crate) view_path: String,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl RenameSelectionDialogState {
+    pub(crate) fn open(
+        &mut self,
+        target: RenameSelectionTarget,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        let draft = target.current_name().to_owned();
+        *self = Self {
+            open: true,
+            target: Some(target),
+            draft,
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
 }
 
 impl ObjectPropertiesDialogState {
@@ -331,6 +411,34 @@ impl ObjectPropertiesDialogState {
                 slice: tap.slice.to_string(),
                 orientation: tap.orientation,
             })),
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            dirty: false,
+            discard_confirm: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn open_net_label(
+        &mut self,
+        label: &crate::state::NetLabel,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::NetLabel(
+                NetLabelObjectPropertiesDraft {
+                    original: label.clone(),
+                    name: label.name.clone(),
+                    x: label.pos.x.to_string(),
+                    y: label.pos.y.to_string(),
+                },
+            )),
             design_execution_epoch,
             active_schematic_epoch,
             topology_version,
@@ -396,6 +504,29 @@ impl ObjectPropertiesDraft {
                 draft.source_bus_id != draft.original.bus_id
                     || selector_changed
                     || draft.orientation != draft.original.orientation
+            }
+            Self::NetLabel(draft) => {
+                let candidate = draft
+                    .x
+                    .trim()
+                    .parse::<i32>()
+                    .ok()
+                    .zip(draft.y.trim().parse::<i32>().ok())
+                    .map(|(x, y)| {
+                        crate::state::NetLabel::new(
+                            draft.original.id,
+                            crate::state::Point::new(x, y),
+                            draft.name.trim(),
+                        )
+                    });
+                candidate.map_or_else(
+                    || {
+                        draft.name != draft.original.name
+                            || draft.x != draft.original.pos.x.to_string()
+                            || draft.y != draft.original.pos.y.to_string()
+                    },
+                    |candidate| candidate != draft.original,
+                )
             }
         }
     }
@@ -517,6 +648,10 @@ pub struct DialogState {
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
 
+    /// Stable-identity rename transaction for one component, net label, or
+    /// declared bus selected in the active schematic.
+    pub(crate) rename_selection: RenameSelectionDialogState,
+
     /// Project-owned technology attachment transaction.
     pub(crate) technology_attachment: TechnologyAttachmentDialogState,
 
@@ -564,6 +699,7 @@ impl DialogState {
             || self.command_palette.open
             || self.bus_tap.open
             || self.object_properties.open
+            || self.rename_selection.open
             || self.technology_attachment.open
             || self.interaction.schematic_delete_confirmation_open
             || self.confirmation_dialog.visible
@@ -591,6 +727,7 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.new_view_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.copy_cell_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.rename_cell_dialog = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.rename_selection.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);

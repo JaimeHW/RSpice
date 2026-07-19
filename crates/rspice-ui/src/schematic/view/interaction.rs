@@ -7,6 +7,7 @@ use super::SchematicSymbolContext;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate};
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::drawing::{bus_tap_at, nearest_bus_hit, nearest_terminal};
+use super::net_labels::net_label_at;
 use super::viewport::Viewport;
 
 pub(super) fn handle_tool_interactions(
@@ -75,7 +76,15 @@ pub(super) fn handle_tool_interactions(
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
                 let hit_pos = screen_to_schematic(viewport, pos);
                 let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
-                handle_select_click(ui, state, grid_pos, hit_pos, hit_radius, symbol_context);
+                handle_select_click(
+                    ui,
+                    state,
+                    PointerHit::new(grid_pos, hit_pos),
+                    hit_radius,
+                    symbol_context,
+                    viewport,
+                    pos,
+                );
             }
             Tool::Probe => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
@@ -113,7 +122,15 @@ pub(super) fn handle_tool_interactions(
             state.schematic.selection.select_component(id);
             state.open_selected_instance_master();
         } else {
-            open_object_properties(state, grid_pos, hit_pos, hit_radius, symbol_context);
+            open_object_properties(
+                state,
+                PointerHit::new(grid_pos, hit_pos),
+                hit_radius,
+                symbol_context,
+                ui.ctx(),
+                viewport,
+                pos,
+            );
         }
     }
 
@@ -229,7 +246,15 @@ fn handle_select_dragging(
         let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
         let hit_pos = screen_to_schematic(viewport, pos);
         let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
-        let target = pointer_target(state, grid_pos, hit_pos, hit_radius, symbol_context);
+        let target = pointer_target(
+            state,
+            PointerHit::new(grid_pos, hit_pos),
+            hit_radius,
+            symbol_context,
+            ui.ctx(),
+            viewport,
+            pos,
+        );
 
         if !select_drag_can_start(ui.input(|i| i.modifiers.shift)) {
             return;
@@ -242,6 +267,12 @@ fn handle_select_dragging(
                     if !state.schematic.selection.has_component(id) {
                         state.schematic.selection.clear();
                         state.schematic.selection.select_component(id);
+                    }
+                    start_selection_drag(state, grid_pos);
+                }
+                Some(PointerTarget::NetLabel(id)) => {
+                    if !state.schematic.selection.has_net_label(id) {
+                        state.schematic.selection.select_only_net_label(id);
                     }
                     start_selection_drag(state, grid_pos);
                 }
@@ -475,55 +506,84 @@ fn handle_junction_click(ui: &Ui, state: &mut AppState, requested: Point) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PointerTarget {
+pub(super) enum PointerTarget {
     Component(u64),
+    NetLabel(u64),
     BusTap(u64),
     Junction(Point),
     Bus(u64),
     Wire(u64),
 }
 
-fn pointer_target(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PointerHit {
+    pub(super) grid: Point,
+    pub(super) schematic: Point,
+}
+
+impl PointerHit {
+    pub(super) const fn new(grid: Point, schematic: Point) -> Self {
+        Self { grid, schematic }
+    }
+}
+
+pub(super) fn pointer_target(
     state: &AppState,
-    grid_pos: Point,
-    hit_pos: Point,
+    hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
+    ctx: &egui::Context,
+    viewport: &Viewport,
+    pointer_pos: egui::Pos2,
 ) -> Option<PointerTarget> {
-    symbol_context
-        .component_at_resolved_symbol(&state.schematic.components, grid_pos)
-        .or_else(|| state.schematic.component_at(grid_pos))
-        .map(PointerTarget::Component)
+    net_label_at(ctx, viewport, &state.schematic.net_labels, pointer_pos)
+        .map(PointerTarget::NetLabel)
         .or_else(|| {
-            bus_tap_at(&state.schematic.bus_taps, hit_pos, hit_radius).map(PointerTarget::BusTap)
+            symbol_context
+                .component_at_resolved_symbol(&state.schematic.components, hit.grid)
+                .or_else(|| state.schematic.component_at(hit.grid))
+                .map(PointerTarget::Component)
+        })
+        .or_else(|| {
+            bus_tap_at(&state.schematic.bus_taps, hit.schematic, hit_radius)
+                .map(PointerTarget::BusTap)
         })
         .or_else(|| {
             state
                 .schematic
-                .junction_at(grid_pos)
-                .map(|_| PointerTarget::Junction(grid_pos))
+                .junction_at(hit.grid)
+                .map(|_| PointerTarget::Junction(hit.grid))
         })
         .or_else(|| {
-            nearest_bus_hit(&state.schematic.buses, hit_pos, hit_radius)
+            nearest_bus_hit(&state.schematic.buses, hit.schematic, hit_radius)
                 .map(|hit| PointerTarget::Bus(hit.bus_id))
         })
-        .or_else(|| state.schematic.wire_at(grid_pos).map(PointerTarget::Wire))
+        .or_else(|| state.schematic.wire_at(hit.grid).map(PointerTarget::Wire))
 }
 
 fn handle_select_click(
     ui: &Ui,
     state: &mut AppState,
-    grid_pos: Point,
-    hit_pos: Point,
+    hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
+    viewport: &Viewport,
+    pointer_pos: egui::Pos2,
 ) {
     // Ctrl and Shift both extend the selection (toggle the clicked item);
     // a plain click replaces it.
     let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
     let alt_held = ui.input(|i| i.modifiers.alt);
 
-    match pointer_target(state, grid_pos, hit_pos, hit_radius, symbol_context) {
+    match pointer_target(
+        state,
+        hit,
+        hit_radius,
+        symbol_context,
+        ui.ctx(),
+        viewport,
+        pointer_pos,
+    ) {
         Some(PointerTarget::Component(id)) => {
             state.schematic.net_highlight.clear();
             if additive {
@@ -531,6 +591,14 @@ fn handle_select_click(
             } else {
                 state.schematic.selection.clear();
                 state.schematic.selection.select_component(id);
+            }
+        }
+        Some(PointerTarget::NetLabel(id)) => {
+            state.schematic.net_highlight.clear();
+            if additive {
+                state.schematic.selection.toggle_net_label(id);
+            } else {
+                state.schematic.selection.select_only_net_label(id);
             }
         }
         Some(PointerTarget::BusTap(id)) => {
@@ -734,15 +802,34 @@ fn handle_component_probe(
 
 fn open_object_properties(
     state: &mut AppState,
-    grid_pos: Point,
-    hit_pos: Point,
+    hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
+    ctx: &egui::Context,
+    viewport: &Viewport,
+    pointer_pos: egui::Pos2,
 ) {
-    match pointer_target(state, grid_pos, hit_pos, hit_radius, symbol_context) {
-        Some(PointerTarget::Component(id)) => state.schematic.selection.select_only_component(id),
-        Some(PointerTarget::BusTap(id)) => state.schematic.selection.select_only_bus_tap(id),
-        Some(PointerTarget::Bus(id)) => state.schematic.selection.select_only_bus(id),
+    match pointer_target(
+        state,
+        hit,
+        hit_radius,
+        symbol_context,
+        ctx,
+        viewport,
+        pointer_pos,
+    ) {
+        Some(PointerTarget::Component(id)) => {
+            state.schematic.selection.select_only_component(id);
+        }
+        Some(PointerTarget::NetLabel(id)) => {
+            state.schematic.selection.select_only_net_label(id);
+        }
+        Some(PointerTarget::BusTap(id)) => {
+            state.schematic.selection.select_only_bus_tap(id);
+        }
+        Some(PointerTarget::Bus(id)) => {
+            state.schematic.selection.select_only_bus(id);
+        }
         Some(PointerTarget::Junction(_)) | Some(PointerTarget::Wire(_)) | None => return,
     }
     crate::common::app::open_selected_object_properties(state);
@@ -753,8 +840,16 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        Junction, Wire,
+        Junction, NetLabel, Wire,
     };
+
+    fn pointer_viewport() -> Viewport {
+        Viewport {
+            offset: egui::Pos2::ZERO,
+            zoom: 1.0,
+            bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(400.0)),
+        }
+    }
 
     #[test]
     fn shift_primary_drag_is_reserved_for_pan() {
@@ -794,29 +889,72 @@ mod tests {
         state.schematic.buses.push(bus);
         state.schematic.bus_taps.push(tap);
         let context = SchematicSymbolContext::default();
+        let ctx = egui::Context::default();
+        let viewport = pointer_viewport();
+        let screen_point = egui::pos2(point.x as f32, point.y as f32);
 
         assert_eq!(
-            pointer_target(&state, point, point, 1, &context),
+            pointer_target(
+                &state,
+                PointerHit::new(point, point),
+                1,
+                &context,
+                &ctx,
+                &viewport,
+                screen_point,
+            ),
             Some(PointerTarget::Component(10))
         );
         state.schematic.components.clear();
         assert_eq!(
-            pointer_target(&state, point, point, 1, &context),
+            pointer_target(
+                &state,
+                PointerHit::new(point, point),
+                1,
+                &context,
+                &ctx,
+                &viewport,
+                screen_point,
+            ),
             Some(PointerTarget::BusTap(21))
         );
         state.schematic.bus_taps.clear();
         assert_eq!(
-            pointer_target(&state, point, point, 1, &context),
+            pointer_target(
+                &state,
+                PointerHit::new(point, point),
+                1,
+                &context,
+                &ctx,
+                &viewport,
+                screen_point,
+            ),
             Some(PointerTarget::Junction(point))
         );
         state.schematic.junctions.clear();
         assert_eq!(
-            pointer_target(&state, point, point, 1, &context),
+            pointer_target(
+                &state,
+                PointerHit::new(point, point),
+                1,
+                &context,
+                &ctx,
+                &viewport,
+                screen_point,
+            ),
             Some(PointerTarget::Bus(20))
         );
         state.schematic.buses.clear();
         assert_eq!(
-            pointer_target(&state, point, point, 1, &context),
+            pointer_target(
+                &state,
+                PointerHit::new(point, point),
+                1,
+                &context,
+                &ctx,
+                &viewport,
+                screen_point,
+            ),
             Some(PointerTarget::Wire(11))
         );
     }
@@ -843,13 +981,18 @@ mod tests {
         state.schematic.buses.push(bus);
         state.schematic.bus_taps.push(tap);
         let symbol_context = SchematicSymbolContext::from_state(&state);
+        let ctx = egui::Context::default();
+        let viewport = pointer_viewport();
+        let screen_point = egui::pos2(10.0, 0.0);
 
         open_object_properties(
             &mut state,
-            Point::new(10, 0),
-            Point::new(10, 0),
+            PointerHit::new(Point::new(10, 0), Point::new(10, 0)),
             1,
             &symbol_context,
+            &ctx,
+            &viewport,
+            screen_point,
         );
 
         assert_eq!(state.schematic.selection.single_bus_tap(), Some(21));
@@ -857,6 +1000,73 @@ mod tests {
             state.dialogs.object_properties.draft,
             Some(crate::common::app::ObjectPropertiesDraft::BusTap(_))
         ));
+    }
+
+    #[test]
+    fn net_label_text_bounds_are_a_first_class_pointer_target() {
+        let mut state = AppState::default();
+        let label = NetLabel::new(31, Point::new(40, 40), "afe_out");
+        state.schematic.net_labels.push(label.clone());
+        state
+            .schematic
+            .components
+            .push(Component::new(10, ComponentType::Resistor, label.pos));
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(11, Point::new(0, 40), Point::new(100, 40)));
+        let symbol_context = SchematicSymbolContext::default();
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let viewport = pointer_viewport();
+        let hit = super::super::net_labels::hit_bounds(&ctx, &viewport, &label)
+            .expect("visible label")
+            .center();
+
+        assert_eq!(
+            pointer_target(
+                &state,
+                PointerHit::new(label.pos, label.pos),
+                1,
+                &symbol_context,
+                &ctx,
+                &viewport,
+                hit,
+            ),
+            Some(PointerTarget::NetLabel(31))
+        );
+
+        open_object_properties(
+            &mut state,
+            PointerHit::new(label.pos, label.pos),
+            1,
+            &symbol_context,
+            &ctx,
+            &viewport,
+            hit,
+        );
+        assert!(state.dialogs.object_properties.open);
+        assert!(matches!(
+            state.dialogs.object_properties.draft.as_ref(),
+            Some(crate::common::app::ObjectPropertiesDraft::NetLabel(draft))
+                if draft.original.id == label.id
+        ));
+
+        state.schematic.net_labels.clear();
+        assert_eq!(
+            pointer_target(
+                &state,
+                PointerHit::new(label.pos, label.pos),
+                1,
+                &symbol_context,
+                &ctx,
+                &viewport,
+                hit,
+            ),
+            Some(PointerTarget::Component(10)),
+            "once the visually topmost label is absent the component receives the pointer"
+        );
     }
 
     #[test]

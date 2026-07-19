@@ -69,7 +69,8 @@ impl SchematicState {
         self.bump_topology_version();
     }
 
-    /// Move all selected components and rubber-band connected wires
+    /// Move selected components, labels, buses, taps, and wires while
+    /// rubber-banding connected wires.
     ///
     /// This is the multi-component version of move_component_with_wires.
     /// Wires connected to selected components are stretched to maintain
@@ -87,13 +88,7 @@ impl SchematicState {
         delta: Point,
         mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        if self.read_only
-            || delta == Point::origin()
-            || (self.selection.components.is_empty()
-                && self.selection.wires.is_empty()
-                && self.selection.buses.is_empty()
-                && self.selection.bus_taps.is_empty())
-        {
+        if self.read_only || delta == Point::origin() || !has_live_movable_selection(self) {
             return;
         }
         let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
@@ -156,6 +151,14 @@ impl SchematicState {
             .filter(|c| self.selection.components.contains(&c.id))
         {
             comp.pos = offset_point(comp.pos, delta);
+        }
+
+        for label in self
+            .net_labels
+            .iter_mut()
+            .filter(|label| self.selection.has_net_label(label.id))
+        {
+            label.pos = offset_point(label.pos, delta);
         }
 
         // Move selected wires wholesale.
@@ -254,24 +257,19 @@ impl SchematicState {
         self.bump_topology_version();
     }
 
-    /// Move all selected components and wires by a delta
+    /// Move all selected complete objects supported by selection dragging.
     pub fn move_selection(&mut self, delta: Point) {
         self.move_selection_resolved(delta, legacy_terminal_points);
     }
 
-    /// Move all selected components and wires using caller-supplied terminal geometry.
+    /// Move all selected complete objects using caller-supplied component
+    /// terminal geometry.
     pub fn move_selection_resolved(
         &mut self,
         delta: Point,
         mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        if self.read_only
-            || delta == Point::origin()
-            || (self.selection.components.is_empty()
-                && self.selection.wires.is_empty()
-                && self.selection.buses.is_empty()
-                && self.selection.bus_taps.is_empty())
-        {
+        if self.read_only || delta == Point::origin() || !has_live_movable_selection(self) {
             return;
         }
         let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
@@ -325,6 +323,14 @@ impl SchematicState {
             .filter(|c| self.selection.components.contains(&c.id))
         {
             comp.pos = offset_point(comp.pos, delta);
+        }
+
+        for label in self
+            .net_labels
+            .iter_mut()
+            .filter(|label| self.selection.has_net_label(label.id))
+        {
+            label.pos = offset_point(label.pos, delta);
         }
 
         // Move selected wires entirely, tracking endpoints for junctions.
@@ -401,6 +407,29 @@ fn tap_targets_selected_conductor(state: &SchematicState) -> std::collections::H
         })
         .map(|tap| tap.id)
         .collect()
+}
+
+fn has_live_movable_selection(state: &SchematicState) -> bool {
+    state
+        .components
+        .iter()
+        .any(|item| state.selection.has_component(item.id))
+        || state
+            .wires
+            .iter()
+            .any(|item| state.selection.has_wire(item.id))
+        || state
+            .buses
+            .iter()
+            .any(|item| state.selection.has_bus(item.id))
+        || state
+            .bus_taps
+            .iter()
+            .any(|item| state.selection.has_bus_tap(item.id))
+        || state
+            .net_labels
+            .iter()
+            .any(|item| state.selection.has_net_label(item.id))
 }
 
 fn move_selected_bus_geometry(
@@ -654,5 +683,54 @@ mod tests {
         assert!(schematic.redo());
         assert_eq!(schematic.buses[0], moved_bus);
         assert_eq!(schematic.bus_taps[0], moved_tap);
+    }
+
+    #[test]
+    fn selected_label_moves_with_saturation_and_one_drag_undo_transaction() {
+        let original = NetLabel::new(72, Point::new(i32::MAX - 5, -10), "sense");
+        let mut schematic = SchematicState::default();
+        schematic.net_labels.push(original.clone());
+        schematic.selection.select_only_net_label(original.id);
+        schematic.init_undo_history();
+
+        schematic.begin_operation("move selection");
+        schematic.move_selection_with_rubber_band(Point::new(3, 4));
+        schematic.move_selection(Point::new(10, 6));
+        assert!(schematic.end_operation());
+
+        assert_eq!(schematic.net_labels[0].pos, Point::new(i32::MAX, 0));
+        assert_eq!(schematic.undo_description(), Some("move selection"));
+        assert!(schematic.undo());
+        assert_eq!(schematic.net_labels, vec![original]);
+        assert!(!schematic.can_undo(), "one drag must create one undo step");
+        assert!(schematic.redo());
+        assert_eq!(schematic.net_labels[0].pos, Point::new(i32::MAX, 0));
+    }
+
+    #[test]
+    fn unselected_and_read_only_labels_do_not_move() {
+        let label = NetLabel::new(73, Point::new(4, 8), "fixed");
+        let mut schematic = SchematicState::default();
+        schematic.net_labels.push(label.clone());
+        schematic.move_selection(Point::new(1, 2));
+        assert_eq!(schematic.net_labels, vec![label.clone()]);
+
+        schematic.selection.select_only_net_label(label.id);
+        schematic.read_only = true;
+        schematic.move_selection(Point::new(1, 2));
+        assert_eq!(schematic.net_labels, vec![label]);
+    }
+
+    #[test]
+    fn stale_label_selection_is_a_clean_move_noop() {
+        let mut schematic = SchematicState::default();
+        schematic.selection.select_only_net_label(999);
+        schematic.is_dirty = false;
+        let topology_before = schematic.topology_version();
+
+        schematic.move_selection(Point::new(1, 2));
+
+        assert!(!schematic.is_dirty);
+        assert_eq!(schematic.topology_version(), topology_before);
     }
 }

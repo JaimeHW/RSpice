@@ -111,6 +111,7 @@ pub struct SchematicState {
     pub clipboard: ClipboardData,
 
     /// Net labels for naming nodes
+    #[serde(default)]
     pub net_labels: Vec<NetLabel>,
 
     /// Explicit wire junctions for connecting crossing wires

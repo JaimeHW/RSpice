@@ -53,7 +53,8 @@ pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewR
 
 mod app_dialog_state;
 pub(crate) use app_dialog_state::{
-    BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft, ObjectPropertiesDraft,
+    BusObjectPropertiesDraft, BusTapDialogState, BusTapObjectPropertiesDraft,
+    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, RenameSelectionTarget,
 };
 pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 
@@ -72,12 +73,19 @@ use app_veriloga_library::{
 };
 
 mod app_property_edit;
-pub(crate) use app_property_edit::{open_property_editor, open_selected_object_properties};
+pub(crate) use app_property_edit::{
+    open_property_editor, open_selected_object_properties, selected_object_properties_available,
+};
 
 mod app_modal_workflows;
 
 mod app_bus_tap_dialog;
 mod app_object_properties_dialog;
+
+mod app_rename_selection_dialog;
+pub(crate) use app_rename_selection_dialog::{
+    open_selected_object_rename, rename_selection_available,
+};
 
 mod app_shortcuts;
 pub(crate) use app_shortcuts::{
@@ -849,6 +857,7 @@ impl RSpiceApp {
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);
         self.render_object_properties_dialog(ctx);
+        self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);

@@ -1,13 +1,16 @@
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::common::app::AppState;
-use crate::state::{Bus, BusTap, Component, ComponentType, Point, ResolvedCellSymbol, Tool};
+use crate::state::{
+    Bus, BusTap, Component, ComponentType, NetLabel, Point, ResolvedCellSymbol, Tool,
+};
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
 use super::SchematicSymbolContext;
 use super::bus_interaction::resolve_bus_tap_candidate;
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::drawing::{draw_bus, draw_bus_tap};
+use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_diode_symbol, draw_ground_symbol, draw_inductor_symbol,
@@ -31,6 +34,7 @@ pub(super) fn draw_interaction_previews(
     draw_wire_preview(painter, response, state, viewport, symbol_context);
     draw_bus_tap_preview(painter, response, state, viewport);
     draw_junction_preview(painter, response, state, viewport);
+    draw_net_label_preview(painter, response, state, viewport);
     draw_component_preview(
         painter,
         response,
@@ -40,6 +44,30 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     draw_selection_rect(painter, state, viewport);
+}
+
+fn draw_net_label_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &AppState,
+    viewport: &Viewport,
+) {
+    if state.schematic.read_only || state.schematic.tool != Tool::Label {
+        return;
+    }
+    let Some(hover) = response.hover_pos() else {
+        return;
+    };
+    let position = screen_to_grid(viewport, state.schematic.grid_size, hover);
+    let name = format!("net{}", state.schematic.net_labels.len() + 1);
+    draw_net_label(
+        painter,
+        viewport,
+        &NetLabel::new(0, position, name),
+        false,
+        false,
+        true,
+    );
 }
 
 fn draw_junction_preview(

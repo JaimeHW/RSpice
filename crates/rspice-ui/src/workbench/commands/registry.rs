@@ -280,6 +280,11 @@ const DELETE: &[ShortcutBinding] = &[primary(
     ALL,
 )];
 const SELECT_ALL: &[ShortcutBinding] = &[primary(chord(Key::A, true, false, false, "Ctrl+A"), ALL)];
+const DESKTOP_BROWSER: &[CommandPlatform] = &[CommandPlatform::Desktop, CommandPlatform::Browser];
+const RENAME_SELECTION: &[ShortcutBinding] = &[primary(
+    chord(Key::F2, false, false, false, "F2"),
+    DESKTOP_BROWSER,
+)];
 const OBJECT_PROPERTIES: &[ShortcutBinding] =
     &[primary(chord(Key::Q, false, false, false, "Q"), ALL)];
 const FIND_DESIGN: &[ShortcutBinding] =
@@ -437,6 +442,7 @@ impl Command {
             | Self::Duplicate
             | Self::Delete
             | Self::SelectAll
+            | Self::RenameSelection
             | Self::ObjectProperties
             | Self::ZoomIn
             | Self::ZoomOut
@@ -515,6 +521,7 @@ impl Command {
             Self::Duplicate => DUPLICATE,
             Self::Delete => DELETE,
             Self::SelectAll => SELECT_ALL,
+            Self::RenameSelection => RENAME_SELECTION,
             Self::ObjectProperties => OBJECT_PROPERTIES,
             Self::FindInDesign => FIND_DESIGN,
             Self::Preferences => PREFERENCES,
@@ -604,6 +611,7 @@ impl Command {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",
             Self::Paste => "clipboard has no compatible content",
+            Self::RenameSelection => "select one editable component, net label, or declared bus",
             Self::ObjectProperties => "select one editable object",
             Self::AscendHierarchy => "already at top hierarchy",
             Self::DescendHierarchy => "select one hierarchical instance",
@@ -722,6 +730,31 @@ mod tests {
             assert!(binding_owners(EXIT[0].chord, platform).is_empty());
             assert_eq!(Command::Exit.default_shortcut_label(platform), "");
         }
+    }
+
+    #[test]
+    fn rename_shortcut_is_unambiguous_and_desktop_browser_only() {
+        for platform in [CommandPlatform::Desktop, CommandPlatform::Browser] {
+            assert_eq!(
+                binding_owners(RENAME_SELECTION[0].chord, platform),
+                vec![Command::RenameSelection]
+            );
+            assert_eq!(
+                Command::RenameSelection.default_shortcut_label(platform),
+                "F2"
+            );
+        }
+        for platform in [CommandPlatform::Tablet, CommandPlatform::Phone] {
+            assert!(binding_owners(RENAME_SELECTION[0].chord, platform).is_empty());
+            assert_eq!(
+                Command::RenameSelection.default_shortcut_label(platform),
+                ""
+            );
+        }
+        assert_eq!(
+            Command::RenameSelection.shortcut_context(),
+            ShortcutContext::EditContext
+        );
     }
 
     #[test]

@@ -7,7 +7,8 @@ impl SchematicState {
     // Clipboard Operations
     // =========================================================================
 
-    /// Copy selected components, wires, and explicit junctions to clipboard.
+    /// Copy selected components, wires, explicit junctions, net labels, buses,
+    /// and bus taps to the typed schematic clipboard.
     ///
     /// In addition to explicitly selected wires, automatically includes
     /// any wires that have both endpoints connected to selected components.
@@ -93,11 +94,18 @@ impl SchematicState {
             })
             .cloned()
             .collect();
+        let net_labels_to_copy: Vec<NetLabel> = self
+            .net_labels
+            .iter()
+            .filter(|label| self.selection.has_net_label(label.id))
+            .cloned()
+            .collect();
 
-        self.clipboard = ClipboardData::from_selection_with_buses(
+        self.clipboard = ClipboardData::from_selection_with_labels_and_buses(
             selected_comps,
             wires_to_copy,
             junctions_to_copy,
+            net_labels_to_copy,
             buses_to_copy,
             bus_taps_to_copy,
         );
@@ -117,7 +125,8 @@ impl SchematicState {
         let junction_only = self.clipboard.components.is_empty()
             && self.clipboard.wires.is_empty()
             && self.clipboard.buses.is_empty()
-            && self.clipboard.bus_taps.is_empty();
+            && self.clipboard.bus_taps.is_empty()
+            && self.clipboard.net_labels.is_empty();
         // A junction-only clipboard is a connectivity edit, not decoration.
         // Snap its anchor through the same ambiguous-crossing candidate set as
         // the junction tool, then reject it before opening an undo transaction
@@ -156,6 +165,7 @@ impl SchematicState {
                 .cloned()
                 .collect();
             let clipboard_junctions = s.clipboard.junctions.clone();
+            let clipboard_net_labels = s.clipboard.net_labels.clone();
             let clipboard_buses = s.clipboard.buses.clone();
             let clipboard_bus_taps = s.clipboard.bus_taps.clone();
             let origin = s.clipboard.origin;
@@ -163,6 +173,7 @@ impl SchematicState {
             if clipboard_components.is_empty()
                 && clipboard_wires.is_empty()
                 && clipboard_junctions.is_empty()
+                && clipboard_net_labels.is_empty()
                 && clipboard_buses.is_empty()
                 && clipboard_bus_taps.is_empty()
             {
@@ -204,6 +215,23 @@ impl SchematicState {
                     .collect();
                 s.wires.push(Wire::new(new_id, new_points));
                 s.selection.select_wire(new_id);
+            }
+
+            // Labels retain their user-facing net names while receiving new
+            // document identities and translated attachment anchors.
+            for mut label in clipboard_net_labels {
+                if !committed {
+                    s.selection.clear();
+                    committed = true;
+                }
+                let new_id = s.next_id();
+                label.id = new_id;
+                label.pos = Point::new(
+                    label.pos.x.saturating_add(offset_x),
+                    label.pos.y.saturating_add(offset_y),
+                );
+                s.net_labels.push(label);
+                s.selection.select_net_label(new_id);
             }
 
             // Paste buses before taps so every source reference can be
@@ -465,5 +493,100 @@ mod tests {
         assert_eq!(schematic.buses.len(), 2);
         assert_eq!(schematic.bus_taps.len(), 2);
         assert_eq!(schematic.wires.len(), 1);
+    }
+
+    #[test]
+    fn label_copy_paste_preserves_name_offsets_position_and_remaps_identity() {
+        let original = NetLabel::new(70, Point::new(10, 20), "sense_out");
+        let mut schematic = SchematicState::default();
+        schematic.net_labels.push(original.clone());
+        schematic.recalculate_runtime_state();
+        schematic.selection.select_only_net_label(original.id);
+        schematic.copy_selection();
+        schematic.clear_undo_history();
+
+        assert_eq!(schematic.clipboard.net_labels, vec![original.clone()]);
+        assert_eq!(schematic.clipboard.origin, original.pos);
+        assert!(schematic.paste_at(Point::new(110, 220)));
+
+        assert_eq!(schematic.net_labels.len(), 2);
+        let pasted = schematic
+            .net_labels
+            .iter()
+            .find(|label| label.id != original.id)
+            .unwrap();
+        assert_eq!(pasted.name, original.name);
+        assert_eq!(pasted.pos, Point::new(110, 220));
+        assert!(schematic.selection.has_net_label(pasted.id));
+        assert_eq!(schematic.selection.single_net_label(), Some(pasted.id));
+        assert_eq!(schematic.undo_description(), Some("paste"));
+
+        assert!(schematic.undo());
+        assert_eq!(schematic.net_labels, vec![original]);
+        assert!(!schematic.can_undo(), "paste must create one undo step");
+        assert!(schematic.redo());
+        assert_eq!(schematic.net_labels.len(), 2);
+    }
+
+    #[test]
+    fn label_cut_pattern_updates_clipboard_and_deletes_in_one_undo_step() {
+        let label = NetLabel::new(80, Point::new(-5, 15), "cut_me");
+        let mut schematic = SchematicState::default();
+        schematic.net_labels.push(label.clone());
+        schematic.selection.select_only_net_label(label.id);
+        schematic.init_undo_history();
+
+        schematic.copy_selection();
+        assert!(schematic.delete_selection());
+
+        assert_eq!(schematic.clipboard.net_labels, vec![label.clone()]);
+        assert!(schematic.net_labels.is_empty());
+        assert_eq!(schematic.undo_description(), Some("delete selection"));
+        assert!(schematic.undo());
+        assert_eq!(schematic.net_labels, vec![label]);
+        assert!(!schematic.can_undo(), "cut must create one undo step");
+    }
+
+    #[test]
+    fn label_duplicate_pattern_creates_fresh_identity_in_one_undo_step() {
+        let label = NetLabel::new(90, Point::new(3, 7), "duplicated_net");
+        let mut schematic = SchematicState::default();
+        schematic.net_labels.push(label.clone());
+        schematic.recalculate_runtime_state();
+        schematic.selection.select_only_net_label(label.id);
+        schematic.init_undo_history();
+
+        schematic.copy_selection();
+        assert!(schematic.paste_at(Point::new(13, 17)));
+
+        assert_eq!(schematic.net_labels.len(), 2);
+        let duplicate = schematic
+            .net_labels
+            .iter()
+            .find(|candidate| candidate.id != label.id)
+            .unwrap();
+        assert_eq!(duplicate.pos, Point::new(13, 17));
+        assert_eq!(duplicate.name, label.name);
+        assert_ne!(duplicate.id, label.id);
+        assert!(schematic.undo());
+        assert_eq!(schematic.net_labels, vec![label]);
+        assert!(!schematic.can_undo(), "duplicate must create one undo step");
+    }
+
+    #[test]
+    fn label_only_paste_is_not_constrained_by_junction_candidates() {
+        let label = NetLabel::new(100, Point::new(0, 0), "floating_name");
+        let mut schematic = SchematicState::default();
+        schematic.clipboard = ClipboardData::from_selection_with_labels_and_buses(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![label],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert!(schematic.paste_at(Point::new(123, 456)));
+        assert_eq!(schematic.net_labels[0].pos, Point::new(123, 456));
     }
 }

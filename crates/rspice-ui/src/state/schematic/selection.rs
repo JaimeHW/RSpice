@@ -215,8 +215,9 @@ impl JunctionSelection {
 
 /// Selection state for schematic elements
 ///
-/// Tracks which components, wires, buses, taps, segments, vertices, and junctions
-/// are currently selected. Supports multi-selection for batch operations.
+/// Tracks which components, wires, buses, taps, net labels, segments, vertices,
+/// and junctions are currently selected. Supports multi-selection for batch
+/// operations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Selection {
     /// Selected component IDs. A set: membership is queried per element
@@ -242,6 +243,10 @@ pub struct Selection {
     /// Selected bus-tap IDs.
     #[serde(default)]
     pub bus_taps: HashSet<u64>,
+
+    /// Selected net-label stable IDs.
+    #[serde(default)]
+    pub net_labels: HashSet<u64>,
 }
 
 impl Selection {
@@ -259,6 +264,7 @@ impl Selection {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
     }
 
     /// Get total number of selected items
@@ -270,6 +276,7 @@ impl Selection {
             + self.junctions.len()
             + self.buses.len()
             + self.bus_taps.len()
+            + self.net_labels.len()
     }
 
     /// Clear all selections
@@ -281,6 +288,7 @@ impl Selection {
         self.junctions.clear();
         self.buses.clear();
         self.bus_taps.clear();
+        self.net_labels.clear();
     }
 
     // =========================================================================
@@ -326,6 +334,7 @@ impl Selection {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
         {
             self.components.iter().next().copied()
         } else {
@@ -376,6 +385,7 @@ impl Selection {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
         {
             self.wires.iter().next().copied()
         } else {
@@ -424,6 +434,7 @@ impl Selection {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
         {
             Some(&self.wire_segments[0])
         } else {
@@ -472,6 +483,7 @@ impl Selection {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
         {
             Some(&self.wire_vertices[0])
         } else {
@@ -515,6 +527,7 @@ impl Selection {
             && self.wire_vertices.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
         {
             Some(self.junctions[0].pos)
         } else {
@@ -585,6 +598,45 @@ impl Selection {
     }
 
     // =========================================================================
+    // Net-Label Selection
+    // =========================================================================
+
+    /// Check whether a net label is selected by its stable document ID.
+    pub fn has_net_label(&self, id: u64) -> bool {
+        self.net_labels.contains(&id)
+    }
+
+    /// Add a net label to the current selection.
+    pub fn select_net_label(&mut self, id: u64) {
+        self.net_labels.insert(id);
+    }
+
+    /// Remove a net label from the current selection.
+    pub fn deselect_net_label(&mut self, id: u64) {
+        self.net_labels.remove(&id);
+    }
+
+    /// Toggle a net label in the current selection.
+    pub fn toggle_net_label(&mut self, id: u64) {
+        if !self.net_labels.remove(&id) {
+            self.net_labels.insert(id);
+        }
+    }
+
+    /// Replace the current selection with one net label.
+    pub fn select_only_net_label(&mut self, id: u64) {
+        self.clear();
+        self.net_labels.insert(id);
+    }
+
+    /// Return the selected label ID only when it is the sole selected item.
+    pub fn single_net_label(&self) -> Option<u64> {
+        (self.net_labels.len() == 1 && self.count() == 1)
+            .then(|| self.net_labels.iter().next().copied())
+            .flatten()
+    }
+
+    // =========================================================================
     // Query Methods
     // =========================================================================
 
@@ -602,6 +654,7 @@ impl Selection {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
     }
 
     /// Check if only wires are selected (no components or other items)
@@ -613,6 +666,7 @@ impl Selection {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
     }
 
     /// Check if any wire-related items are selected
@@ -664,5 +718,31 @@ mod tests {
         assert_eq!(selection.count(), 2);
         selection.clear();
         assert!(selection.is_empty());
+    }
+
+    #[test]
+    fn net_label_selection_uses_stable_ids_and_exclusive_queries() {
+        let mut selection = Selection::new();
+        selection.select_only_net_label(41);
+        assert!(selection.has_net_label(41));
+        assert_eq!(selection.single_net_label(), Some(41));
+        assert_eq!(selection.count(), 1);
+
+        selection.toggle_net_label(42);
+        assert_eq!(selection.count(), 2);
+        assert_eq!(selection.single_net_label(), None);
+        selection.toggle_net_label(42);
+        selection.deselect_net_label(41);
+        assert!(selection.is_empty());
+    }
+
+    #[test]
+    fn legacy_selection_without_net_label_ids_deserializes_empty() {
+        let mut value = serde_json::to_value(Selection::default()).unwrap();
+        value.as_object_mut().unwrap().remove("net_labels");
+
+        let selection: Selection = serde_json::from_value(value).unwrap();
+
+        assert!(selection.net_labels.is_empty());
     }
 }

@@ -38,6 +38,10 @@ pub(crate) enum SelectionPreview {
         connection_point: Point,
         label: String,
     },
+    NetLabel {
+        position: Point,
+        label: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -256,7 +260,8 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
     let accessible_description = match preview {
         SelectionPreview::Component { label }
         | SelectionPreview::Bus { label, .. }
-        | SelectionPreview::BusTap { label, .. } => label,
+        | SelectionPreview::BusTap { label, .. }
+        | SelectionPreview::NetLabel { label, .. } => label,
     };
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_description(format!("{code}: {accessible_description}"));
@@ -395,6 +400,35 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
                 t.color.text,
             );
             points_bounds(&mapped).expand(18.0)
+        }
+        SelectionPreview::NetLabel { position, label } => {
+            let anchor = map_points(&[*position], content)[0];
+            painter.line_segment(
+                [
+                    egui::pos2(content.left(), anchor.y),
+                    egui::pos2(content.right(), anchor.y),
+                ],
+                Stroke::new(2.0, t.color.wire),
+            );
+            let diamond = 5.0;
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    anchor + Vec2::new(0.0, -diamond),
+                    anchor + Vec2::new(diamond, 0.0),
+                    anchor + Vec2::new(0.0, diamond),
+                    anchor + Vec2::new(-diamond, 0.0),
+                ],
+                t.color.canvas_bg,
+                Stroke::new(1.5, t.color.accent),
+            ));
+            let galley = painter.layout_no_wrap(
+                label.clone(),
+                theme::mono(tokens::FS_1, FontWeight::Medium),
+                t.color.text,
+            );
+            let text_pos = anchor + Vec2::new(10.0, -galley.size().y - 7.0);
+            painter.galley(text_pos, galley.clone(), t.color.text);
+            Rect::from_two_pos(anchor, text_pos + galley.size()).expand(10.0)
         }
     }
     .intersect(rect.shrink(8.0));

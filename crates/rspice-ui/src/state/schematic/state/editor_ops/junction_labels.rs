@@ -46,6 +46,27 @@ impl SchematicState {
         let id = self.next_id();
         self.net_labels.push(NetLabel::new(id, pos, name));
         self.is_dirty = true;
+        self.bump_topology_version();
         id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adding_a_label_invalidates_connectivity_state() {
+        let mut schematic = SchematicState::default();
+        let topology_before = schematic.topology_version();
+
+        let id = schematic.add_net_label(Point::new(2, 3), "sense".to_owned());
+
+        assert!(schematic.is_dirty);
+        assert_eq!(
+            schematic.net_labels,
+            vec![NetLabel::new(id, Point::new(2, 3), "sense")]
+        );
+        assert_ne!(schematic.topology_version(), topology_before);
     }
 }

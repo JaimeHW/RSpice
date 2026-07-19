@@ -25,7 +25,7 @@ use crate::workbench::state::Workspace;
 
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
-use super::drawing::{bus_tap_at, nearest_bus_hit};
+use super::interaction::{PointerHit, PointerTarget, pointer_target};
 use super::viewport::Viewport;
 
 const DESKTOP_WIDTH: f32 = 286.0;
@@ -304,60 +304,79 @@ fn capture_pointer_target(
     let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pos);
     let hit_pos = screen_to_schematic(viewport, pos);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
-    let target = select_pointer_target(state, grid_pos, hit_pos, hit_radius, symbol_context);
+    let target = select_pointer_target(
+        state,
+        PointerHit::new(grid_pos, hit_pos),
+        hit_radius,
+        symbol_context,
+        &response.ctx,
+        viewport,
+        pos,
+    );
     state.dialogs.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
     Some(pos)
 }
 
 fn select_pointer_target(
     state: &mut AppState,
-    grid_pos: Point,
-    hit_pos: Point,
+    hit: PointerHit,
     hit_radius: i32,
     symbol_context: &SchematicSymbolContext,
+    ctx: &Context,
+    viewport: &Viewport,
+    pointer_pos: egui::Pos2,
 ) -> ContextTarget {
-    if let Some(id) = symbol_context
-        .component_at_resolved_symbol(&state.schematic.components, grid_pos)
-        .or_else(|| state.schematic.component_at(grid_pos))
-    {
-        state.schematic.net_highlight.clear();
-        if !state.schematic.selection.has_component(id) {
-            state.schematic.selection.clear();
-            state.schematic.selection.select_component(id);
+    let Some(target) = pointer_target(
+        state,
+        hit,
+        hit_radius,
+        symbol_context,
+        ctx,
+        viewport,
+        pointer_pos,
+    ) else {
+        return ContextTarget::Canvas;
+    };
+    state.schematic.net_highlight.clear();
+    match target {
+        PointerTarget::Component(id) => {
+            if !state.schematic.selection.has_component(id) {
+                state.schematic.selection.select_only_component(id);
+            }
+            ContextTarget::Component(id)
         }
-        ContextTarget::Component(id)
-    } else if let Some(id) = bus_tap_at(&state.schematic.bus_taps, hit_pos, hit_radius) {
-        state.schematic.net_highlight.clear();
-        if !state.schematic.selection.has_bus_tap(id) {
-            state.schematic.selection.select_only_bus_tap(id);
+        PointerTarget::NetLabel(id) => {
+            if !state.schematic.selection.has_net_label(id) {
+                state.schematic.selection.select_only_net_label(id);
+            }
+            // ContextTarget has no net-label variant; stable Selection identity
+            // remains authoritative for properties and lifecycle actions.
+            ContextTarget::Canvas
         }
-        ContextTarget::Canvas
-    } else if state.schematic.has_junction(grid_pos) {
-        state.schematic.net_highlight.clear();
-        if !state.schematic.selection.has_junction(grid_pos) {
-            state.schematic.selection.clear();
-            state.schematic.selection.select_junction(grid_pos);
+        PointerTarget::BusTap(id) => {
+            if !state.schematic.selection.has_bus_tap(id) {
+                state.schematic.selection.select_only_bus_tap(id);
+            }
+            ContextTarget::Canvas
         }
-        // ContextTarget has no junction variant; the retained selection is
-        // authoritative for action availability and deletion review.
-        ContextTarget::Canvas
-    } else if let Some(id) =
-        nearest_bus_hit(&state.schematic.buses, hit_pos, hit_radius).map(|hit| hit.bus_id)
-    {
-        state.schematic.net_highlight.clear();
-        if !state.schematic.selection.has_bus(id) {
-            state.schematic.selection.select_only_bus(id);
+        PointerTarget::Junction(position) => {
+            if !state.schematic.selection.has_junction(position) {
+                state.schematic.selection.select_only_junction(position);
+            }
+            ContextTarget::Canvas
         }
-        ContextTarget::Canvas
-    } else if let Some(id) = state.schematic.wire_at(grid_pos) {
-        state.schematic.net_highlight.clear();
-        if !state.schematic.selection.has_wire(id) {
-            state.schematic.selection.clear();
-            state.schematic.selection.select_wire(id);
+        PointerTarget::Bus(id) => {
+            if !state.schematic.selection.has_bus(id) {
+                state.schematic.selection.select_only_bus(id);
+            }
+            ContextTarget::Canvas
         }
-        ContextTarget::Wire(id)
-    } else {
-        ContextTarget::Canvas
+        PointerTarget::Wire(id) => {
+            if !state.schematic.selection.has_wire(id) {
+                state.schematic.selection.select_only_wire(id);
+            }
+            ContextTarget::Wire(id)
+        }
     }
 }
 
@@ -399,6 +418,11 @@ fn keyboard_target(
         && let Some(tap) = state.schematic.bus_taps.iter().find(|item| item.id == id)
     {
         return (ContextTarget::Canvas, tap.connection_point);
+    }
+    if let Some(id) = state.schematic.selection.single_net_label()
+        && let Some(label) = state.schematic.net_labels.iter().find(|item| item.id == id)
+    {
+        return (ContextTarget::Canvas, label.pos);
     }
     if let Some(id) = state.schematic.selection.single_bus()
         && let Some(bus) = state.schematic.buses.iter().find(|item| item.id == id)
@@ -485,7 +509,8 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.wire_vertices.len()
         + selection.junctions.len()
         + selection.buses.len()
-        + selection.bus_taps.len();
+        + selection.bus_taps.len()
+        + selection.net_labels.len();
     let path = format!("/{}", state.workspace.active_view.display_path());
     if count > 1 {
         return format!("{count} selected objects · {path}");
@@ -503,6 +528,22 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
             bus.declaration
                 .as_ref()
                 .map_or_else(|| "unnamed".to_owned(), ToString::to_string)
+        );
+    }
+    if let Some(id) = selection.single_net_label()
+        && let Some(label) = state
+            .schematic
+            .net_labels
+            .iter()
+            .find(|label| label.id == id)
+    {
+        return format!(
+            "net label · {} · {path}",
+            if label.name.trim().is_empty() {
+                "<unnamed>"
+            } else {
+                &label.name
+            }
         );
     }
     let target = selection
@@ -791,11 +832,17 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .bus_taps
         .iter()
         .any(|tap| selection.has_bus_tap(tap.id));
+    let has_live_net_label = state
+        .schematic
+        .net_labels
+        .iter()
+        .any(|label| selection.has_net_label(label.id));
     let has_copyable_object = has_live_component
         || has_live_wire
         || has_live_junction
         || has_live_bus
-        || has_live_bus_tap;
+        || has_live_bus_tap
+        || has_live_net_label;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
@@ -813,7 +860,14 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && selection
             .bus_taps
             .iter()
-            .all(|id| state.schematic.bus_taps.iter().any(|tap| tap.id == *id));
+            .all(|id| state.schematic.bus_taps.iter().any(|tap| tap.id == *id))
+        && selection.net_labels.iter().all(|id| {
+            state
+                .schematic
+                .net_labels
+                .iter()
+                .any(|label| label.id == *id)
+        });
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
             .schematic
@@ -829,11 +883,14 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && !has_wire_sub_object;
     // Junction-only paste requires a separately chosen valid intersection, so
     // fixed-offset Duplicate intentionally stays unavailable for that case.
-    let duplicable_objects_only =
-        (has_live_component || has_live_wire || has_live_bus || has_live_bus_tap)
-            && all_whole_object_ids_are_live
-            && all_junctions_are_live
-            && !has_wire_sub_object;
+    let duplicable_objects_only = (has_live_component
+        || has_live_wire
+        || has_live_bus
+        || has_live_bus_tap
+        || has_live_net_label)
+        && all_whole_object_ids_are_live
+        && all_junctions_are_live
+        && !has_wire_sub_object;
     let deletable_objects_only = (has_copyable_object || has_live_junction)
         && all_whole_object_ids_are_live
         && all_junctions_are_live
@@ -842,20 +899,8 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     let writable = !state.schematic.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
-            writable
-                && (selection.single_component().is_some_and(|id| {
-                    state
-                        .schematic
-                        .components
-                        .iter()
-                        .any(|component| component.id == id)
-                }) || selection
-                    .single_bus()
-                    .is_some_and(|id| state.schematic.buses.iter().any(|bus| bus.id == id))
-                    || selection
-                        .single_bus_tap()
-                        .is_some_and(|id| state.schematic.bus_taps.iter().any(|tap| tap.id == id))),
-            "Select one editable component, bus, or bus tap to open its properties",
+            crate::common::app::selected_object_properties_available(state),
+            "Select one editable component, bus, bus tap, or net label to open its properties",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
             writable && has_component,
@@ -863,15 +908,15 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Copy => (
             copyable_objects_only,
-            "Select at least one component, wire, bus, tap, or junction",
+            "Select at least one component, wire, bus, tap, junction, or net label",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
-            "Select at least one editable component, wire, bus, or tap",
+            "Select at least one editable component, wire, bus, tap, or net label",
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, wire, bus, tap, or junction",
+            "Select at least one editable component, wire, bus, tap, junction, or net label",
         ),
         ContextAction::Probe => (true, ""),
         ContextAction::OperatingPoint => (
@@ -1041,6 +1086,11 @@ fn delete_review(
             objects.push(format!("bus tap {}", tap.slice));
         }
     }
+    for label in &state.schematic.net_labels {
+        if request.selection.has_net_label(label.id) {
+            objects.push(format!("net label {}", label.name));
+        }
+    }
     let selection = if objects.is_empty() {
         "No live schematic objects".to_owned()
     } else {
@@ -1082,6 +1132,11 @@ fn delete_review(
             // of strings would freeze the modal without adding useful review
             // information; scalar selectors already format identically.
             nets.insert(tap.slice.to_string());
+        }
+    }
+    for label in &state.schematic.net_labels {
+        if request.selection.has_net_label(label.id) {
+            nets.insert(label.name.clone());
         }
     }
     let affected_nets = if nets.is_empty() {
@@ -1163,7 +1218,12 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
             .schematic
             .bus_taps
             .iter()
-            .any(|tap| request.selection.has_bus_tap(tap.id));
+            .any(|tap| request.selection.has_bus_tap(tap.id))
+        || state
+            .schematic
+            .net_labels
+            .iter()
+            .any(|label| request.selection.has_net_label(label.id));
     if !has_live_object {
         state.push_user_message(ConsoleMessage::warning(
             "The reviewed selection no longer contains deletable objects.".to_owned(),
@@ -1309,8 +1369,16 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        Junction, LibraryCellInstance, Wire,
+        Junction, LibraryCellInstance, NetLabel, Wire,
     };
+
+    fn pointer_viewport() -> Viewport {
+        Viewport {
+            offset: egui::Pos2::ZERO,
+            zoom: 1.0,
+            bounds: Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0)),
+        }
+    }
 
     #[test]
     fn command_catalog_matches_the_mockup_exactly() {
@@ -1517,12 +1585,58 @@ mod tests {
         state.schematic.wires = vec![Wire::new(17, vec![Point::new(0, 10), Point::new(20, 10)])];
         state.schematic.junctions = vec![Junction::new(18, point)];
         let symbol_context = SchematicSymbolContext::from_state(&state);
+        let ctx = Context::default();
+        let viewport = pointer_viewport();
 
-        let target = select_pointer_target(&mut state, point, point, 1, &symbol_context);
+        let target = select_pointer_target(
+            &mut state,
+            PointerHit::new(point, point),
+            1,
+            &symbol_context,
+            &ctx,
+            &viewport,
+            pos2(point.x as f32, point.y as f32),
+        );
 
         assert!(matches!(target, ContextTarget::Canvas));
         assert_eq!(state.schematic.selection.single_junction(), Some(point));
         assert!(state.schematic.selection.wires.is_empty());
+    }
+
+    #[test]
+    fn net_label_context_exposes_the_complete_object_lifecycle() {
+        let mut state = AppState::default();
+        let label = NetLabel::new(73, Point::new(40, 40), "afe_out");
+        state.schematic.net_labels.push(label.clone());
+        state.schematic.selection.select_only_net_label(label.id);
+
+        assert!(action_availability(ContextAction::Properties, &state).0);
+        assert!(action_availability(ContextAction::Copy, &state).0);
+        assert!(action_availability(ContextAction::Duplicate, &state).0);
+        assert!(action_availability(ContextAction::Delete, &state).0);
+        assert!(selection_summary(&state, ContextTarget::Canvas).contains("net label · afe_out"));
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                execute_context_action(
+                    ContextAction::Properties,
+                    ui,
+                    &mut state,
+                    label.pos,
+                    &symbol_context,
+                );
+            });
+        });
+        assert!(state.dialogs.object_properties.open);
+        assert!(!state.dialogs.rename_selection.open);
+        assert!(matches!(
+            state.dialogs.object_properties.draft,
+            Some(crate::common::app::ObjectPropertiesDraft::NetLabel(ref draft))
+                if draft.original == label
+        ));
     }
 
     #[test]
@@ -1551,6 +1665,26 @@ mod tests {
         assert!(state.schematic.components.is_empty());
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.components.len(), 1);
+
+        let label = NetLabel::new(73, Point::new(40, 40), "afe_out");
+        state.schematic.net_labels.push(label.clone());
+        state.schematic.selection.select_only_net_label(label.id);
+
+        duplicate_selection_at(&mut state, label.pos);
+        assert_eq!(state.schematic.net_labels.len(), 2);
+        assert!(state.schematic.can_undo());
+        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.net_labels, vec![label.clone()]);
+
+        state.schematic.selection.select_only_net_label(label.id);
+        let request = DeleteSelectionRequest {
+            selection: state.schematic.selection.clone(),
+            topology_version: state.schematic.topology_version(),
+        };
+        apply_delete_request(&mut state, request);
+        assert!(state.schematic.net_labels.is_empty());
+        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.net_labels, vec![label]);
     }
 
     #[test]

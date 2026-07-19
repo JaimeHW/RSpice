@@ -1156,6 +1156,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::Cut | Command::Copy | Command::Paste | Command::Duplicate => WorkbenchIcon::Copy,
         Command::Delete | Command::ClearConsole => WorkbenchIcon::Trash,
         Command::SelectAll => WorkbenchIcon::Grid,
+        Command::RenameSelection => WorkbenchIcon::Label,
         Command::ObjectProperties | Command::SimulationOptions => WorkbenchIcon::Sliders,
         Command::FindInDesign | Command::CommandPalette => WorkbenchIcon::Search,
         Command::Preferences => WorkbenchIcon::Settings,
@@ -1272,6 +1273,7 @@ fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         command_item(ui, app, command);
     }
     menu_separator(ui);
+    command_item(ui, app, Command::RenameSelection);
     command_item(ui, app, Command::ObjectProperties);
     command_item(ui, app, Command::FindInDesign);
     menu_separator(ui);
@@ -2419,6 +2421,7 @@ mod tests {
             (Command::Copy, WorkbenchIcon::Copy),
             (Command::Delete, WorkbenchIcon::Trash),
             (Command::SelectAll, WorkbenchIcon::Grid),
+            (Command::RenameSelection, WorkbenchIcon::Label),
             (Command::ObjectProperties, WorkbenchIcon::Sliders),
             (Command::ResetActiveView, WorkbenchIcon::Refresh),
             (Command::AscendHierarchy, WorkbenchIcon::ArrowLeft),

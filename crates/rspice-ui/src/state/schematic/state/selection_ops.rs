@@ -7,7 +7,7 @@ impl SchematicState {
     // Selection Management
     // =========================================================================
 
-    /// Select all components and wires within a rectangular region
+    /// Select all complete schematic objects within a rectangular region.
     ///
     /// This is used for rubber-band box selection. The user drags to create
     /// a selection rectangle, and all items within the rectangle are selected.
@@ -63,6 +63,20 @@ impl SchematicState {
                 && !self.selection.has_junction(junction.pos)
             {
                 self.selection.select_junction(junction.pos);
+                count += 1;
+            }
+        }
+
+        // Net labels are complete, stable-ID objects whose attachment anchor
+        // determines the named electrical node.
+        for label in &self.net_labels {
+            if label.pos.x >= min_x
+                && label.pos.x <= max_x
+                && label.pos.y >= min_y
+                && label.pos.y <= max_y
+                && !self.selection.has_net_label(label.id)
+            {
+                self.selection.select_net_label(label.id);
                 count += 1;
             }
         }
@@ -134,6 +148,16 @@ impl SchematicState {
             }
         }
 
+        for label in &self.net_labels {
+            if label.pos.x >= min_x
+                && label.pos.x <= max_x
+                && label.pos.y >= min_y
+                && label.pos.y <= max_y
+            {
+                self.selection.select_net_label(label.id);
+            }
+        }
+
         for bus in &self.buses {
             if polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y) {
                 self.selection.select_bus(bus.id);
@@ -154,7 +178,7 @@ impl SchematicState {
         }
     }
 
-    /// Atomically remove selected components, complete wires, and junctions.
+    /// Atomically remove selected complete objects, including net labels.
     ///
     /// This state-layer entry point owns the undo transaction so keyboard,
     /// menu, and context-menu deletion all have identical behavior. Wire
@@ -175,6 +199,10 @@ impl SchematicState {
                 .junctions
                 .iter()
                 .any(|junction| selection.has_junction(junction.pos))
+            || self
+                .net_labels
+                .iter()
+                .any(|label| selection.has_net_label(label.id))
             || self.buses.iter().any(|bus| selection.has_bus(bus.id))
             || self
                 .bus_taps
@@ -208,6 +236,9 @@ impl SchematicState {
             schematic
                 .junctions
                 .retain(|junction| !selection.has_junction(junction.pos));
+            schematic
+                .net_labels
+                .retain(|label| !selection.has_net_label(label.id));
             schematic.selection.clear();
             schematic.is_dirty = true;
             schematic.bump_topology_version();
@@ -221,6 +252,7 @@ impl SchematicState {
         self.selection.wires = self.wires.iter().map(|item| item.id).collect();
         self.selection.buses = self.buses.iter().map(|item| item.id).collect();
         self.selection.bus_taps = self.bus_taps.iter().map(|item| item.id).collect();
+        self.selection.net_labels = self.net_labels.iter().map(|item| item.id).collect();
         for position in self.junctions.iter().map(|item| item.pos) {
             self.selection.select_junction(position);
         }
@@ -396,5 +428,48 @@ mod tests {
         assert!(schematic.undo());
         assert_eq!(schematic.buses.len(), 1);
         assert_eq!(schematic.bus_taps.len(), 1);
+    }
+
+    #[test]
+    fn rectangle_preview_commit_and_select_all_include_label_ids() {
+        let mut schematic = SchematicState::default();
+        schematic
+            .net_labels
+            .push(NetLabel::new(31, Point::new(5, 6), "inside"));
+        schematic
+            .net_labels
+            .push(NetLabel::new(32, Point::new(50, 60), "outside"));
+
+        schematic.preview_selection_in_rect(0, 0, 10, 10);
+        assert!(schematic.selection.has_net_label(31));
+        assert!(!schematic.selection.has_net_label(32));
+
+        assert_eq!(schematic.select_in_rect(45, 55, 55, 65, false), 1);
+        assert!(!schematic.selection.has_net_label(31));
+        assert!(schematic.selection.has_net_label(32));
+
+        schematic.select_all_objects();
+        assert!(schematic.selection.has_net_label(31));
+        assert!(schematic.selection.has_net_label(32));
+        assert_eq!(schematic.selection.count(), 2);
+    }
+
+    #[test]
+    fn label_deletion_is_one_undoable_redoable_transaction() {
+        let retained = NetLabel::new(40, Point::new(1, 1), "retained");
+        let removed = NetLabel::new(41, Point::new(2, 2), "removed");
+        let mut schematic = SchematicState::default();
+        schematic.net_labels = vec![retained.clone(), removed.clone()];
+        schematic.init_undo_history();
+        schematic.selection.select_only_net_label(removed.id);
+
+        assert!(schematic.delete_selection());
+        assert_eq!(schematic.net_labels, vec![retained.clone()]);
+        assert_eq!(schematic.undo_description(), Some("delete selection"));
+        assert!(schematic.undo());
+        assert_eq!(schematic.net_labels, vec![retained, removed]);
+        assert!(!schematic.can_undo());
+        assert!(schematic.redo());
+        assert_eq!(schematic.net_labels.len(), 1);
     }
 }

@@ -4,6 +4,7 @@
 
 use super::bus::{Bus, BusTap};
 use super::component::Component;
+use super::net_label::NetLabel;
 use super::point::Point;
 use super::wire::Wire;
 use serde::{Deserialize, Serialize};
@@ -14,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 /// Clipboard data for copy/paste operations
 ///
-/// Stores copied components, wires, and explicit junction intent with their
-/// relative positions.
+/// Stores copied components, wires, explicit junction intent, net labels,
+/// buses, and bus taps with their relative positions.
 /// When pasting, elements are offset from the paste location based on
 /// the original selection's center.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -40,6 +41,11 @@ pub struct ClipboardData {
     #[serde(default)]
     pub bus_taps: Vec<BusTap>,
 
+    /// Copied net labels, retaining their source stable IDs until paste remaps
+    /// them into the destination document namespace.
+    #[serde(default)]
+    pub net_labels: Vec<NetLabel>,
+
     /// Origin point (center of copied selection)
     ///
     /// Used to calculate offsets when pasting at a new location.
@@ -59,6 +65,7 @@ impl ClipboardData {
             || !self.junctions.is_empty()
             || !self.buses.is_empty()
             || !self.bus_taps.is_empty()
+            || !self.net_labels.is_empty()
     }
 
     /// Check if clipboard is empty
@@ -68,6 +75,7 @@ impl ClipboardData {
             && self.junctions.is_empty()
             && self.buses.is_empty()
             && self.bus_taps.is_empty()
+            && self.net_labels.is_empty()
     }
 
     /// Get total number of items in clipboard
@@ -77,6 +85,7 @@ impl ClipboardData {
             + self.junctions.len()
             + self.buses.len()
             + self.bus_taps.len()
+            + self.net_labels.len()
     }
 
     /// Clear all clipboard content
@@ -86,6 +95,7 @@ impl ClipboardData {
         self.junctions.clear();
         self.buses.clear();
         self.bus_taps.clear();
+        self.net_labels.clear();
         self.origin = Point::origin();
     }
 
@@ -109,13 +119,40 @@ impl ClipboardData {
         buses: Vec<Bus>,
         bus_taps: Vec<BusTap>,
     ) -> Self {
-        let origin = Self::calculate_center(&components, &wires, &junctions, &buses, &bus_taps);
+        Self::from_selection_with_labels_and_buses(
+            components,
+            wires,
+            junctions,
+            Vec::new(),
+            buses,
+            bus_taps,
+        )
+    }
+
+    /// Create clipboard data for every complete selectable schematic object.
+    pub fn from_selection_with_labels_and_buses(
+        components: Vec<Component>,
+        wires: Vec<Wire>,
+        junctions: Vec<Point>,
+        net_labels: Vec<NetLabel>,
+        buses: Vec<Bus>,
+        bus_taps: Vec<BusTap>,
+    ) -> Self {
+        let origin = Self::calculate_center(
+            &components,
+            &wires,
+            &junctions,
+            &net_labels,
+            &buses,
+            &bus_taps,
+        );
         Self {
             components,
             wires,
             junctions,
             buses,
             bus_taps,
+            net_labels,
             origin,
         }
     }
@@ -125,6 +162,7 @@ impl ClipboardData {
         components: &[Component],
         wires: &[Wire],
         junctions: &[Point],
+        net_labels: &[NetLabel],
         buses: &[Bus],
         bus_taps: &[BusTap],
     ) -> Point {
@@ -149,6 +187,12 @@ impl ClipboardData {
         for junction in junctions {
             cx = cx.saturating_add(i64::from(junction.x));
             cy = cy.saturating_add(i64::from(junction.y));
+            count = count.saturating_add(1);
+        }
+
+        for label in net_labels {
+            cx = cx.saturating_add(i64::from(label.pos.x));
+            cy = cy.saturating_add(i64::from(label.pos.y));
             count = count.saturating_add(1);
         }
 
@@ -215,5 +259,33 @@ mod tests {
             ],
         );
         assert_eq!(clipboard.origin, Point::new(i32::MAX, i32::MIN));
+    }
+
+    #[test]
+    fn label_only_clipboard_is_content_centered_on_the_label_anchor() {
+        let label = NetLabel::new(17, Point::new(-30, 40), "sense_out");
+        let clipboard = ClipboardData::from_selection_with_labels_and_buses(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![label.clone()],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert!(clipboard.has_content());
+        assert_eq!(clipboard.count(), 1);
+        assert_eq!(clipboard.origin, label.pos);
+        assert_eq!(clipboard.net_labels, vec![label]);
+    }
+
+    #[test]
+    fn legacy_clipboard_without_net_labels_deserializes_empty() {
+        let mut value = serde_json::to_value(ClipboardData::default()).unwrap();
+        value.as_object_mut().unwrap().remove("net_labels");
+
+        let clipboard: ClipboardData = serde_json::from_value(value).unwrap();
+
+        assert!(clipboard.net_labels.is_empty());
     }
 }

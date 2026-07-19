@@ -7,6 +7,9 @@ use super::super::symbols::SymbolLibrary;
 use super::SchematicSymbolContext;
 use super::drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire};
 use super::grid::draw_grid;
+use super::net_labels::{
+    draw_net_label, hovered_net_label, world_bounds as net_label_world_bounds,
+};
 use super::viewport::Viewport;
 
 /// Culling margin in world units: symbols extend up to ~40 units from their
@@ -53,6 +56,7 @@ pub(super) fn draw_scene(
     if state.schematic.components.is_empty()
         && state.schematic.wires.is_empty()
         && state.schematic.buses.is_empty()
+        && state.schematic.net_labels.is_empty()
     {
         draw_empty_hint(painter, available);
     }
@@ -166,6 +170,36 @@ pub(super) fn draw_scene(
     }
 
     draw_operating_point_annotations(painter, available, viewport, state);
+
+    // Net labels are authored text, not derived annotations. Paint them after
+    // junction and OP overlays so the source net name always remains legible.
+    let hovered_label = if state.schematic.tool == crate::state::Tool::Select {
+        hovered_net_label(painter, viewport, &state.schematic.net_labels, available)
+    } else {
+        None
+    };
+    for label in &state.schematic.net_labels {
+        let (min, max) = net_label_world_bounds(label);
+        if (max.x as f32) < wx0
+            || (min.x as f32) > wx1
+            || (max.y as f32) < wy0
+            || (min.y as f32) > wy1
+        {
+            continue;
+        }
+        let mut selected = state.schematic.selection.has_net_label(label.id);
+        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
+        }
+        draw_net_label(
+            painter,
+            viewport,
+            label,
+            selected,
+            hovered_label == Some(label.id),
+            false,
+        );
+    }
 
     if let Some((hx, hy)) = state.dialogs.interaction.hover_wire_vertex {
         let hover_pos = Point::new(hx, hy);
