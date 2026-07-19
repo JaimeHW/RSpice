@@ -365,6 +365,11 @@ pub(super) fn form(
             input_row(ui, "Stop", &mut setup.stop);
             input_row(ui, "Step", &mut setup.step);
             check_row(ui, "Nested sweep", &mut setup.nested);
+            // Nested-sweep enablement is a complete field group. Do not pair
+            // the first secondary-sweep value with the checkbox: doing so
+            // shifts every following field by one column and leaves Step 2
+            // stranded on a partial final row.
+            clear_pending_cell(ui);
             if setup.nested {
                 input_row(ui, "Source 2", &mut setup.source2);
                 input_row(ui, "Start 2", &mut setup.start2);

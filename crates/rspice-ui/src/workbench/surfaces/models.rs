@@ -13,7 +13,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 
-use super::super::design_system::{heading, property_card, property_row, workspace_title_row};
+use super::super::design_system::{property_card, property_row, workspace_title_row};
 use super::super::state::{ModelsPage, Workspace};
 
 const TABLE_HEAD_H: f32 = 27.0;
@@ -25,21 +25,31 @@ const MODEL_SUMMARY_BREAKPOINT: f32 = 820.0;
 const MODEL_TABLE_MIN_H: f32 = 120.0;
 const MODEL_WIDE_SUMMARY_H: f32 = 150.0;
 const MODEL_STACKED_SUMMARY_H: f32 = 300.0;
+const MODEL_TITLE_MIN_CONTENT_H: f32 = 48.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
-        ui.set_min_size(ui.available_size());
-        ui.spacing_mut().item_spacing = Vec2::ZERO;
-        model_tabs(ui, app);
-        match app.state.workbench.models_page {
-            ModelsPage::Models => models_catalog(ui, app),
-            ModelsPage::Symbols => symbols(ui, app),
-            ModelsPage::Corners => corners(ui, app),
-            ModelsPage::Include => include_graph(ui, app),
-            ModelsPage::Qualification => metadata_audit(ui, app),
-        }
-    });
+    // Own the viewport explicitly. Giving a framed child the parent's complete
+    // available size as its minimum made that minimum leak into the first
+    // title-row child: right-aligned actions were then laid out at the bottom
+    // of the workspace and the actual page body received no usable height.
+    let size = ui.available_size().max(Vec2::splat(1.0));
+    let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect_filled(viewport, 0.0, t.color.bg_app);
+    let mut surface = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(viewport)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    surface.spacing_mut().item_spacing = Vec2::ZERO;
+    model_tabs(&mut surface, app);
+    match app.state.workbench.models_page {
+        ModelsPage::Models => models_catalog(&mut surface, app),
+        ModelsPage::Symbols => symbols(&mut surface, app),
+        ModelsPage::Corners => corners(&mut surface, app),
+        ModelsPage::Include => include_graph(&mut surface, app),
+        ModelsPage::Qualification => metadata_audit(&mut surface, app),
+    }
 }
 
 fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -397,7 +407,13 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
                 egui::vec2(ui.available_width(), table_h),
                 "No symbol views are present in the loaded design libraries.",
             );
-            symbol_summary(ui, stats, layout.narrow, layout.summary_height);
+            symbol_summary(
+                ui,
+                stats,
+                layout.narrow,
+                layout.summary_height,
+                layout.owns_vertical_scroll,
+            );
             event
         },
     );
@@ -536,21 +552,26 @@ fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 layout.narrow,
                 layout.summary_height,
-                "Binding policy",
-                &[
-                    ("Resolved bindings", resolved.to_string()),
-                    ("Unresolved bindings", unresolved.to_string()),
-                    ("Missing non-TT section", "fail closed".to_owned()),
-                ],
-                "Environment axes",
-                &[
-                    ("Temperature", temperature_axis),
-                    ("Supply factor", supply_axis),
-                    (
-                        "PDK search paths",
-                        app.state.pdk_config.library_paths.len().to_string(),
-                    ),
-                ],
+                layout.owns_vertical_scroll,
+                SummaryCardSpec::new(
+                    "Binding policy",
+                    &[
+                        ("Resolved bindings", resolved.to_string()),
+                        ("Unresolved bindings", unresolved.to_string()),
+                        ("Missing non-TT section", "fail closed".to_owned()),
+                    ],
+                ),
+                SummaryCardSpec::new(
+                    "Environment axes",
+                    &[
+                        ("Temperature", temperature_axis),
+                        ("Supply factor", supply_axis),
+                        (
+                            "PDK search paths",
+                            app.state.pdk_config.library_paths.len().to_string(),
+                        ),
+                    ],
+                ),
             );
             event
         },
@@ -854,34 +875,110 @@ fn surface_title(
     workspace_title_row(ui, |ui| {
         if narrow {
             ui.vertical(|ui| {
-                heading(ui, eyebrow, title, description);
+                model_heading(ui, eyebrow, title, description);
                 if has_actions {
                     ui.add_space(6.0);
                     ui.horizontal_wrapped(actions);
                 }
             });
         } else {
-            ui.horizontal_top(|ui| {
-                let action_reserve = if has_actions {
-                    240.0_f32.min(ui.available_width() * 0.34)
-                } else {
-                    0.0
-                };
-                ui.allocate_ui_with_layout(
-                    egui::vec2((ui.available_width() - action_reserve).max(1.0), 0.0),
-                    Layout::top_down(Align::Min),
-                    |ui| heading(ui, eyebrow, title, description),
+            let width = ui.available_width().max(1.0);
+            let action_reserve = if has_actions {
+                240.0_f32.min(width * 0.34)
+            } else {
+                0.0
+            };
+            let heading_width = (width - action_reserve).max(1.0);
+            let row_height =
+                model_title_content_height(ui, heading_width, eyebrow, title, description);
+            let (row, _) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
+            let heading_rect = Rect::from_min_max(
+                row.left_top(),
+                egui::pos2((row.right() - action_reserve).max(row.left()), row.bottom()),
+            );
+            let mut heading_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(heading_rect)
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            model_heading(&mut heading_ui, eyebrow, title, description);
+            if has_actions {
+                let action_rect = Rect::from_min_max(
+                    egui::pos2(heading_rect.right(), row.top()),
+                    row.right_bottom(),
                 );
-                if has_actions {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(action_reserve.max(1.0), 0.0),
-                        Layout::right_to_left(Align::Min),
-                        actions,
-                    );
-                }
-            });
+                let mut action_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(action_rect)
+                        .layout(Layout::right_to_left(Align::Center)),
+                );
+                actions(&mut action_ui);
+            }
         }
     });
+}
+
+fn model_heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
+    let t = Tokens::get(ui.ctx());
+    let eyebrow_response = ui.label(
+        egui::RichText::new(eyebrow.to_uppercase())
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .color(t.color.text_faint),
+    );
+    accessible_model_text(ui, &eyebrow_response, eyebrow);
+    ui.add_space(2.0);
+    let title_response = ui.label(
+        egui::RichText::new(title)
+            .font(theme::sans(15.0, FontWeight::SemiBold))
+            .color(t.color.text),
+    );
+    ui.ctx().accesskit_node_builder(title_response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(title);
+    });
+    let description_response = ui.label(
+        egui::RichText::new(description)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+    accessible_model_text(ui, &description_response, description);
+}
+
+fn accessible_model_text(ui: &Ui, response: &egui::Response, text: &str) {
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Label);
+        node.set_label(text);
+    });
+}
+
+fn model_title_content_height(
+    ui: &Ui,
+    heading_width: f32,
+    eyebrow: &str,
+    title: &str,
+    description: &str,
+) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let heading_width = heading_width.max(1.0);
+    let eyebrow = ui.painter().layout(
+        eyebrow.to_uppercase(),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.text_faint,
+        heading_width,
+    );
+    let title = ui.painter().layout(
+        title.to_owned(),
+        theme::sans(15.0, FontWeight::SemiBold),
+        t.color.text,
+        heading_width,
+    );
+    let description = ui.painter().layout(
+        description.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        heading_width,
+    );
+    (eyebrow.size().y + 2.0 + title.size().y + description.size().y).max(MODEL_TITLE_MIN_CONTENT_H)
 }
 
 fn model_tab_strip_height(touch: bool, filter_visible: bool) -> f32 {
@@ -1111,13 +1208,18 @@ fn data_table(
                     egui::vec2(table_width, t.metrics.row_h.max(44.0)),
                     Sense::hover(),
                 );
-                ui.painter().text(
-                    egui::pos2(rect.left() + 8.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    empty_message,
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.text_dim,
+                let mut empty = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(rect)
+                        .layout(Layout::left_to_right(Align::Center)),
                 );
+                empty.add_space(8.0);
+                let response = empty.label(
+                    egui::RichText::new(empty_message)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+                accessible_model_text(&empty, &response, empty_message);
             }
         });
     if let Some((id, key)) = requested_focus {
@@ -1224,38 +1326,80 @@ struct SymbolStats {
     parameter_forms: usize,
 }
 
-fn symbol_summary(ui: &mut Ui, stats: SymbolStats, narrow: bool, summary_height: f32) {
+fn symbol_summary(
+    ui: &mut Ui,
+    stats: SymbolStats,
+    narrow: bool,
+    summary_height: f32,
+    parent_owns_scroll: bool,
+) {
     summary_cards(
         ui,
         narrow,
         summary_height,
-        "Pin contract",
-        &[
-            ("Symbol views", stats.symbols.to_string()),
-            ("Explicit pins", stats.pins.to_string()),
-            ("Unplaced pins", stats.unplaced_pins.to_string()),
-        ],
-        "Parameter form",
-        &[
-            ("Defined forms", stats.parameter_forms.to_string()),
-            ("Missing pin contracts", stats.missing_contracts.to_string()),
-            (
-                "Invalid symbol metadata",
-                stats.invalid_documents.to_string(),
-            ),
-        ],
+        parent_owns_scroll,
+        SummaryCardSpec::new(
+            "Pin contract",
+            &[
+                ("Symbol views", stats.symbols.to_string()),
+                ("Explicit pins", stats.pins.to_string()),
+                ("Unplaced pins", stats.unplaced_pins.to_string()),
+            ],
+        ),
+        SummaryCardSpec::new(
+            "Parameter form",
+            &[
+                ("Defined forms", stats.parameter_forms.to_string()),
+                ("Missing pin contracts", stats.missing_contracts.to_string()),
+                (
+                    "Invalid symbol metadata",
+                    stats.invalid_documents.to_string(),
+                ),
+            ],
+        ),
     );
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SummaryCardSpec<'a> {
+    title: &'a str,
+    rows: &'a [(&'a str, String)],
+}
+
+impl<'a> SummaryCardSpec<'a> {
+    const fn new(title: &'a str, rows: &'a [(&'a str, String)]) -> Self {
+        Self { title, rows }
+    }
 }
 
 fn summary_cards(
     ui: &mut Ui,
     narrow: bool,
     summary_height: f32,
-    left_title: &str,
-    left: &[(&str, String)],
-    right_title: &str,
-    right: &[(&str, String)],
+    parent_owns_scroll: bool,
+    left: SummaryCardSpec<'_>,
+    right: SummaryCardSpec<'_>,
 ) -> egui::Response {
+    let width = ui.available_width().max(1.0);
+    if parent_owns_scroll {
+        // The enclosing table/summary composition is already the vertical
+        // scroll owner. Render at natural height here so short workspaces do
+        // not create a second, partially hidden scroll viewport at the
+        // Console boundary.
+        return ui
+            .scope(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                ui.set_min_width(width);
+                let start = ui.cursor().top();
+                summary_cards_content(ui, width, narrow, left, right);
+                let consumed = ui.cursor().top() - start;
+                if consumed < summary_height {
+                    ui.add_space(summary_height - consumed);
+                }
+            })
+            .response;
+    }
+
     let viewport_size = egui::vec2(ui.available_width().max(1.0), summary_height.max(1.0));
     let (viewport, response) = ui.allocate_exact_size(viewport_size, Sense::hover());
     let mut child = ui.new_child(
@@ -1265,51 +1409,61 @@ fn summary_cards(
     );
     child.spacing_mut().item_spacing = Vec2::ZERO;
     ScrollArea::vertical()
-        .id_salt(("models.summary-cards", left_title, right_title))
+        .id_salt(("models.summary-cards", left.title, right.title))
         .auto_shrink([false, false])
         .show(&mut child, |ui| {
             ui.set_min_width(viewport.width());
-            if narrow {
-                property_card(ui, left_title, |ui| {
-                    for (label, value) in left {
-                        property_row(ui, label, value);
-                    }
-                });
-                property_card(ui, right_title, |ui| {
-                    for (label, value) in right {
-                        property_row(ui, label, value);
-                    }
-                });
-            } else {
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = 1.0;
-                    let column_w = ((viewport.width() - 1.0) * 0.5).max(1.0);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(column_w, 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            property_card(ui, left_title, |ui| {
-                                for (label, value) in left {
-                                    property_row(ui, label, value);
-                                }
-                            });
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(column_w, 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            property_card(ui, right_title, |ui| {
-                                for (label, value) in right {
-                                    property_row(ui, label, value);
-                                }
-                            });
-                        },
-                    );
-                });
-            }
+            summary_cards_content(ui, viewport.width(), narrow, left, right);
         });
     response
+}
+
+fn summary_cards_content(
+    ui: &mut Ui,
+    width: f32,
+    narrow: bool,
+    left: SummaryCardSpec<'_>,
+    right: SummaryCardSpec<'_>,
+) {
+    if narrow {
+        property_card(ui, left.title, |ui| {
+            for (label, value) in left.rows {
+                property_row(ui, label, value);
+            }
+        });
+        property_card(ui, right.title, |ui| {
+            for (label, value) in right.rows {
+                property_row(ui, label, value);
+            }
+        });
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 1.0;
+            let column_w = ((width - 1.0) * 0.5).max(1.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_w, 0.0),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    property_card(ui, left.title, |ui| {
+                        for (label, value) in left.rows {
+                            property_row(ui, label, value);
+                        }
+                    });
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_w, 0.0),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    property_card(ui, right.title, |ui| {
+                        for (label, value) in right.rows {
+                            property_row(ui, label, value);
+                        }
+                    });
+                },
+            );
+        });
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1455,10 +1609,15 @@ fn draw_include_graph(ui: &mut Ui, libraries: &[IncludeLibrary], collapsed: bool
         .show(&mut child, |ui| {
             ui.set_min_width(400.0);
             if libraries.is_empty() {
-                ui.label(
+                let response = ui.label(
                     egui::RichText::new("No loaded model libraries expose an include graph.")
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
+                );
+                accessible_model_text(
+                    ui,
+                    &response,
+                    "No loaded model libraries expose an include graph.",
                 );
                 return;
             }
@@ -1977,6 +2136,83 @@ mod tests {
         assert!(!output.shapes.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
+        for (page, label, description, body_label) in [
+            (
+                ModelsPage::Symbols,
+                "Create symbol",
+                "Bind graphical symbols and explicit terminal contracts without hiding netlist semantics.",
+                "No symbol views are present in the loaded design libraries.",
+            ),
+            (
+                ModelsPage::Include,
+                "Collapse transitive",
+                "Inspect ordered dependency resolution, captured paths, source pins, and cycle diagnostics.",
+                "No loaded model libraries expose an include graph.",
+            ),
+        ] {
+            for width in [1_431.0, 820.0, 720.0, 561.0] {
+                let ctx = egui::Context::default();
+                crate::ui::Theme::default().apply(&ctx);
+                ctx.enable_accesskit();
+                let mut app = RSpiceApp::test_instance();
+                app.state.workbench.models_page = page;
+                app.state.library_manager.clear();
+                app.state.model_library_manager.clear();
+
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 560.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::NONE)
+                            .show(ctx, |ui| show(ui, &mut app));
+                    },
+                );
+
+                let nodes = output
+                    .platform_output
+                    .accesskit_update
+                    .expect("models accessibility tree")
+                    .nodes;
+                let bounds = nodes
+                    .iter()
+                    .find(|(_, node)| {
+                        node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+                    })
+                    .and_then(|(_, node)| node.bounds())
+                    .unwrap_or_else(|| panic!("missing {label} action"));
+                assert!(
+                    bounds.y1 <= 150.0,
+                    "{label} escaped the models title band on {page:?} at {width}: {bounds:?}"
+                );
+                let description_bounds = nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(description))
+                    .and_then(|(_, node)| node.bounds())
+                    .unwrap_or_else(|| panic!("missing {description} title description"));
+                let body_bounds = nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(body_label))
+                    .and_then(|(_, node)| node.bounds())
+                    .unwrap_or_else(|| panic!("missing {body_label} body state"));
+                assert!(
+                    body_bounds.y0 >= bounds.y1 - 1.0
+                        && body_bounds.y0 >= description_bounds.y1 - 1.0
+                        && body_bounds.y1 <= 560.0,
+                    "{body_label} overlaps the title or leaves the visible body on {page:?} at {width}: action={bounds:?}, description={description_bounds:?}, body={body_bounds:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn summary_cards_reserve_exact_height_when_long_values_wrap() {
         let ctx = egui::Context::default();
@@ -2007,10 +2243,9 @@ mod tests {
                         ui,
                         false,
                         MODEL_WIDE_SUMMARY_H,
-                        "Binding policy",
-                        &left,
-                        "Environment axes",
-                        &right,
+                        false,
+                        SummaryCardSpec::new("Binding policy", &left),
+                        SummaryCardSpec::new("Environment axes", &right),
                     );
                     consumed = Some(response.rect.height());
                 });
@@ -2018,6 +2253,54 @@ mod tests {
         );
 
         assert!((consumed.expect("summary rendered") - MODEL_WIDE_SUMMARY_H).abs() <= 0.5);
+    }
+
+    #[test]
+    fn parent_scrolled_summary_uses_natural_height_instead_of_nesting_scrollbars() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut consumed = None;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(620.0, 260.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let long = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
+                    let left = [
+                        ("Resolved bindings", long.clone()),
+                        ("Unresolved bindings", long.clone()),
+                        ("Missing non-TT section", long.clone()),
+                    ];
+                    let right = [
+                        ("Temperature", long.clone()),
+                        ("Supply factor", long.clone()),
+                        ("PDK search paths", long),
+                    ];
+                    consumed = Some(
+                        summary_cards(
+                            ui,
+                            false,
+                            MODEL_WIDE_SUMMARY_H,
+                            true,
+                            SummaryCardSpec::new("Binding policy", &left),
+                            SummaryCardSpec::new("Environment axes", &right),
+                        )
+                        .rect
+                        .height(),
+                    );
+                });
+            },
+        );
+
+        assert!(
+            consumed.expect("summary rendered") > MODEL_WIDE_SUMMARY_H,
+            "natural content must expand inside the single parent scroll owner"
+        );
     }
 
     #[test]

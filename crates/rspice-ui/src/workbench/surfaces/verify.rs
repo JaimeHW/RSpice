@@ -18,6 +18,8 @@ const VERIFY_KPI_BREAKPOINT: f32 = 1_260.0;
 const VERIFY_PHONE_BREAKPOINT: f32 = 560.0;
 const VERIFY_STACKED_CHART_HEIGHT: f32 = 250.0;
 const VERIFY_PHONE_CHART_HEIGHT: f32 = 230.0;
+const VERIFY_FIRST_ROW_MIN_HEIGHT: f32 = 210.0;
+const VERIFY_FIRST_ROW_MAX_HEIGHT: f32 = 390.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // Persisted legacy pages can outlive their retired prototype surfaces.
@@ -28,23 +30,31 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     let ctx = ui.ctx().clone();
     let t = Tokens::get(ui.ctx());
+    let viewport_height = ui.available_height();
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ScrollArea::vertical()
-            .id_salt("workbench.verify.surface")
+            .id_salt((
+                "workbench.verify.surface",
+                app.state.workbench.verification_page.label(),
+            ))
             .show(ui, |ui| {
                 let surface_width = ui.available_width();
+                let surface_top = ui.cursor().top();
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
                 workspace_title_row(ui, |ui| {
                     verification_heading(ui, app);
                 });
+                let consumed_height = ui.cursor().top() - surface_top;
+                let body_viewport_height =
+                    remaining_viewport_height(viewport_height, consumed_height);
                 match app.state.workbench.verification_page {
-                    VerificationPage::Yield => cockpit(ui, app),
+                    VerificationPage::Yield => cockpit(ui, app, body_viewport_height),
                     VerificationPage::Corners => corners(ui, app),
                     VerificationPage::Tuning => tuning_unavailable(ui),
                     VerificationPage::Optimization => optimization(ui, app),
                     VerificationPage::Reliability => reliability(ui, app),
-                    VerificationPage::Regression => regression(ui, app),
+                    VerificationPage::Regression => regression(ui, app, body_viewport_height),
                     VerificationPage::Drc => physical_drc(ui, app),
                 }
             });
@@ -394,23 +404,25 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
         .regression_baseline_picker_open = open;
 }
 
-fn cockpit(ui: &mut Ui, app: &mut RSpiceApp) {
+fn cockpit(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32) {
+    let surface_top = ui.cursor().top();
     let run_index = verification_run_index(app);
     let evidence = specification_evidence(app, run_index);
     engineering_status_strip(ui, app, &evidence);
 
     let width = ui.available_width();
-    let responsive_width = ui.ctx().content_rect().width().min(width);
+    let viewport_width = ui.ctx().content_rect().width();
     let t = Tokens::get(ui.ctx());
     let header_height = if t.metrics.ctl_h >= 44.0 { 44.0 } else { 37.0 };
-    let visible_remaining = (ui.clip_rect().bottom() - ui.cursor().top()).max(0.0);
+    let visible_remaining =
+        remaining_viewport_height(viewport_height, ui.cursor().top() - surface_top);
     let layout = VerifyLayout::resolve(
-        responsive_width,
+        viewport_width,
         width,
         visible_remaining,
         evidence.len(),
         header_height,
-        verification_table_row_height(responsive_width),
+        verification_table_row_height(viewport_width),
     );
     if layout.split {
         ui.horizontal(|ui| {
@@ -432,7 +444,7 @@ fn cockpit(ui: &mut Ui, app: &mut RSpiceApp) {
             egui::Stroke::new(1.0, t.color.border),
         );
     } else {
-        let chart_height = verification_stacked_chart_height(responsive_width);
+        let chart_height = verification_stacked_chart_height(viewport_width);
         ui.allocate_ui(egui::vec2(width, chart_height), |ui| {
             yield_chart(ui, app, chart_height)
         });
@@ -475,8 +487,9 @@ impl VerifyLayout {
         let content_width = content_width.max(0.0);
         let specification_height =
             section_header_height + 27.0 + row_height * specification_rows.max(1) as f32;
-        let first_row_height = (visible_height - specification_height - 1.0).max(210.0);
-        let split = viewport_width > 1_020.0 && content_width >= 641.0;
+        let first_row_height =
+            bounded_verification_first_row_height(visible_height, specification_height);
+        let split = viewport_width > VERIFY_KPI_BREAKPOINT && content_width >= 641.0;
         let left_width = if split {
             let usable = content_width - 1.0;
             (usable * 0.45).clamp(280.0, usable - 360.0)
@@ -495,6 +508,19 @@ impl VerifyLayout {
             first_row_height,
         }
     }
+}
+
+fn bounded_verification_first_row_height(visible_height: f32, specification_height: f32) -> f32 {
+    let requested = visible_height - specification_height - 1.0;
+    if requested.is_finite() {
+        requested.clamp(VERIFY_FIRST_ROW_MIN_HEIGHT, VERIFY_FIRST_ROW_MAX_HEIGHT)
+    } else {
+        VERIFY_FIRST_ROW_MIN_HEIGHT
+    }
+}
+
+fn remaining_viewport_height(viewport_height: f32, consumed_height: f32) -> f32 {
+    (viewport_height - consumed_height.max(0.0)).max(0.0)
 }
 
 #[derive(Clone)]
@@ -682,7 +708,7 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
 fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::Color32)]) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let responsive_width = ui.ctx().content_rect().width().min(width);
+    let responsive_width = ui.ctx().content_rect().width();
     let columns = verification_status_columns(responsive_width);
     let cell_width = width / columns as f32;
     let top = ui.cursor().top();
@@ -1247,7 +1273,7 @@ fn render_data_table(
     // it, `available_width()` is the unconstrained scroll content width and
     // previously stretched ordinary tables far past the visible surface.
     let viewport_width = ui.available_width().max(1.0);
-    let responsive_width = ui.ctx().content_rect().width().min(viewport_width);
+    let responsive_width = ui.ctx().content_rect().width();
     let row_height = verification_table_row_height(responsive_width);
     egui::ScrollArea::horizontal()
         .id_salt(id)
@@ -1349,7 +1375,7 @@ fn render_virtual_data_table(
     let t = Tokens::get(ui.ctx());
     let mut clicked_row = None;
     let viewport_width = ui.available_width().max(1.0);
-    let responsive_width = ui.ctx().content_rect().width().min(viewport_width);
+    let responsive_width = ui.ctx().content_rect().width();
     let row_height = verification_table_row_height(responsive_width);
     egui::ScrollArea::horizontal()
         .id_salt(id)
@@ -2119,7 +2145,10 @@ fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Retained result", &format!("{iterations} iterations"));
             property_row(ui, "Dataset", "immutable active result");
         } else {
-            ui.label("No optimization result is retained. Configure a bounded variable set and execute the production optimization analysis to create evidence.");
+            execution_card_note(
+                ui,
+                "No optimization result is retained. Configure a bounded variable set and execute the production optimization analysis to create evidence.",
+            );
         }
     });
     if let Some(result) = latest_analysis(app, crate::state::AnalysisType::Optimization) {
@@ -2167,7 +2196,6 @@ fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
     card(ui, "Reliability execution", |ui| {
-        ui.spacing_mut().item_spacing.y = 8.0;
         ui.horizontal_wrapped(|ui| {
             if Button::new("Run preview plan").accent().show(ui).clicked() {
                 let result = request_analysis_run(
@@ -2195,7 +2223,10 @@ fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
         });
-        ui.label("Electrical reliability evaluates operating stress and mission aging. Physical geometry checks remain owned by the Physical DRC flow.");
+        execution_card_note(
+            ui,
+            "Electrical reliability evaluates operating stress and mission aging. Physical geometry checks remain owned by the Physical DRC flow.",
+        );
     });
 
     let soa_payload = latest_analysis(app, crate::state::AnalysisType::Soa)
@@ -2352,6 +2383,11 @@ fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     }
     action_receipt(ui, app);
+}
+
+fn execution_card_note(ui: &mut Ui, note: &str) {
+    ui.add_space(8.0);
+    ui.add(egui::Label::new(note).wrap());
 }
 
 fn reliability_projection_row(
@@ -4218,7 +4254,8 @@ fn evaluate_regression_waveform(
     }
 }
 
-fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
+fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32) {
+    let surface_top = ui.cursor().top();
     let targets = regression_run_pair(app)
         .map(|(baseline, current)| {
             let checks = derive_regression_checks(baseline, current);
@@ -4338,13 +4375,20 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         .iter()
         .filter(|target| regression_rule(&rules, &target.target).is_some())
         .count();
+    let comparison_available = pair.is_some();
     let overall_pass = failures == 0 && unresolved == 0 && !targets.is_empty();
     let items = [
         (
             "Checks passing".to_owned(),
             format!("{passed_checks} / {}", checks.len()),
-            format!("{failures} blocking failures across all targets"),
-            if failures == 0 && !checks.is_empty() {
+            if comparison_available {
+                format!("{failures} blocking failures across all targets")
+            } else {
+                "retain two immutable runs before evaluation".to_owned()
+            },
+            if checks.is_empty() {
+                t.color.text_dim
+            } else if failures == 0 {
                 t.color.ok
             } else {
                 t.color.err
@@ -4353,8 +4397,14 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         (
             "Waveform matches".to_owned(),
             format!("{passed_waveforms} / {}", waveforms.len()),
-            "configured envelope, skew, and window".to_owned(),
-            if passed_waveforms == waveforms.len() && !waveforms.is_empty() {
+            if comparison_available {
+                "configured envelope, skew, and window".to_owned()
+            } else {
+                "no source-aligned waveform pair".to_owned()
+            },
+            if waveforms.is_empty() {
+                t.color.text_dim
+            } else if passed_waveforms == waveforms.len() {
                 t.color.ok
             } else {
                 t.color.warn
@@ -4372,12 +4422,16 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 },
             ),
-            if overall_pass {
+            if !comparison_available {
+                "no retained comparison pair is available".to_owned()
+            } else if overall_pass {
                 "all evaluated targets pass".to_owned()
             } else {
                 format!("{unresolved} targets unresolved")
             },
-            if overall_pass {
+            if !comparison_available {
+                t.color.text_dim
+            } else if overall_pass {
                 t.color.ok
             } else {
                 t.color.warn
@@ -4386,7 +4440,9 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         (
             "Tolerance contract".to_owned(),
             format!("{configured} / {}", targets.len()),
-            if regression_session
+            if targets.is_empty() {
+                "no comparison targets available".to_owned()
+            } else if regression_session
                 .regression_tolerance_drafts
                 .iter()
                 .any(|draft| draft.dirty)
@@ -4395,7 +4451,9 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
             } else {
                 "persisted by active simulation plan".to_owned()
             },
-            if configured == targets.len() && !targets.is_empty() {
+            if targets.is_empty() {
+                t.color.text_dim
+            } else if configured == targets.len() {
                 t.color.ok
             } else {
                 t.color.warn
@@ -4405,13 +4463,24 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     verification_kpi_strip(ui, &items);
 
     let width = ui.available_width();
-    let split = width > 1_020.0;
-    if split {
-        let left = ((width - 1.0) * 0.45).clamp(280.0, width - 361.0);
+    let viewport_width = ui.ctx().content_rect().width();
+    let header_height = if t.metrics.ctl_h >= 44.0 { 44.0 } else { 37.0 };
+    let visible_remaining =
+        remaining_viewport_height(viewport_height, ui.cursor().top() - surface_top);
+    let comparison_rows = checks.len() + waveforms.len() + coverage_issues.len();
+    let layout = VerifyLayout::resolve(
+        viewport_width,
+        width,
+        visible_remaining,
+        comparison_rows,
+        header_height,
+        verification_table_row_height(viewport_width),
+    );
+    if layout.split {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 1.0;
             ui.allocate_ui_with_layout(
-                egui::vec2(left, 390.0),
+                egui::vec2(layout.left_width, layout.first_row_height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     regression_waveform_chart(
@@ -4423,10 +4492,10 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
                 },
             );
             ui.allocate_ui_with_layout(
-                egui::vec2(width - left - 1.0, 390.0),
+                egui::vec2(layout.right_width, layout.first_row_height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    regression_baseline_contract(
+                    regression_baseline_contract_pane(
                         ui,
                         &mut regression_session,
                         baseline_contract.as_ref(),
@@ -4436,7 +4505,8 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         });
     } else {
-        ui.allocate_ui(egui::vec2(width, 280.0), |ui| {
+        let chart_height = verification_stacked_chart_height(viewport_width);
+        ui.allocate_ui(egui::vec2(width, chart_height), |ui| {
             regression_waveform_chart(
                 ui,
                 &waveforms,
@@ -4631,6 +4701,31 @@ fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
             regression_session.regression_tolerance_drafts;
     }
     action_receipt(ui, app);
+}
+
+fn regression_baseline_contract_pane(
+    ui: &mut Ui,
+    session: &mut super::super::state::VerificationSessionState,
+    contract: Option<&RegressionBaselineContractSnapshot>,
+    targets: &[RegressionTargetDescriptor],
+) {
+    let t = Tokens::get(ui.ctx());
+    let size = ui.available_size().max(egui::Vec2::splat(1.0));
+    let (viewport, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    ui.painter().rect_filled(viewport, 0.0, t.color.bg_app);
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(viewport)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    child.spacing_mut().item_spacing.y = 0.0;
+    ScrollArea::vertical()
+        .id_salt("verify.regression.baseline-contract")
+        .auto_shrink([false, false])
+        .show(&mut child, |ui| {
+            ui.set_min_width(viewport.width());
+            regression_baseline_contract(ui, session, contract, targets);
+        });
 }
 
 #[derive(Debug, Clone)]
@@ -5133,10 +5228,10 @@ mod tests {
         let desktop = VerifyLayout::resolve(1_440.0, 820.0, 620.0, 5, 37.0, 28.0);
         assert!(desktop.split);
         assert!((desktop.left_width + 1.0 + desktop.right_width - 820.0).abs() < f32::EPSILON);
-        assert!(desktop.first_row_height > 400.0);
+        assert_eq!(desktop.first_row_height, VERIFY_FIRST_ROW_MAX_HEIGHT);
 
         let compact_desktop = VerifyLayout::resolve(1_024.0, 744.0, 600.0, 5, 37.0, 28.0);
-        assert!(compact_desktop.split);
+        assert!(!compact_desktop.split);
 
         let tablet = VerifyLayout::resolve(820.0, 768.0, 600.0, 5, 44.0, 31.0);
         assert!(!tablet.split);
@@ -5145,6 +5240,34 @@ mod tests {
         let phone = VerifyLayout::resolve(390.0, 390.0, 540.0, 5, 44.0, 36.0);
         assert!(!phone.split);
         assert_eq!(phone.right_width, 390.0);
+    }
+
+    #[test]
+    fn verification_first_row_height_is_finite_and_capped() {
+        assert_eq!(
+            bounded_verification_first_row_height(10_000.0, 100.0),
+            VERIFY_FIRST_ROW_MAX_HEIGHT
+        );
+        assert_eq!(
+            bounded_verification_first_row_height(100.0, 200.0),
+            VERIFY_FIRST_ROW_MIN_HEIGHT
+        );
+        assert_eq!(
+            bounded_verification_first_row_height(f32::INFINITY, 100.0),
+            VERIFY_FIRST_ROW_MIN_HEIGHT
+        );
+        assert_eq!(
+            bounded_verification_first_row_height(f32::NAN, 100.0),
+            VERIFY_FIRST_ROW_MIN_HEIGHT
+        );
+    }
+
+    #[test]
+    fn visible_height_depends_only_on_consumed_content_not_scroll_offset() {
+        assert_eq!(remaining_viewport_height(600.0, -40.0), 600.0);
+        assert_eq!(remaining_viewport_height(600.0, 0.0), 600.0);
+        assert_eq!(remaining_viewport_height(600.0, 160.0), 440.0);
+        assert_eq!(remaining_viewport_height(600.0, 640.0), 0.0);
     }
 
     #[test]

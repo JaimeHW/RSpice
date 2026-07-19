@@ -914,6 +914,30 @@ fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePage
             });
         },
     );
+    setting_row(
+        ui,
+        "Canvas keyboard navigation",
+        "Traverse schematic component instances with the arrow keys without changing canvas geometry.",
+        |ui| {
+            right_aligned(ui, |ui| {
+                let mut value = state
+                    .ui
+                    .preferences
+                    .toggle(TogglePreference::CanvasKeyboardNavigation);
+                if preference_switch(
+                    ui,
+                    "preferences.accessibility.canvas-keyboard-navigation",
+                    "Enable canvas keyboard navigation",
+                    &mut value,
+                ) {
+                    state
+                        .ui
+                        .preferences
+                        .set_toggle(TogglePreference::CanvasKeyboardNavigation, value);
+                }
+            });
+        },
+    );
     #[cfg(target_arch = "wasm32")]
     setting_row(
         ui,

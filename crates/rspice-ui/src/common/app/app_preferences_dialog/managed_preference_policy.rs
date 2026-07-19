@@ -708,6 +708,13 @@ fn resolved_policy_rows(category: PreferenceCategory, state: &AppState) -> Vec<R
                 "User profile",
                 "interface accessibility",
             ),
+            toggle_policy_row(
+                state,
+                "Canvas keyboard navigation",
+                TogglePreference::CanvasKeyboardNavigation,
+                "User profile",
+                "schematic instance navigation",
+            ),
             choice_policy_row(
                 state,
                 "Minimum touch target",

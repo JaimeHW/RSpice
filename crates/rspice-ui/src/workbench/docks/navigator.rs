@@ -431,6 +431,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                     app.state.sim_setup.palette_scroll_to_active = true;
                 }
             });
+            ui.add_space(8.0);
             section_header(ui, "Capability policy", None);
             capability_policy_banner(ui);
         });

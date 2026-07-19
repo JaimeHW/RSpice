@@ -504,11 +504,19 @@ impl Command {
         {
             return false;
         }
+        if self.requires_open_project() && !state.project_lifecycle.project_open {
+            return false;
+        }
         match self {
             Self::OpenWorkspace(workspace) => {
                 workspace_available(state.project_lifecycle.project_open, workspace)
             }
-            Self::Save | Self::SaveAs => state.project_lifecycle.project_open,
+            Self::Save => {
+                state.project_lifecycle.project_open
+                    || state.schematic.current_file.is_some()
+                    || state.browser_schematic_save_name.is_some()
+            }
+            Self::SaveAs => state.project_lifecycle.project_open,
             Self::SaveAll => {
                 state.project_lifecycle.project_open
                     && crate::common::project_lifecycle::has_unsaved_changes(state)
@@ -706,6 +714,13 @@ impl Command {
                 ));
             return;
         }
+        if self.requires_open_project() && !app.state.project_lifecycle.project_open {
+            app.state
+                .push_user_message(crate::common::app::ConsoleMessage::warning(
+                    "Open a project before using this command.",
+                ));
+            return;
+        }
         match self {
             Self::OpenWorkspace(workspace) => {
                 if workspace_available(app.state.project_lifecycle.project_open, workspace) {
@@ -834,37 +849,12 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.select_all_symbol_items();
                 } else {
-                    let component_ids: Vec<u64> = app
-                        .state
-                        .schematic
-                        .components
-                        .iter()
-                        .map(|component| component.id)
-                        .collect();
-                    let wire_ids: Vec<u64> = app
-                        .state
-                        .schematic
-                        .wires
-                        .iter()
-                        .map(|wire| wire.id)
-                        .collect();
-                    let junction_positions: Vec<_> = app
-                        .state
-                        .schematic
-                        .junctions
-                        .iter()
-                        .map(|junction| junction.pos)
-                        .collect();
-                    app.state.schematic.selection.clear();
-                    for id in component_ids {
-                        app.state.schematic.selection.select_component(id);
-                    }
-                    for id in wire_ids {
-                        app.state.schematic.selection.select_wire(id);
-                    }
-                    for pos in junction_positions {
-                        app.state.schematic.selection.select_junction(pos);
-                    }
+                    // Keep the menu/shortcut projection on the state layer's
+                    // complete object taxonomy. Repeating a hand-maintained
+                    // subset here previously made Ctrl+A silently omit buses,
+                    // taps, and net labels even though every downstream edit
+                    // operation already supported them.
+                    app.state.schematic.select_all_objects();
                 }
             }
             Self::RenameSelection => {
@@ -1339,6 +1329,15 @@ fn schematic_selection_has_live_object(schematic: &crate::state::SchematicState)
             .junctions
             .iter()
             .any(|junction| selection.has_junction(junction.pos))
+        || schematic
+            .net_labels
+            .iter()
+            .any(|label| selection.has_net_label(label.id))
+        || schematic.buses.iter().any(|bus| selection.has_bus(bus.id))
+        || schematic
+            .bus_taps
+            .iter()
+            .any(|tap| selection.has_bus_tap(tap.id))
 }
 
 fn schematic_selection_has_duplicable_object(schematic: &crate::state::SchematicState) -> bool {
@@ -1352,7 +1351,16 @@ fn schematic_selection_has_duplicable_object(schematic: &crate::state::Schematic
             || schematic
                 .wires
                 .iter()
-                .any(|wire| selection.has_wire(wire.id)))
+                .any(|wire| selection.has_wire(wire.id))
+            || schematic
+                .net_labels
+                .iter()
+                .any(|label| selection.has_net_label(label.id))
+            || schematic.buses.iter().any(|bus| selection.has_bus(bus.id))
+            || schematic
+                .bus_taps
+                .iter()
+                .any(|tap| selection.has_bus_tap(tap.id)))
 }
 
 fn set_tool(app: &mut RSpiceApp, tool: Tool) {
@@ -1721,6 +1729,114 @@ mod tests {
                 expected_rotation
             );
         }
+    }
+
+    fn app_with_every_complete_schematic_object() -> RSpiceApp {
+        use crate::state::{
+            Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, Junction,
+            NetLabel, Point, Wire,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let bus = Bus::segment(
+            5,
+            Point::new(0, 20),
+            Point::new(20, 20),
+            Some(BusDeclaration::parse("DATA[3:0]").unwrap()),
+        )
+        .unwrap();
+        let tap = BusTap::new(
+            6,
+            &bus,
+            Point::new(10, 20),
+            Point::new(10, 30),
+            BusSlice::parse("DATA[1]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        app.state.schematic.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        app.state
+            .schematic
+            .wires
+            .push(Wire::segment(2, Point::new(0, 0), Point::new(20, 0)));
+        app.state
+            .schematic
+            .junctions
+            .push(Junction::new(3, Point::new(10, 0)));
+        app.state
+            .schematic
+            .net_labels
+            .push(NetLabel::new(4, Point::new(10, 0), "sense_out"));
+        app.state.schematic.buses.push(bus);
+        app.state.schematic.bus_taps.push(tap);
+        app
+    }
+
+    #[test]
+    fn edit_command_enablement_covers_every_complete_schematic_object_class() {
+        let mut app = app_with_every_complete_schematic_object();
+
+        let selectable = [
+            ("component", 1_u64),
+            ("wire", 2),
+            ("net label", 4),
+            ("bus", 5),
+            ("bus tap", 6),
+        ];
+        for (kind, id) in selectable {
+            app.state.schematic.selection.clear();
+            match kind {
+                "component" => app.state.schematic.selection.select_component(id),
+                "wire" => app.state.schematic.selection.select_wire(id),
+                "net label" => app.state.schematic.selection.select_net_label(id),
+                "bus" => app.state.schematic.selection.select_bus(id),
+                "bus tap" => app.state.schematic.selection.select_bus_tap(id),
+                _ => unreachable!(),
+            }
+            assert!(Command::Copy.is_enabled(&app), "copy disabled for {kind}");
+            assert!(Command::Cut.is_enabled(&app), "cut disabled for {kind}");
+            assert!(
+                Command::Delete.is_enabled(&app),
+                "delete disabled for {kind}"
+            );
+            assert!(
+                Command::Duplicate.is_enabled(&app),
+                "duplicate disabled for {kind}"
+            );
+        }
+
+        app.state
+            .schematic
+            .selection
+            .select_only_junction(crate::state::Point::new(10, 0));
+        assert!(Command::Copy.is_enabled(&app));
+        assert!(Command::Cut.is_enabled(&app));
+        assert!(Command::Delete.is_enabled(&app));
+        assert!(
+            !Command::Duplicate.is_enabled(&app),
+            "a fixed-offset duplicate cannot invent a valid junction target"
+        );
+    }
+
+    #[test]
+    fn select_all_command_delegates_to_the_complete_schematic_object_taxonomy() {
+        let mut app = app_with_every_complete_schematic_object();
+
+        Command::SelectAll.execute(&mut app);
+
+        let selection = &app.state.schematic.selection;
+        assert_eq!(selection.count(), 6);
+        assert!(selection.has_component(1));
+        assert!(selection.has_wire(2));
+        assert!(selection.has_junction(crate::state::Point::new(10, 0)));
+        assert!(selection.has_net_label(4));
+        assert!(selection.has_bus(5));
+        assert!(selection.has_bus_tap(6));
     }
 
     #[test]
@@ -2210,6 +2326,101 @@ mod tests {
             }
             assert!(workspace_available(true, workspace));
         }
+    }
+
+    #[test]
+    fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
+        // This independent expectation list prevents the predicate under test
+        // from silently omitting a newly exposed submenu route.
+        for command in [
+            Command::NewCell,
+            Command::ImportNetlist,
+            Command::ImportVerilogA,
+            Command::ExportSchematicSvg,
+            Command::ExportWaveformsCsv,
+            Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+            Command::FindInDesign,
+            Command::ProjectPage(ProjectPage::Configuration),
+            Command::PreflightChecks,
+            Command::SimulationOptions,
+            Command::GenerateNetlist,
+            Command::WaveformCalculator,
+            Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+            Command::EditSpecifications,
+            Command::VerificationPage(VerificationPage::Yield),
+            Command::ModelsPage(ModelsPage::Models),
+            Command::ModelBrowser,
+            Command::PdkSettings,
+            Command::CompileVerilogA,
+            Command::AutomationConsole,
+            Command::VisualizationStudio,
+            Command::ReportAuthoring,
+        ] {
+            assert!(
+                command.requires_open_project(),
+                "missing closed-project boundary: {command:?}"
+            );
+        }
+
+        let commands: Vec<_> = COMMAND_REGISTRY
+            .iter()
+            .copied()
+            .filter(|command| command.requires_open_project())
+            .collect();
+        assert!(!commands.is_empty());
+
+        for command in commands {
+            let mut app = RSpiceApp::test_instance();
+            app.state.project_lifecycle.project_open = false;
+            app.state.workbench.workspace = Workspace::Project;
+
+            assert!(
+                !command.is_enabled(&app),
+                "enabled without project: {command:?}"
+            );
+            assert_eq!(
+                command.availability(&app),
+                CommandAvailability::Disabled("no project is open"),
+                "wrong closed-project reason for {command:?}"
+            );
+
+            command.execute(&mut app);
+
+            assert_eq!(
+                app.state.workbench.workspace,
+                Workspace::Project,
+                "closed-project command changed workspace: {command:?}"
+            );
+            assert!(
+                app.state
+                    .log_buffer
+                    .entries()
+                    .any(|entry| entry.message == "Open a project before using this command."),
+                "closed-project command did not explain its boundary: {command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn standalone_schematic_save_remains_available_without_a_project() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = false;
+        app.state.schematic.current_file = Some("standalone.rsch".into());
+
+        assert!(!Command::Save.requires_open_project());
+        assert!(Command::Save.is_enabled(&app));
+        assert_eq!(
+            Command::Save.availability(&app),
+            CommandAvailability::Available
+        );
+
+        app.state.schematic.current_file = None;
+        app.state.browser_schematic_save_name = Some("browser-import.rsch".to_owned());
+        assert!(Command::Save.is_enabled(&app));
+        assert_eq!(
+            Command::Save.availability(&app),
+            CommandAvailability::Available
+        );
     }
 
     #[test]

@@ -530,10 +530,11 @@ impl TransmissionLine {
         let (x1, y1) = first;
         let (x2, y2) = middle;
         let (x3, y3) = last;
-        if ![x1, y1, x2, y2, x3, y3, reltol, abstol]
+        if !([x1, y1, x2, y2, x3, y3, reltol, abstol]
             .into_iter()
             .all(Value::is_finite)
-            || !(x1 < x2 && x2 < x3)
+            && x1 < x2
+            && x2 < x3)
             || reltol < 0.0
             || abstol < 0.0
         {

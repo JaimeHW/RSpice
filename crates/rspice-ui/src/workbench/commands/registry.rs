@@ -394,6 +394,50 @@ const CANCEL: &[ShortcutBinding] = &[primary(
 )];
 
 impl Command {
+    /// Commands whose owning surface or dialog has no valid lifecycle without
+    /// an open project. Keeping this boundary on the command itself prevents
+    /// submenu and command-palette routes from bypassing the workspace gate.
+    pub(crate) const fn requires_open_project(self) -> bool {
+        matches!(
+            self,
+            Self::SaveAs
+                | Self::SaveAll
+                | Self::RevertActiveDocument
+                | Self::CloseActiveDocument
+                | Self::CloseProject
+                | Self::NewCell
+                | Self::ImportNetlist
+                | Self::ImportVerilogA
+                | Self::ExportSchematicSvg
+                | Self::ExportWaveformsCsv
+                | Self::ExportNetlist(_)
+                | Self::FindInDesign
+                | Self::ProjectPage(_)
+                | Self::PreflightChecks
+                | Self::SimulationOptions
+                | Self::GenerateNetlist
+                | Self::WaveformCalculator
+                | Self::ResultViewer(_)
+                | Self::EditSpecifications
+                | Self::VerificationPage(_)
+                | Self::ModelsPage(_)
+                | Self::ModelBrowser
+                | Self::PdkSettings
+                | Self::CompileVerilogA
+                | Self::AutomationConsole
+                | Self::VisualizationStudio
+                | Self::ReportAuthoring
+                | Self::SaveReportDocument
+                | Self::AddReportPage
+                | Self::ReportPageProperties
+                | Self::AddVisualizationPane
+                | Self::VisualizationTraceManager
+                | Self::VisualizationCursorManager
+                | Self::VisualizationDocumentProperties
+                | Self::ExportVisualizationDocument
+        )
+    }
+
     pub(crate) const fn blocked_by_project_operation(self) -> bool {
         matches!(
             self,
@@ -593,6 +637,9 @@ impl Command {
             && self.blocked_by_project_operation()
         {
             return CommandAvailability::Disabled("project operation is still in progress");
+        }
+        if self.requires_open_project() && !app.state.project_lifecycle.project_open {
+            return CommandAvailability::Disabled("no project is open");
         }
         if self.is_enabled(app) {
             return CommandAvailability::Available;

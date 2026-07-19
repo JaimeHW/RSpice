@@ -819,6 +819,7 @@ impl ChoicePreference {
 #[serde(rename_all = "kebab-case")]
 pub enum TogglePreference {
     ReducedMotion,
+    CanvasKeyboardNavigation,
     HierarchicalEditInPlace,
     CrossProbeBehavior,
     IncrementalConnectivityChecks,
@@ -829,8 +830,9 @@ pub enum TogglePreference {
 }
 
 impl TogglePreference {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::ReducedMotion,
+        Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
         Self::CrossProbeBehavior,
         Self::IncrementalConnectivityChecks,
@@ -843,6 +845,7 @@ impl TogglePreference {
     pub const fn stable_id(self) -> &'static str {
         match self {
             Self::ReducedMotion => "reduced-motion",
+            Self::CanvasKeyboardNavigation => "canvas-keyboard-navigation",
             Self::HierarchicalEditInPlace => "hierarchical-edit-in-place",
             Self::CrossProbeBehavior => "cross-probe-behavior",
             Self::IncrementalConnectivityChecks => "incremental-connectivity-checks",

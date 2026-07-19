@@ -528,7 +528,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
         DocumentStatusTone::Error => t.color.err,
     };
     let status_visible = toolbar_status_visible(phone, status_tone);
-    let advisory_count = (!compact).then(|| {
+    let advisory_candidate = (!compact).then(|| {
         app.state
             .ui
             .netlist
@@ -547,8 +547,6 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
                 .map_or(0, |receipt| receipt.advisory_count)
             + usize::from(app.state.ui.netlist.validation_error.is_some())
     });
-    let advisory_label = advisory_count
-        .map(|count| format!("{count} advisor{}", if count == 1 { "y" } else { "ies" }));
     let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let label_width = |label: &str, color| {
         ui.painter()
@@ -556,11 +554,24 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             .size()
             .x
     };
-    let mut status_width = if status_visible {
+    let status_only_width = if status_visible {
         11.0 + label_width(&status, status_color)
     } else {
         0.0
     };
+    let language_width = label_width(language, t.color.text_dim);
+    let advisory_count = advisory_candidate.filter(|count| {
+        let label = format!("{count} advisor{}", if *count == 1 { "y" } else { "ies" });
+        toolbar_advisory_fits(
+            left_rect.width(),
+            language_width,
+            status_only_width,
+            11.0 + label_width(&label, t.color.text_faint),
+        )
+    });
+    let advisory_label = advisory_count
+        .map(|count| format!("{count} advisor{}", if count == 1 { "y" } else { "ies" }));
+    let mut status_width = status_only_width;
     if let Some(label) = advisory_label.as_deref() {
         status_width += CODE_TOOLBAR_GAP + 11.0 + label_width(label, t.color.text_faint);
     }
@@ -815,6 +826,22 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
 
 const fn code_toolbar_compact(width: f32) -> bool {
     width <= CODE_TOOLBAR_COMPACT_BREAKPOINT
+}
+
+fn toolbar_advisory_fits(
+    left_width: f32,
+    language_width: f32,
+    status_width: f32,
+    advisory_width: f32,
+) -> bool {
+    let status_group_width = status_width
+        + if status_width > 0.0 {
+            CODE_TOOLBAR_GAP
+        } else {
+            0.0
+        }
+        + advisory_width;
+    language_width + CODE_TOOLBAR_GAP + status_group_width <= left_width
 }
 
 fn code_status(ui: &mut Ui, label: &str, color: egui::Color32) {
@@ -2109,6 +2136,11 @@ mod tests {
         assert!(!toolbar_status_visible(true, DocumentStatusTone::Warning));
         assert!(toolbar_status_visible(true, DocumentStatusTone::Error));
         assert!(toolbar_status_visible(false, DocumentStatusTone::Warning));
+        assert!(toolbar_advisory_fits(500.0, 260.0, 110.0, 70.0));
+        assert!(
+            !toolbar_advisory_fits(430.0, 260.0, 110.0, 70.0),
+            "advisory must yield before language, blocking status, or actions clip"
+        );
     }
 
     #[test]

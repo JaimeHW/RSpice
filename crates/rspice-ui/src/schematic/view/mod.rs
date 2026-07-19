@@ -20,6 +20,7 @@ mod coordinates;
 mod drawing;
 mod grid;
 mod interaction;
+mod keyboard_navigation;
 mod mobile_controls;
 mod navigation;
 mod net_labels;
@@ -32,6 +33,7 @@ pub(crate) mod violations;
 
 use self::coordinates::viewport_from_state;
 use self::interaction::handle_tool_interactions;
+use self::keyboard_navigation::handle_keyboard_instance_navigation;
 use self::navigation::handle_viewport_navigation;
 use self::preview::draw_interaction_previews;
 use self::resolved_symbol_render::resolved_symbol_world_bounds;
@@ -422,8 +424,47 @@ fn schematic_accessibility_label(
             Command::Cancel,
         ],
     );
+    let selected_instance = schematic
+        .selection
+        .single_component()
+        .and_then(|id| {
+            schematic
+                .components
+                .iter()
+                .find(|component| component.id == id)
+        })
+        .map(|component| {
+            let name = component.name.trim();
+            let name = if name.is_empty() { "unnamed" } else { name };
+            let value = component.value.trim();
+            let value = if !value.is_empty() {
+                value
+            } else {
+                component.library_cell.as_ref().map_or_else(
+                    || component.kind.display_name(),
+                    |binding| {
+                        binding
+                            .module_name
+                            .as_deref()
+                            .unwrap_or(binding.cell.as_str())
+                    },
+                )
+            };
+            format!(" Selected instance: {name}, {value}.")
+        })
+        .unwrap_or_default();
+    let traversal_instruction = if schematic.components.is_empty()
+        || !state
+            .ui
+            .preferences
+            .toggle(crate::workbench::TogglePreference::CanvasKeyboardNavigation)
+    {
+        ""
+    } else {
+        " Arrow keys select the previous or next instance."
+    };
     format!(
-        "Schematic canvas. {}, {}, {}, {}, {}, {}; {}. Active tool: {}.{shortcuts}",
+        "Schematic canvas. {}, {}, {}, {}, {}, {}; {}.{selected_instance}{traversal_instruction} Active tool: {}.{shortcuts}",
         counted(schematic.components.len(), "component", "components"),
         counted(schematic.wires.len(), "wire", "wires"),
         counted(schematic.buses.len(), "bus", "buses"),
@@ -704,7 +745,52 @@ mod tests {
             "Schematic canvas. 1 component, 1 wire, 0 buses, 0 bus taps, 1 junction, 1 net label; 1 item selected."
         ));
         assert!(label.contains("Active tool: Wire."));
+        assert!(label.contains("Selected instance:"));
+        assert!(label.contains("Arrow keys select the previous or next instance."));
         assert!(label.contains("Escape: Cancel active command"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn canvas_accessibility_node_announces_selected_identity_and_traversal_instructions() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut state = AppState::default();
+        let mut component = Component::new(17, ComponentType::Resistor, Point::new(40, 20));
+        component.name = "RGAIN".to_owned();
+        component.value = "499 ohm".to_owned();
+        state.schematic.components.push(component);
+        state.schematic.selection.select_only_component(17);
+
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| render_schematic_view(ui, &mut state, None));
+            },
+        );
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("schematic accessibility tree")
+            .nodes;
+        let canvas = nodes
+            .iter()
+            .find(|(_, node)| node.role() == egui::accesskit::Role::Canvas)
+            .map(|(_, node)| node)
+            .expect("schematic canvas node");
+        let label = canvas.label().expect("schematic canvas label");
+        assert!(label.contains("Selected instance: RGAIN, 499 ohm."));
+        assert!(label.contains("Arrow keys select the previous or next instance."));
+        assert_eq!(canvas.live(), Some(egui::accesskit::Live::Polite));
     }
 
     #[test]
@@ -769,6 +855,7 @@ pub fn render_schematic_view(
         routing_was_active,
         &symbol_context,
     );
+    handle_keyboard_instance_navigation(&response, state);
     refresh_symbol_context_after_interactions(
         state,
         &mut symbol_context,
@@ -814,15 +901,19 @@ pub fn render_schematic_view(
 
     let shortcut_platform = crate::common::app::runtime_command_platform(ui.ctx());
     let operating_system = ui.ctx().os();
+    let accessibility_label =
+        schematic_accessibility_label(state, shortcut_platform, operating_system);
     response.widget_info(|| {
         WidgetInfo::labeled(
             WidgetType::Image,
             ui.is_enabled(),
-            schematic_accessibility_label(state, shortcut_platform, operating_system),
+            accessibility_label.clone(),
         )
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Canvas);
+        node.set_label(accessibility_label);
+        node.set_live(egui::accesskit::Live::Polite);
     });
     crate::common::app::report_engineering_canvas_focus(
         &response,
