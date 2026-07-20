@@ -65,12 +65,15 @@ pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 mod app_schematic_edit_authority;
 pub(crate) use app_schematic_edit_authority::SchematicEditAuthority;
 
+mod app_check_and_save_dialog;
+mod app_check_and_save_validation;
 mod app_create_hierarchy_dialog;
 mod app_hierarchy_reference_impact;
 mod app_instance_catalog;
 mod app_mockup_operation;
 mod app_mockup_review;
 mod app_replace_instance_dialog;
+pub(crate) use app_check_and_save_dialog::open_check_and_save_dialog;
 pub(crate) use app_create_hierarchy_dialog::{
     create_hierarchy_available, open_create_hierarchy_dialog,
 };
@@ -906,6 +909,7 @@ impl RSpiceApp {
         self.render_array_selection_dialog(ctx);
         self.render_replace_instance_dialog(ctx);
         self.render_create_hierarchy_dialog(ctx);
+        self.render_check_and_save_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);

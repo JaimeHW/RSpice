@@ -23,6 +23,7 @@ use super::rotation::Rotation;
 use super::selection::Selection;
 use super::snap::SnapEngine;
 use super::tool::Tool;
+use super::validated_revision::ValidatedRevisionJournal;
 use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 
 mod components;
@@ -383,6 +384,14 @@ pub struct SchematicState {
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
 
+    /// Durable, append-only evidence for validated schematic saves.
+    ///
+    /// Legacy schematic documents predate this journal and deserialize with
+    /// an empty history. Records own exact design snapshots; transient editor
+    /// state and undo history are intentionally excluded.
+    #[serde(default)]
+    pub validated_revisions: ValidatedRevisionJournal,
+
     /// Cached point-to-net mapping from last netlist generation (for probe lookup)
     /// Updated after each simulation run
     #[serde(skip)]
@@ -476,6 +485,7 @@ impl Default for SchematicState {
             pending_documentation_shape: None,
             documentation_shape_drawing: DocumentationShapeDrawing::default(),
             connections: Vec::new(),
+            validated_revisions: ValidatedRevisionJournal::default(),
             net_mapping: HashMap::new(),
             is_dirty: false,
             needs_fit: false,

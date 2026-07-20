@@ -10,7 +10,6 @@ use crate::common::file_workflow::FileWorkflowIo;
 pub(crate) enum FileMenuAction {
     NewProject,
     OpenProject,
-    SaveProject,
     SaveProjectAs,
     SaveAll,
     RevertActiveDocument,
@@ -43,9 +42,6 @@ pub(crate) fn dispatch_file_menu_action(
                 return;
             }
             crate::common::project_workflow::open_project(state);
-        }
-        FileMenuAction::SaveProject => {
-            crate::common::project_workflow::save_project(state);
         }
         FileMenuAction::SaveProjectAs => {
             crate::common::project_workflow::save_project_as(state);

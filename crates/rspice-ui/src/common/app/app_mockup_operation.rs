@@ -19,12 +19,15 @@ pub(crate) fn operation_steps(ui: &mut Ui) {
     let labels = [
         "1 \u{00b7} Scope",
         "2 \u{00b7} Options",
-        "3 \u{00b7} Review",
-        "4 \u{00b7} Apply",
+        "3 \u{00b7} Difference",
+        "4 \u{00b7} Commit",
     ];
-    let item_width = rect.width() / labels.len() as f32;
+    let gap = 6.0;
+    let item_width = ((rect.width() - gap * (labels.len().saturating_sub(1) as f32))
+        / labels.len() as f32)
+        .max(1.0);
     for (index, label) in labels.into_iter().enumerate() {
-        let left = rect.left() + index as f32 * item_width;
+        let left = rect.left() + index as f32 * (item_width + gap);
         let right = if index + 1 == labels.len() {
             rect.right()
         } else {
@@ -42,10 +45,8 @@ pub(crate) fn operation_steps(ui: &mut Ui) {
                 Stroke::new(2.0, t.color.accent),
             );
         }
-        if index + 1 < labels.len() {
-            ui.painter()
-                .vline(right, item.y_range(), Stroke::new(1.0, t.color.border));
-        }
+        ui.painter()
+            .vline(right, item.y_range(), Stroke::new(1.0, t.color.border));
         ui.painter().text(
             item.left_center() + vec2(10.0, 0.0),
             Align2::LEFT_CENTER,
@@ -66,8 +67,8 @@ pub(crate) fn operation_steps(ui: &mut Ui) {
         Stroke::new(1.0, t.color.border_strong),
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label("Replacement operation progress");
-        node.set_description("Scope complete; Options active; Review and Apply follow.");
+        node.set_label("Operation progress");
+        node.set_description("Scope complete; Options active; Difference and Commit follow.");
     });
 }
 
@@ -191,7 +192,7 @@ fn two_column_row(ui: &mut Ui, label: &str, value: &str, height: f32, table: boo
     }
 }
 
-fn ellipsized_text(
+pub(crate) fn ellipsized_text(
     ui: &Ui,
     value: &str,
     available_width: f32,

@@ -737,6 +737,16 @@ impl ProjectFile {
             .collect::<Vec<_>>();
         schematic_buffer_keys.sort_unstable();
         for key in schematic_buffer_keys {
+            let Some(schematic) = self.workspace.schematic_buffers.get(key) else {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace schematic buffer '{key}' disappeared during validation"
+                )));
+            };
+            schematic.validated_revisions.validate().map_err(|error| {
+                ProjectIoError::InvalidData(format!(
+                    "workspace schematic buffer '{key}' has invalid validated revision history: {error}"
+                ))
+            })?;
             let Some(view) = view_index.get(key) else {
                 let message = if persisted_lcv_key_is_well_formed(key) {
                     format!(

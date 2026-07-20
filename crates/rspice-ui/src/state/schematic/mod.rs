@@ -38,6 +38,7 @@ mod state;
 mod symbol_gen;
 mod tool;
 mod undo_history;
+mod validated_revision;
 mod wire;
 
 // Re-export all public types for backwards compatibility
@@ -103,6 +104,13 @@ pub use state::{
 pub use symbol_gen::{GeneratedPin, GeneratedSymbol, generate_symbol};
 pub use tool::Tool;
 pub use undo_history::{MAX_UNDO_STEPS, SchematicSnapshot, UndoHistory};
+pub use validated_revision::{
+    AdvisoryDisposition, AdvisoryDispositionKind, MAX_ADVISORY_DISPOSITION_REASON_LEN,
+    MAX_VALIDATED_REVISION_IDENTITY_LEN, MAX_VALIDATED_REVISION_NOTE_LEN,
+    ValidatedRevisionDependency, ValidatedRevisionError, ValidatedRevisionJournal,
+    ValidatedRevisionRequest, ValidatedSchematicRevision, ValidatedSchematicRevisionId,
+    ValidationFindingCounts,
+};
 pub use wire::{
     // Connection types
     ConnectionSet,

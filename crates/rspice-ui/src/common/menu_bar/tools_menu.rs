@@ -3,7 +3,8 @@
 
 use crate::common::app::{AppState, ConsoleMessage};
 use crate::panels::{LogSeverity, LogSource};
-use crate::services::drc::DrcSeverity;
+use crate::services::drc::{DrcConfig, DrcSeverity};
+use crate::state::CellViewRef;
 
 /// Per-run cap on per-finding console rows; the rest stay reachable via
 /// the canvas badges and typed finding-navigation commands.
@@ -18,7 +19,21 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
         &state.library_manager,
         &state.workspace.schematic_buffers,
     );
-    let result = crate::services::drc::run_drc_check_with_hierarchy(&state.schematic, &hierarchy);
+    let root_schematic = CellViewRef::new(
+        &state.workspace.project.root_library,
+        &state.workspace.project.top_cell,
+        "schematic",
+    );
+    let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
+        &state.schematic,
+        &hierarchy,
+        DrcConfig {
+            // Ground is a top-level circuit contract. Requiring every reusable
+            // child cell to contain node 0 produces false blockers.
+            check_missing_ground: state.workspace.active_schematic_reference() == root_schematic,
+            ..DrcConfig::default()
+        },
+    );
     let summary = result.summary();
     let msg = if result.passed() {
         format!(

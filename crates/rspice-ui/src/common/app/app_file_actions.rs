@@ -81,7 +81,7 @@ impl RSpiceApp {
                         crate::common::project_workflow::SaveRequestOutcome::CanonicalComplete
                     }
                 } else {
-                    crate::common::project_workflow::SaveRequestOutcome::CancelledOrFailed
+                    crate::common::project_workflow::SaveRequestOutcome::Cancelled
                 };
                 if outcome.authorizes_immediate_destructive_action() {
                     if let Some(action) = pending {
@@ -122,7 +122,8 @@ impl RSpiceApp {
                         self.state.dialogs.confirmation_dialog.pending_example = pending_example;
                     }
                     crate::common::project_workflow::SaveRequestOutcome::CopyPending
-                    | crate::common::project_workflow::SaveRequestOutcome::CancelledOrFailed => {}
+                    | crate::common::project_workflow::SaveRequestOutcome::Cancelled
+                    | crate::common::project_workflow::SaveRequestOutcome::Failed(_) => {}
                     crate::common::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                         unreachable!("canonical completion returned through the authorization gate")
                     }
@@ -136,6 +137,9 @@ impl RSpiceApp {
         &mut self,
         event: crate::common::project_workflow::SaveContinuationEvent,
     ) {
+        if self.handle_check_and_save_continuation(&event) {
+            return;
+        }
         let Some(pending) = self
             .state
             .dialogs
@@ -161,6 +165,17 @@ impl RSpiceApp {
                     "The requested snapshot was saved, but newer edits were made while the browser file surface was pending. Review and save those edits before continuing.",
                 ),
             );
+        } else {
+            self.state
+                .dialogs
+                .confirmation_dialog
+                .restore_continuation_for_review(pending);
+            if let Some(message) = event.failure_message() {
+                self.state
+                    .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        message.to_owned(),
+                    ));
+            }
         }
     }
 
@@ -188,7 +203,8 @@ impl RSpiceApp {
                 );
             }
             crate::common::project_workflow::SaveRequestOutcome::CopyPending
-            | crate::common::project_workflow::SaveRequestOutcome::CancelledOrFailed => {}
+            | crate::common::project_workflow::SaveRequestOutcome::Cancelled
+            | crate::common::project_workflow::SaveRequestOutcome::Failed(_) => {}
         }
     }
 

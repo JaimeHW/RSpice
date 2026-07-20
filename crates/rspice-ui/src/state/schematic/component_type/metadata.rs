@@ -64,6 +64,40 @@ impl ComponentType {
         }
     }
 
+    /// Validate a user-authored SPICE instance designator for this type.
+    ///
+    /// Ground and interface ports are structural objects and intentionally do
+    /// not own emitted instance names. Every emitted element uses its device
+    /// prefix followed by a non-empty ASCII identifier suffix.
+    pub fn validate_reference_designator(&self, value: &str) -> Result<(), String> {
+        let prefix = self.spice_prefix();
+        if prefix.is_empty() {
+            return Err(
+                "This component type does not own a SPICE reference designator.".to_owned(),
+            );
+        }
+        if !value
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        {
+            return Err(format!(
+                "{} designators must begin with `{prefix}`.",
+                self.display_name()
+            ));
+        }
+        let suffix = &value[prefix.len()..];
+        if suffix.is_empty()
+            || !suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(format!(
+                "Enter `{prefix}` followed by one or more ASCII letters, digits, or underscores."
+            ));
+        }
+        Ok(())
+    }
+
     /// Get the display name for this component type.
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -149,5 +183,50 @@ impl ComponentType {
             ComponentType::CellInstance => "",
             _ => "",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_designators_use_the_device_prefix_and_portable_suffix() {
+        assert!(
+            ComponentType::Resistor
+                .validate_reference_designator("R17")
+                .is_ok()
+        );
+        assert!(
+            ComponentType::Nmos
+                .validate_reference_designator("m_input_2")
+                .is_ok()
+        );
+        assert!(
+            ComponentType::CellInstance
+                .validate_reference_designator("XAFE")
+                .is_ok()
+        );
+
+        assert!(
+            ComponentType::Resistor
+                .validate_reference_designator("C17")
+                .is_err()
+        );
+        assert!(
+            ComponentType::Resistor
+                .validate_reference_designator("R")
+                .is_err()
+        );
+        assert!(
+            ComponentType::Resistor
+                .validate_reference_designator("R 17")
+                .is_err()
+        );
+        assert!(
+            ComponentType::Ground
+                .validate_reference_designator("GND")
+                .is_err()
+        );
     }
 }

@@ -345,6 +345,44 @@ pub fn collect_properties_from_component(
     properties
 }
 
+/// Run the same complete schema, expression, numeric-draft, and PWL checks
+/// used by the interactive property editor without mutating application state.
+/// Keeping this adapter at the property boundary prevents save validation from
+/// drifting into a weaker duplicate of the production editor contract.
+pub(crate) fn validate_component_properties(
+    component: &Component,
+    registry: &PropertyRegistry,
+) -> Vec<(String, String)> {
+    let Some(sheet) = registry.get(component.kind) else {
+        return vec![(
+            "schema".to_owned(),
+            format!(
+                "{} has no registered property schema",
+                component.kind.display_name()
+            ),
+        )];
+    };
+    let values = collect_properties_from_component(component, registry);
+    let mut validator = crate::properties::TabbedPropertyDialogState::default();
+    validator.open_for_component(
+        component.id,
+        component.name.clone(),
+        component.kind,
+        sheet,
+        values,
+        crate::properties::ComponentPropertySession::new(
+            component.clone(),
+            0,
+            0,
+            "detached property validation".to_owned(),
+        ),
+    );
+    validator.validate_all(sheet);
+    let mut errors = validator.validation_errors.into_iter().collect::<Vec<_>>();
+    errors.sort_by(|left, right| left.0.cmp(&right.0));
+    errors
+}
+
 // =============================================================================
 // Property Application (PropertyValue HashMap → Component)
 // =============================================================================
@@ -611,6 +649,22 @@ mod tests {
 
         assert!(component.params.is_empty());
         assert!(!component.params.contains("inf"));
+    }
+
+    #[test]
+    fn detached_validation_uses_the_production_property_contract() {
+        let registry = PropertyRegistry::new();
+        let valid =
+            Component::new(1, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k");
+        let invalid = Component::new(2, ComponentType::Resistor, Point::origin())
+            .with_name_value("R2", "1k+");
+
+        assert!(validate_component_properties(&valid, &registry).is_empty());
+        assert!(
+            validate_component_properties(&invalid, &registry)
+                .iter()
+                .any(|(field, _)| field == "r")
+        );
     }
 
     #[test]

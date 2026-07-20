@@ -138,6 +138,48 @@ pub(crate) enum SaveScope {
     AllDocuments,
 }
 
+/// Resolve the actual publication scope before validation starts. The first
+/// canonical save has no accepted baseline that can safely receive a
+/// document-only overlay, so it necessarily publishes the complete project.
+/// Workflows such as Check and save use this same decision before presenting
+/// their document scope and before freezing validation evidence.
+pub(crate) fn effective_save_scope(state: &AppState, requested: SaveScope) -> SaveScope {
+    let first_save = state.project_lifecycle.accepted.is_none()
+        || state
+            .project_lifecycle
+            .accepted
+            .as_ref()
+            .and_then(|accepted| accepted.binding.as_ref())
+            .is_none();
+    if first_save {
+        SaveScope::AllDocuments
+    } else {
+        requested
+    }
+}
+
+/// Exact active schematic from the currently accepted canonical project.
+/// This is used only to seed the validated-save journal when an older project
+/// predates that journal. A missing canonical binding or a newly created view
+/// has no predecessor and therefore returns `None`.
+pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state::SchematicState> {
+    let accepted = state.project_lifecycle.accepted.as_ref()?;
+    accepted.binding.as_ref()?;
+    accepted
+        .baseline
+        .workspace
+        .schematic_buffers
+        .get(&state.workspace.active_view.key())
+        .cloned()
+}
+
+/// Monotonic identity of the accepted canonical baseline. Validation receipts
+/// bind this value so a save opened against one baseline cannot publish after
+/// a different save, import, or binding restoration has completed.
+pub(crate) const fn accepted_generation(state: &AppState) -> u64 {
+    state.project_lifecycle.accepted_generation
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DestinationAuthority {
@@ -545,6 +587,7 @@ pub(crate) fn accept_loaded_project(
     binding: Option<PersistenceBinding>,
 ) {
     state.clear_project_design_history();
+    state.dialogs.check_and_save.close();
     #[cfg(not(target_arch = "wasm32"))]
     let native_receipt = binding
         .as_ref()
@@ -580,6 +623,7 @@ pub(crate) fn accept_loaded_project(
 
 pub(crate) fn reset_for_new_project(state: &mut AppState) {
     state.clear_project_design_history();
+    state.dialogs.check_and_save.close();
     state.native_project_binding_receipt = None;
     state.browser_project_binding_receipt = None;
     #[cfg(target_arch = "wasm32")]
@@ -596,6 +640,7 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
 
 pub(crate) fn mark_project_closed(state: &mut AppState) {
     state.clear_project_design_history();
+    state.dialogs.check_and_save.close();
     state.native_project_binding_receipt = None;
     state.browser_project_binding_receipt = None;
     #[cfg(target_arch = "wasm32")]
@@ -790,18 +835,7 @@ pub(crate) fn save_native(
             })?,
         DestinationAuthority::UserSelected => persistence::observe_native_destination(&path)?,
     };
-    let first_save = state.project_lifecycle.accepted.is_none()
-        || state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref())
-            .is_none();
-    let scope = if first_save {
-        SaveScope::AllDocuments
-    } else {
-        requested_scope
-    };
+    let scope = effective_save_scope(state, requested_scope);
     let kind = match scope {
         SaveScope::ActiveDocument => TransactionKind::SaveActive,
         SaveScope::AllDocuments => TransactionKind::SaveAll,
@@ -825,13 +859,18 @@ pub(crate) fn save_native(
             }
         };
         candidate.workspace.project.set_path(path.clone());
+        // Build every fallible post-save document digest before publishing.
+        // Once the durable file replacement succeeds, adoption below is an
+        // in-memory, infallible state transition.
+        let post_save_registry = prepare_post_save_registry(state, &candidate, scope)?;
         let (bytes, _) = persistence::serialized_project(&candidate)?;
         let digest = persistence::publish_canonical_native(&path, expected, &bytes)?;
         let binding = PersistenceBinding::Native {
             canonical_path: path.clone(),
             accepted_digest: digest,
         };
-        finish_successful_save(state, candidate, binding, scope)
+        adopt_successful_save(state, candidate, binding, scope, post_save_registry);
+        Ok(())
     })();
     state.project_lifecycle.transaction = None;
     result
@@ -920,18 +959,7 @@ pub(crate) fn prepare_browser_save(
         let _ = conflict.observed_digest;
         return Err(ProjectLifecycleError::BrowserExternalChange);
     }
-    let first_save = state.project_lifecycle.accepted.is_none()
-        || state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref())
-            .is_none();
-    let scope = if first_save {
-        SaveScope::AllDocuments
-    } else {
-        requested_scope
-    };
+    let scope = effective_save_scope(state, requested_scope);
     let kind = if project_copy {
         TransactionKind::SaveProjectCopy
     } else {
@@ -1204,12 +1232,53 @@ pub(crate) fn complete_browser_save(
     result
 }
 
+#[cfg(target_arch = "wasm32")]
 fn finish_successful_save(
     state: &mut AppState,
     candidate: ProjectFile,
     binding: PersistenceBinding,
     scope: SaveScope,
 ) -> Result<(), ProjectLifecycleError> {
+    let post_save_registry = prepare_post_save_registry(state, &candidate, scope)?;
+    adopt_successful_save(state, candidate, binding, scope, post_save_registry);
+    Ok(())
+}
+
+fn prepare_post_save_registry(
+    state: &AppState,
+    candidate: &ProjectFile,
+    scope: SaveScope,
+) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut current = snapshot(state)?;
+    #[cfg(target_arch = "wasm32")]
+    let current = snapshot(state)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if scope == SaveScope::AllDocuments
+            || active_document(state) == ProjectDocumentId::ProjectConfiguration
+        {
+            current.workspace.project = candidate.workspace.project.clone();
+        } else {
+            current.workspace.project.path = candidate.workspace.project.path.clone();
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = scope;
+    let mut post_save_registry = registry::DocumentRegistry::default();
+    post_save_registry
+        .rebuild(&current, Some(candidate))
+        .map_err(ProjectLifecycleError::InvalidState)?;
+    Ok(post_save_registry)
+}
+
+fn adopt_successful_save(
+    state: &mut AppState,
+    candidate: ProjectFile,
+    binding: PersistenceBinding,
+    scope: SaveScope,
+    post_save_registry: registry::DocumentRegistry,
+) {
     #[cfg(not(target_arch = "wasm32"))]
     let native_receipt = binding.native_receipt(&candidate.workspace.project.id().to_string());
     #[cfg(target_arch = "wasm32")]
@@ -1247,15 +1316,6 @@ fn finish_successful_save(
         state.project_lifecycle.browser_conflict = None;
     }
     advance_accepted_generation(&mut state.project_lifecycle);
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = scope;
-        // The picker/write is asynchronous. Rebuilding dirtiness against the
-        // newly accepted bytes preserves any edits made while it was pending,
-        // including project-descriptor edits, instead of overwriting them or
-        // marking them clean.
-        refresh_registry(state)
-    }
     #[cfg(not(target_arch = "wasm32"))]
     match scope {
         SaveScope::AllDocuments => {
@@ -1265,8 +1325,13 @@ fn finish_successful_save(
         }
         SaveScope::ActiveDocument => mark_active_document_clean(state),
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    refresh_registry(state)
+    #[cfg(target_arch = "wasm32")]
+    let _ = scope;
+    // This registry was fully built before native publication and before any
+    // browser adoption mutation. Installing it cannot fail and preserves
+    // edits made while an asynchronous browser write was pending.
+    state.project_lifecycle.registry = post_save_registry;
+    apply_registry_dirty_flags(state);
 }
 
 #[cfg(target_arch = "wasm32")]

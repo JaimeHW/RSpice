@@ -702,7 +702,13 @@ impl Command {
                 active_schematic_editor(app)
                     && state.schematic.selection.single_component().is_some()
             }
-            Self::RunChecks | Self::CheckAndSave => active_schematic_editor(app),
+            Self::RunChecks => active_schematic_editor(app),
+            Self::CheckAndSave => {
+                active_schematic_editor(app)
+                    && !state.schematic.read_only
+                    && !state.active_view_read_only()
+                    && !state.workbench.safe_mode.project_read_only()
+            }
             Self::ClearChecks => state.dialogs.drc_results.is_some(),
             Self::NextViolation | Self::PreviousViolation => state.dialogs.drc_results.is_some(),
             Self::RunSimulation => {
@@ -1198,21 +1204,7 @@ impl Command {
             }
             Self::RunChecks => crate::common::menu_bar::run_design_rule_check(&mut app.state),
             Self::CheckAndSave => {
-                crate::common::menu_bar::run_design_rule_check(&mut app.state);
-                let passed = app
-                    .state
-                    .dialogs
-                    .drc_results
-                    .as_ref()
-                    .is_some_and(crate::services::drc::DrcResult::passed);
-                if passed {
-                    file_action(app, FileMenuAction::SaveProject);
-                } else {
-                    activate_workspace(app, Workspace::Verify);
-                    app.state.workbench.verification_page = VerificationPage::Yield;
-                    app.state.workbench.console_visible = true;
-                    app.state.workbench.console_page = super::state::ConsolePage::Problems;
-                }
+                crate::common::app::open_check_and_save_dialog(&mut app.state);
             }
             Self::ClearChecks => app.state.dialogs.drc_results = None,
             Self::NextViolation => {
@@ -2831,6 +2823,31 @@ mod tests {
     }
 
     #[test]
+    fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        assert!(Command::CheckAndSave.is_enabled(&app));
+
+        Command::CheckAndSave.execute(&mut app);
+        assert!(app.state.dialogs.check_and_save.open);
+        assert!(app.state.dialogs.check_and_save.report.is_some());
+
+        app.state.dialogs.check_and_save.close();
+        app.state.schematic.read_only = true;
+        assert!(!Command::CheckAndSave.is_enabled(&app));
+
+        app.state.schematic.read_only = false;
+        app.state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..crate::workbench::state::LocalSafeModeOptions::default()
+            },
+            "test session".to_owned(),
+        );
+        assert!(!Command::CheckAndSave.is_enabled(&app));
+    }
+
+    #[test]
     fn stop_command_follows_the_execution_target_capability() {
         assert!(!stop_simulation_enabled(false));
         assert_eq!(
@@ -2862,6 +2879,7 @@ mod tests {
             Command::ExportWaveformsCsv,
             Command::ExportNetlist(crate::io::NetlistFormat::Spice),
             Command::FindInDesign,
+            Command::CheckAndSave,
             Command::ProjectPage(ProjectPage::Configuration),
             Command::PreflightChecks,
             Command::SimulationOptions,

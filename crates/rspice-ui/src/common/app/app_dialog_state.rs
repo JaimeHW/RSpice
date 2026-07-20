@@ -781,6 +781,92 @@ impl CreateHierarchyDialogState {
     }
 }
 
+/// Retained review state for the mockup-owned Check and save transaction.
+/// Validation evidence is frozen when the dialog opens and re-derived before
+/// publication; the editable revision note never mutates the live document
+/// until a canonical save request has been accepted.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CheckAndSaveDialogState {
+    pub(crate) open: bool,
+    pub(crate) revision_note: String,
+    pub(crate) revision_note_touched: bool,
+    pub(crate) report: Option<super::app_check_and_save_validation::CheckAndSaveValidationReport>,
+    pub(crate) validation_error: Option<String>,
+    pub(crate) save_receipt: Option<String>,
+    pub(crate) saved_with_newer_changes: bool,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_transaction: Option<crate::common::project_lifecycle::TransactionId>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_view_key: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_original_journal: Option<crate::state::ValidatedRevisionJournal>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_expected_journal: Option<crate::state::ValidatedRevisionJournal>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_expected_design_digest: Option<crate::product::ContentDigest>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_original_dirty: bool,
+}
+
+impl CheckAndSaveDialogState {
+    pub(crate) fn open(
+        &mut self,
+        report: super::app_check_and_save_validation::CheckAndSaveValidationReport,
+    ) {
+        *self = Self {
+            open: true,
+            report: Some(report),
+            ..Self::default()
+        };
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        if self.save_receipt.is_some() || self.is_pending() {
+            return;
+        }
+        self.dirty = !self.revision_note.is_empty();
+        self.revision_note_touched = true;
+        self.discard_confirm = false;
+        self.validation_error = None;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.is_pending() {
+            return false;
+        }
+        if self.save_receipt.is_some() {
+            self.close();
+            return true;
+        }
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+
+    pub(crate) fn is_pending(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.pending_transaction.is_some()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            false
+        }
+    }
+}
+
 impl ReplaceInstanceDialogState {
     pub(crate) fn open(&mut self, request: ReplaceInstanceOpen) {
         let initial_replacement = request.replacement.clone();
@@ -1361,6 +1447,9 @@ pub struct DialogState {
 
     /// Multi-document selected-instance extraction transaction.
     pub(crate) create_hierarchy: CreateHierarchyDialogState,
+
+    /// Validated active-document save revision transaction.
+    pub(crate) check_and_save: CheckAndSaveDialogState,
 
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.

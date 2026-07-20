@@ -86,6 +86,7 @@ pub(crate) fn save_project_to_path(state: &mut AppState, path: &Path) -> bool {
         path,
         DestinationAuthority::UserSelected,
     )
+    .is_ok()
 }
 
 fn file_name_string(path: &Path) -> Option<String> {
@@ -114,21 +115,22 @@ pub(crate) fn save_all(state: &mut AppState) -> bool {
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SaveRequestOutcome {
     CanonicalComplete,
     CanonicalPending(crate::common::project_lifecycle::TransactionId),
     CopyOnly,
     CopyPending,
-    CancelledOrFailed,
+    Cancelled,
+    Failed(String),
 }
 
 impl SaveRequestOutcome {
-    fn request_started(self) -> bool {
-        !matches!(self, Self::CancelledOrFailed)
+    fn request_started(&self) -> bool {
+        !matches!(self, Self::Cancelled | Self::Failed(_))
     }
 
-    pub(crate) fn authorizes_immediate_destructive_action(self) -> bool {
+    pub(crate) fn authorizes_immediate_destructive_action(&self) -> bool {
         matches!(self, Self::CanonicalComplete)
     }
 }
@@ -144,27 +146,24 @@ pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestO
 #[cfg(not(target_arch = "wasm32"))]
 fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
     if let Some(path) = crate::common::project_lifecycle::canonical_native_path(state) {
-        return if save_native_scope(state, scope, &path, DestinationAuthority::Canonical) {
-            SaveRequestOutcome::CanonicalComplete
-        } else {
-            SaveRequestOutcome::CancelledOrFailed
-        };
+        return save_native_scope(state, scope, &path, DestinationAuthority::Canonical)
+            .map_or_else(SaveRequestOutcome::Failed, |()| {
+                SaveRequestOutcome::CanonicalComplete
+            });
     }
     let default_name = project_save_dialog_default_name(state);
     match crate::io::show_save_project_dialog(Some(&default_name)) {
-        Ok(path) => {
-            if save_native_scope(state, scope, &path, DestinationAuthority::UserSelected) {
+        Ok(path) => save_native_scope(state, scope, &path, DestinationAuthority::UserSelected)
+            .map_or_else(SaveRequestOutcome::Failed, |()| {
                 SaveRequestOutcome::CanonicalComplete
-            } else {
-                SaveRequestOutcome::CancelledOrFailed
-            }
-        }
-        Err(ProjectIoError::Cancelled) => SaveRequestOutcome::CancelledOrFailed,
+            }),
+        Err(ProjectIoError::Cancelled) => SaveRequestOutcome::Cancelled,
         Err(error) => {
+            let message = error.to_string();
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project save failed: {error}"
             )));
-            SaveRequestOutcome::CancelledOrFailed
+            SaveRequestOutcome::Failed(message)
         }
     }
 }
@@ -175,7 +174,7 @@ fn save_native_scope(
     scope: SaveScope,
     path: &Path,
     authority: DestinationAuthority,
-) -> bool {
+) -> Result<(), String> {
     match crate::common::project_lifecycle::save_native(state, scope, path, authority) {
         Ok(()) => {
             let canonical = crate::common::project_lifecycle::canonical_native_path(state)
@@ -186,11 +185,12 @@ fn save_native_scope(
                 "Saved project: {}",
                 canonical.display()
             )));
-            true
+            Ok(())
         }
         Err(error) => {
+            let message = error.to_string();
             lifecycle_error(state, error, "Project save failed");
-            false
+            Err(message)
         }
     }
 }
@@ -250,8 +250,9 @@ fn start_browser_project_save(
     ) {
         Ok(prepared) => prepared,
         Err(error) => {
+            let message = error.to_string();
             lifecycle_error(state, error, "Project save failed");
-            return SaveRequestOutcome::CancelledOrFailed;
+            return SaveRequestOutcome::Failed(message);
         }
     };
 
@@ -279,7 +280,9 @@ fn start_browser_project_save(
                 state.push_user_message(ConsoleMessage::error(format!(
                     "Project copy failed: serialized project was not UTF-8: {error}"
                 )));
-                return SaveRequestOutcome::CancelledOrFailed;
+                return SaveRequestOutcome::Failed(format!(
+                    "Serialized project was not UTF-8: {error}"
+                ));
             }
         };
         let path = std::path::PathBuf::from(&prepared.suggested_name);
@@ -304,7 +307,7 @@ fn start_browser_project_save(
                 state.push_user_message(ConsoleMessage::error(format!(
                     "Project download failed: {error}"
                 )));
-                return SaveRequestOutcome::CancelledOrFailed;
+                return SaveRequestOutcome::Failed(error);
             }
         }
     }
@@ -335,11 +338,12 @@ fn start_browser_project_save(
             }
         }
         Err(error) => {
+            let message = error.clone();
             crate::common::project_lifecycle::cancel_transaction_if(state, transaction);
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project save failed: {error}"
             )));
-            SaveRequestOutcome::CancelledOrFailed
+            SaveRequestOutcome::Failed(message)
         }
     }
 }
@@ -351,29 +355,46 @@ struct BrowserProjectSaveCompletion {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SaveContinuationEvent {
     Saved(crate::common::project_lifecycle::TransactionId),
     SavedWithNewerChanges(crate::common::project_lifecycle::TransactionId),
-    NotSaved(crate::common::project_lifecycle::TransactionId),
+    Cancelled(crate::common::project_lifecycle::TransactionId),
+    Conflict(crate::common::project_lifecycle::TransactionId),
+    Failed(crate::common::project_lifecycle::TransactionId, String),
+    PublishedButNotAdopted(crate::common::project_lifecycle::TransactionId, String),
 }
 
 #[cfg(target_arch = "wasm32")]
 impl SaveContinuationEvent {
-    pub(crate) fn transaction(self) -> crate::common::project_lifecycle::TransactionId {
+    pub(crate) fn transaction(&self) -> crate::common::project_lifecycle::TransactionId {
         match self {
             Self::Saved(transaction)
             | Self::SavedWithNewerChanges(transaction)
-            | Self::NotSaved(transaction) => transaction,
+            | Self::Cancelled(transaction)
+            | Self::Conflict(transaction)
+            | Self::Failed(transaction, _)
+            | Self::PublishedButNotAdopted(transaction, _) => *transaction,
         }
     }
 
-    pub(crate) fn authorizes_destructive_action(self) -> bool {
+    pub(crate) fn authorizes_destructive_action(&self) -> bool {
         matches!(self, Self::Saved(_))
     }
 
-    pub(crate) fn needs_another_save(self) -> bool {
+    pub(crate) fn needs_another_save(&self) -> bool {
         matches!(self, Self::SavedWithNewerChanges(_))
+    }
+
+    pub(crate) fn failure_message(&self) -> Option<&str> {
+        match self {
+            Self::Cancelled(_) => Some("The canonical save was cancelled."),
+            Self::Conflict(_) => Some(
+                "The canonical project changed outside RSpice; reopen it or save an independent project copy.",
+            ),
+            Self::Failed(_, message) | Self::PublishedButNotAdopted(_, message) => Some(message),
+            Self::Saved(_) | Self::SavedWithNewerChanges(_) => None,
+        }
     }
 }
 
@@ -394,6 +415,25 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         state,
         &completion.prepared.context,
     ) {
+        let terminal = match &completion.result {
+            crate::common::project_lifecycle::BrowserWriteResult::Saved { .. }
+            | crate::common::project_lifecycle::BrowserWriteResult::SavedSessionOnly { .. } => {
+                SaveContinuationEvent::PublishedButNotAdopted(
+                    transaction,
+                    "The project bytes were published after this tab lost authority, so RSpice did not adopt them as the canonical live baseline. Reopen the project before continuing."
+                        .to_owned(),
+                )
+            }
+            crate::common::project_lifecycle::BrowserWriteResult::Cancelled => {
+                SaveContinuationEvent::Cancelled(transaction)
+            }
+            crate::common::project_lifecycle::BrowserWriteResult::ExternalChange { .. } => {
+                SaveContinuationEvent::Conflict(transaction)
+            }
+            crate::common::project_lifecycle::BrowserWriteResult::Failed(error) => {
+                SaveContinuationEvent::Failed(transaction, error.clone())
+            }
+        };
         match &completion.result {
             crate::common::project_lifecycle::BrowserWriteResult::Saved { handle_id, .. }
             | crate::common::project_lifecycle::BrowserWriteResult::SavedSessionOnly {
@@ -407,7 +447,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             | crate::common::project_lifecycle::BrowserWriteResult::Failed(_) => {}
         }
         crate::common::project_lifecycle::cancel_transaction_if(state, transaction);
-        return (!project_copy).then_some(SaveContinuationEvent::NotSaved(transaction));
+        return (!project_copy).then_some(terminal);
     }
     let mut continuation = None;
     match completion.result {
@@ -456,9 +496,15 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 }
             }
             Err(error) => {
+                let message = error.to_string();
                 lifecycle_error(state, error, "Browser save completion failed");
                 if !project_copy {
-                    continuation = Some(SaveContinuationEvent::NotSaved(transaction));
+                    continuation = Some(SaveContinuationEvent::PublishedButNotAdopted(
+                        transaction,
+                        format!(
+                            "The project bytes were written, but RSpice could not adopt the saved baseline: {message}"
+                        ),
+                    ));
                 }
             }
         },
@@ -510,16 +556,22 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 }
             }
             Err(error) => {
+                let message = error.to_string();
                 lifecycle_error(state, error, "Browser save completion failed");
                 if !project_copy {
-                    continuation = Some(SaveContinuationEvent::NotSaved(transaction));
+                    continuation = Some(SaveContinuationEvent::PublishedButNotAdopted(
+                        transaction,
+                        format!(
+                            "The project bytes were written, but RSpice could not adopt the saved baseline: {message}"
+                        ),
+                    ));
                 }
             }
         },
         crate::common::project_lifecycle::BrowserWriteResult::Cancelled => {
             crate::common::project_lifecycle::cancel_transaction_if(state, transaction);
             if !project_copy {
-                continuation = Some(SaveContinuationEvent::NotSaved(transaction));
+                continuation = Some(SaveContinuationEvent::Cancelled(transaction));
             }
         }
         crate::common::project_lifecycle::BrowserWriteResult::ExternalChange {
@@ -535,7 +587,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 "Browser project changed outside RSpice; reopen it or save an independent project copy",
             ));
             if !project_copy {
-                continuation = Some(SaveContinuationEvent::NotSaved(transaction));
+                continuation = Some(SaveContinuationEvent::Conflict(transaction));
             }
         }
         crate::common::project_lifecycle::BrowserWriteResult::Failed(error) => {
@@ -544,7 +596,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 "Browser project save failed: {error}"
             )));
             if !project_copy {
-                continuation = Some(SaveContinuationEvent::NotSaved(transaction));
+                continuation = Some(SaveContinuationEvent::Failed(transaction, error));
             }
         }
     }
@@ -1259,7 +1311,11 @@ mod tests {
         );
         assert!(!SaveRequestOutcome::CopyOnly.authorizes_immediate_destructive_action());
         assert!(!SaveRequestOutcome::CopyPending.authorizes_immediate_destructive_action());
-        assert!(!SaveRequestOutcome::CancelledOrFailed.authorizes_immediate_destructive_action());
+        assert!(!SaveRequestOutcome::Cancelled.authorizes_immediate_destructive_action());
+        assert!(
+            !SaveRequestOutcome::Failed("disk unavailable".to_owned())
+                .authorizes_immediate_destructive_action()
+        );
     }
 
     #[test]

@@ -444,30 +444,8 @@ fn validate_draft(
             if candidate == expected.name {
                 return RenameValidation::Unchanged;
             }
-            let prefix = expected.kind.spice_prefix();
-            if prefix.is_empty() {
-                return RenameValidation::Invalid(
-                    "This component type does not own a SPICE reference designator.".to_owned(),
-                );
-            }
-            if !candidate
-                .get(..prefix.len())
-                .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
-            {
-                return RenameValidation::Invalid(format!(
-                    "{} designators must begin with `{prefix}`.",
-                    expected.kind.display_name()
-                ));
-            }
-            let suffix = &candidate[prefix.len()..];
-            if suffix.is_empty()
-                || !suffix
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-            {
-                return RenameValidation::Invalid(format!(
-                    "Enter `{prefix}` followed by one or more ASCII letters, digits, or underscores."
-                ));
+            if let Err(error) = expected.kind.validate_reference_designator(candidate) {
+                return RenameValidation::Invalid(error);
             }
             if schematic.components.iter().any(|component| {
                 component.id != expected.id && component.name.eq_ignore_ascii_case(candidate)

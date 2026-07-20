@@ -417,6 +417,7 @@ impl Command {
                 | Self::ExportWaveformsCsv
                 | Self::ExportNetlist(_)
                 | Self::FindInDesign
+                | Self::CheckAndSave
                 | Self::CreateHierarchy
                 | Self::ProjectPage(_)
                 | Self::PreflightChecks

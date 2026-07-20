@@ -33,6 +33,7 @@ pub(crate) fn purpose_line(ui: &mut Ui, description: &str) {
                 vec2(width, PURPOSE_HEIGHT),
                 Layout::left_to_right(Align::Center),
                 |ui| {
+                    ui.set_min_size(vec2(width, PURPOSE_HEIGHT));
                     ui.spacing_mut().item_spacing.x = 8.0;
                     let (icon_rect, icon_response) =
                         ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
