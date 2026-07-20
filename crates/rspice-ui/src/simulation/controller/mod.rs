@@ -1352,9 +1352,7 @@ mod tests {
 
     fn state_with_current_clean_drc() -> AppState {
         let mut state = AppState::default();
-        state
-            .schematic
-            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        crate::common::examples::load_example("Voltage Divider", &mut state.schematic);
         let mut result = DrcResult::new();
         result.completed = true;
         state.dialogs.drc_results = Some(result);

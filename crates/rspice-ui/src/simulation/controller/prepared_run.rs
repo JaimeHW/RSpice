@@ -1157,8 +1157,6 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use crate::services::drc::DrcResult;
-    use crate::state::{ComponentType, Point};
-
     static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 
     fn fixture_dir(label: &str) -> PathBuf {
@@ -1173,9 +1171,7 @@ mod tests {
 
     fn runnable_state() -> AppState {
         let mut state = AppState::default();
-        state
-            .schematic
-            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        crate::common::examples::load_example("Voltage Divider", &mut state.schematic);
         let mut drc = DrcResult::new();
         drc.completed = true;
         state.dialogs.drc_results = Some(drc);

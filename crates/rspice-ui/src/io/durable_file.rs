@@ -389,6 +389,22 @@ where
 
     let (temp, mut file) = create_unique_sibling(path).map_err(E::from)?;
 
+    #[cfg(windows)]
+    if path.exists()
+        && let Err(error) = copy_windows_file_security(path, &temp)
+    {
+        drop(file);
+        remove_unpublished_temp(&temp);
+        return Err(E::from(io::Error::new(
+            error.kind(),
+            format!(
+                "could not stage the security contract from '{}' onto '{}': {error}",
+                path.display(),
+                temp.display()
+            ),
+        )));
+    }
+
     let staged = (|| {
         write(&mut file)?;
         file.flush().map_err(E::from)?;
@@ -2860,7 +2876,7 @@ fn replace_file_checked(
 }
 
 #[cfg(windows)]
-fn verify_windows_file_security_equivalence(source: &Path, destination: &Path) -> io::Result<()> {
+fn read_windows_file_security(path: &Path) -> io::Result<Vec<u8>> {
     use windows_sys::Win32::Security::{
         DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
     };
@@ -2868,42 +2884,138 @@ fn verify_windows_file_security_equivalence(source: &Path, destination: &Path) -
     const OBSERVED_CONTRACT: u32 =
         OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
 
-    fn read(path: &Path) -> io::Result<Vec<u8>> {
-        use windows_sys::Win32::Security::GetFileSecurityW;
+    use windows_sys::Win32::Security::GetFileSecurityW;
 
-        let path = wide(path);
-        let mut needed = 0_u32;
-        unsafe {
-            GetFileSecurityW(
-                path.as_ptr(),
-                OBSERVED_CONTRACT,
-                std::ptr::null_mut(),
-                0,
-                &mut needed,
-            )
-        };
-        if needed == 0 {
-            return Err(io::Error::last_os_error());
+    let path = wide(path);
+    let mut needed = 0_u32;
+    unsafe {
+        GetFileSecurityW(
+            path.as_ptr(),
+            OBSERVED_CONTRACT,
+            std::ptr::null_mut(),
+            0,
+            &mut needed,
+        )
+    };
+    if needed == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut descriptor = vec![0_u8; needed as usize];
+    let read = unsafe {
+        GetFileSecurityW(
+            path.as_ptr(),
+            OBSERVED_CONTRACT,
+            descriptor.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        )
+    };
+    if read == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    descriptor.truncate(needed as usize);
+    Ok(descriptor)
+}
+
+#[cfg(windows)]
+fn copy_windows_file_security(source: &Path, destination: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+        SetFileSecurityW,
+    };
+
+    const OBSERVED_CONTRACT: u32 =
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+    let mut descriptor = read_windows_file_security(source)?;
+    let destination_wide = wide(destination);
+    let written = unsafe {
+        SetFileSecurityW(
+            destination_wide.as_ptr(),
+            OBSERVED_CONTRACT,
+            descriptor.as_mut_ptr().cast(),
+        )
+    };
+    if written == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    verify_windows_file_security_equivalence(source, destination)
+}
+
+#[cfg(windows)]
+fn verify_windows_file_security_equivalence(source: &Path, destination: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    };
+
+    const OBSERVED_CONTRACT: u32 =
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+
+    struct LocalSecurityString(*mut u16);
+    impl Drop for LocalSecurityString {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0.cast());
+                }
+            }
         }
-        let mut descriptor = vec![0_u8; needed as usize];
-        let read = unsafe {
-            GetFileSecurityW(
-                path.as_ptr(),
-                OBSERVED_CONTRACT,
-                descriptor.as_mut_ptr().cast(),
-                needed,
-                &mut needed,
-            )
-        };
-        if read == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        descriptor.truncate(needed as usize);
-        Ok(descriptor)
     }
 
-    let expected = read(source)?;
-    let actual = read(destination)?;
+    fn canonical(path: &Path) -> io::Result<String> {
+        let mut descriptor = read_windows_file_security(path)?;
+        let mut text = std::ptr::null_mut();
+        let mut text_len = 0_u32;
+        let converted = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor.as_mut_ptr().cast(),
+                SDDL_REVISION_1,
+                OBSERVED_CONTRACT,
+                &mut text,
+                &mut text_len,
+            )
+        };
+        if converted == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let allocation = LocalSecurityString(text);
+        if allocation.0.is_null() {
+            return Err(io::Error::other(
+                "Windows returned a null canonical security descriptor",
+            ));
+        }
+        let text_len = usize::try_from(text_len)
+            .map_err(|_| io::Error::other("Windows security descriptor length overflow"))?;
+        let mut canonical =
+            String::from_utf16(unsafe { std::slice::from_raw_parts(allocation.0, text_len) })
+                .map_err(|_| {
+                    io::Error::other("Windows returned a malformed security descriptor")
+                })?;
+        while canonical.ends_with('\0') {
+            canonical.pop();
+        }
+        // SetFileSecurityW preserves every inherited ACE but Windows does not
+        // copy the SE_DACL_AUTO_INHERITED bookkeeping bit onto the sibling.
+        // That bit records how the ACL was produced; it does not change the
+        // owner, group, ACE order, inheritance flags, or effective access that
+        // ReplaceFileW must preserve. Normalize only this provenance flag and
+        // continue comparing the complete canonical security contract.
+        if let Some(dacl_start) = canonical.find("D:") {
+            let flags_start = dacl_start + 2;
+            if let Some(relative_end) = canonical[flags_start..].find('(') {
+                let flags_end = flags_start + relative_end;
+                let flags = canonical[flags_start..flags_end].replace("AI", "");
+                canonical.replace_range(flags_start..flags_end, &flags);
+            }
+        }
+        Ok(canonical)
+    }
+
+    let expected = canonical(source)?;
+    let actual = canonical(destination)?;
     if actual != expected {
         return Err(io::Error::other(format!(
             "staged security descriptor for '{}' does not match '{}'",

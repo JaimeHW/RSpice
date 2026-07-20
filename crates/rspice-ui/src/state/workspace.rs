@@ -3493,7 +3493,7 @@ impl<'a> HierarchyResolver<'a> {
         instance_path: &str,
         depth: usize,
         is_root: bool,
-        ancestors: &mut Vec<String>,
+        ancestors: &mut Vec<CellViewRef>,
     ) {
         self.encountered_instance_paths
             .insert(instance_path.to_ascii_lowercase());
@@ -3555,11 +3555,15 @@ impl<'a> HierarchyResolver<'a> {
             );
         let identity = hierarchy_identity(&resolved_reference);
 
-        if ancestors.iter().any(|ancestor| ancestor == &identity) {
+        if let Some(cycle_start) = ancestors
+            .iter()
+            .position(|ancestor| hierarchy_identity(ancestor) == identity)
+        {
             let chain = ancestors
                 .iter()
-                .chain(std::iter::once(&identity))
-                .cloned()
+                .skip(cycle_start)
+                .chain(std::iter::once(&resolved_reference))
+                .map(hierarchy_display_path)
                 .collect::<Vec<_>>()
                 .join(" → ");
             let row = self.binding_row_with_master(
@@ -3694,7 +3698,7 @@ impl<'a> HierarchyResolver<'a> {
         }
 
         let row = self.binding_row_with_master(
-            resolved_reference,
+            resolved_reference.clone(),
             binding,
             instance_path,
             depth,
@@ -3731,7 +3735,7 @@ impl<'a> HierarchyResolver<'a> {
             return;
         }
 
-        ancestors.push(identity);
+        ancestors.push(resolved_reference.clone());
         for (instance_name, child) in &children {
             let requested_view = if child.view.eq_ignore_ascii_case("symbol") {
                 DEFAULT_SCHEMATIC_VIEW
@@ -4207,20 +4211,15 @@ impl<'a> HierarchyResolver<'a> {
     }
 
     fn upsert(&mut self, row: ResolvedHierarchyBinding) {
-        let unresolved_identity = if row.status.is_resolved() {
-            String::new()
-        } else {
-            format!(
-                "{}|{}",
-                row.instance_paths.join(",").to_ascii_lowercase(),
-                row.diagnostic
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_ascii_lowercase()
-            )
-        };
+        // Rows are grouped by the executable binding contract, not by their
+        // current outcome. Repeated instances of one master must remain one
+        // review row while `instance_paths` preserves every exact occurrence;
+        // a recursive or unresolved occurrence then promotes the aggregate to
+        // the most severe observed status. Configuration variants still split
+        // naturally through their ordered views, stop, model, and fallback
+        // fields below.
         let key = format!(
-            "{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             row.reference.key().to_ascii_lowercase(),
             row.view_search_order.join(",").to_ascii_lowercase(),
             row.stop_view
@@ -4229,8 +4228,6 @@ impl<'a> HierarchyResolver<'a> {
                 .to_ascii_lowercase(),
             row.model_section.to_ascii_lowercase(),
             row.used_review_fallback,
-            row.status.label(),
-            unresolved_identity,
         );
         if let Some(index) = self.row_indices.get(&key).copied() {
             let existing = &mut self.rows[index];
