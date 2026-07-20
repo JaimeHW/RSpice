@@ -815,9 +815,24 @@ pub(crate) fn build_menu_netlist(
     state: &mut AppState,
     format: crate::io::NetlistFormat,
 ) -> Option<String> {
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
+    let execution_projection = match state.workspace.configuration_execution_projection(
         &state.library_manager,
-        &state.workspace.schematic_buffers,
+        &state.workspace.active_view,
+        &state.schematic,
+    ) {
+        Ok(projection) => projection,
+        Err(error) => {
+            state.push_user_message(crate::common::app::ConsoleMessage::error(error.to_string()));
+            return None;
+        }
+    };
+    let root_reference = execution_projection.root().clone();
+    let root_schematic = execution_projection
+        .root_schematic()
+        .expect("a successful execution projection has a materialized root");
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+        &state.library_manager,
+        &execution_projection,
     );
     let analysis_instances = state
         .sim_setup
@@ -846,12 +861,12 @@ pub(crate) fn build_menu_netlist(
         return None;
     };
     let generation = crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
-        &state.schematic,
+        root_schematic,
         &[],
         &hierarchy,
         &plan_payload.design_variables,
         crate::simulation::netlist_gen::DesignVariableNetlistContext {
-            active_cell: &state.workspace.active_view,
+            active_cell: &root_reference,
             analysis_instances: &analysis_instances,
         },
     );
@@ -867,7 +882,9 @@ pub(crate) fn build_menu_netlist(
         state.push_user_message(crate::common::app::ConsoleMessage::warning(warning));
     }
 
-    let spice_netlist = generation.netlist;
+    let spice_netlist = state
+        .workspace
+        .bind_generated_netlist_provenance(generation.netlist);
     Some(match format {
         crate::io::NetlistFormat::Spectre => {
             super::netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)

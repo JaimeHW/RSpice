@@ -26,13 +26,13 @@ const EMPTY_HINT_MOBILE_BREAKPOINT: f32 = 460.0;
 const EMPTY_HINT_DESKTOP_LINES: [&str; 3] = [
     "Empty schematic",
     "Pick a part from the left panel to place a device or source",
-    "File > Open example loads a ready-to-run circuit",
+    "File > Open project loads an existing design",
 ];
 const EMPTY_HINT_MOBILE_LINES: [&str; 4] = [
     "Empty schematic",
     "Use Library to place devices and sources",
     "The toolbar provides wiring, labels, and probes",
-    "File > Open example loads a circuit",
+    "File > Open project loads an existing design",
 ];
 
 pub(super) fn component_cull_bounds(
@@ -338,8 +338,10 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     let policy = state.schematic.document_policy.operating_point_annotations;
     if policy == OperatingPointAnnotationPolicy::Hidden
         || !state.simulation.cross_probe.is_populated()
-        || state.simulation.cross_probe.source_topology_version
-            != Some(state.schematic.topology_version())
+        || !state.simulation.cross_probe.is_current_for(
+            &state.workspace.active_view,
+            state.schematic.topology_version(),
+        )
     {
         return Vec::new();
     }
@@ -613,6 +615,7 @@ mod tests {
 
         let point = Point::new(20, 10);
         state.simulation.cross_probe.update(
+            state.workspace.active_view.clone(),
             HashMap::from([(point, "OUT".to_owned())]),
             HashMap::from([("OUT".to_owned(), vec![Point::new(30, 10), point])]),
             HashMap::new(),

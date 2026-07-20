@@ -3,6 +3,7 @@
 //! Application state for simulation, project, and UI state.
 //! Core data structures that are shared across multiple modules.
 
+mod configuration_set;
 pub mod library_browser;
 pub mod model_library;
 pub mod pdk_config;
@@ -13,6 +14,13 @@ mod symbol;
 pub mod symbol_resolver;
 pub mod workspace;
 
+pub use configuration_set::{
+    ALLOWED_EXECUTABLE_VIEW_TYPES, CONFIGURATION_SET_CATALOG_SCHEMA_VERSION,
+    ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
+    ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog, ConfigurationSetDefinition,
+    ConfigurationSetError, ConfigurationSetId, ConfigurationSetLineage, ConfigurationSetOverride,
+    UnresolvedBindingPolicy,
+};
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryCellPlacementParameter, LibraryManager,
     NavColumn, View, ViewType, library_cell_placement_candidates,
@@ -52,14 +60,14 @@ pub use workspace::{
     DesignVariableSweepEligibility, MAX_PROJECT_CODE_SOURCE_BYTES, OpenCellView,
     OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistSaveRecord,
     PROJECT_DESCRIPTOR_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
-    ProjectDescriptor, ProjectDescriptorError, ProjectSourceDocument, ProjectSourceError,
-    ProjectSourceLanguage, ProjectSourceRegistry, ProjectSourceValidationIdentity,
-    ProjectTechnologyBinding, ProjectWorkspace, RegressionComparisonMethod,
-    RegressionComparisonWindow, RegressionTargetKind, RegressionTargetSelector,
-    RegressionToleranceRule, SavedOutput, SavedOutputCompatibility, SavedOutputCompatibilityKind,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    SimulationConfigurationError, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
-    TechnologyBindingError,
+    ProjectConfigurationMutationError, ProjectDescriptor, ProjectDescriptorError,
+    ProjectSourceDocument, ProjectSourceError, ProjectSourceLanguage, ProjectSourceRegistry,
+    ProjectSourceValidationIdentity, ProjectTechnologyBinding, ProjectWorkspace,
+    RegressionComparisonMethod, RegressionComparisonWindow, RegressionTargetKind,
+    RegressionTargetSelector, RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput,
+    SavedOutputCompatibility, SavedOutputCompatibilityKind, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming, SimulationConfigurationError,
+    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry, TechnologyBindingError,
 };
 
 #[cfg(test)]

@@ -1531,6 +1531,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::ArraySelection => Icon::Grid,
         Command::ReplaceInstance => Icon::Refresh,
         Command::CreateHierarchy => Icon::Folder,
+        Command::ConfigurationSets => Icon::Grid,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
         Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,

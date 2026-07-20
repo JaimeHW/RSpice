@@ -3,7 +3,10 @@
 //! Modal/dialog payload used by `AppState`. Analysis configuration lives
 //! in `SimSetupState`, not here.
 
-use super::{ConfirmationDialogState, ProjectReviewDialogState, SchematicEditAuthority};
+use super::{
+    ConfigurationSetsDialogState, ConfirmationDialogState, ProjectReviewDialogState,
+    SchematicEditAuthority,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ShortcutEditorContext {
@@ -1451,6 +1454,9 @@ pub struct DialogState {
     /// Validated active-document save revision transaction.
     pub(crate) check_and_save: CheckAndSaveDialogState,
 
+    /// Project-owned hierarchy/view configuration manager.
+    pub(crate) configuration_sets: ConfigurationSetsDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -1512,6 +1518,9 @@ impl DialogState {
             || self.stretch_selection.open
             || self.array_selection.open
             || self.replace_instance.open
+            || self.create_hierarchy.open
+            || self.check_and_save.open
+            || self.configuration_sets.open
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open

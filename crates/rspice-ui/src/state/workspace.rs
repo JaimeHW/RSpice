@@ -5,7 +5,7 @@
 //! breadcrumbs, and per-view schematic buffers together instead of letting the
 //! workbench, library browser, and single schematic buffer drift apart.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
@@ -237,6 +237,13 @@ pub struct ResolvedHierarchyBinding {
     pub model_section: String,
     pub status: HierarchyBindingStatus,
     pub instance_count: usize,
+    /// Exact expanded instance paths represented by this grouped semantic
+    /// binding. Paths remain available for configuration review and exact
+    /// override audit even when repeated masters are grouped in the table.
+    pub instance_paths: Vec<String>,
+    /// True when the active configuration explicitly permits and records a
+    /// reviewed fallback outside its primary ordered view policy.
+    pub used_review_fallback: bool,
     pub diagnostic: Option<String>,
 }
 
@@ -247,6 +254,9 @@ pub struct HierarchyResolution {
     pub bindings: Vec<ResolvedHierarchyBinding>,
     pub total_instances: usize,
     pub resolved_instances: usize,
+    pub configuration_id: Option<crate::state::ConfigurationSetId>,
+    pub configuration_revision: Option<u64>,
+    pub configuration_digest: Option<ContentDigest>,
 }
 
 impl HierarchyResolution {
@@ -257,6 +267,123 @@ impl HierarchyResolution {
     pub fn is_valid(&self) -> bool {
         self.unresolved_instances() == 0
     }
+}
+
+/// One immutable, exact-path executable binding consumed by hierarchical
+/// netlist generation.  The placed schematic binding is deliberately not
+/// retained as execution authority: `materialized_binding` is rebuilt from
+/// the resolved Library/Cell/View and its authoritative view metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigurationExecutionBinding {
+    instance_path: String,
+    resolved_reference: CellViewRef,
+    resolved_view_type: ViewType,
+    materialized_binding: Option<LibraryCellInstance>,
+    model_section: Option<String>,
+    stop_boundary: bool,
+}
+
+impl ConfigurationExecutionBinding {
+    pub fn instance_path(&self) -> &str {
+        &self.instance_path
+    }
+
+    pub const fn resolved_reference(&self) -> &CellViewRef {
+        &self.resolved_reference
+    }
+
+    pub const fn resolved_view_type(&self) -> ViewType {
+        self.resolved_view_type
+    }
+
+    pub const fn materialized_binding(&self) -> Option<&LibraryCellInstance> {
+        self.materialized_binding.as_ref()
+    }
+
+    pub fn model_section(&self) -> Option<&str> {
+        self.model_section.as_deref()
+    }
+
+    pub const fn stop_boundary(&self) -> bool {
+        self.stop_boundary
+    }
+}
+
+/// Frozen per-instance hierarchy authority for one active configuration-set
+/// revision. Keys are canonicalized exact instance paths; values retain the
+/// display spelling for receipts and diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigurationExecutionPlan {
+    root: CellViewRef,
+    bindings: BTreeMap<String, ConfigurationExecutionBinding>,
+    configuration_id: crate::state::ConfigurationSetId,
+    configuration_revision: u64,
+    configuration_digest: ContentDigest,
+}
+
+impl ConfigurationExecutionPlan {
+    pub const fn root(&self) -> &CellViewRef {
+        &self.root
+    }
+
+    pub fn binding(&self, instance_path: &str) -> Option<&ConfigurationExecutionBinding> {
+        self.bindings.get(&instance_path.to_ascii_lowercase())
+    }
+
+    pub fn bindings(&self) -> impl ExactSizeIterator<Item = &ConfigurationExecutionBinding> {
+        self.bindings.values()
+    }
+
+    pub const fn configuration_id(&self) -> crate::state::ConfigurationSetId {
+        self.configuration_id
+    }
+
+    pub const fn configuration_revision(&self) -> u64 {
+        self.configuration_revision
+    }
+
+    pub const fn configuration_digest(&self) -> ContentDigest {
+        self.configuration_digest
+    }
+}
+
+/// Owned live-buffer projection paired with its frozen configuration plan.
+/// Holding both in one value prevents a caller from resolving one hierarchy
+/// and accidentally netlisting a different editor buffer.
+#[derive(Debug, Clone)]
+pub struct ConfigurationExecutionProjection {
+    root: CellViewRef,
+    schematic_buffers: HashMap<String, SchematicState>,
+    plan: Option<ConfigurationExecutionPlan>,
+}
+
+impl ConfigurationExecutionProjection {
+    pub const fn root(&self) -> &CellViewRef {
+        &self.root
+    }
+
+    pub fn root_schematic(&self) -> Option<&SchematicState> {
+        self.schematic_buffers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(&self.root.key()))
+            .map(|(_, schematic)| schematic)
+    }
+
+    pub const fn schematic_buffers(&self) -> &HashMap<String, SchematicState> {
+        &self.schematic_buffers
+    }
+
+    pub const fn plan(&self) -> Option<&ConfigurationExecutionPlan> {
+        self.plan.as_ref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConfigurationExecutionPlanError {
+    #[error("configuration hierarchy is unresolved: {0}")]
+    Unresolved(String),
+    #[error("configuration root {0} has no materialized schematic buffer")]
+    MissingRoot(String),
 }
 
 /// Exact project-owned attachment to a locally parsed and content-pinned model
@@ -1833,6 +1960,8 @@ fn validate_bounded_text(
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SimulationConfigurationError {
+    #[error("project configuration-set catalog is invalid: {message}")]
+    InvalidConfigurationSetCatalog { message: String },
     #[error("project-owned netlist document is invalid: {message}")]
     InvalidNetlistDocumentProjection { message: String },
     #[error("project-owned Code source registry is invalid: {message}")]
@@ -1952,6 +2081,20 @@ pub enum SimulationConfigurationError {
     PlanPayloadAlreadyExists { plan_id: SimulationPlanId },
     #[error("cloned plan payload has no destination mapping for source analysis {analysis_id}")]
     MissingClonedAnalysisMapping { analysis_id: AnalysisInstanceId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProjectConfigurationMutationError {
+    #[error("configuration-set catalog is invalid: {0}")]
+    InvalidCatalog(#[from] crate::state::ConfigurationSetError),
+    #[error("configuration '{configuration}' root {root} is not a schematic or testbench view")]
+    UnsupportedRootView { configuration: String, root: String },
+    #[error("configuration '{configuration}' root {root} has no authoritative schematic buffer")]
+    MissingRootBuffer { configuration: String, root: String },
+    #[error("project revision could not advance: {0}")]
+    ProjectRevision(#[from] RevisionError),
+    #[error("configuration-set transaction has no semantic changes")]
+    NoChanges,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2583,6 +2726,11 @@ fn validate_project_source_file_name(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectWorkspace {
     pub project: ProjectDescriptor,
+    /// Project-owned hierarchy/view-resolution authority. Empty catalogs
+    /// preserve legacy deterministic resolution; once populated, the active
+    /// configuration is the exact authority used by preflight and netlisting.
+    #[serde(default)]
+    pub configuration_sets: crate::state::ConfigurationSetCatalog,
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
     pub hierarchy_stack: Vec<CellViewRef>,
@@ -2667,6 +2815,7 @@ impl Default for ProjectWorkspace {
 
         Self {
             project: ProjectDescriptor::default(),
+            configuration_sets: crate::state::ConfigurationSetCatalog::default(),
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],
@@ -2695,6 +2844,11 @@ impl ProjectWorkspace {
     /// runtime editor state. Cross-document targets are validated by project
     /// I/O once the library tree and simulation plan are available.
     pub fn validate_simulation_configuration(&self) -> Result<(), SimulationConfigurationError> {
+        self.configuration_sets.validate().map_err(|error| {
+            SimulationConfigurationError::InvalidConfigurationSetCatalog {
+                message: error.to_string(),
+            }
+        })?;
         self.plot_export_presets
             .validate_ownership_scope(
                 crate::results::plot_export_preset::PlotExportPresetScope::Project,
@@ -3189,15 +3343,18 @@ struct HierarchyResolver<'a> {
     row_indices: HashMap<String, usize>,
     total_instances: usize,
     resolved_instances: usize,
+    encountered_instance_paths: HashSet<String>,
+    execution_bindings: BTreeMap<String, ConfigurationExecutionBinding>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct HierarchyMaster<'a> {
     schematic: Option<&'a SchematicState>,
     view_type: Option<ViewType>,
     view_modified: bool,
     library_read_only: bool,
     library_has_technology: bool,
+    materialized_binding: Option<LibraryCellInstance>,
 }
 
 impl<'a> HierarchyResolver<'a> {
@@ -3214,42 +3371,145 @@ impl<'a> HierarchyResolver<'a> {
             row_indices: HashMap::new(),
             total_instances: 0,
             resolved_instances: 0,
+            encountered_instance_paths: HashSet::new(),
+            execution_bindings: BTreeMap::new(),
         }
     }
 
-    fn resolve(mut self) -> HierarchyResolution {
-        let root = CellViewRef::new(
-            &self.workspace.project.root_library,
-            &self.workspace.project.top_cell,
-            DEFAULT_SCHEMATIC_VIEW,
+    fn resolve(self) -> HierarchyResolution {
+        self.resolve_all().0
+    }
+
+    fn resolve_all(mut self) -> (HierarchyResolution, Option<ConfigurationExecutionPlan>) {
+        let active_configuration = self.workspace.configuration_sets.active();
+        let root = active_configuration.map_or_else(
+            || {
+                CellViewRef::new(
+                    &self.workspace.project.root_library,
+                    &self.workspace.project.top_cell,
+                    DEFAULT_SCHEMATIC_VIEW,
+                )
+            },
+            |configuration| configuration.root().clone(),
         );
+        let required_paths = active_configuration
+            .map(|configuration| {
+                let mut paths = vec![(
+                    configuration.dut_path().to_owned(),
+                    "configured DUT path".to_owned(),
+                )];
+                paths.extend(configuration.overrides().iter().map(|scoped| {
+                    (
+                        scoped.instance_path.clone(),
+                        "scoped configuration override".to_owned(),
+                    )
+                }));
+                paths
+            })
+            .unwrap_or_default();
         let mut ancestors = Vec::new();
-        self.resolve_reference(root, None, 0, true, &mut ancestors);
-        HierarchyResolution {
+        if let Some(error) = active_configuration
+            .and_then(|configuration| validate_override_pattern_authority(configuration).err())
+        {
+            self.total_instances = 1;
+            let row = self.binding_row(
+                root.clone(),
+                None,
+                "/top",
+                0,
+                true,
+                (HierarchyBindingStatus::Unresolved, Some(error)),
+            );
+            self.upsert(row);
+        } else {
+            self.resolve_reference(root.clone(), None, "/top", 0, true, &mut ancestors);
+        }
+        for (path, purpose) in required_paths {
+            let matched = if path.contains('*') {
+                self.encountered_instance_paths
+                    .iter()
+                    .any(|candidate| instance_path_pattern_matches(&path, candidate))
+            } else {
+                self.encountered_instance_paths
+                    .contains(&path.to_ascii_lowercase())
+            };
+            if !matched {
+                self.encountered_instance_paths
+                    .insert(path.to_ascii_lowercase());
+                self.total_instances = self.total_instances.saturating_add(1);
+                let row = self.binding_row(
+                    root.clone(),
+                    None,
+                    &path,
+                    1,
+                    false,
+                    (
+                        HierarchyBindingStatus::Unresolved,
+                        Some(format!(
+                            "{purpose} {path} does not exist in the expanded hierarchy"
+                        )),
+                    ),
+                );
+                self.upsert(row);
+            }
+        }
+        if let Some(error) = self.execution_model_section_conflict() {
+            self.total_instances = self.total_instances.saturating_add(1);
+            let row = self.binding_row(
+                root.clone(),
+                None,
+                "/top",
+                0,
+                true,
+                (HierarchyBindingStatus::Unresolved, Some(error)),
+            );
+            self.upsert(row);
+        }
+        let active_configuration = self.workspace.configuration_sets.active();
+        let resolution = HierarchyResolution {
             bindings: self.rows,
             total_instances: self.total_instances,
             resolved_instances: self.resolved_instances,
-        }
+            configuration_id: active_configuration.map(|configuration| configuration.id()),
+            configuration_revision: active_configuration
+                .map(|configuration| configuration.revision()),
+            configuration_digest: active_configuration
+                .map(|configuration| configuration.semantic_digest()),
+        };
+        let plan = active_configuration.map(|configuration| ConfigurationExecutionPlan {
+            root,
+            bindings: self.execution_bindings,
+            configuration_id: configuration.id(),
+            configuration_revision: configuration.revision(),
+            configuration_digest: configuration.semantic_digest(),
+        });
+        (resolution, plan)
     }
 
     fn resolve_reference(
         &mut self,
         requested: CellViewRef,
         binding: Option<&LibraryCellInstance>,
+        instance_path: &str,
         depth: usize,
         is_root: bool,
         ancestors: &mut Vec<String>,
     ) {
+        self.encountered_instance_paths
+            .insert(instance_path.to_ascii_lowercase());
         if self.total_instances >= MAX_HIERARCHY_RESOLUTION_INSTANCES {
             let mut row = self.binding_row(
                 requested,
                 binding,
+                instance_path,
                 depth,
                 is_root,
-                HierarchyBindingStatus::InstanceLimit,
-                Some(format!(
-                    "hierarchy exceeds the supported limit of {MAX_HIERARCHY_RESOLUTION_INSTANCES} expanded instances"
-                )),
+                (
+                    HierarchyBindingStatus::InstanceLimit,
+                    Some(format!(
+                        "hierarchy exceeds the supported limit of {MAX_HIERARCHY_RESOLUTION_INSTANCES} expanded instances"
+                    )),
+                ),
             );
             row.instance_count = 1;
             self.total_instances = self.total_instances.saturating_add(1);
@@ -3262,33 +3522,37 @@ impl<'a> HierarchyResolver<'a> {
             let row = self.binding_row(
                 requested,
                 binding,
+                instance_path,
                 depth,
                 is_root,
-                HierarchyBindingStatus::DepthLimit,
-                Some(format!(
-                    "hierarchy exceeds the supported depth of {MAX_HIERARCHY_RESOLUTION_DEPTH}"
-                )),
+                (
+                    HierarchyBindingStatus::DepthLimit,
+                    Some(format!(
+                        "hierarchy exceeds the supported depth of {MAX_HIERARCHY_RESOLUTION_DEPTH}"
+                    )),
+                ),
             );
             self.upsert(row);
             return;
         }
 
-        let search_order = hierarchy_view_search_order(&requested.view, is_root);
-        let source_binding_error = binding.and_then(|binding| {
-            binding
-                .source_path
-                .as_ref()
-                .and_then(|_| self.validate_source_binding(binding).err())
-        });
-        let master = if source_binding_error.is_none() {
-            self.resolve_master(&requested, binding, &search_order)
-        } else {
-            None
-        };
+        let search_order = self.view_search_order(&requested.view, is_root, instance_path);
+        let (master, resolution_error) =
+            match self.resolve_master(&requested, binding, &search_order) {
+                Ok(master) => (master, None),
+                Err(error) => (None, Some(error)),
+            };
         let resolved_reference = master
             .as_ref()
             .and_then(|(_, reference)| reference.clone())
             .unwrap_or_else(|| requested.clone());
+        let used_review_fallback = master.is_some()
+            && self.used_review_fallback(
+                &requested.view,
+                &resolved_reference.view,
+                is_root,
+                instance_path,
+            );
         let identity = hierarchy_identity(&resolved_reference);
 
         if ancestors.iter().any(|ancestor| ancestor == &identity) {
@@ -3301,20 +3565,23 @@ impl<'a> HierarchyResolver<'a> {
             let row = self.binding_row_with_master(
                 resolved_reference,
                 binding,
+                instance_path,
                 depth,
                 is_root,
                 master.map(|(master, _)| master),
                 HierarchyBindingStatus::Recursive,
+                false,
                 Some(format!("recursive hierarchy: {chain}")),
             );
             self.upsert(row);
             return;
         }
 
-        let (master, status, diagnostic) = match master {
+        let (master, mut status, mut diagnostic) = match master {
             Some((master, _)) => {
                 let modified = master.view_modified
-                    || master.schematic.is_some_and(|schematic| schematic.is_dirty);
+                    || master.schematic.is_some_and(|schematic| schematic.is_dirty)
+                    || used_review_fallback;
                 (
                     Some(master),
                     if modified {
@@ -3328,7 +3595,7 @@ impl<'a> HierarchyResolver<'a> {
             None => (
                 None,
                 HierarchyBindingStatus::Unresolved,
-                source_binding_error.or_else(|| {
+                resolution_error.or_else(|| {
                     Some(format!(
                         "no executable master resolved for {} using {}",
                         hierarchy_display_path(&requested),
@@ -3338,13 +3605,103 @@ impl<'a> HierarchyResolver<'a> {
             ),
         };
 
+        let current_platform = crate::state::ConfigurationPlatform::current();
+        if !self.configured_platform_eligible(instance_path, current_platform) {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "binding at {instance_path} is not supported by this execution target ({})",
+                current_platform.label()
+            ));
+        }
+        if status.is_resolved()
+            && self.configured_platform_declared(
+                instance_path,
+                crate::state::ConfigurationPlatform::Browser,
+            )
+            && master
+                .as_ref()
+                .and_then(|value| value.materialized_binding.as_ref())
+                .and_then(|binding| binding.source_path.as_ref())
+                .is_some()
+        {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "binding at {instance_path} declares Browser eligibility, but its filesystem-backed source is unavailable in this browser session"
+            ));
+        }
+        let configured_model_section = self.configured_model_section(instance_path);
+        if let Some(section) = configured_model_section.as_deref()
+            && status.is_resolved()
+            && master
+                .as_ref()
+                .and_then(|value| value.view_type)
+                .is_some_and(|view_type| {
+                    !matches!(view_type, ViewType::Spice | ViewType::Extracted)
+                })
+        {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "model section '{section}' at {instance_path} requires a source-backed SPICE or extracted view"
+            ));
+        }
+        if let Some(section) = configured_model_section.as_deref()
+            && status.is_resolved()
+            && let Some(source_path) = master
+                .as_ref()
+                .and_then(|value| value.materialized_binding.as_ref())
+                .and_then(|binding| binding.source_path.as_deref())
+            && let Err(error) = validate_configured_model_section(source_path, section)
+        {
+            status = HierarchyBindingStatus::Unresolved;
+            diagnostic = Some(format!(
+                "model section '{section}' at {instance_path} is unavailable: {error}"
+            ));
+        }
+
+        let stop_boundary = master
+            .as_ref()
+            .and_then(|value| value.view_type)
+            .is_some_and(|view_type| self.stops_at(instance_path, Some(view_type)));
+        if status.is_resolved()
+            && self.workspace.configuration_sets.active().is_some()
+            && let Some(master) = master.as_ref()
+            && let Some(view_type) = master.view_type
+        {
+            let mut materialized_binding = if is_root {
+                None
+            } else {
+                master.materialized_binding.clone()
+            };
+            if let Some(materialized) = materialized_binding.as_mut()
+                && matches!(view_type, ViewType::Schematic | ViewType::Testbench)
+            {
+                materialized.module_name = Some(configured_subcircuit_name(
+                    &resolved_reference,
+                    instance_path,
+                ));
+            }
+            self.execution_bindings.insert(
+                instance_path.to_ascii_lowercase(),
+                ConfigurationExecutionBinding {
+                    instance_path: instance_path.to_owned(),
+                    resolved_reference: resolved_reference.clone(),
+                    resolved_view_type: view_type,
+                    materialized_binding,
+                    model_section: configured_model_section,
+                    stop_boundary,
+                },
+            );
+        }
+
         let row = self.binding_row_with_master(
             resolved_reference,
             binding,
+            instance_path,
             depth,
             is_root,
-            master,
+            master.clone(),
             status,
+            used_review_fallback,
             diagnostic,
         );
         self.upsert(row);
@@ -3352,29 +3709,40 @@ impl<'a> HierarchyResolver<'a> {
             self.resolved_instances += 1;
         }
 
-        let Some(schematic) = master.and_then(|master| master.schematic) else {
+        if stop_boundary {
+            return;
+        }
+
+        let Some(schematic) = master.as_ref().and_then(|master| master.schematic) else {
             return;
         };
         let children = schematic
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
-            .filter_map(|component| component.library_cell.clone())
+            .filter_map(|component| {
+                component
+                    .library_cell
+                    .clone()
+                    .map(|binding| (component.name.clone(), binding))
+            })
             .collect::<Vec<_>>();
         if children.is_empty() {
             return;
         }
 
         ancestors.push(identity);
-        for child in &children {
+        for (instance_name, child) in &children {
             let requested_view = if child.view.eq_ignore_ascii_case("symbol") {
                 DEFAULT_SCHEMATIC_VIEW
             } else {
                 child.view.as_str()
             };
+            let child_path = format!("{instance_path}/{instance_name}");
             self.resolve_reference(
                 CellViewRef::new(&child.library, &child.cell, requested_view),
                 Some(child),
+                &child_path,
                 depth + 1,
                 false,
                 ancestors,
@@ -3387,12 +3755,23 @@ impl<'a> HierarchyResolver<'a> {
         &self,
         reference: CellViewRef,
         binding: Option<&LibraryCellInstance>,
+        instance_path: &str,
         depth: usize,
         is_root: bool,
-        status: HierarchyBindingStatus,
-        diagnostic: Option<String>,
+        outcome: (HierarchyBindingStatus, Option<String>),
     ) -> ResolvedHierarchyBinding {
-        self.binding_row_with_master(reference, binding, depth, is_root, None, status, diagnostic)
+        let (status, diagnostic) = outcome;
+        self.binding_row_with_master(
+            reference,
+            binding,
+            instance_path,
+            depth,
+            is_root,
+            None,
+            status,
+            false,
+            diagnostic,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3400,17 +3779,24 @@ impl<'a> HierarchyResolver<'a> {
         &self,
         reference: CellViewRef,
         binding: Option<&LibraryCellInstance>,
+        instance_path: &str,
         depth: usize,
         is_root: bool,
         master: Option<HierarchyMaster<'_>>,
         status: HierarchyBindingStatus,
+        used_review_fallback: bool,
         diagnostic: Option<String>,
     ) -> ResolvedHierarchyBinding {
-        let search_order = hierarchy_view_search_order(&reference.view, is_root);
+        let search_order = self.view_search_order(
+            binding.map_or(reference.view.as_str(), |value| value.view.as_str()),
+            is_root,
+            instance_path,
+        );
         let source_bound = binding
             .and_then(|value| value.source_path.as_ref())
             .is_some();
         let terminal_view = master
+            .as_ref()
             .and_then(|value| value.view_type)
             .filter(|view_type| hierarchy_stop_view(*view_type));
         let purpose = if is_root {
@@ -3426,7 +3812,17 @@ impl<'a> HierarchyResolver<'a> {
         } else {
             "hierarchical cell"
         };
-        let stop_view = if is_root {
+        let stop_view = if self.workspace.configuration_sets.active().is_some() {
+            self.configured_stop_views(instance_path)
+                .into_iter()
+                .find(|stop| {
+                    terminal_view.is_some_and(|view_type| {
+                        view_type.display_name().eq_ignore_ascii_case(stop)
+                    }) || search_order
+                        .iter()
+                        .any(|candidate| candidate.eq_ignore_ascii_case(stop))
+                })
+        } else if is_root {
             None
         } else {
             terminal_view
@@ -3440,15 +3836,191 @@ impl<'a> HierarchyResolver<'a> {
                 })
         };
         ResolvedHierarchyBinding {
-            model_section: hierarchy_model_section(self.libraries, &reference, binding),
+            model_section: self.model_section(&reference, binding, instance_path),
             reference,
             purpose: purpose.to_owned(),
             view_search_order: search_order,
             stop_view,
             status,
             instance_count: 1,
+            instance_paths: vec![instance_path.to_owned()],
+            used_review_fallback,
             diagnostic,
         }
+    }
+
+    fn configured_primary_views(
+        &self,
+        requested: &str,
+        is_root: bool,
+        instance_path: &str,
+    ) -> Vec<String> {
+        let Some(configuration) = self.workspace.configuration_sets.active() else {
+            return hierarchy_view_search_order(requested, is_root);
+        };
+        let mut order = Vec::new();
+        if is_root {
+            order.push(if requested.eq_ignore_ascii_case("symbol") {
+                DEFAULT_SCHEMATIC_VIEW.to_owned()
+            } else {
+                requested.to_ascii_lowercase()
+            });
+        }
+        let configured = selected_configuration_override(configuration.overrides(), instance_path)
+            .map_or(configuration.executable_view_policy(), |scoped| {
+                scoped.executable_views.as_slice()
+            });
+        order.extend(configured.iter().cloned());
+        deduplicate_view_order(&mut order);
+        order
+    }
+
+    fn view_search_order(
+        &self,
+        requested: &str,
+        is_root: bool,
+        instance_path: &str,
+    ) -> Vec<String> {
+        let Some(configuration) = self.workspace.configuration_sets.active() else {
+            return hierarchy_view_search_order(requested, is_root);
+        };
+        let mut order = self.configured_primary_views(requested, is_root, instance_path);
+        if configuration.definition().unresolved_policy
+            == crate::state::UnresolvedBindingPolicy::ExplicitFallbackWithReview
+        {
+            order.extend(hierarchy_view_search_order(requested, is_root));
+        }
+        deduplicate_view_order(&mut order);
+        order
+    }
+
+    fn used_review_fallback(
+        &self,
+        requested: &str,
+        resolved: &str,
+        is_root: bool,
+        instance_path: &str,
+    ) -> bool {
+        let Some(configuration) = self.workspace.configuration_sets.active() else {
+            return false;
+        };
+        configuration.definition().unresolved_policy
+            == crate::state::UnresolvedBindingPolicy::ExplicitFallbackWithReview
+            && !self
+                .configured_primary_views(requested, is_root, instance_path)
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(resolved))
+    }
+
+    fn configured_stop_views(&self, instance_path: &str) -> Vec<String> {
+        let Some(configuration) = self.workspace.configuration_sets.active() else {
+            return Vec::new();
+        };
+        if let Some(scoped) =
+            selected_configuration_override(configuration.overrides(), instance_path)
+            && let Some(stop_view) = &scoped.stop_view
+        {
+            return vec![stop_view.clone()];
+        }
+        configuration.stop_views().to_vec()
+    }
+
+    fn stops_at(&self, instance_path: &str, resolved_view: Option<ViewType>) -> bool {
+        let Some(resolved_view) = resolved_view else {
+            return false;
+        };
+        // A stop is executable only when the selected view is itself a
+        // materialized terminal implementation.  Treating a schematic as a
+        // black box would emit an X-instance without any defining source.
+        if !hierarchy_stop_view(resolved_view) {
+            return false;
+        }
+        self.configured_stop_views(instance_path)
+            .iter()
+            .any(|stop| resolved_view.display_name().eq_ignore_ascii_case(stop))
+    }
+
+    fn model_section(
+        &self,
+        reference: &CellViewRef,
+        binding: Option<&LibraryCellInstance>,
+        instance_path: &str,
+    ) -> String {
+        self.workspace
+            .configuration_sets
+            .active()
+            .and_then(|configuration| {
+                selected_configuration_override(configuration.overrides(), instance_path)
+                    .and_then(|scoped| scoped.model_section.clone())
+            })
+            .unwrap_or_else(|| hierarchy_model_section(self.libraries, reference, binding))
+    }
+
+    fn configured_model_section(&self, instance_path: &str) -> Option<String> {
+        self.workspace
+            .configuration_sets
+            .active()
+            .and_then(|configuration| {
+                selected_configuration_override(configuration.overrides(), instance_path)
+            })
+            .and_then(|scoped| scoped.model_section.clone())
+    }
+
+    fn configured_platform_eligible(
+        &self,
+        instance_path: &str,
+        platform: crate::state::ConfigurationPlatform,
+    ) -> bool {
+        self.workspace
+            .configuration_sets
+            .active()
+            .and_then(|configuration| {
+                selected_configuration_override(configuration.overrides(), instance_path)
+            })
+            .is_none_or(|scoped| scoped.eligible_platforms.contains(&platform))
+    }
+
+    fn configured_platform_declared(
+        &self,
+        instance_path: &str,
+        platform: crate::state::ConfigurationPlatform,
+    ) -> bool {
+        self.workspace
+            .configuration_sets
+            .active()
+            .and_then(|configuration| {
+                selected_configuration_override(configuration.overrides(), instance_path)
+            })
+            .is_some_and(|scoped| scoped.eligible_platforms.contains(&platform))
+    }
+
+    fn execution_model_section_conflict(&self) -> Option<String> {
+        let mut sources = HashMap::<String, (Option<&str>, &str)>::new();
+        for binding in self.execution_bindings.values() {
+            let Some(materialized) = binding.materialized_binding.as_ref() else {
+                continue;
+            };
+            let Some(source_path) = materialized.source_path.as_deref() else {
+                continue;
+            };
+            let key = configured_source_identity(source_path);
+            let section = binding.model_section.as_deref();
+            if let Some((existing_section, existing_path)) = sources.get(&key).copied() {
+                if existing_section != section {
+                    return Some(format!(
+                        "source '{}' has conflicting model-section bindings '{}' at {} and '{}' at {}",
+                        source_path.display(),
+                        existing_section.unwrap_or("<entire source>"),
+                        existing_path,
+                        section.unwrap_or("<entire source>"),
+                        binding.instance_path
+                    ));
+                }
+            } else {
+                sources.insert(key, (section, binding.instance_path()));
+            }
+        }
+        None
     }
 
     fn resolve_master(
@@ -3456,16 +4028,29 @@ impl<'a> HierarchyResolver<'a> {
         requested: &CellViewRef,
         binding: Option<&LibraryCellInstance>,
         search_order: &[String],
-    ) -> Option<(HierarchyMaster<'a>, Option<CellViewRef>)> {
+    ) -> Result<Option<(HierarchyMaster<'a>, Option<CellViewRef>)>, String> {
         let library = find_library(self.libraries, &requested.library);
         let cell = library.and_then(|library| find_cell(library, &requested.cell));
         let source_bound = binding
             .and_then(|value| value.source_path.as_ref())
             .is_some();
 
-        if source_bound {
-            let view = cell.and_then(|cell| find_view(cell, &requested.view))?;
-            return Some((
+        // Compatibility mode retains the historical placed-binding authority.
+        // Configuration mode below instead materializes each selected L/C/V
+        // from the authoritative library view.
+        if self.workspace.configuration_sets.active().is_none() && source_bound {
+            if !search_order
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(&requested.view))
+            {
+                return Ok(None);
+            }
+            let Some(view) = cell.and_then(|cell| find_view(cell, &requested.view)) else {
+                return Ok(None);
+            };
+            let binding = binding.expect("source-bound branch has a placed binding");
+            self.validate_source_binding(binding)?;
+            return Ok(Some((
                 HierarchyMaster {
                     schematic: None,
                     view_type: Some(view.view_type),
@@ -3473,23 +4058,31 @@ impl<'a> HierarchyResolver<'a> {
                     library_read_only: library.is_some_and(|library| library.read_only),
                     library_has_technology: library
                         .is_some_and(|library| !library.technology.trim().is_empty()),
+                    materialized_binding: Some(binding.clone()),
                 },
                 Some(requested.clone()),
-            ));
+            )));
         }
 
         for candidate in search_order {
-            let reference = CellViewRef::new(&requested.library, &requested.cell, candidate);
             // A buffer without an authoritative library/cell/view identity is
             // an orphan, not an executable master. Corrupt or partially
             // restored workspaces must fail closed.
             let Some(view) = cell.and_then(|cell| find_view(cell, candidate)) else {
                 continue;
             };
+            let reference = CellViewRef::new(
+                &library.expect("view implies library").name,
+                &cell.expect("view implies cell").name,
+                &view.name,
+            );
             let view_type = view.view_type;
             if matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
                 if let Some(schematic) = self.find_schematic(&reference) {
-                    return Some((
+                    let materialized_binding = binding
+                        .map(|placed| materialize_schematic_binding(placed, &reference, schematic))
+                        .transpose()?;
+                    return Ok(Some((
                         HierarchyMaster {
                             schematic: Some(schematic),
                             view_type: Some(view_type),
@@ -3497,17 +4090,45 @@ impl<'a> HierarchyResolver<'a> {
                             library_read_only: library.is_some_and(|library| library.read_only),
                             library_has_technology: library
                                 .is_some_and(|library| !library.technology.trim().is_empty()),
+                            materialized_binding,
                         },
                         Some(reference),
-                    ));
+                    )));
                 }
                 continue;
             }
-            // External executable views are owned by the placed binding's
-            // source path. A library view alone is not enough: accepting it
-            // here would claim a closure the netlist generator cannot emit.
+            if self.workspace.configuration_sets.active().is_some()
+                && hierarchy_stop_view(view_type)
+            {
+                let Some(placed) = binding else {
+                    return Err(format!(
+                        "configuration root {} cannot materialize source view '{}' without an instance interface",
+                        requested.display_path(),
+                        candidate
+                    ));
+                };
+                let materialized = materialize_authoritative_source_binding(
+                    placed,
+                    library.expect("view implies library"),
+                    cell.expect("view implies cell"),
+                    view,
+                )?;
+                self.validate_source_binding(&materialized)?;
+                return Ok(Some((
+                    HierarchyMaster {
+                        schematic: None,
+                        view_type: Some(view_type),
+                        view_modified: view.modified,
+                        library_read_only: library.is_some_and(|library| library.read_only),
+                        library_has_technology: library
+                            .is_some_and(|library| !library.technology.trim().is_empty()),
+                        materialized_binding: Some(materialized),
+                    },
+                    Some(reference),
+                )));
+            }
         }
-        None
+        Ok(None)
     }
 
     fn find_schematic(&self, reference: &CellViewRef) -> Option<&'a SchematicState> {
@@ -3586,10 +4207,41 @@ impl<'a> HierarchyResolver<'a> {
     }
 
     fn upsert(&mut self, row: ResolvedHierarchyBinding) {
-        let key = row.reference.key().to_ascii_lowercase();
+        let unresolved_identity = if row.status.is_resolved() {
+            String::new()
+        } else {
+            format!(
+                "{}|{}",
+                row.instance_paths.join(",").to_ascii_lowercase(),
+                row.diagnostic
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+            )
+        };
+        let key = format!(
+            "{}|{}|{}|{}|{}|{}|{}",
+            row.reference.key().to_ascii_lowercase(),
+            row.view_search_order.join(",").to_ascii_lowercase(),
+            row.stop_view
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase(),
+            row.model_section.to_ascii_lowercase(),
+            row.used_review_fallback,
+            row.status.label(),
+            unresolved_identity,
+        );
         if let Some(index) = self.row_indices.get(&key).copied() {
             let existing = &mut self.rows[index];
             existing.instance_count = existing.instance_count.saturating_add(row.instance_count);
+            existing.instance_paths.extend(row.instance_paths);
+            existing
+                .instance_paths
+                .sort_by_key(|path| path.to_ascii_lowercase());
+            existing
+                .instance_paths
+                .dedup_by(|left, right| left.eq_ignore_ascii_case(right));
             if row.status.severity() > existing.status.severity() {
                 existing.status = row.status;
                 existing.diagnostic = row.diagnostic;
@@ -3636,6 +4288,141 @@ fn find_schematic<'a>(
         .map(|(_, schematic)| schematic)
 }
 
+fn materialize_schematic_binding(
+    placed: &LibraryCellInstance,
+    reference: &CellViewRef,
+    schematic: &SchematicState,
+) -> Result<LibraryCellInstance, String> {
+    let ports = schematic.interface_ports();
+    let authoritative = ports
+        .iter()
+        .map(|port| port.name.as_str())
+        .collect::<Vec<_>>();
+    if !placed.terminal_order.is_empty()
+        && !same_terminal_contract(&placed.terminal_order, &authoritative)
+    {
+        return Err(format!(
+            "placed interface for {}/{} is incompatible with authoritative schematic view '{}'",
+            placed.library, placed.cell, reference.view
+        ));
+    }
+    let mut materialized =
+        LibraryCellInstance::new(&reference.library, &reference.cell, &reference.view);
+    materialized.bind_interface(&ports);
+    Ok(materialized)
+}
+
+fn materialize_authoritative_source_binding(
+    placed: &LibraryCellInstance,
+    library: &Library,
+    cell: &Cell,
+    view: &View,
+) -> Result<LibraryCellInstance, String> {
+    let source_path = view
+        .file_path
+        .clone()
+        .or_else(|| metadata_source_path(&view.metadata).map(Path::to_path_buf))
+        .or_else(|| metadata_source_path(&cell.metadata).map(Path::to_path_buf))
+        .ok_or_else(|| {
+            format!(
+                "authoritative source view {}/{}/{} has no source identity",
+                library.name, cell.name, view.name
+            )
+        })?;
+    let terminal_order = metadata_terminal_names(&view.metadata)
+        .or_else(|| metadata_terminal_names(&cell.metadata))
+        .ok_or_else(|| {
+            format!(
+                "authoritative source view {}/{}/{} has no terminal contract",
+                library.name, cell.name, view.name
+            )
+        })?;
+    if !placed.terminal_order.is_empty()
+        && !same_terminal_contract(
+            &placed.terminal_order,
+            &terminal_order
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        )
+    {
+        return Err(format!(
+            "placed interface for {}/{} is incompatible with authoritative source view '{}'",
+            placed.library, placed.cell, view.name
+        ));
+    }
+    let mut materialized = LibraryCellInstance::new(&library.name, &cell.name, &view.name);
+    materialized.source_path = Some(source_path);
+    materialized.module_name = view
+        .metadata
+        .get("veriloga.module")
+        .or_else(|| view.metadata.get("netlist.module"))
+        .or_else(|| cell.metadata.get("veriloga.module"))
+        .or_else(|| cell.metadata.get("netlist.module"))
+        .cloned();
+    let ports = terminal_order
+        .into_iter()
+        .map(|name| crate::state::PortSpec {
+            name,
+            direction: crate::state::PortDirection::InOut,
+        })
+        .collect::<Vec<_>>();
+    materialized.bind_interface(&ports);
+    Ok(materialized)
+}
+
+fn metadata_terminal_names(metadata: &HashMap<String, String>) -> Option<Vec<String>> {
+    let encoded = metadata
+        .get("netlist.ports")
+        .or_else(|| metadata.get("netlist.terminals"))
+        .or_else(|| metadata.get("veriloga.ports"))?;
+    let names = serde_json::from_str::<Vec<String>>(encoded).unwrap_or_else(|_| {
+        encoded
+            .split([',', ' ', '\t', '\n'])
+            .filter_map(|name| {
+                let name = name.trim();
+                (!name.is_empty()).then(|| name.to_owned())
+            })
+            .collect()
+    });
+    (!names.is_empty()).then_some(names)
+}
+
+fn same_terminal_contract(placed: &[String], authoritative: &[&str]) -> bool {
+    placed.len() == authoritative.len()
+        && placed
+            .iter()
+            .zip(authoritative)
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
+}
+
+fn configured_subcircuit_name(reference: &CellViewRef, instance_path: &str) -> String {
+    let stem = reference
+        .cell
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let digest = sha2::Sha256::digest(
+        format!(
+            "{}|{}",
+            reference.key().to_ascii_lowercase(),
+            instance_path.to_ascii_lowercase()
+        )
+        .as_bytes(),
+    );
+    let suffix = digest[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{stem}__cfg_{suffix}")
+}
+
 fn metadata_source_path(metadata: &HashMap<String, String>) -> Option<&Path> {
     metadata
         .get("netlist.source_path")
@@ -3657,6 +4444,16 @@ fn source_paths_match(left: &Path, right: &Path) -> bool {
     }
     #[cfg(target_arch = "wasm32")]
     false
+}
+
+fn configured_source_identity(path: &Path) -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    #[cfg(target_arch = "wasm32")]
+    let path = path.to_path_buf();
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -3709,6 +4506,20 @@ fn validate_source_file(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_configured_model_section(source_path: &Path, section: &str) -> Result<(), String> {
+    let mut processor = rspice_core::netlist::IncludeProcessor::new(source_path);
+    processor
+        .process_lib(&source_path.to_string_lossy(), Some(section))
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn validate_configured_model_section(_source_path: &Path, _section: &str) -> Result<(), String> {
+    Err("filesystem-backed model sections are unavailable in this browser session".to_owned())
+}
+
 #[cfg(target_arch = "wasm32")]
 fn validate_source_file(
     _source_path: &Path,
@@ -3722,11 +4533,7 @@ fn validate_source_file(
 }
 
 fn hierarchy_identity(reference: &CellViewRef) -> String {
-    format!(
-        "{}/{}",
-        reference.library.to_ascii_lowercase(),
-        reference.cell.to_ascii_lowercase()
-    )
+    reference.key().to_ascii_lowercase()
 }
 
 fn hierarchy_display_path(reference: &CellViewRef) -> String {
@@ -3754,6 +4561,70 @@ fn hierarchy_view_search_order(requested: &str, is_root: bool) -> Vec<String> {
     }
     order.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
     order
+}
+
+fn deduplicate_view_order(order: &mut Vec<String>) {
+    let mut seen = HashSet::with_capacity(order.len());
+    order.retain(|view| seen.insert(view.to_ascii_lowercase()));
+}
+
+fn selected_configuration_override<'a>(
+    overrides: &'a [crate::state::ConfigurationSetOverride],
+    instance_path: &str,
+) -> Option<&'a crate::state::ConfigurationSetOverride> {
+    overrides
+        .iter()
+        .filter(|scoped| instance_path_pattern_matches(&scoped.instance_path, instance_path))
+        .max_by_key(|scoped| instance_path_pattern_specificity(&scoped.instance_path))
+}
+
+fn instance_path_pattern_matches(pattern: &str, instance_path: &str) -> bool {
+    let pattern = pattern.trim_start_matches('/').split('/');
+    let instance = instance_path.trim_start_matches('/').split('/');
+    let pattern = pattern.collect::<Vec<_>>();
+    let instance = instance.collect::<Vec<_>>();
+    pattern.len() == instance.len()
+        && pattern
+            .iter()
+            .zip(instance)
+            .all(|(expected, actual)| *expected == "*" || expected.eq_ignore_ascii_case(actual))
+}
+
+fn instance_path_pattern_specificity(pattern: &str) -> usize {
+    pattern
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| *segment != "*")
+        .count()
+}
+
+fn instance_path_patterns_overlap(left: &str, right: &str) -> bool {
+    let left = left.trim_start_matches('/').split('/').collect::<Vec<_>>();
+    let right = right.trim_start_matches('/').split('/').collect::<Vec<_>>();
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| *left == "*" || right == "*" || left.eq_ignore_ascii_case(right))
+}
+
+fn validate_override_pattern_authority(
+    configuration: &crate::state::ConfigurationSet,
+) -> Result<(), String> {
+    for (index, left) in configuration.overrides().iter().enumerate() {
+        for right in configuration.overrides().iter().skip(index + 1) {
+            if instance_path_pattern_specificity(&left.instance_path)
+                == instance_path_pattern_specificity(&right.instance_path)
+                && instance_path_patterns_overlap(&left.instance_path, &right.instance_path)
+            {
+                return Err(format!(
+                    "configuration overrides '{}' and '{}' overlap with equal specificity",
+                    left.instance_path, right.instance_path
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn hierarchy_stop_view(view_type: ViewType) -> bool {
@@ -3796,6 +4667,97 @@ fn hierarchy_model_section(
 }
 
 impl ProjectWorkspace {
+    /// Exact testbench root selected for simulation. Legacy projects without
+    /// configuration sets retain their project descriptor root.
+    pub fn simulation_root_reference(&self) -> CellViewRef {
+        self.configuration_sets.active().map_or_else(
+            || {
+                CellViewRef::new(
+                    &self.project.root_library,
+                    &self.project.top_cell,
+                    DEFAULT_SCHEMATIC_VIEW,
+                )
+            },
+            |configuration| configuration.root().clone(),
+        )
+    }
+
+    /// Resolve the exact root schematic while projecting the live editor only
+    /// when it is the selected root. A different open tab can never silently
+    /// replace the configuration's simulation source.
+    pub fn simulation_root_schematic<'a>(
+        &'a self,
+        active_reference: &CellViewRef,
+        active_schematic: &'a SchematicState,
+    ) -> Option<&'a SchematicState> {
+        let root = self.simulation_root_reference();
+        if root.key().eq_ignore_ascii_case(&active_reference.key()) {
+            Some(active_schematic)
+        } else {
+            find_schematic(self, &root)
+        }
+    }
+
+    /// Bind the exact active hierarchy configuration into generated source.
+    /// The SPICE comment is part of the executable bytes and therefore flows
+    /// into source, snapshot, and retained-run digests without relying on
+    /// mutable UI state or a side-channel receipt.
+    pub fn bind_generated_netlist_provenance(&self, mut source: String) -> String {
+        let Some(configuration) = self.configuration_sets.active() else {
+            return source;
+        };
+        let comment = format!(
+            "* RSpice configuration-set {} revision {} digest {}\n",
+            configuration.id(),
+            configuration.revision(),
+            configuration.semantic_digest()
+        );
+        let insertion = source.find('\n').map_or(0, |index| index + 1);
+        source.insert_str(insertion, &comment);
+        source
+    }
+
+    /// Publish an independently mutated catalog and the owning project
+    /// revision as one fail-closed transaction. Runtime invalidation uses the
+    /// dirty flag while persistent lifecycle hashing authenticates the exact
+    /// catalog bytes.
+    pub fn replace_configuration_sets(
+        &mut self,
+        candidate: crate::state::ConfigurationSetCatalog,
+    ) -> Result<ObjectRevision, ProjectConfigurationMutationError> {
+        candidate.validate()?;
+        for configuration in candidate.configurations() {
+            let root = configuration.root();
+            if !matches!(
+                ViewType::from_name(&root.view),
+                ViewType::Schematic | ViewType::Testbench
+            ) {
+                return Err(ProjectConfigurationMutationError::UnsupportedRootView {
+                    configuration: configuration.name().to_owned(),
+                    root: root.display_path(),
+                });
+            }
+            if !self
+                .schematic_buffers
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case(&root.key()))
+            {
+                return Err(ProjectConfigurationMutationError::MissingRootBuffer {
+                    configuration: configuration.name().to_owned(),
+                    root: root.display_path(),
+                });
+            }
+        }
+        if candidate == self.configuration_sets {
+            return Err(ProjectConfigurationMutationError::NoChanges);
+        }
+        let next_revision = self.project.revision.next()?;
+        self.configuration_sets = candidate;
+        self.project.revision = next_revision;
+        self.project_metadata_dirty = true;
+        Ok(next_revision)
+    }
+
     /// Create a new default project and ensure its editable top cell exists in
     /// the shared library manager.
     pub fn new_bootstrapped(libraries: &mut LibraryManager) -> Self {
@@ -3861,6 +4823,69 @@ impl ProjectWorkspace {
     ) -> HierarchyResolution {
         HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
             .resolve()
+    }
+
+    /// Freeze the live editor projection and the active configuration's
+    /// exact-path execution plan as one immutable value.  Legacy projects
+    /// return the same projected buffers with no plan, preserving the
+    /// historical generator path.
+    pub fn configuration_execution_projection<'a>(
+        &'a self,
+        libraries: &'a LibraryManager,
+        active_reference: &'a CellViewRef,
+        active_schematic: &'a SchematicState,
+    ) -> Result<ConfigurationExecutionProjection, ConfigurationExecutionPlanError> {
+        let root = self.simulation_root_reference();
+        let (resolution, plan) = if self.configuration_sets.active().is_some() {
+            HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
+                .resolve_all()
+        } else {
+            (
+                HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
+                    .resolve(),
+                None,
+            )
+        };
+        if self.configuration_sets.active().is_some() && !resolution.is_valid() {
+            let diagnostics = resolution
+                .bindings
+                .iter()
+                .filter(|binding| !binding.status.is_resolved())
+                .map(|binding| {
+                    binding.diagnostic.clone().unwrap_or_else(|| {
+                        format!(
+                            "{} is {}",
+                            binding.reference.display_path(),
+                            binding.status.label()
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(ConfigurationExecutionPlanError::Unresolved(diagnostics));
+        }
+
+        let mut schematic_buffers = self.schematic_buffers.clone();
+        if let Some(existing_key) = schematic_buffers
+            .keys()
+            .find(|key| key.eq_ignore_ascii_case(&active_reference.key()))
+            .cloned()
+        {
+            schematic_buffers.insert(existing_key, active_schematic.clone());
+        } else {
+            schematic_buffers.insert(active_reference.key(), active_schematic.clone());
+        }
+        let projection = ConfigurationExecutionProjection {
+            root,
+            schematic_buffers,
+            plan,
+        };
+        if projection.root_schematic().is_none() {
+            return Err(ConfigurationExecutionPlanError::MissingRoot(
+                projection.root.display_path(),
+            ));
+        }
+        Ok(projection)
     }
 
     /// Ensure the workspace's top library/cell/view exists in the library tree.
@@ -4311,6 +5336,42 @@ mod tests {
 
     fn symbol_reference(cell: &str) -> CellViewRef {
         CellViewRef::new("work", cell, "symbol")
+    }
+
+    #[test]
+    fn configuration_override_patterns_use_most_specific_segment_match() {
+        let overrides = vec![
+            crate::state::ConfigurationSetOverride {
+                instance_path: "/top/*".to_owned(),
+                executable_views: vec!["spice".to_owned()],
+                stop_view: Some("spice".to_owned()),
+                model_section: None,
+                eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
+            },
+            crate::state::ConfigurationSetOverride {
+                instance_path: "/top/Xcritical".to_owned(),
+                executable_views: vec!["schematic".to_owned()],
+                stop_view: None,
+                model_section: None,
+                eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
+            },
+        ];
+        let selected = selected_configuration_override(&overrides, "/top/xCRITICAL")
+            .expect("specific override matches");
+        assert_eq!(selected.instance_path, "/top/Xcritical");
+        let wildcard = selected_configuration_override(&overrides, "/top/Xother")
+            .expect("wildcard override matches");
+        assert_eq!(wildcard.instance_path, "/top/*");
+    }
+
+    #[test]
+    fn equal_specificity_pattern_overlap_is_detectable() {
+        assert!(instance_path_patterns_overlap("/top/*/X1", "/top/I0/*"));
+        assert_eq!(
+            instance_path_pattern_specificity("/top/*/X1"),
+            instance_path_pattern_specificity("/top/I0/*")
+        );
+        assert!(!instance_path_patterns_overlap("/top/I0/X1", "/top/I1/X1"));
     }
 
     fn resistance_variable(
@@ -4852,6 +5913,243 @@ mod tests {
             .expect("bias row");
         assert_eq!(bias.instance_count, 2);
         assert_eq!(bias.purpose, "hierarchical cell");
+    }
+
+    #[test]
+    fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        let top = workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer");
+        top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
+        top.add_library_cell_component(Point::new(80, 20), instance("work", "amp"));
+        add_schematic_master(
+            &mut libraries,
+            &mut workspace,
+            "work",
+            "amp",
+            SchematicState::default(),
+        );
+
+        let id = workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Lab characterization".to_owned(),
+                root: CellViewRef::default_top(),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
+                stop_views: vec!["spice".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: vec![crate::state::ConfigurationSetOverride {
+                    instance_path: "/top/X2".to_owned(),
+                    executable_views: vec!["spice".to_owned()],
+                    stop_view: Some("spice".to_owned()),
+                    model_section: Some("tt".to_owned()),
+                    eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
+                }],
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Analog design".to_owned(),
+            })
+            .expect("create configuration");
+
+        let resolution = workspace.resolve_hierarchy(&libraries);
+
+        assert_eq!(resolution.configuration_id, Some(id));
+        assert_eq!(resolution.configuration_revision, Some(1));
+        assert_eq!(
+            resolution.configuration_digest,
+            workspace
+                .configuration_sets
+                .find(id)
+                .map(|configuration| configuration.semantic_digest())
+        );
+        assert_eq!(resolution.total_instances, 3);
+        assert_eq!(resolution.resolved_instances, 2);
+        assert_eq!(resolution.unresolved_instances(), 1);
+        let configured = resolution
+            .bindings
+            .iter()
+            .find(|binding| binding.instance_paths == ["/top/X2"])
+            .expect("exact overridden instance row");
+        assert_eq!(configured.view_search_order, ["spice"]);
+        assert_eq!(configured.model_section, "tt");
+        assert_eq!(configured.status, HierarchyBindingStatus::Unresolved);
+        assert!(resolution.bindings.iter().any(|binding| {
+            binding.instance_paths.iter().any(|path| path == "/top/X1")
+                && binding.status.is_resolved()
+        }));
+    }
+
+    #[test]
+    fn active_configuration_rejects_missing_dut_and_override_paths() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Missing bindings".to_owned(),
+                root: CellViewRef::default_top(),
+                dut_path: "/top/XMISSING".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
+                stop_views: vec!["spice".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: vec![crate::state::ConfigurationSetOverride {
+                    instance_path: "/top/XOTHER".to_owned(),
+                    executable_views: vec!["schematic".to_owned()],
+                    stop_view: None,
+                    model_section: None,
+                    eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
+                }],
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Local project".to_owned(),
+            })
+            .expect("create configuration");
+
+        let resolution = workspace.resolve_hierarchy(&libraries);
+
+        assert_eq!(resolution.total_instances, 3);
+        assert_eq!(resolution.resolved_instances, 1);
+        assert_eq!(resolution.unresolved_instances(), 2);
+        assert!(resolution.bindings.iter().any(|binding| {
+            binding.diagnostic.as_deref().is_some_and(|diagnostic| {
+                diagnostic.contains("configured DUT path /top/XMISSING does not exist")
+            })
+        }));
+        assert!(resolution.bindings.iter().any(|binding| {
+            binding.diagnostic.as_deref().is_some_and(|diagnostic| {
+                diagnostic.contains("scoped configuration override /top/XOTHER does not exist")
+            })
+        }));
+    }
+
+    #[test]
+    fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        let top = workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer");
+        top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
+        add_schematic_master(
+            &mut libraries,
+            &mut workspace,
+            "work",
+            "amp",
+            SchematicState::default(),
+        );
+        workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Reviewed fallback".to_owned(),
+                root: CellViewRef::default_top(),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["spice".to_owned()],
+                stop_views: vec!["spice".to_owned()],
+                unresolved_policy:
+                    crate::state::UnresolvedBindingPolicy::ExplicitFallbackWithReview,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Local project".to_owned(),
+            })
+            .expect("create configuration");
+
+        let resolution = workspace.resolve_hierarchy(&libraries);
+        let fallback = resolution
+            .bindings
+            .iter()
+            .find(|binding| binding.instance_paths == ["/top/X1"])
+            .expect("child binding");
+
+        assert!(fallback.status.is_resolved());
+        assert!(fallback.used_review_fallback);
+        assert_eq!(fallback.reference.view, "schematic");
+        assert_eq!(
+            fallback.view_search_order,
+            ["spice", "schematic", "extracted"]
+        );
+    }
+
+    #[test]
+    fn configuration_catalog_replacement_advances_project_revision_atomically() {
+        let mut workspace = ProjectWorkspace::default();
+        let original_revision = workspace.project.revision;
+        let mut candidate = workspace.configuration_sets.clone();
+        candidate
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Release".to_owned(),
+                root: CellViewRef::default_top(),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Local project".to_owned(),
+            })
+            .expect("candidate configuration");
+
+        let committed_revision = workspace
+            .replace_configuration_sets(candidate.clone())
+            .expect("publish configuration catalog");
+        assert_eq!(workspace.project.revision, committed_revision);
+        assert_ne!(workspace.project.revision, original_revision);
+        assert_eq!(workspace.configuration_sets, candidate);
+        assert!(workspace.project_metadata_dirty);
+
+        let committed = workspace.clone();
+        assert_eq!(
+            workspace.replace_configuration_sets(candidate),
+            Err(ProjectConfigurationMutationError::NoChanges)
+        );
+        assert_eq!(workspace.project.revision, committed.project.revision);
+        assert_eq!(workspace.configuration_sets, committed.configuration_sets);
+    }
+
+    #[test]
+    fn configuration_catalog_replacement_rejects_unmaterialized_roots_atomically() {
+        let mut workspace = ProjectWorkspace::default();
+        let before = workspace.clone();
+        let mut candidate = crate::state::ConfigurationSetCatalog::default();
+        candidate
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Missing root".to_owned(),
+                root: CellViewRef::new("user", "missing", "schematic"),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Local project".to_owned(),
+            })
+            .expect("structurally valid candidate");
+
+        assert!(matches!(
+            workspace.replace_configuration_sets(candidate),
+            Err(ProjectConfigurationMutationError::MissingRootBuffer { .. })
+        ));
+        assert_eq!(workspace.project.revision, before.project.revision);
+        assert_eq!(workspace.configuration_sets, before.configuration_sets);
+        assert_eq!(
+            workspace.project_metadata_dirty,
+            before.project_metadata_dirty
+        );
     }
 
     #[test]

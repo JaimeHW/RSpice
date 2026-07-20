@@ -197,22 +197,44 @@ pub(crate) fn run(app: &mut RSpiceApp) {
 fn collect_report(state: &AppState) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
-
-    if state.schematic.components.is_empty() {
-        blockers.push(PreflightIssue {
-            check: "Design topology".to_owned(),
-            observed: "The active schematic contains no components.".to_owned(),
-            required: "A non-empty circuit topology".to_owned(),
-            remediation: PreflightRemediation::DesignChecks,
-        });
-    }
-
-    let hierarchy = state.workspace.resolve_hierarchy_with_active(
+    let root_reference = state.workspace.simulation_root_reference();
+    let execution_projection = state.workspace.configuration_execution_projection(
         &state.library_manager,
         &state.workspace.active_view,
         &state.schematic,
     );
-    for binding in hierarchy
+
+    match &execution_projection {
+        Err(error) => blockers.push(PreflightIssue {
+            check: "Design topology".to_owned(),
+            observed: error.to_string(),
+            required: "An existing, fully resolved executable configuration root".to_owned(),
+            remediation: PreflightRemediation::DesignChecks,
+        }),
+        Ok(projection)
+            if projection
+                .root_schematic()
+                .is_some_and(|root| root.components.is_empty()) =>
+        {
+            blockers.push(PreflightIssue {
+                check: "Design topology".to_owned(),
+                observed: format!(
+                    "Configured simulation root '{}' contains no components.",
+                    root_reference.display_path()
+                ),
+                required: "A non-empty circuit topology".to_owned(),
+                remediation: PreflightRemediation::DesignChecks,
+            });
+        }
+        Ok(_) => {}
+    }
+
+    let hierarchy_resolution = state.workspace.resolve_hierarchy_with_active(
+        &state.library_manager,
+        &state.workspace.active_view,
+        &state.schematic,
+    );
+    for binding in hierarchy_resolution
         .bindings
         .iter()
         .filter(|binding| !binding.status.is_resolved())
@@ -237,18 +259,36 @@ fn collect_report(state: &AppState) -> PreflightReport {
             remediation: PreflightRemediation::DesignChecks,
         });
     }
+    for binding in hierarchy_resolution
+        .bindings
+        .iter()
+        .filter(|binding| binding.used_review_fallback)
+    {
+        advisories.push(format!(
+            "Configuration fallback reviewed for {} at {}",
+            binding.reference.display_path(),
+            binding.instance_paths.join(", ")
+        ));
+    }
 
-    match state.dialogs.drc_results.as_ref() {
-        Some(_) if state.dialogs.drc_checked_version != state.schematic.topology_version() => {
-            blockers.push(PreflightIssue {
-                check: "Schematic validation".to_owned(),
-                observed: "The retained source-check receipt belongs to an earlier topology."
-                    .to_owned(),
-                required: "A completed validation result for this topology revision".to_owned(),
-                remediation: PreflightRemediation::DesignChecks,
-            });
-        }
-        Some(result) if result.completed => {
+    if let Ok(execution_projection) = &execution_projection {
+        let root_schematic = execution_projection
+            .root_schematic()
+            .expect("a successful execution projection has a materialized root");
+        let hierarchy_source =
+            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+                &state.library_manager,
+                execution_projection,
+            );
+        let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
+            root_schematic,
+            &hierarchy_source,
+            crate::services::drc::DrcConfig {
+                check_missing_ground: true,
+                ..crate::services::drc::DrcConfig::default()
+            },
+        );
+        if result.completed {
             for violation in result.errors() {
                 blockers.push(PreflightIssue {
                     check: "Schematic validation".to_owned(),
@@ -264,19 +304,14 @@ fn collect_report(state: &AppState) -> PreflightReport {
                     violation.location.display()
                 ));
             }
+        } else {
+            blockers.push(PreflightIssue {
+                check: "Schematic validation".to_owned(),
+                observed: "The configured-root schematic validator did not complete.".to_owned(),
+                required: "A completed validation result for this topology revision".to_owned(),
+                remediation: PreflightRemediation::DesignChecks,
+            });
         }
-        Some(_) => blockers.push(PreflightIssue {
-            check: "Schematic validation".to_owned(),
-            observed: "The schematic validator did not complete.".to_owned(),
-            required: "A completed validation result for this topology revision".to_owned(),
-            remediation: PreflightRemediation::DesignChecks,
-        }),
-        None => blockers.push(PreflightIssue {
-            check: "Schematic validation".to_owned(),
-            observed: "No schematic validation result was returned.".to_owned(),
-            required: "A completed validation result for this topology revision".to_owned(),
-            remediation: PreflightRemediation::DesignChecks,
-        }),
     }
 
     match state.sim_setup.stable_analysis_plan() {
@@ -333,7 +368,13 @@ fn collect_report(state: &AppState) -> PreflightReport {
 
     PreflightReport {
         project_revision: state.workspace.project.revision().get(),
-        topology_revision: state.schematic.topology_version(),
+        topology_revision: execution_projection
+            .as_ref()
+            .ok()
+            .and_then(|projection| projection.root_schematic())
+            .map_or(state.schematic.topology_version(), |schematic| {
+                schematic.topology_version()
+            }),
         blockers,
         advisories,
         prepared: None,

@@ -20,11 +20,16 @@ impl<'a> NetlistGenerator<'a> {
     /// - Other source-backed bindings emit `.include "path"`
     pub(super) fn generate_library_view_includes(&mut self) {
         let mut includes = std::collections::BTreeMap::<String, Option<String>>::new();
-        let mut generic_includes = std::collections::BTreeSet::<String>::new();
+        let mut generic_includes = std::collections::BTreeMap::<String, Option<String>>::new();
 
         for component in &self.schematic.components {
-            let Some(binding) = component.library_cell.as_ref() else {
-                continue;
+            let binding = match self.effective_library_binding(component) {
+                Ok(Some(binding)) => binding.clone(),
+                Ok(None) => continue,
+                Err(error) => {
+                    self.errors.push(error);
+                    continue;
+                }
             };
 
             let Some(source_path) = binding.source_path.as_ref() else {
@@ -32,6 +37,13 @@ impl<'a> NetlistGenerator<'a> {
             };
 
             let key = source_path.to_string_lossy().to_string();
+            let configured_model_section = self
+                .hierarchy
+                .and_then(|hierarchy| {
+                    hierarchy.execution_binding(&self.child_hierarchy_path(component))
+                })
+                .and_then(|binding| binding.model_section())
+                .map(str::to_owned);
             if binding.view.eq_ignore_ascii_case("veriloga") {
                 let model = binding
                     .module_name
@@ -57,7 +69,18 @@ impl<'a> NetlistGenerator<'a> {
                     includes.insert(key, model);
                 }
             } else {
-                generic_includes.insert(key);
+                if let Some(existing_section) = generic_includes.get(&key) {
+                    if existing_section.as_deref() != configured_model_section.as_deref() {
+                        self.errors.push(format!(
+                            "Source '{}' has conflicting model-section bindings '{}' and '{}'; use one section per source in a configuration",
+                            key,
+                            existing_section.as_deref().unwrap_or("<entire source>"),
+                            configured_model_section.as_deref().unwrap_or("<entire source>")
+                        ));
+                    }
+                } else {
+                    generic_includes.insert(key, configured_model_section);
+                }
             }
         }
 
@@ -66,9 +89,14 @@ impl<'a> NetlistGenerator<'a> {
         }
 
         self.lines.push("* Library includes".to_string());
-        for path in generic_includes {
+        for (path, model_section) in generic_includes {
             let quoted_path = Self::quote_path_for_netlist(&path);
-            self.lines.push(format!(".include {}", quoted_path));
+            if let Some(model_section) = model_section {
+                self.lines
+                    .push(format!(".lib {} {}", quoted_path, model_section));
+            } else {
+                self.lines.push(format!(".include {}", quoted_path));
+            }
         }
         for (path, model) in includes {
             let quoted_path = Self::quote_path_for_netlist(&path);

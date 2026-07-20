@@ -1455,7 +1455,11 @@ fn handle_probe_click(
     symbol_context: &SchematicSymbolContext,
 ) {
     if let Some(_wire_id) = state.schematic.wire_at(grid_pos) {
-        if let Some(net_name) = state.simulation.cross_probe.net_at(grid_pos) {
+        if let Some(net_name) = state.simulation.cross_probe.net_at_in(
+            &state.workspace.active_view,
+            state.schematic.topology_version(),
+            grid_pos,
+        ) {
             let net_name = net_name.clone();
             log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
@@ -1531,7 +1535,11 @@ fn handle_component_probe(
             let terminals =
                 component.terminal_positions_resolved(symbol_context.resolved_symbol(component));
             if let Some((_, term_pos)) = nearest_terminal(&terminals, grid_pos) {
-                if let Some(net_name) = state.simulation.cross_probe.net_at(term_pos) {
+                if let Some(net_name) = state.simulation.cross_probe.net_at_in(
+                    &state.workspace.active_view,
+                    state.schematic.topology_version(),
+                    term_pos,
+                ) {
                     format!("V({})", net_name)
                 } else {
                     format!("V({})", comp_name)

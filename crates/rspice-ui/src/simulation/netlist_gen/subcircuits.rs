@@ -8,6 +8,9 @@
 //! generator simulates anywhere — no side files, no implicit project state.
 
 use super::*;
+use crate::state::workspace::{
+    ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationExecutionProjection,
+};
 use crate::state::{LibraryCellInstance, LibraryManager, ResolvedCellSymbol, SymbolResolver};
 
 /// Read-only access to project cell masters for hierarchical netlisting.
@@ -19,6 +22,7 @@ pub struct HierarchySource<'a> {
     masters: HashMap<String, &'a SchematicState>,
     libraries: Option<&'a LibraryManager>,
     schematic_buffers: Option<&'a HashMap<String, SchematicState>>,
+    execution_plan: Option<ConfigurationExecutionPlan>,
 }
 
 impl<'a> HierarchySource<'a> {
@@ -32,14 +36,13 @@ impl<'a> HierarchySource<'a> {
             else {
                 continue;
             };
-            if view.eq_ignore_ascii_case("schematic") {
-                masters.insert(Self::key(library, cell), schematic);
-            }
+            masters.insert(Self::view_key(library, cell, view), schematic);
         }
         Self {
             masters,
             libraries: None,
             schematic_buffers: None,
+            execution_plan: None,
         }
     }
 
@@ -55,6 +58,18 @@ impl<'a> HierarchySource<'a> {
         source
     }
 
+    /// Bind a frozen workspace/configuration projection to the generator.
+    /// The plan is cloned into this read-only source so later workspace edits
+    /// cannot change a deck that is already being prepared.
+    pub fn from_execution_projection(
+        libraries: &'a LibraryManager,
+        projection: &'a ConfigurationExecutionProjection,
+    ) -> Self {
+        let mut source = Self::from_workspace(libraries, projection.schematic_buffers());
+        source.execution_plan = projection.plan().cloned();
+        source
+    }
+
     /// An empty source — netlisting behaves exactly as before hierarchy
     /// support (every project-cell instance is an unresolved master).
     pub fn empty() -> Self {
@@ -62,17 +77,50 @@ impl<'a> HierarchySource<'a> {
             masters: HashMap::new(),
             libraries: None,
             schematic_buffers: None,
+            execution_plan: None,
         }
     }
 
     /// Register a master directly (tests, ad-hoc callers).
     pub fn insert(&mut self, library: &str, cell: &str, schematic: &'a SchematicState) {
-        self.masters.insert(Self::key(library, cell), schematic);
+        self.masters
+            .insert(Self::view_key(library, cell, "schematic"), schematic);
     }
 
     /// Look up the schematic master of `library/cell`.
     pub fn master(&self, library: &str, cell: &str) -> Option<&'a SchematicState> {
-        self.masters.get(&Self::key(library, cell)).copied()
+        self.master_view(library, cell, "schematic")
+    }
+
+    /// Resolve one exact Library/Cell/View schematic master.
+    pub fn master_view(&self, library: &str, cell: &str, view: &str) -> Option<&'a SchematicState> {
+        self.masters
+            .get(&Self::view_key(library, cell, view))
+            .copied()
+    }
+
+    pub(super) fn execution_binding(
+        &self,
+        instance_path: &str,
+    ) -> Option<&ConfigurationExecutionBinding> {
+        self.execution_plan
+            .as_ref()
+            .and_then(|plan| plan.binding(instance_path))
+    }
+
+    pub(super) const fn has_execution_plan(&self) -> bool {
+        self.execution_plan.is_some()
+    }
+
+    pub(super) fn schematic_master_for_binding(
+        &self,
+        binding: &LibraryCellInstance,
+    ) -> Option<&'a SchematicState> {
+        if self.has_execution_plan() {
+            self.master_view(&binding.library, &binding.cell, &binding.view)
+        } else {
+            self.master(&binding.library, &binding.cell)
+        }
     }
 
     pub fn resolved_symbol_for(&self, binding: &LibraryCellInstance) -> Option<ResolvedCellSymbol> {
@@ -81,11 +129,12 @@ impl<'a> HierarchySource<'a> {
         SymbolResolver::new(libraries, schematic_buffers).resolve_binding(binding)
     }
 
-    fn key(library: &str, cell: &str) -> String {
+    fn view_key(library: &str, cell: &str, view: &str) -> String {
         format!(
-            "{}/{}",
+            "{}/{}/{}",
             library.to_ascii_lowercase(),
-            cell.to_ascii_lowercase()
+            cell.to_ascii_lowercase(),
+            view.to_ascii_lowercase()
         )
     }
 }
@@ -125,6 +174,10 @@ impl<'a> NetlistGenerator<'a> {
         let Some(hierarchy) = self.hierarchy else {
             return;
         };
+        if hierarchy.has_execution_plan() {
+            self.generate_configured_subcircuit_definitions(hierarchy);
+            return;
+        }
         let needed = project_cells(self.schematic);
         if needed.is_empty() {
             return;
@@ -156,6 +209,152 @@ impl<'a> NetlistGenerator<'a> {
             self.lines.push(String::new());
         }
     }
+
+    fn generate_configured_subcircuit_definitions(&mut self, hierarchy: &HierarchySource<'a>) {
+        let mut emitted = HashSet::new();
+        let mut blocks = Vec::new();
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+        for component in &self.schematic.components {
+            if component.kind != ComponentType::CellInstance {
+                continue;
+            }
+            let path = self.child_hierarchy_path(component);
+            emit_configured_definition(
+                hierarchy,
+                &path,
+                &mut emitted,
+                &mut blocks,
+                &mut errors,
+                &mut warnings,
+            );
+        }
+        self.errors.extend(errors);
+        self.warnings.extend(warnings);
+        if !blocks.is_empty() {
+            self.lines.push("* Configured cell definitions".to_owned());
+            self.lines.extend(blocks);
+            self.lines.push(String::new());
+        }
+    }
+}
+
+/// Emit one path-specialized schematic definition. The alias retained by the
+/// execution binding rewrites parent X-lines, allowing two instances of the
+/// same cell to select different descendant views without conflating bodies.
+fn emit_configured_definition(
+    hierarchy: &HierarchySource<'_>,
+    instance_path: &str,
+    emitted: &mut HashSet<String>,
+    out: &mut Vec<String>,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    let canonical_path = instance_path.to_ascii_lowercase();
+    if !emitted.insert(canonical_path) {
+        return;
+    }
+    let Some(execution) = hierarchy.execution_binding(instance_path) else {
+        errors.push(format!(
+            "configuration execution plan has no exact binding at {instance_path}"
+        ));
+        return;
+    };
+    if !matches!(
+        execution.resolved_view_type(),
+        crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+    ) {
+        return;
+    }
+    let reference = execution.resolved_reference();
+    let Some(binding) = execution.materialized_binding() else {
+        errors.push(format!(
+            "configuration execution plan did not materialize schematic binding at {instance_path}"
+        ));
+        return;
+    };
+    let Some(master) = hierarchy.master_view(&reference.library, &reference.cell, &reference.view)
+    else {
+        errors.push(format!(
+            "configured schematic master {} at {} is absent from projected buffers",
+            reference.display_path(),
+            instance_path
+        ));
+        return;
+    };
+    let ports = master.interface_ports();
+    let port_names = ports
+        .iter()
+        .map(|port| port.name.as_str())
+        .collect::<Vec<_>>();
+    if binding.terminal_order.len() != port_names.len()
+        || !binding
+            .terminal_order
+            .iter()
+            .zip(&port_names)
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    {
+        errors.push(format!(
+            "configured schematic interface {} at {} changed after plan resolution",
+            reference.display_path(),
+            instance_path
+        ));
+        return;
+    }
+
+    for component in &master.components {
+        if component.kind == ComponentType::CellInstance {
+            emit_configured_definition(
+                hierarchy,
+                &format!("{instance_path}/{}", component.name),
+                emitted,
+                out,
+                errors,
+                warnings,
+            );
+        }
+    }
+
+    let Some(master_name) = binding
+        .module_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    else {
+        errors.push(format!(
+            "configured schematic binding at {instance_path} has no deterministic master alias"
+        ));
+        return;
+    };
+    let mut nested = NetlistGenerator::with_hierarchy_at_path(master, hierarchy, instance_path);
+    nested.extract_nets();
+    nested.apply_interface_ports();
+    nested.apply_net_labels();
+    nested.identify_ground();
+    nested.generate_library_view_includes();
+    nested.generate_instances();
+    nested.generate_models();
+    errors.extend(
+        nested
+            .errors()
+            .iter()
+            .map(|error| format!("at {instance_path}: {error}")),
+    );
+    warnings.extend(
+        nested
+            .warnings()
+            .iter()
+            .map(|warning| format!("at {instance_path}: {warning}")),
+    );
+    out.push(String::new());
+    out.push(format!(".subckt {master_name} {}", port_names.join(" ")));
+    out.extend(
+        nested
+            .take_lines()
+            .into_iter()
+            .filter(|line| line != "* Circuit netlist" && !line.is_empty()),
+    );
+    out.push(format!(".ends {master_name}"));
 }
 
 /// Emit one cell's `.SUBCKT` block (children first), guarding against
@@ -272,9 +471,10 @@ fn emit_cell_definition(
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, CellViewRef, Library, LibraryCellInstance, LibraryManager, NetLabel,
+        Cell, CellViewRef, ConfigurationSetCatalog, ConfigurationSetDefinition,
+        ConfigurationSetOverride, Library, LibraryCellInstance, LibraryManager, NetLabel,
         PendingPortPlacement, Point, PortDirection, PortDirectionType, PortDiscipline, PortSpec,
-        SymbolDocument, SymbolPin, View, ViewType, Wire,
+        ProjectWorkspace, SymbolDocument, SymbolPin, UnresolvedBindingPolicy, View, ViewType, Wire,
     };
 
     fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
@@ -324,6 +524,152 @@ mod tests {
         top.wires
             .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
         top
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
+        let source_path =
+            std::env::temp_dir().join(format!("rspice-config-view-{}.cir", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &source_path,
+            ".lib tt\n.subckt div_sp a b\nRsrc a b 9k\n.ends div_sp\n.endl tt\n",
+        )
+        .expect("source fixture writes");
+
+        let mut libraries = LibraryManager::new();
+        let mut user = Library::new("user");
+        let mut top_cell = Cell::new("top");
+        top_cell.add_view(View::new("schematic", ViewType::Schematic));
+        user.add_cell(top_cell);
+        libraries.add_library(user);
+
+        let mut work = Library::new("work");
+        let mut div = Cell::new("div");
+        div.add_view(View::new("schematic", ViewType::Schematic));
+        let mut spice = View::new("spice", ViewType::Spice).with_path(source_path.clone());
+        spice
+            .metadata
+            .insert("netlist.ports".to_owned(), "a,b".to_owned());
+        spice
+            .metadata
+            .insert("netlist.module".to_owned(), "div_sp".to_owned());
+        div.add_view(spice);
+        work.add_cell(div);
+        libraries.add_library(work);
+
+        let mut workspace = ProjectWorkspace::default();
+        workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "div", "schematic").key(),
+            div_master(),
+        );
+        let mut top = SchematicState::default();
+        top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
+        top.add_library_cell_component(Point::new(240, 0), binding("div", &["a", "b"]));
+        workspace
+            .schematic_buffers
+            .insert(workspace.active_view.key(), top.clone());
+
+        let mut catalog = ConfigurationSetCatalog::default();
+        catalog
+            .create(ConfigurationSetDefinition {
+                name: "Mixed implementation".to_owned(),
+                root: workspace.active_view.clone(),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: vec![ConfigurationSetOverride {
+                    instance_path: "/top/X2".to_owned(),
+                    executable_views: vec!["spice".to_owned()],
+                    stop_view: Some("spice".to_owned()),
+                    model_section: Some("tt".to_owned()),
+                    eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
+                }],
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "test".to_owned(),
+            })
+            .expect("configuration creates");
+        workspace.configuration_sets = catalog;
+
+        let active = workspace.active_view.clone();
+        let projection = workspace
+            .configuration_execution_projection(&libraries, &active, &top)
+            .expect("configuration resolves into an execution plan");
+        let x1 = projection
+            .plan()
+            .and_then(|plan| plan.binding("/top/X1"))
+            .expect("X1 binding");
+        let x2 = projection
+            .plan()
+            .and_then(|plan| plan.binding("/top/X2"))
+            .expect("X2 binding");
+        assert_eq!(x1.resolved_reference().view, "schematic");
+        assert_eq!(x2.resolved_reference().view, "spice");
+        assert_eq!(x2.model_section(), Some("tt"));
+        assert_ne!(
+            x1.materialized_binding()
+                .and_then(|binding| binding.module_name.as_deref()),
+            x2.materialized_binding()
+                .and_then(|binding| binding.module_name.as_deref())
+        );
+
+        let hierarchy = HierarchySource::from_execution_projection(&libraries, &projection);
+        let result = generate_netlist_hierarchical(
+            projection.root_schematic().expect("root schematic"),
+            &[],
+            &hierarchy,
+        );
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        let source_literal = source_path.to_string_lossy();
+        assert!(
+            result
+                .netlist
+                .contains(&format!(".lib \"{}\" tt", source_literal))
+        );
+        assert!(result.netlist.contains(".subckt div__cfg_"));
+        let x1_line = result
+            .netlist
+            .lines()
+            .find(|line| line.starts_with("X1 "))
+            .expect("X1 line");
+        let x2_line = result
+            .netlist
+            .lines()
+            .find(|line| line.starts_with("X2 "))
+            .expect("X2 line");
+        assert!(x1_line.contains("div__cfg_"), "{x1_line}");
+        assert!(x2_line.ends_with(" div_sp"), "{x2_line}");
+        assert_ne!(x1_line, x2_line);
+
+        let active_configuration = workspace
+            .configuration_sets
+            .active()
+            .expect("active configuration")
+            .clone();
+        let mut desktop_incompatible = active_configuration.definition().clone();
+        desktop_incompatible.overrides[0].eligible_platforms =
+            vec![crate::state::ConfigurationPlatform::Browser];
+        workspace
+            .configuration_sets
+            .update(
+                active_configuration.id(),
+                active_configuration.revision(),
+                desktop_incompatible,
+            )
+            .expect("platform policy update");
+        let platform_error = workspace
+            .configuration_execution_projection(&libraries, &active, &top)
+            .expect_err("desktop-incompatible binding blocks projection");
+        assert!(
+            platform_error
+                .to_string()
+                .contains("not supported by this execution target")
+        );
+
+        let _ = std::fs::remove_file(source_path);
     }
 
     #[test]

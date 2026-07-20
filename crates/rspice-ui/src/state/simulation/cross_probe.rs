@@ -10,6 +10,9 @@ use super::*;
 /// simulation run or schematic modification.
 #[derive(Debug, Clone, Default)]
 pub struct CrossProbeMapping {
+    /// Exact source document that owns the retained point coordinates.
+    pub source_reference: Option<crate::state::CellViewRef>,
+
     /// Node point to net name lookup (e.g., Point(280, 200) → "NET3").
     /// Holds net node points (vertices, terminals, junctions, labels);
     /// probes between nodes resolve through `net_segments`.
@@ -53,11 +56,13 @@ impl CrossProbeMapping {
     /// Update mapping from netlist generation result
     pub fn update(
         &mut self,
+        source_reference: crate::state::CellViewRef,
         point_to_net: HashMap<Point, String>,
         net_to_points: HashMap<String, Vec<Point>>,
         net_segments: HashMap<String, Vec<(Point, Point)>>,
         source_topology_version: u64,
     ) {
+        self.source_reference = Some(source_reference);
         self.point_to_net = point_to_net;
         self.net_to_points = net_to_points;
         self.net_segments = net_segments;
@@ -70,6 +75,7 @@ impl CrossProbeMapping {
         self.point_to_net.clear();
         self.net_to_points.clear();
         self.net_segments.clear();
+        self.source_reference = None;
         self.source_topology_version = None;
         self.version += 1;
     }
@@ -91,6 +97,30 @@ impl CrossProbeMapping {
         })
     }
 
+    /// Resolve a net only when both the owning cell/view and topology receipt
+    /// match the currently displayed schematic.
+    pub fn net_at_in(
+        &self,
+        reference: &crate::state::CellViewRef,
+        topology_version: u64,
+        point: Point,
+    ) -> Option<&String> {
+        self.is_current_for(reference, topology_version)
+            .then(|| self.net_at(point))
+            .flatten()
+    }
+
+    pub fn is_current_for(
+        &self,
+        reference: &crate::state::CellViewRef,
+        topology_version: u64,
+    ) -> bool {
+        self.source_reference
+            .as_ref()
+            .is_some_and(|source| source.key().eq_ignore_ascii_case(&reference.key()))
+            && self.source_topology_version == Some(topology_version)
+    }
+
     /// Look up all grid points for a net name
     ///
     /// Returns empty slice if net not found
@@ -104,5 +134,32 @@ impl CrossProbeMapping {
     /// Check if mapping is populated
     pub fn is_populated(&self) -> bool {
         !self.point_to_net.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_requires_exact_source_document_and_topology_receipt() {
+        let source = crate::state::CellViewRef::new("user", "top", "schematic");
+        let other = crate::state::CellViewRef::new("user", "child", "schematic");
+        let point = Point::new(10, 20);
+        let mut mapping = CrossProbeMapping::new();
+        mapping.update(
+            source.clone(),
+            HashMap::from([(point, "OUT".to_owned())]),
+            HashMap::from([("OUT".to_owned(), vec![point])]),
+            HashMap::new(),
+            7,
+        );
+
+        assert_eq!(
+            mapping.net_at_in(&source, 7, point).map(String::as_str),
+            Some("OUT")
+        );
+        assert!(mapping.net_at_in(&other, 7, point).is_none());
+        assert!(mapping.net_at_in(&source, 8, point).is_none());
     }
 }

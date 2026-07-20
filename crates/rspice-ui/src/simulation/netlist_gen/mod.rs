@@ -448,6 +448,9 @@ pub struct NetlistGenerator<'a> {
     /// emission and instance terminal resolution). `None` keeps the
     /// flat, single-schematic behavior.
     hierarchy: Option<&'a HierarchySource<'a>>,
+    /// Exact path of `schematic` inside a frozen configuration plan.
+    /// Legacy generation keeps the canonical root and ignores it.
+    hierarchy_path: String,
 }
 
 impl<'a> NetlistGenerator<'a> {
@@ -464,6 +467,7 @@ impl<'a> NetlistGenerator<'a> {
             warnings: Vec::new(),
             errors: Vec::new(),
             hierarchy: None,
+            hierarchy_path: "/top".to_owned(),
         }
     }
 
@@ -476,6 +480,51 @@ impl<'a> NetlistGenerator<'a> {
         let mut generator = Self::new(schematic);
         generator.hierarchy = Some(hierarchy);
         generator
+    }
+
+    fn with_hierarchy_at_path(
+        schematic: &'a SchematicState,
+        hierarchy: &'a HierarchySource<'a>,
+        hierarchy_path: impl Into<String>,
+    ) -> Self {
+        let mut generator = Self::with_hierarchy(schematic, hierarchy);
+        generator.hierarchy_path = hierarchy_path.into();
+        generator
+    }
+
+    fn child_hierarchy_path(&self, component: &Component) -> String {
+        format!("{}/{}", self.hierarchy_path, component.name)
+    }
+
+    /// Return the frozen configured binding when a plan is active. Missing
+    /// exact-path entries are errors; falling back to the placed binding here
+    /// would make validation and executable bytes disagree.
+    fn effective_library_binding<'b>(
+        &'b self,
+        component: &'b Component,
+    ) -> Result<Option<&'b crate::state::LibraryCellInstance>, String> {
+        let Some(placed) = component.library_cell.as_ref() else {
+            return Ok(None);
+        };
+        let Some(hierarchy) = self.hierarchy else {
+            return Ok(Some(placed));
+        };
+        if !hierarchy.has_execution_plan() {
+            return Ok(Some(placed));
+        }
+        let path = self.child_hierarchy_path(component);
+        let resolved = hierarchy.execution_binding(&path).ok_or_else(|| {
+            format!(
+                "configuration execution plan has no exact binding for instance '{}' at {}",
+                component.name, path
+            )
+        })?;
+        resolved.materialized_binding().map(Some).ok_or_else(|| {
+            format!(
+                "configuration execution plan did not materialize instance '{}' at {}",
+                component.name, path
+            )
+        })
     }
 
     /// Consume the generated lines (subcircuit-body assembly).

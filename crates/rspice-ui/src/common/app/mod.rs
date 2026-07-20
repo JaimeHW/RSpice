@@ -51,6 +51,11 @@ pub use app_confirmation_state::{
 };
 pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
 
+mod app_configuration_sets_dialog;
+pub(crate) use app_configuration_sets_dialog::{
+    ConfigurationSetsDialogState, open_configuration_sets_dialog,
+};
+
 mod app_dialog_state;
 pub(crate) use app_dialog_state::{
     ArraySelectionDialogState, ArraySelectionPreviewCache, BusObjectPropertiesDraft,
@@ -910,6 +915,7 @@ impl RSpiceApp {
         self.render_replace_instance_dialog(ctx);
         self.render_create_hierarchy_dialog(ctx);
         self.render_check_and_save_dialog(ctx);
+        self.render_configuration_sets_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);

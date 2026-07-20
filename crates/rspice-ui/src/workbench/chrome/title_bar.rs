@@ -1345,6 +1345,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     menu_separator(ui);
     command_item(ui, app, Command::CreateHierarchy);
+    command_item(ui, app, Command::ConfigurationSets);
     command_item(ui, app, Command::CheckAndSave);
 }
 

@@ -272,8 +272,12 @@ impl<'a> From<&'a crate::state::View> for ViewDocumentContent<'a> {
 }
 
 fn project_configuration_value(project: &ProjectFile) -> Result<serde_json::Value, String> {
-    let mut value = serde_json::to_value((&project.workspace.project, &project.libraries))
-        .map_err(|error| error.to_string())?;
+    let mut value = serde_json::to_value((
+        &project.workspace.project,
+        &project.libraries,
+        &project.workspace.configuration_sets,
+    ))
+    .map_err(|error| error.to_string())?;
     // Paths are persistence bindings and browser/tree expansion is
     // presentation state.  Neither makes engineering content dirty.
     if let Some(project) = value.pointer_mut("/0/path") {

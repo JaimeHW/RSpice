@@ -168,6 +168,126 @@ impl CheckAndSaveValidationReport {
                     }),
                 );
             }
+            if binding.used_review_fallback {
+                insert_finding(
+                    &mut findings,
+                    CheckAndSaveFindingLevel::Advisory,
+                    "hierarchy",
+                    &format!("{}:reviewed-fallback", binding.reference.key()),
+                    format!(
+                        "Configuration uses reviewed fallback for {} at {}.",
+                        binding.reference.display_path(),
+                        binding.instance_paths.join(", ")
+                    ),
+                );
+            }
+        }
+
+        let execution_projection = state.workspace.configuration_execution_projection(
+            &state.library_manager,
+            &active_view,
+            &state.schematic,
+        );
+        match &execution_projection {
+            Ok(projection) => {
+                let root = projection
+                    .root_schematic()
+                    .expect("a successful execution projection has a materialized root");
+                let configured_hierarchy =
+                    HierarchySource::from_execution_projection(&state.library_manager, projection);
+                let drc = run_drc_check_with_hierarchy_and_config(
+                    root,
+                    &configured_hierarchy,
+                    DrcConfig {
+                        check_missing_ground: true,
+                        ..DrcConfig::default()
+                    },
+                );
+                if !drc.completed {
+                    insert_finding(
+                        &mut findings,
+                        CheckAndSaveFindingLevel::Blocker,
+                        "checks",
+                        "configured-root:incomplete",
+                        "Design checks did not complete for the configured simulation root."
+                            .to_owned(),
+                    );
+                }
+                for violation in drc.violations() {
+                    let level = if violation.severity >= DrcSeverity::Error {
+                        CheckAndSaveFindingLevel::Blocker
+                    } else {
+                        CheckAndSaveFindingLevel::Advisory
+                    };
+                    insert_finding(
+                        &mut findings,
+                        level,
+                        "configured-root checks",
+                        &format!(
+                            "configured-root:{:?}:{:?}:{}",
+                            violation.violation_type, violation.location, violation.message
+                        ),
+                        format!("Configured root: {}", violation.message),
+                    );
+                }
+                let generated = generate_netlist_hierarchical(root, &[], &configured_hierarchy);
+                for error in &generated.errors {
+                    insert_finding(
+                        &mut findings,
+                        CheckAndSaveFindingLevel::Blocker,
+                        "configured-root netlist",
+                        &format!("configured-root:{error}"),
+                        format!("Configured root: {error}"),
+                    );
+                }
+                for warning in &generated.warnings {
+                    insert_finding(
+                        &mut findings,
+                        CheckAndSaveFindingLevel::Advisory,
+                        "configured-root netlist",
+                        &format!("configured-root:{warning}"),
+                        format!("Configured root: {warning}"),
+                    );
+                }
+                let generated_source = state
+                    .workspace
+                    .bind_generated_netlist_provenance(generated.netlist);
+                match crate::simulation::controller::prepared_run::expand_generated_dependencies(
+                    &generated_source,
+                    root.current_file.as_deref(),
+                ) {
+                    Ok((sealed_source, sealed_dependencies)) => {
+                        dependencies.insert(
+                            "configuration:executable-netlist".to_owned(),
+                            digest_serializable(&sealed_source)?,
+                        );
+                        for dependency in sealed_dependencies {
+                            dependencies.insert(
+                                format!(
+                                    "configuration:source:{}:{}",
+                                    dependency.resolved_path().display(),
+                                    dependency.selected_section().unwrap_or("<entire-source>")
+                                ),
+                                digest_serializable(&dependency.source())?,
+                            );
+                        }
+                    }
+                    Err(error) => insert_finding(
+                        &mut findings,
+                        CheckAndSaveFindingLevel::Blocker,
+                        "configured-root source seal",
+                        "configured-root:source-seal-failed",
+                        format!("Configured root source sealing failed: {error}"),
+                    ),
+                }
+            }
+            Err(error) => insert_finding(
+                &mut findings,
+                CheckAndSaveFindingLevel::Blocker,
+                "configuration",
+                "execution-projection-invalid",
+                error.to_string(),
+            ),
         }
 
         let mut documents = match effective_scope {
@@ -178,12 +298,7 @@ impl CheckAndSaveValidationReport {
                 .collect::<Vec<_>>(),
         };
         documents.sort_by(|left, right| left.0.cmp(&right.0));
-        let root_schematic_key = CellViewRef::new(
-            &state.workspace.project.root_library,
-            &state.workspace.project.top_cell,
-            "schematic",
-        )
-        .key();
+        let root_schematic_key = state.workspace.simulation_root_reference().key();
         let symbol_resolver = SymbolResolver::new(&state.library_manager, &buffers);
         for (key, schematic) in &documents {
             if let Err(error) = schematic.validated_revisions.validate() {
@@ -195,40 +310,39 @@ impl CheckAndSaveValidationReport {
                     format!("Validated revision history for {key} is invalid: {error}"),
                 );
             }
-            let drc = run_drc_check_with_hierarchy_and_config(
-                schematic,
-                &hierarchy,
-                DrcConfig {
-                    check_missing_ground: key == &root_schematic_key,
-                    ..DrcConfig::default()
-                },
-            );
-            if !drc.completed {
-                insert_finding(
-                    &mut findings,
-                    CheckAndSaveFindingLevel::Blocker,
-                    "checks",
-                    &format!("{key}:incomplete"),
-                    format!("Design checks did not complete for {key}."),
+            if key != &root_schematic_key || execution_projection.is_err() {
+                let drc = run_drc_check_with_hierarchy_and_config(
+                    schematic,
+                    &hierarchy,
+                    DrcConfig::default(),
                 );
-            }
-            for violation in drc.violations() {
-                let level = if violation.severity >= DrcSeverity::Error {
-                    CheckAndSaveFindingLevel::Blocker
-                } else {
-                    CheckAndSaveFindingLevel::Advisory
-                };
-                let discriminator = format!(
-                    "{key}:{:?}:{:?}:{}",
-                    violation.violation_type, violation.location, violation.message
-                );
-                insert_finding(
-                    &mut findings,
-                    level,
-                    "design checks",
-                    &discriminator,
-                    format!("{key}: {}", violation.message),
-                );
+                if !drc.completed {
+                    insert_finding(
+                        &mut findings,
+                        CheckAndSaveFindingLevel::Blocker,
+                        "checks",
+                        &format!("{key}:incomplete"),
+                        format!("Design checks did not complete for {key}."),
+                    );
+                }
+                for violation in drc.violations() {
+                    let level = if violation.severity >= DrcSeverity::Error {
+                        CheckAndSaveFindingLevel::Blocker
+                    } else {
+                        CheckAndSaveFindingLevel::Advisory
+                    };
+                    let discriminator = format!(
+                        "{key}:{:?}:{:?}:{}",
+                        violation.violation_type, violation.location, violation.message
+                    );
+                    insert_finding(
+                        &mut findings,
+                        level,
+                        "design checks",
+                        &discriminator,
+                        format!("{key}: {}", violation.message),
+                    );
+                }
             }
             validate_component_contracts(
                 key,
@@ -237,26 +351,28 @@ impl CheckAndSaveValidationReport {
                 &state.property_registry,
                 &mut findings,
             );
-            let generated = generate_netlist_hierarchical(schematic, &[], &hierarchy);
-            for error in generated.errors {
-                let discriminator = format!("{key}:{error}");
-                insert_finding(
-                    &mut findings,
-                    CheckAndSaveFindingLevel::Blocker,
-                    "netlist",
-                    &discriminator,
-                    format!("{key}: {error}"),
-                );
-            }
-            for warning in generated.warnings {
-                let discriminator = format!("{key}:{warning}");
-                insert_finding(
-                    &mut findings,
-                    CheckAndSaveFindingLevel::Advisory,
-                    "netlist",
-                    &discriminator,
-                    format!("{key}: {warning}"),
-                );
+            if key != &root_schematic_key || execution_projection.is_err() {
+                let generated = generate_netlist_hierarchical(schematic, &[], &hierarchy);
+                for error in generated.errors {
+                    let discriminator = format!("{key}:{error}");
+                    insert_finding(
+                        &mut findings,
+                        CheckAndSaveFindingLevel::Blocker,
+                        "netlist",
+                        &discriminator,
+                        format!("{key}: {error}"),
+                    );
+                }
+                for warning in generated.warnings {
+                    let discriminator = format!("{key}:{warning}");
+                    insert_finding(
+                        &mut findings,
+                        CheckAndSaveFindingLevel::Advisory,
+                        "netlist",
+                        &discriminator,
+                        format!("{key}: {warning}"),
+                    );
+                }
             }
             dependencies.insert(format!("schematic:{key}"), digest_serializable(schematic)?);
         }

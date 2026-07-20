@@ -50,7 +50,7 @@ mod analysis_plan;
 mod analysis_run_config;
 mod analysis_spec_build;
 mod manual_deck;
-mod prepared_run;
+pub(crate) mod prepared_run;
 mod results_convert;
 mod results_post;
 mod results_update;

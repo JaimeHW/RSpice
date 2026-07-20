@@ -621,9 +621,13 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
                 .iter()
                 .find(|wire| wire.id == id)
                 .and_then(|wire| {
-                    wire.points
-                        .iter()
-                        .find_map(|point| state.simulation.cross_probe.net_at(*point))
+                    wire.points.iter().find_map(|point| {
+                        state.simulation.cross_probe.net_at_in(
+                            &state.workspace.active_view,
+                            state.schematic.topology_version(),
+                            *point,
+                        )
+                    })
                 })
                 .map_or("wire", String::as_str);
             format!("wire · {net} · {path}")
@@ -1199,7 +1203,11 @@ fn delete_review(
             continue;
         }
         for point in symbol_context.terminal_points(component) {
-            if let Some(net) = state.simulation.cross_probe.net_at(point) {
+            if let Some(net) = state.simulation.cross_probe.net_at_in(
+                &state.workspace.active_view,
+                state.schematic.topology_version(),
+                point,
+            ) {
                 nets.insert(net.clone());
             }
         }
@@ -1209,14 +1217,22 @@ fn delete_review(
             continue;
         }
         for point in &wire.points {
-            if let Some(net) = state.simulation.cross_probe.net_at(*point) {
+            if let Some(net) = state.simulation.cross_probe.net_at_in(
+                &state.workspace.active_view,
+                state.schematic.topology_version(),
+                *point,
+            ) {
                 nets.insert(net.clone());
             }
         }
     }
     for junction in &state.schematic.junctions {
         if request.selection.has_junction(junction.pos)
-            && let Some(net) = state.simulation.cross_probe.net_at(junction.pos)
+            && let Some(net) = state.simulation.cross_probe.net_at_in(
+                &state.workspace.active_view,
+                state.schematic.topology_version(),
+                junction.pos,
+            )
         {
             nets.insert(net.clone());
         }

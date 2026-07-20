@@ -427,8 +427,9 @@ struct PreparedPvtPoint {
     temperature_celsius: f64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(in crate::simulation) struct CrossProbeSnapshot {
+    source_reference: crate::state::CellViewRef,
     point_to_net: HashMap<Point, String>,
     nets: HashMap<String, Vec<Point>>,
     net_segments: HashMap<String, Vec<(Point, Point)>>,
@@ -437,12 +438,14 @@ pub(in crate::simulation) struct CrossProbeSnapshot {
 
 impl CrossProbeSnapshot {
     pub(in crate::simulation) fn new(
+        source_reference: crate::state::CellViewRef,
         point_to_net: HashMap<Point, String>,
         nets: HashMap<String, Vec<Point>>,
         net_segments: HashMap<String, Vec<(Point, Point)>>,
         topology_version: u64,
     ) -> Self {
         Self {
+            source_reference,
             point_to_net,
             nets,
             net_segments,
@@ -451,8 +454,16 @@ impl CrossProbeSnapshot {
     }
 
     pub(in crate::simulation) fn apply(self, state: &mut crate::common::app::AppState) {
-        state.schematic.net_mapping = self.point_to_net.clone();
+        let source_is_active = state
+            .workspace
+            .active_view
+            .key()
+            .eq_ignore_ascii_case(&self.source_reference.key());
+        if source_is_active {
+            state.schematic.net_mapping = self.point_to_net.clone();
+        }
         state.simulation.cross_probe.update(
+            self.source_reference,
             self.point_to_net,
             self.nets,
             self.net_segments,

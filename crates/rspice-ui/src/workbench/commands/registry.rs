@@ -418,6 +418,7 @@ impl Command {
                 | Self::ExportNetlist(_)
                 | Self::FindInDesign
                 | Self::CheckAndSave
+                | Self::ConfigurationSets
                 | Self::CreateHierarchy
                 | Self::ProjectPage(_)
                 | Self::PreflightChecks
@@ -464,6 +465,7 @@ impl Command {
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::CheckAndSave
+                | Self::ConfigurationSets
                 | Self::CreateHierarchy
         )
     }
@@ -526,7 +528,8 @@ impl Command {
             Self::AscendHierarchy
             | Self::DescendHierarchy
             | Self::RunChecks
-            | Self::CheckAndSave => ShortcutContext::DesignWorkspace,
+            | Self::CheckAndSave
+            | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::ClearResults
@@ -610,6 +613,7 @@ impl Command {
             Self::ArraySelection => NONE,
             Self::ReplaceInstance => NONE,
             Self::CreateHierarchy => NONE,
+            Self::ConfigurationSets => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -683,6 +687,7 @@ impl Command {
             | Self::ArraySelection
             | Self::ReplaceInstance
             | Self::CreateHierarchy
+            | Self::ConfigurationSets
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",

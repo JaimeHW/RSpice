@@ -682,6 +682,27 @@ impl ProjectFile {
             )));
         }
 
+        for (index, configuration) in self
+            .workspace
+            .configuration_sets
+            .configurations()
+            .iter()
+            .enumerate()
+        {
+            let view_type = self.validate_library_reference(
+                &format!("workspace.configuration_sets.configurations[{index}].root"),
+                configuration.root(),
+            )?;
+            if !matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace.configuration_sets.configurations[{index}].root references {} view '{}'; a simulation root must be a schematic or testbench",
+                    view_type.display_name(),
+                    configuration.root().key()
+                )));
+            }
+            required_schematic_buffers.insert(configuration.root().key());
+        }
+
         let active_view_type =
             self.validate_library_reference("workspace.active_view", &self.workspace.active_view)?;
         if !self
@@ -3814,6 +3835,41 @@ mod tests {
         assert!(json.contains("\"workspace\""));
         assert!(json.contains("\"libraries\""));
         assert!(json.ends_with('\n'));
+    }
+
+    #[test]
+    fn project_file_round_trips_configuration_execution_authority() {
+        let mut libraries = LibraryManager::with_primitives();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Browser-qualified release".to_owned(),
+                root: workspace.active_view.clone(),
+                dut_path: "/top/XDUT".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
+                stop_views: vec!["spice".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: vec![crate::state::ConfigurationSetOverride {
+                    instance_path: "/top/XDUT/*".to_owned(),
+                    executable_views: vec!["spice".to_owned()],
+                    stop_view: Some("spice".to_owned()),
+                    model_section: Some("tt".to_owned()),
+                    eligible_platforms: vec![crate::state::ConfigurationPlatform::Browser],
+                }],
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Verification".to_owned(),
+            })
+            .expect("configuration fixture");
+        let expected = workspace.configuration_sets.clone();
+        let project = ProjectFile::new(workspace, libraries);
+
+        let json = serialize_project_file(&project).expect("configuration project serializes");
+        let loaded = load_project_text(&json, None).expect("configuration project loads");
+
+        assert_eq!(loaded.workspace.configuration_sets, expected);
     }
 
     #[test]

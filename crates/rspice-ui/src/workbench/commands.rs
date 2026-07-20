@@ -91,6 +91,7 @@ pub enum Command {
     ArraySelection,
     ReplaceInstance,
     CreateHierarchy,
+    ConfigurationSets,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -285,6 +286,9 @@ impl Command {
                 "Create hierarchy from selection\u{2026}",
                 "Design",
             ),
+            Self::ConfigurationSets => {
+                spec("configuration-sets", "Configuration sets\u{2026}", "Design")
+            }
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -652,6 +656,7 @@ impl Command {
                 active_schematic_editor(app)
                     && crate::common::app::create_hierarchy_available(state)
             }
+            Self::ConfigurationSets => state.project_lifecycle.project_open,
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     let selection = state.ui.symbol.effective_selection();
@@ -1115,6 +1120,9 @@ impl Command {
             }
             Self::CreateHierarchy => {
                 crate::common::app::open_create_hierarchy_dialog(&mut app.state);
+            }
+            Self::ConfigurationSets => {
+                crate::common::app::open_configuration_sets_dialog(&mut app.state);
             }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
@@ -1696,6 +1704,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ArraySelection,
     Command::ReplaceInstance,
     Command::CreateHierarchy,
+    Command::ConfigurationSets,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -2845,6 +2854,31 @@ mod tests {
             "test session".to_owned(),
         );
         assert!(!Command::CheckAndSave.is_enabled(&app));
+    }
+
+    #[test]
+    fn configuration_sets_has_mockup_identity_and_opens_the_owned_workflow() {
+        assert_eq!(Command::ConfigurationSets.stable_id(), "configuration-sets");
+        assert_eq!(
+            Command::ConfigurationSets.spec().label,
+            "Configuration sets\u{2026}"
+        );
+        assert_eq!(Command::ConfigurationSets.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("configuration-sets"),
+            Some(Command::ConfigurationSets)
+        );
+        assert!(Command::ConfigurationSets.shortcut_bindings().is_empty());
+
+        let mut app = RSpiceApp::test_instance();
+        assert!(Command::ConfigurationSets.is_enabled(&app));
+        Command::ConfigurationSets.execute(&mut app);
+        assert!(app.state.dialogs.configuration_sets.open);
+        assert!(app.state.dialogs.application_modal_open());
+
+        app.state.dialogs.configuration_sets.open = false;
+        app.state.project_lifecycle.project_open = false;
+        assert!(!Command::ConfigurationSets.is_enabled(&app));
     }
 
     #[test]

@@ -208,24 +208,41 @@ impl SimulationController {
         &self,
         state: &AppState,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
-        if state.schematic.components.is_empty() {
-            return Err(PreparationError::new(
-                PreparationStage::DesignChecks,
-                "Add a component before preparing a schematic simulation",
-            ));
-        }
-        let drc = state.dialogs.drc_results.as_ref().ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::DesignChecks,
-                "Run schematic source checks before simulation",
+        let execution_projection = state
+            .workspace
+            .configuration_execution_projection(
+                &state.library_manager,
+                &state.workspace.active_view,
+                &state.schematic,
             )
-        })?;
-        if state.dialogs.drc_checked_version != state.schematic.topology_version() {
+            .map_err(|error| {
+                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+            })?;
+        let root_reference = execution_projection.root().clone();
+        let root_schematic = execution_projection
+            .root_schematic()
+            .expect("a successful execution projection has a materialized root");
+        if root_schematic.components.is_empty() {
             return Err(PreparationError::new(
                 PreparationStage::DesignChecks,
-                "Schematic source-check receipt is stale for the current topology",
+                format!(
+                    "Add a component to configured simulation root '{}' before preparing a run",
+                    root_reference.display_path()
+                ),
             ));
         }
+        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+            &state.library_manager,
+            &execution_projection,
+        );
+        let drc = crate::services::drc::run_drc_check_with_hierarchy_and_config(
+            root_schematic,
+            &hierarchy,
+            crate::services::drc::DrcConfig {
+                check_missing_ground: true,
+                ..crate::services::drc::DrcConfig::default()
+            },
+        );
         if !drc.completed {
             return Err(PreparationError::new(
                 PreparationStage::DesignChecks,
@@ -283,10 +300,6 @@ impl SimulationController {
             .iter()
             .map(|task| task.queued_analysis().analysis_line.clone())
             .collect::<Vec<_>>();
-        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
-            &state.library_manager,
-            &state.workspace.schematic_buffers,
-        );
         let analysis_instances = plan
             .instances()
             .iter()
@@ -294,12 +307,12 @@ impl SimulationController {
             .collect::<Vec<_>>();
         let generated =
             crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
-                &state.schematic,
+                root_schematic,
                 &analysis_lines,
                 &hierarchy,
                 &plan_payload.design_variables,
                 crate::simulation::netlist_gen::DesignVariableNetlistContext {
-                    active_cell: &state.workspace.active_view,
+                    active_cell: &root_reference,
                     analysis_instances: &analysis_instances,
                 },
             );
@@ -313,10 +326,15 @@ impl SimulationController {
         let model_cards = sealed_models
             .reference_process_model_cards(state.sim_setup.reference_pvt.process)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let generated_source = state
+            .workspace
+            .bind_generated_netlist_provenance(generated.netlist);
         let mut netlist =
-            Self::apply_reference_model_bindings_to_netlist(&generated.netlist, &model_cards);
+            Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
         netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
-        reject_deferred_external_sources(&netlist)?;
+        let (expanded_netlist, sealed_source_dependencies) =
+            expand_generated_dependencies(&netlist, root_schematic.current_file.as_deref())?;
+        netlist = expanded_netlist;
         let project_veriloga_runtime = prepared_project_veriloga_runtime(state)?;
         if let Some(runtime) = &project_veriloga_runtime {
             crate::workbench::code_workspace::append_project_veriloga_directive(
@@ -325,12 +343,16 @@ impl SimulationController {
                 runtime.module_name(),
             );
         }
+        reject_deferred_external_sources_with_project_runtime(
+            &netlist,
+            project_veriloga_runtime.as_ref(),
+        )?;
 
         let source_digest =
             content_digest("rspice.generated-executable-source/v1", netlist.as_bytes());
         let receipt = RunSourceReceipt::SchematicDrc(drc_receipt_digest(
-            state.schematic.topology_version(),
-            drc,
+            root_schematic.topology_version(),
+            &drc,
         ));
         let mut model_identities = model_cards
             .iter()
@@ -356,14 +378,14 @@ impl SimulationController {
         let touchstone_export = touchstone_export_policy(
             state,
             tasks.iter().map(PreparedTask::queued_analysis),
-            state.schematic.current_file.as_deref(),
+            root_schematic.current_file.as_deref(),
         )?;
 
         PreparedRunSnapshot::new(SnapshotParts {
             intent: SimulationRunIntent::SimulateRunSet,
             simulation_plan_id: Some(plan.plan_id()),
             project_revision: state.workspace.project.revision().get(),
-            topology_revision: state.schematic.topology_version(),
+            topology_revision: root_schematic.topology_version(),
             source_digest,
             reference_process: state.sim_setup.reference_pvt.process,
             reference_temperature_celsius: state.sim_setup.reference_pvt.temperature_celsius,
@@ -377,13 +399,14 @@ impl SimulationController {
             advisories,
             manual_source: None,
             cross_probe: Some(CrossProbeSnapshot::new(
+                root_reference,
                 generated.point_to_net,
                 generated.nets,
                 generated.net_segments,
-                state.schematic.topology_version(),
+                root_schematic.topology_version(),
             )),
             touchstone_export,
-            sealed_source_dependencies: Vec::new(),
+            sealed_source_dependencies,
         })
     }
 
@@ -752,6 +775,40 @@ fn expand_manual_dependencies(
     ))
 }
 
+pub(crate) fn expand_generated_dependencies(
+    source: &str,
+    origin: Option<&Path>,
+) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), PreparationError> {
+    if !contains_external_include_directive(source) {
+        return Ok((source.to_owned(), Vec::new()));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = origin;
+        return Err(PreparationError::new(
+            PreparationStage::SourceChecks,
+            "Configured filesystem-backed SPICE sources are unavailable in this browser session",
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let owner = match origin {
+            Some(path) => absolute_source_identity(path)?,
+            None => execution_current_directory()?.join("__rspice_generated_source__.cir"),
+        };
+        let mut processor = IncludeProcessor::new(&owner);
+        let expanded = processor.expand_content(source, &owner).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!("Could not seal configured source dependencies: {error}"),
+            )
+        })?;
+        Ok((expanded, processor.resolved_dependencies().to_vec()))
+    }
+}
+
 fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
     if path.is_absolute() {
         return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
@@ -850,6 +907,7 @@ fn contains_external_include_directive(source: &str) -> bool {
         .any(|line| parse_include_directive(line).is_some() || parse_lib_directive(line).is_some())
 }
 
+#[cfg(test)]
 fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationError> {
     reject_deferred_external_sources_with_project_runtime(netlist, None)
 }
@@ -1352,6 +1410,38 @@ mod tests {
             .expect_err("unbound include must fail");
         assert_eq!(error.stage(), PreparationStage::SourceChecks);
         assert!(error.message().contains("origin"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn generated_model_section_is_expanded_and_retained_before_dispatch() {
+        let directory = fixture_dir("configured-model-section");
+        let model = directory.join("device.lib");
+        fs::write(
+            &model,
+            ".lib tt\n.subckt owned in out\nRsrc in out 9k\n.ends owned\n.endl tt\n.lib ff\n.subckt owned in out\nRsrc in out 4k\n.ends owned\n.endl ff\n",
+        )
+        .expect("write model-section fixture");
+        let source = format!(
+            "configured deck\n.lib \"{}\" tt\nX1 in out owned\n.end\n",
+            model.display()
+        );
+
+        let (expanded, dependencies) =
+            expand_generated_dependencies(&source, Some(&directory.join("generated.cir")))
+                .expect("configured dependency seals");
+
+        assert!(expanded.contains("Rsrc in out 9k"));
+        assert!(!expanded.contains("Rsrc in out 4k"));
+        reject_deferred_external_sources(&expanded).expect("expanded deck has no deferred source");
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies[0].selected_section(), Some("tt"));
+        assert_eq!(
+            dependencies[0].source(),
+            fs::read_to_string(&model).unwrap()
+        );
+
+        fs::remove_dir_all(directory).expect("remove model-section fixture");
     }
 
     #[test]

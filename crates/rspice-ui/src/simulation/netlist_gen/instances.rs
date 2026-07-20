@@ -221,12 +221,19 @@ impl<'a> NetlistGenerator<'a> {
             // Emits a standard X-instance referring to the bound master name
             // (Verilog-A module or subcircuit/cell fallback).
             ComponentType::CellInstance => {
-                let Some(binding) = component.library_cell.as_ref() else {
-                    self.errors.push(format!(
-                        "Cell instance '{}' is missing library binding metadata",
-                        component.name
-                    ));
-                    return None;
+                let binding = match self.effective_library_binding(component) {
+                    Ok(Some(binding)) => binding.clone(),
+                    Ok(None) => {
+                        self.errors.push(format!(
+                            "Cell instance '{}' is missing library binding metadata",
+                            component.name
+                        ));
+                        return None;
+                    }
+                    Err(error) => {
+                        self.errors.push(error);
+                        return None;
+                    }
                 };
 
                 // Project cells (no source file) resolve their interface
@@ -234,7 +241,7 @@ impl<'a> NetlistGenerator<'a> {
                 // IS the node order, and its .SUBCKT is emitted alongside.
                 let master_ports: Option<Vec<String>> = if binding.source_path.is_none() {
                     self.hierarchy
-                        .and_then(|h| h.master(&binding.library, &binding.cell))
+                        .and_then(|h| h.schematic_master_for_binding(&binding))
                         .map(|master| {
                             master
                                 .interface_ports()
