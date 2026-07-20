@@ -181,27 +181,6 @@ pub(super) fn design_note_at(
     })
 }
 
-pub(super) fn hovered_design_note(
-    painter: &Painter,
-    viewport: &Viewport,
-    state: &AppState,
-    canvas: Rect,
-) -> Option<u64> {
-    painter
-        .ctx()
-        .pointer_hover_pos()
-        .filter(|pointer| canvas.contains(*pointer))
-        .and_then(|pointer| {
-            design_note_at(
-                painter.ctx(),
-                viewport,
-                &state.schematic.design_notes,
-                state,
-                pointer,
-            )
-        })
-}
-
 /// Intrinsic world bounds for culling, zoom-to-fit, and marquee selection.
 pub(super) fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Point) {
     let lines: Vec<&str> = rendered_text.split('\n').collect();

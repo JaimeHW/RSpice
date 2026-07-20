@@ -14,6 +14,7 @@ use crate::state::Point;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::active_palette;
 
+use super::sheet_visibility::object_is_on_active_sheet;
 use super::viewport::Viewport;
 
 /// Jump the view to the next (`step` = 1) or previous (−1) finding,
@@ -167,40 +168,38 @@ fn anchor(state: &AppState, violation: &DrcViolation) -> Option<Point> {
             .schematic
             .components
             .iter()
-            .find(|c| c.id == *id)
+            .find(|component| component.id == *id && object_is_on_active_sheet(state, component.id))
             .map(|c| c.pos),
-        DrcLocation::Wire { id } => {
-            state
-                .schematic
-                .wires
-                .iter()
-                .find(|w| w.id == *id)
-                .and_then(|w| {
-                    let first = w.points.first()?;
-                    let second = w.points.get(1).unwrap_or(first);
-                    Some(Point::new(
-                        ((i64::from(first.x) + i64::from(second.x)) / 2) as i32,
-                        ((i64::from(first.y) + i64::from(second.y)) / 2) as i32,
-                    ))
-                })
-        }
+        DrcLocation::Wire { id } => state
+            .schematic
+            .wires
+            .iter()
+            .find(|wire| wire.id == *id && object_is_on_active_sheet(state, wire.id))
+            .and_then(|w| {
+                let first = w.points.first()?;
+                let second = w.points.get(1).unwrap_or(first);
+                Some(Point::new(
+                    ((i64::from(first.x) + i64::from(second.x)) / 2) as i32,
+                    ((i64::from(first.y) + i64::from(second.y)) / 2) as i32,
+                ))
+            }),
         DrcLocation::Bus { id } => state
             .schematic
             .buses
             .iter()
-            .find(|bus| bus.id == *id)
+            .find(|bus| bus.id == *id && object_is_on_active_sheet(state, bus.id))
             .and_then(|bus| bus.points.first().copied()),
         DrcLocation::BusTap { id } => state
             .schematic
             .bus_taps
             .iter()
-            .find(|tap| tap.id == *id)
+            .find(|tap| tap.id == *id && object_is_on_active_sheet(state, tap.id))
             .map(|tap| tap.connection_point),
         DrcLocation::NetLabel { name } => state
             .schematic
             .net_labels
             .iter()
-            .find(|l| l.name == *name)
+            .find(|label| label.name == *name && object_is_on_active_sheet(state, label.id))
             .map(|l| l.pos),
         DrcLocation::Node { .. } | DrcLocation::Global | DrcLocation::SymbolPin { .. } => None,
     }
@@ -309,4 +308,84 @@ fn truncate(text: &str, max: usize) -> String {
     let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::drc::DrcViolationType;
+    use crate::state::{
+        Component, ComponentType, SheetDefinition, SheetPortPolicy, SheetTemplate, Wire,
+    };
+
+    fn state_with_hidden_object(hidden_id: u64) -> AppState {
+        let mut state = AppState::default();
+        let key = state.workspace.active_schematic_reference().key();
+        let first = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Sheet 1", [hidden_id])
+            .unwrap();
+        let catalog = state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Sheet 2".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .unwrap();
+        catalog
+            .assign_objects(catalog.revision(), second, [hidden_id])
+            .unwrap();
+        catalog.set_active(first).unwrap();
+        state
+    }
+
+    #[test]
+    fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
+        let mut state = state_with_hidden_object(20);
+        state.schematic.components.push(Component::new(
+            20,
+            ComponentType::Resistor,
+            Point::new(10, 10),
+        ));
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(20, Point::origin(), Point::new(20, 0)));
+
+        let component = DrcViolation::new(
+            1,
+            DrcViolationType::UnconnectedPin,
+            "hidden component",
+            DrcLocation::Component {
+                id: 20,
+                name: "R1".to_owned(),
+            },
+        );
+        let wire = DrcViolation::new(
+            2,
+            DrcViolationType::DanglingWire,
+            "hidden wire",
+            DrcLocation::Wire { id: 20 },
+        );
+        let point = DrcViolation::new(
+            3,
+            DrcViolationType::MissingGround,
+            "unowned point",
+            DrcLocation::Point { x: 4.0, y: 8.0 },
+        );
+
+        assert_eq!(anchor(&state, &component), None);
+        assert_eq!(anchor(&state, &wire), None);
+        assert_eq!(anchor(&state, &point), Some(Point::new(4, 8)));
+    }
 }

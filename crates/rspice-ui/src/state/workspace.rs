@@ -423,6 +423,8 @@ pub enum ConfigurationExecutionPlanError {
     Unresolved(String),
     #[error("configuration root {0} has no materialized schematic buffer")]
     MissingRoot(String),
+    #[error("design-management projection is invalid: {0}")]
+    DesignManagement(String),
 }
 
 /// Exact project-owned attachment to a locally parsed and content-pinned model
@@ -879,6 +881,21 @@ impl ProjectDescriptor {
     #[must_use]
     pub const fn revision(&self) -> ObjectRevision {
         self.revision
+    }
+
+    /// Preflight the next logical project revision without mutating state.
+    /// Multi-owner transactions use this before changing library or document
+    /// state so exhausted revision authority fails before any partial commit.
+    pub fn next_revision(&self) -> Result<ObjectRevision, ProjectDescriptorError> {
+        self.revision.next().map_err(ProjectDescriptorError::from)
+    }
+
+    /// Advance only the logical project revision after every other part of a
+    /// preflighted project transaction is ready to publish.
+    pub fn advance_revision(&mut self) -> Result<ObjectRevision, ProjectDescriptorError> {
+        let revision = self.next_revision()?;
+        self.revision = revision;
+        Ok(revision)
     }
 
     #[must_use]
@@ -2001,6 +2018,8 @@ fn validate_bounded_text(
 pub enum SimulationConfigurationError {
     #[error("project configuration-set catalog is invalid: {message}")]
     InvalidConfigurationSetCatalog { message: String },
+    #[error("project design-management catalog is invalid: {message}")]
+    InvalidDesignManagementCatalog { message: String },
     #[error("project-owned netlist document is invalid: {message}")]
     InvalidNetlistDocumentProjection { message: String },
     #[error("project-owned Code source registry is invalid: {message}")]
@@ -2126,6 +2145,8 @@ pub enum SimulationConfigurationError {
 pub enum ProjectConfigurationMutationError {
     #[error("configuration-set catalog is invalid: {0}")]
     InvalidCatalog(#[from] crate::state::ConfigurationSetError),
+    #[error("design-management catalog is invalid: {message}")]
+    InvalidDesignManagementCatalog { message: String },
     #[error("configuration '{configuration}' root {root} is not a schematic or testbench view")]
     UnsupportedRootView { configuration: String, root: String },
     #[error("configuration '{configuration}' root {root} has no authoritative schematic buffer")]
@@ -2364,6 +2385,12 @@ pub struct ProjectWorkspace {
     /// configuration is the exact authority used by preflight and netlisting.
     #[serde(default)]
     pub configuration_sets: crate::state::ConfigurationSetCatalog,
+    /// Project-owned schematic sheet, assembly variant, annotation, and
+    /// hierarchy-audit authority. The catalog is deliberately separate from
+    /// simulation configuration sets: it describes design identity, while a
+    /// configuration set describes how that identity is executed.
+    #[serde(default)]
+    pub design_management: crate::state::DesignManagementCatalog,
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
     pub hierarchy_stack: Vec<CellViewRef>,
@@ -2449,6 +2476,7 @@ impl Default for ProjectWorkspace {
         Self {
             project: ProjectDescriptor::default(),
             configuration_sets: crate::state::ConfigurationSetCatalog::default(),
+            design_management: crate::state::DesignManagementCatalog::default(),
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],
@@ -2479,6 +2507,11 @@ impl ProjectWorkspace {
     pub fn validate_simulation_configuration(&self) -> Result<(), SimulationConfigurationError> {
         self.configuration_sets.validate().map_err(|error| {
             SimulationConfigurationError::InvalidConfigurationSetCatalog {
+                message: error.to_string(),
+            }
+        })?;
+        self.design_management.validate().map_err(|error| {
+            SimulationConfigurationError::InvalidDesignManagementCatalog {
                 message: error.to_string(),
             }
         })?;
@@ -3966,6 +3999,122 @@ fn is_project_virtual_source_path(path: &Path) -> bool {
         .is_some_and(|value| value.starts_with("__rspice_project__/"))
 }
 
+fn translated_point(
+    point: crate::state::Point,
+    delta: crate::state::Point,
+) -> Result<crate::state::Point, crate::state::DesignManagementError> {
+    Ok(crate::state::Point::new(
+        point
+            .x
+            .checked_add(delta.x)
+            .ok_or(crate::state::DesignManagementError::NumericRange(
+                "materialized sheet x coordinate",
+            ))?,
+        point
+            .y
+            .checked_add(delta.y)
+            .ok_or(crate::state::DesignManagementError::NumericRange(
+                "materialized sheet y coordinate",
+            ))?,
+    ))
+}
+
+/// Resolve one typed cross-sheet endpoint against the authored topology and
+/// then project it into the endpoint sheet's execution namespace. A wire
+/// point must still lie on its retained conductor; a component terminal must
+/// still own a canonical wire connection. Stale contracts fail before DRC or
+/// netlisting rather than silently connecting a label to a component origin.
+fn projected_cross_sheet_anchor(
+    source: &SchematicState,
+    projected: &SchematicState,
+    endpoint: &crate::state::CrossSheetPortEndpoint,
+    delta: crate::state::Point,
+) -> Result<crate::state::Point, crate::state::DesignManagementError> {
+    let authored_point = match &endpoint.anchor {
+        crate::state::CrossSheetPortAnchor::WirePoint { wire_id, point } => {
+            let wire = source
+                .wires
+                .iter()
+                .find(|wire| wire.id == *wire_id)
+                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
+                    domain: "cross-sheet wire anchor",
+                    identity: wire_id.to_string(),
+                })?;
+            if !wire.contains_point(*point) {
+                return Err(crate::state::DesignManagementError::MissingReference {
+                    domain: "cross-sheet wire anchor point",
+                    identity: format!("{}@{},{}", wire_id, point.x, point.y),
+                });
+            }
+            *point
+        }
+        crate::state::CrossSheetPortAnchor::ComponentTerminal {
+            component_id,
+            terminal_name,
+        } => {
+            if !source
+                .components
+                .iter()
+                .any(|component| component.id == *component_id)
+            {
+                return Err(crate::state::DesignManagementError::MissingReference {
+                    domain: "cross-sheet component anchor",
+                    identity: component_id.to_string(),
+                });
+            }
+            let connection = source
+                .connections
+                .iter()
+                .find(|connection| {
+                    connection.component_id == *component_id
+                        && connection.terminal_name.eq_ignore_ascii_case(terminal_name)
+                })
+                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
+                    domain: "cross-sheet component terminal connection",
+                    identity: format!("{}:{}", component_id, terminal_name),
+                })?;
+            source
+                .wires
+                .iter()
+                .find(|wire| wire.id == connection.wire_id)
+                .and_then(|wire| wire.points.get(connection.point_index))
+                .copied()
+                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
+                    domain: "cross-sheet component terminal wire point",
+                    identity: format!("{}:{}", connection.wire_id, connection.point_index),
+                })?
+        }
+    };
+    let anchor = translated_point(authored_point, delta)?;
+    match &endpoint.anchor {
+        crate::state::CrossSheetPortAnchor::WirePoint { wire_id, .. } => {
+            if !projected
+                .wires
+                .iter()
+                .any(|wire| wire.id == *wire_id && wire.contains_point(anchor))
+            {
+                return Err(crate::state::DesignManagementError::MissingReference {
+                    domain: "projected cross-sheet wire anchor",
+                    identity: wire_id.to_string(),
+                });
+            }
+        }
+        crate::state::CrossSheetPortAnchor::ComponentTerminal { component_id, .. } => {
+            if !projected
+                .components
+                .iter()
+                .any(|component| component.id == *component_id)
+            {
+                return Err(crate::state::DesignManagementError::MissingReference {
+                    domain: "projected cross-sheet component anchor",
+                    identity: component_id.to_string(),
+                });
+            }
+        }
+    }
+    Ok(anchor)
+}
+
 fn materialize_schematic_binding(
     placed: &LibraryCellInstance,
     reference: &CellViewRef,
@@ -4466,17 +4615,21 @@ impl ProjectWorkspace {
     /// into source, snapshot, and retained-run digests without relying on
     /// mutable UI state or a side-channel receipt.
     pub fn bind_generated_netlist_provenance(&self, mut source: String) -> String {
-        let Some(configuration) = self.configuration_sets.active() else {
-            return source;
-        };
-        let comment = format!(
-            "* RSpice configuration-set {} revision {} digest {}\n",
-            configuration.id(),
-            configuration.revision(),
-            configuration.semantic_digest()
-        );
         let insertion = source.find('\n').map_or(0, |index| index + 1);
-        source.insert_str(insertion, &comment);
+        let mut provenance = self
+            .design_management
+            .semantic_digest()
+            .map(|digest| format!("* RSpice design-management digest {digest}\n"))
+            .unwrap_or_else(|error| format!("* RSpice design-management INVALID ({error})\n"));
+        if let Some(configuration) = self.configuration_sets.active() {
+            provenance.push_str(&format!(
+                "* RSpice configuration-set {} revision {} digest {}\n",
+                configuration.id(),
+                configuration.revision(),
+                configuration.semantic_digest()
+            ));
+        }
+        source.insert_str(insertion, &provenance);
         source
     }
 
@@ -4519,6 +4672,93 @@ impl ProjectWorkspace {
         self.project.revision = next_revision;
         self.project_metadata_dirty = true;
         Ok(next_revision)
+    }
+
+    /// Publish a complete design-management candidate and its owning project
+    /// revision atomically. Validation happens before any live state changes;
+    /// failed candidates therefore cannot partially alter sheet, variant,
+    /// annotation, or hierarchy-audit authority.
+    pub fn replace_design_management(
+        &mut self,
+        candidate: crate::state::DesignManagementCatalog,
+    ) -> Result<ObjectRevision, ProjectConfigurationMutationError> {
+        candidate.validate().map_err(|source| {
+            ProjectConfigurationMutationError::InvalidDesignManagementCatalog {
+                message: source.to_string(),
+            }
+        })?;
+        let mut published = self.design_management.clone();
+        published
+            .publish_reviewed_candidate(self.design_management.revision(), candidate)
+            .map_err(|source| {
+                ProjectConfigurationMutationError::InvalidDesignManagementCatalog {
+                    message: source.to_string(),
+                }
+            })?;
+        let next_revision = self.project.revision.next()?;
+        self.design_management = published;
+        self.project.revision = next_revision;
+        self.project_metadata_dirty = true;
+        Ok(next_revision)
+    }
+
+    /// Bind newly authored schematic objects to the currently active sheet.
+    /// Legacy projects with no sheet catalog remain untouched; once the
+    /// user enters multi-sheet authoring, every later object receives durable
+    /// membership at the same save/sync boundary as its schematic edit.
+    pub fn assign_unowned_objects_to_active_sheet(
+        &mut self,
+        reference: &CellViewRef,
+        schematic: &SchematicState,
+    ) -> Result<bool, ProjectConfigurationMutationError> {
+        let key = reference.key();
+        let Some(catalog) = self.design_management.sheet_catalog(&key) else {
+            return Ok(false);
+        };
+        let Some(active_sheet_id) = catalog.active_sheet_id() else {
+            return Ok(false);
+        };
+        let live_object_ids = schematic
+            .components
+            .iter()
+            .map(|object| object.id)
+            .chain(schematic.wires.iter().map(|object| object.id))
+            .chain(schematic.buses.iter().map(|object| object.id))
+            .chain(schematic.bus_taps.iter().map(|object| object.id))
+            .chain(schematic.junctions.iter().map(|object| object.id))
+            .chain(schematic.net_labels.iter().map(|object| object.id))
+            .chain(schematic.design_notes.iter().map(|object| object.id))
+            .chain(
+                schematic
+                    .documentation_shapes
+                    .iter()
+                    .map(|object| object.id),
+            )
+            .collect::<Vec<_>>();
+
+        let mut candidate = self.design_management.clone();
+        let catalog = candidate
+            .sheet_catalog_mut(&key)
+            .expect("the cloned catalog retains the validated cell/view key");
+        let receipt = catalog
+            .reconcile_object_assignments(
+                catalog.revision(),
+                live_object_ids,
+                Some(active_sheet_id),
+            )
+            .map_err(|source| {
+                ProjectConfigurationMutationError::InvalidDesignManagementCatalog {
+                    message: source.to_string(),
+                }
+            })?;
+        if receipt.added_assignments == 0
+            && receipt.removed_assignments == 0
+            && receipt.removed_cross_sheet_ports == 0
+        {
+            return Ok(false);
+        }
+        self.replace_design_management(candidate)?;
+        Ok(true)
     }
 
     /// Create a new default project and ensure its editable top cell exists in
@@ -4588,6 +4828,167 @@ impl ProjectWorkspace {
             .resolve()
     }
 
+    /// Materialize the exact multi-sheet, active-variant, and annotation
+    /// projection consumed by DRC and netlisting. Authored canvas coordinates
+    /// stay local to each sheet; the execution clone namespaces them by sheet
+    /// order so coincident coordinates on different pages cannot create an
+    /// accidental electrical connection. Explicit cross-sheet port contracts
+    /// are then materialized as identically named labels at both endpoints.
+    fn materialize_design_management_schematic(
+        &self,
+        cell_view_key: &str,
+        source: &SchematicState,
+    ) -> Result<SchematicState, crate::state::DesignManagementError> {
+        self.design_management.validate()?;
+        let mut projected = source.clone();
+
+        if let Some(catalog) = self.design_management.sheet_catalog(cell_view_key) {
+            let offsets = catalog
+                .sheets()
+                .iter()
+                .enumerate()
+                .map(|(index, sheet)| {
+                    let ordinal = i32::try_from(index).unwrap_or(i32::MAX);
+                    (
+                        sheet.id(),
+                        crate::state::Point::new(ordinal.saturating_mul(1_000_000), 0),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+            let offset_for = |object_id: u64| {
+                self.design_management
+                    .sheet_for_object_or_active(cell_view_key, object_id)
+                    .and_then(|sheet_id| offsets.get(&sheet_id).copied())
+                    .unwrap_or_else(crate::state::Point::origin)
+            };
+
+            for component in &mut projected.components {
+                component.pos = translated_point(component.pos, offset_for(component.id))?;
+            }
+            for wire in &mut projected.wires {
+                let delta = offset_for(wire.id);
+                for point in &mut wire.points {
+                    *point = translated_point(*point, delta)?;
+                }
+            }
+            for bus in &mut projected.buses {
+                let delta = offset_for(bus.id);
+                for point in &mut bus.points {
+                    *point = translated_point(*point, delta)?;
+                }
+            }
+            for tap in &mut projected.bus_taps {
+                let delta = offset_for(tap.id);
+                tap.bus_point = translated_point(tap.bus_point, delta)?;
+                tap.connection_point = translated_point(tap.connection_point, delta)?;
+            }
+            for junction in &mut projected.junctions {
+                junction.pos = translated_point(junction.pos, offset_for(junction.id))?;
+            }
+            for label in &mut projected.net_labels {
+                label.pos = translated_point(label.pos, offset_for(label.id))?;
+            }
+            for note in &mut projected.design_notes {
+                note.pos = translated_point(note.pos, offset_for(note.id))?;
+            }
+            for shape in &mut projected.documentation_shapes {
+                let delta = offset_for(shape.id);
+                let (minimum, maximum) = shape.bounds();
+                let _ = translated_point(minimum, delta)?;
+                let _ = translated_point(maximum, delta)?;
+                shape.translate(delta);
+            }
+
+            for contract in catalog.cross_sheet_ports() {
+                for endpoint in [&contract.definition().first, &contract.definition().second] {
+                    if catalog.sheet_for_object(endpoint.object_id()) != Some(endpoint.sheet_id) {
+                        return Err(crate::state::DesignManagementError::MissingReference {
+                            domain: "cross-sheet anchor sheet assignment",
+                            identity: endpoint.object_id().to_string(),
+                        });
+                    }
+                    let delta = offsets.get(&endpoint.sheet_id).copied().ok_or_else(|| {
+                        crate::state::DesignManagementError::MissingReference {
+                            domain: "cross-sheet port sheet",
+                            identity: endpoint.sheet_id.to_string(),
+                        }
+                    })?;
+                    let anchor = projected_cross_sheet_anchor(source, &projected, endpoint, delta)?;
+                    let next_id = projected.next_id();
+                    projected.net_labels.push(crate::state::NetLabel::new(
+                        next_id,
+                        anchor,
+                        contract.definition().net_name.clone(),
+                    ));
+                }
+            }
+        }
+
+        if let Some(active_variant) = self.design_management.variants().active() {
+            let resolved = self
+                .design_management
+                .variants()
+                .resolve(active_variant.id())?;
+            let mut do_not_populate = HashSet::new();
+            for component in &mut projected.components {
+                let Some(override_value) = resolved.override_for(cell_view_key, component.id)?
+                else {
+                    continue;
+                };
+                match override_value {
+                    crate::state::VariantObjectOverride::DoNotPopulate { .. } => {
+                        do_not_populate.insert(component.id);
+                    }
+                    crate::state::VariantObjectOverride::Substitute { replacement } => {
+                        let prior = component.library_cell.take();
+                        let mut binding = crate::state::LibraryCellInstance::new(
+                            replacement.library.clone(),
+                            replacement.cell.clone(),
+                            replacement.view.clone(),
+                        );
+                        if let Some(prior) = prior {
+                            binding.terminal_order = prior.terminal_order;
+                            binding.terminal_dirs = prior.terminal_dirs;
+                            binding.interface_bound = prior.interface_bound;
+                        }
+                        component.kind = crate::state::ComponentType::CellInstance;
+                        component.library_cell = Some(binding);
+                        if let Some(value) = &replacement.value_override {
+                            component.value.clone_from(value);
+                        }
+                        if let Some(section) = &replacement.model_section {
+                            let mut params =
+                                crate::properties::parse_params_string(&component.params);
+                            params.insert("model_section".to_owned(), section.clone());
+                            component.params =
+                                crate::properties::property_bridge::format_params_string(&params);
+                        }
+                    }
+                }
+            }
+            if !do_not_populate.is_empty() {
+                projected
+                    .components
+                    .retain(|component| !do_not_populate.contains(&component.id));
+                projected
+                    .connections
+                    .retain(|connection| !do_not_populate.contains(&connection.component_id));
+            }
+        }
+
+        for component in &mut projected.components {
+            if let Some(mapping) = self
+                .design_management
+                .annotation()
+                .effective_mapping_for(cell_view_key, component.id)?
+            {
+                component.name.clone_from(&mapping.new_reference);
+            }
+        }
+        projected.recalculate_runtime_state();
+        Ok(projected)
+    }
+
     /// Freeze the live editor projection and the active configuration's
     /// exact-path execution plan as one immutable value.  Legacy projects
     /// return the same projected buffers with no plan, preserving the
@@ -4637,6 +5038,13 @@ impl ProjectWorkspace {
             schematic_buffers.insert(existing_key, active_schematic.clone());
         } else {
             schematic_buffers.insert(active_reference.key(), active_schematic.clone());
+        }
+        for (key, schematic) in &mut schematic_buffers {
+            *schematic = self
+                .materialize_design_management_schematic(key, schematic)
+                .map_err(|error| {
+                    ConfigurationExecutionPlanError::DesignManagement(error.to_string())
+                })?;
         }
         let projection = ConfigurationExecutionProjection {
             root,
@@ -5913,6 +6321,239 @@ mod tests {
             workspace.project_metadata_dirty,
             before.project_metadata_dirty
         );
+    }
+
+    #[test]
+    fn design_management_projection_namespaces_sheets_and_materializes_explicit_ports() {
+        use crate::state::{
+            CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition,
+            CrossSheetPortDirection, CrossSheetPortEndpoint, CrossSheetSignalType,
+            MoveBoundaryResolution, MoveSelectionRequest, SheetDefinition, SheetPortPolicy,
+            SheetTemplate,
+        };
+
+        let mut workspace = ProjectWorkspace::default();
+        let key = CellViewRef::default_top().key();
+        let mut schematic = SchematicState::default();
+        let first = schematic
+            .add_wire(vec![Point::origin(), Point::new(10, 0)])
+            .expect("first wire");
+        let second = schematic
+            .add_wire(vec![Point::origin(), Point::new(0, 10)])
+            .expect("second wire");
+        let component = schematic.add_component(ComponentType::Resistor, Point::new(20, 0));
+        let terminal_name = schematic
+            .components
+            .iter()
+            .find(|candidate| candidate.id == component)
+            .expect("component")
+            .terminal_positions_resolved(None)
+            .into_iter()
+            .find(|(_, point)| *point == Point::origin())
+            .map(|(name, _)| name)
+            .expect("terminal at the second-wire anchor");
+        schematic
+            .connections
+            .push(crate::state::WireConnection::new(
+                second,
+                0,
+                component,
+                terminal_name.clone(),
+            ));
+        let source_sheet = workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Input", [first, second, component])
+            .expect("bootstrap sheet ownership");
+        let catalog = workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("sheet catalog");
+        let destination_sheet = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Output".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(source_sheet),
+            )
+            .expect("second sheet");
+        catalog
+            .move_selection(MoveSelectionRequest {
+                expected_catalog_revision: catalog.revision(),
+                object_ids: vec![second, component],
+                destination_sheet_id: destination_sheet,
+                boundary_resolution: MoveBoundaryResolution::ExplicitPorts {
+                    ports: vec![CrossSheetPortDefinition {
+                        net_name: "BIAS".to_owned(),
+                        first: CrossSheetPortEndpoint {
+                            sheet_id: source_sheet,
+                            anchor: CrossSheetPortAnchor::WirePoint {
+                                wire_id: first,
+                                point: Point::origin(),
+                            },
+                        },
+                        second: CrossSheetPortEndpoint {
+                            sheet_id: destination_sheet,
+                            anchor: CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: component,
+                                terminal_name,
+                            },
+                        },
+                        direction: CrossSheetPortDirection::Output,
+                        signal_type: CrossSheetSignalType::Analog,
+                        discipline: CrossSheetDiscipline::Electrical,
+                    }],
+                },
+            })
+            .expect("move with explicit boundary contract");
+
+        let projected = workspace
+            .materialize_design_management_schematic(&key, &schematic)
+            .expect("materialize governed design");
+        let first_position = projected
+            .wires
+            .iter()
+            .find(|wire| wire.id == first)
+            .and_then(|wire| wire.points.first())
+            .copied()
+            .expect("first wire");
+        let second_position = projected
+            .wires
+            .iter()
+            .find(|wire| wire.id == second)
+            .and_then(|wire| wire.points.first())
+            .copied()
+            .expect("second wire");
+        assert_ne!(first_position, second_position);
+        assert_eq!(first_position, Point::origin());
+        assert_eq!(second_position, Point::new(1_000_000, 0));
+
+        let mut port_positions = projected
+            .net_labels
+            .iter()
+            .filter(|label| label.name == "BIAS")
+            .map(|label| label.pos)
+            .collect::<Vec<_>>();
+        port_positions.sort_by_key(|point| point.x);
+        assert_eq!(port_positions, [first_position, second_position]);
+    }
+
+    #[test]
+    fn design_management_projection_applies_active_variant_and_annotation() {
+        use std::collections::BTreeMap;
+
+        use crate::state::{
+            AnnotationObject, AnnotationPosition, AssemblyVariantDraft, ComponentSubstitution,
+            ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope,
+            SchematicObjectKey, VariantInheritance, VariantObjectOverride,
+            VariantQualificationPlan, VariantQualificationState,
+        };
+
+        let mut workspace = ProjectWorkspace::default();
+        let key = CellViewRef::default_top().key();
+        let mut schematic = SchematicState::default();
+        let substituted = schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
+        let omitted = schematic.add_component(ComponentType::Capacitor, Point::new(20, 10));
+        let variant = workspace
+            .design_management
+            .variants_mut()
+            .create(AssemblyVariantDraft {
+                name: "Automotive".to_owned(),
+                parent_id: None,
+                inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: BTreeMap::from([
+                    (
+                        SchematicObjectKey::new(&key, substituted)
+                            .expect("scoped substituted identity"),
+                        VariantObjectOverride::Substitute {
+                            replacement: ComponentSubstitution {
+                                library: "qualified".to_owned(),
+                                cell: "resistor_aecq".to_owned(),
+                                view: "schematic".to_owned(),
+                                value_override: Some("2 kohm".to_owned()),
+                                model_section: Some("automotive".to_owned()),
+                                port_equivalence_digest: Some(ContentDigest::from_bytes([9; 32])),
+                                qualification: VariantQualificationState::Current,
+                            },
+                        },
+                    ),
+                    (
+                        SchematicObjectKey::new(&key, omitted).expect("scoped omitted identity"),
+                        VariantObjectOverride::DoNotPopulate {
+                            approval_reference: "ECO-104".to_owned(),
+                        },
+                    ),
+                ]),
+            })
+            .expect("create governed variant");
+        workspace
+            .design_management
+            .variants_mut()
+            .set_active(variant)
+            .expect("activate variant");
+
+        let request = RenumberRequest {
+            scope: RenumberScope::WholeProject,
+            order: RenumberOrder::HierarchyThenCoordinates,
+            protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![AnnotationObject {
+                object: SchematicObjectKey::new(&key, substituted)
+                    .expect("scoped annotation identity"),
+                current_reference: "R42".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: None,
+                hierarchy_path: "/top".to_owned(),
+                position: AnnotationPosition { x: 10, y: 10 },
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&request)
+            .expect("preview annotation");
+        workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &request)
+            .expect("commit annotation receipt");
+
+        let projected = workspace
+            .materialize_design_management_schematic(&key, &schematic)
+            .expect("materialize variant and annotation");
+        assert!(
+            projected
+                .components
+                .iter()
+                .all(|component| component.id != omitted)
+        );
+        assert!(
+            projected
+                .connections
+                .iter()
+                .all(|connection| connection.component_id != omitted)
+        );
+        let component = projected
+            .components
+            .iter()
+            .find(|component| component.id == substituted)
+            .expect("substituted component");
+        let binding = component
+            .library_cell
+            .as_ref()
+            .expect("qualified cell binding");
+        assert_eq!(binding.library, "qualified");
+        assert_eq!(binding.cell, "resistor_aecq");
+        assert_eq!(component.value, "2 kohm");
+        assert!(component.params.contains("model_section=automotive"));
+        assert_eq!(component.name, "R1");
     }
 
     #[test]

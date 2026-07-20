@@ -6,10 +6,21 @@ impl RSpiceApp {
             if block_configuration_root_deletion(&mut self.state, &lib_name, &cell_name, None) {
                 return;
             }
+            let ownership_removal =
+                match prepare_design_management_removal(&self.state, &lib_name, &cell_name, None) {
+                    Ok(removal) => removal,
+                    Err(error) => {
+                        self.state.push_user_message(ConsoleMessage::error(error));
+                        return;
+                    }
+                };
             let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
+                    if apply_design_management_removal(&mut self.state, ownership_removal) {
+                        self.simulation_controller.clear_prepared_run();
+                    }
                     remove_project_sources_for_deleted_scope(
                         &mut self.state,
                         &lib_name,
@@ -38,12 +49,27 @@ impl RSpiceApp {
             ) {
                 return;
             }
+            let ownership_removal = match prepare_design_management_removal(
+                &self.state,
+                &lib_name,
+                &cell_name,
+                Some(&view_name),
+            ) {
+                Ok(removal) => removal,
+                Err(error) => {
+                    self.state.push_user_message(ConsoleMessage::error(error));
+                    return;
+                }
+            };
             let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name)
                 && let Some(cell) = lib.get_cell_mut(&cell_name)
             {
                 deleted = cell.remove_view(&view_name);
                 if deleted {
+                    if apply_design_management_removal(&mut self.state, ownership_removal) {
+                        self.simulation_controller.clear_prepared_run();
+                    }
                     remove_project_sources_for_deleted_scope(
                         &mut self.state,
                         &lib_name,
@@ -63,6 +89,64 @@ impl RSpiceApp {
             }
         }
     }
+}
+
+struct PendingDesignManagementRemoval {
+    catalog: crate::state::DesignManagementCatalog,
+}
+
+fn prepare_design_management_removal(
+    state: &crate::common::app::AppState,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Result<Option<PendingDesignManagementRemoval>, String> {
+    let mut catalog = state.workspace.design_management.clone();
+    let receipt = match view {
+        Some(view) => catalog.remove_sheet_catalog_for_view(
+            &crate::state::CellViewRef::new(library, cell, view).key(),
+        ),
+        None => catalog.remove_sheet_catalogs_for_cell(library, cell),
+    }
+    .map_err(|error| {
+        let target = view.map_or_else(
+            || format!("cell '{library}/{cell}'"),
+            |view| format!("view '{library}/{cell}/{view}'"),
+        );
+        format!("Cannot delete {target}: Design Management still references it ({error}).")
+    })?;
+    if receipt.affected_sheet_catalogs == 0
+        && receipt.remapped_variant_objects == 0
+        && receipt.remapped_annotation_objects == 0
+    {
+        return Ok(None);
+    }
+    state
+        .workspace
+        .project
+        .next_revision()
+        .map_err(|error| format!("Could not advance the project revision: {error}"))?;
+    Ok(Some(PendingDesignManagementRemoval { catalog }))
+}
+
+fn apply_design_management_removal(
+    state: &mut crate::common::app::AppState,
+    removal: Option<PendingDesignManagementRemoval>,
+) -> bool {
+    let Some(removal) = removal else {
+        return false;
+    };
+    state
+        .workspace
+        .project
+        .advance_revision()
+        .expect("the project revision was preflighted without intervening mutation");
+    state.workspace.design_management = removal.catalog;
+    state.workspace.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.ui.netlist.current_generation_input_digest = None;
+    state.clear_project_design_history();
+    true
 }
 
 fn block_configuration_root_deletion(
@@ -640,5 +724,263 @@ mod tests {
         assert_eq!(app.state.workspace.project.root_library, "user");
         assert_eq!(app.state.workspace.project.top_cell, "top");
         assert_ne!(app.state.design_execution_epoch, original_epoch);
+    }
+
+    #[test]
+    fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_management_ownership() {
+        let mut state = state_with_open_amp_cell();
+        let object_id = state.schematic.components[0].id;
+        let owner = CellViewRef::new("work", "amp", "schematic").key();
+        let sheet_id = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&owner, "Main", [object_id])
+            .expect("owned sheet catalog");
+        let object = crate::state::SchematicObjectKey::new(&owner, object_id)
+            .expect("scoped schematic object");
+        let variant_id = state
+            .workspace
+            .design_management
+            .variants_mut()
+            .create(crate::state::AssemblyVariantDraft {
+                name: "Industrial".to_owned(),
+                parent_id: None,
+                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::from([(
+                    object.clone(),
+                    crate::state::VariantObjectOverride::DoNotPopulate {
+                        approval_reference: "ECO-23".to_owned(),
+                    },
+                )]),
+            })
+            .expect("live variant");
+        let renumber_request = crate::state::RenumberRequest {
+            scope: crate::state::RenumberScope::WholeProject,
+            order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+            protected_references:
+                crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![crate::state::AnnotationObject {
+                object: object.clone(),
+                current_reference: "R8".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: Some(sheet_id),
+                hierarchy_path: "/top".to_owned(),
+                position: crate::state::AnnotationPosition::default(),
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = state
+            .workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&renumber_request)
+            .expect("renumber preview");
+        state
+            .workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &renumber_request)
+            .expect("reviewed annotation");
+        let catalog_before_blocked_delete = state.workspace.design_management.clone();
+        let mut app = app_with_state(state);
+
+        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.process_pending_library_deletions();
+
+        assert!(
+            app.state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .is_some(),
+            "a live scoped variant must block the library mutation"
+        );
+        assert_eq!(
+            app.state.workspace.design_management, catalog_before_blocked_delete,
+            "blocked deletion must not partially mutate governed design state"
+        );
+        assert!(app.state.log_buffer.entries().any(|entry| {
+            entry.message.contains("Cannot delete cell 'work/amp'")
+                && entry
+                    .message
+                    .contains("Design Management still references it")
+        }));
+
+        let variant_revision = app
+            .state
+            .workspace
+            .design_management
+            .variants()
+            .find(variant_id)
+            .expect("variant remains after blocked delete")
+            .revision();
+        app.state
+            .workspace
+            .design_management
+            .variants_mut()
+            .update(
+                variant_id,
+                variant_revision,
+                crate::state::AssemblyVariantDraft {
+                    name: "Industrial".to_owned(),
+                    parent_id: None,
+                    inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                    qualification_plan:
+                        crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                    overrides: std::collections::BTreeMap::new(),
+                },
+            )
+            .expect("variant reference is reviewed away");
+        let annotation_journal_len = app
+            .state
+            .workspace
+            .design_management
+            .annotation()
+            .journal()
+            .len();
+
+        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.process_pending_library_deletions();
+
+        assert!(
+            app.state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .is_none()
+        );
+        assert!(
+            app.state
+                .workspace
+                .design_management
+                .sheet_catalog(&owner)
+                .is_none()
+        );
+        assert_eq!(
+            app.state
+                .workspace
+                .design_management
+                .annotation()
+                .journal()
+                .len(),
+            annotation_journal_len,
+            "deletion must retain immutable reviewed annotation history"
+        );
+        assert!(
+            app.state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&owner, object_id)
+                .expect("deleted annotation lookup")
+                .is_none()
+        );
+        assert!(matches!(
+            app.state
+                .workspace
+                .design_management
+                .annotation()
+                .object_authorities()
+                .get(&object),
+            Some(crate::state::AnnotationObjectAuthority::Tombstone)
+        ));
+    }
+
+    #[test]
+    fn deleting_cell_publishes_annotation_tombstones_without_a_sheet_catalog() {
+        let mut state = state_with_open_amp_cell();
+        let object_id = state.schematic.components[0].id;
+        let owner = CellViewRef::new("work", "amp", "schematic").key();
+        let object = crate::state::SchematicObjectKey::new(&owner, object_id)
+            .expect("scoped schematic object");
+        let renumber_request = crate::state::RenumberRequest {
+            scope: crate::state::RenumberScope::WholeProject,
+            order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+            protected_references:
+                crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![crate::state::AnnotationObject {
+                object: object.clone(),
+                current_reference: "R28".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: None,
+                hierarchy_path: "/top".to_owned(),
+                position: crate::state::AnnotationPosition::default(),
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = state
+            .workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&renumber_request)
+            .expect("renumber preview");
+        state
+            .workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &renumber_request)
+            .expect("reviewed annotation");
+        assert!(
+            state
+                .workspace
+                .design_management
+                .sheet_catalog(&owner)
+                .is_none()
+        );
+        let journal_len = state
+            .workspace
+            .design_management
+            .annotation()
+            .journal()
+            .len();
+        let mut app = app_with_state(state);
+
+        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.process_pending_library_deletions();
+
+        assert!(
+            app.state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .is_none()
+        );
+        assert_eq!(
+            app.state
+                .workspace
+                .design_management
+                .annotation()
+                .journal()
+                .len(),
+            journal_len,
+            "deletion must keep immutable annotation evidence"
+        );
+        assert!(
+            app.state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&owner, object_id)
+                .expect("deleted annotation lookup")
+                .is_none()
+        );
+        assert!(matches!(
+            app.state
+                .workspace
+                .design_management
+                .annotation()
+                .object_authorities()
+                .get(&object),
+            Some(crate::state::AnnotationObjectAuthority::Tombstone)
+        ));
     }
 }

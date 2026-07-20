@@ -7,6 +7,7 @@ use crate::state::{Point, StretchTarget};
 
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
+use super::sheet_visibility::object_is_on_active_sheet;
 use super::viewport::Viewport;
 
 const DELTA_OVERFLOW: &str = "The requested stretch exceeds the schematic coordinate range.";
@@ -201,15 +202,16 @@ fn stretch_target_at(
     let mut candidates: Vec<(f64, u8, u64, usize, StretchTarget)> = Vec::new();
 
     for wire in state.schematic.wires.iter().filter(|wire| {
-        selection.has_wire(wire.id)
-            || selection
-                .wire_segments
-                .iter()
-                .any(|selected| selected.wire_id == wire.id)
-            || selection
-                .wire_vertices
-                .iter()
-                .any(|selected| selected.wire_id == wire.id)
+        object_is_on_active_sheet(state, wire.id)
+            && (selection.has_wire(wire.id)
+                || selection
+                    .wire_segments
+                    .iter()
+                    .any(|selected| selected.wire_id == wire.id)
+                || selection
+                    .wire_vertices
+                    .iter()
+                    .any(|selected| selected.wire_id == wire.id))
     }) {
         for (segment_index, endpoints) in wire.points.windows(2).enumerate() {
             let distance =
@@ -227,7 +229,7 @@ fn stretch_target_at(
         .schematic
         .buses
         .iter()
-        .filter(|bus| selection.has_bus(bus.id))
+        .filter(|bus| selection.has_bus(bus.id) && object_is_on_active_sheet(state, bus.id))
     {
         for (segment_index, endpoints) in bus.points.windows(2).enumerate() {
             let distance =
@@ -241,12 +243,9 @@ fn stretch_target_at(
             }
         }
     }
-    for shape in state
-        .schematic
-        .documentation_shapes
-        .iter()
-        .filter(|shape| selection.has_documentation_shape(shape.id))
-    {
+    for shape in state.schematic.documentation_shapes.iter().filter(|shape| {
+        selection.has_documentation_shape(shape.id) && object_is_on_active_sheet(state, shape.id)
+    }) {
         for (point_index, control) in shape.geometry.points().into_iter().enumerate() {
             let dx = f64::from(control.x) - f64::from(point.x);
             let dy = f64::from(control.y) - f64::from(point.y);

@@ -4,8 +4,8 @@
 //! in `SimSetupState`, not here.
 
 use super::{
-    ConfigurationSetsDialogState, ConfirmationDialogState, ProjectReviewDialogState,
-    SchematicEditAuthority,
+    ConfigurationSetsDialogState, ConfirmationDialogState, DesignManagementDialogState,
+    ProjectReviewDialogState, SchematicEditAuthority,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1457,6 +1457,9 @@ pub struct DialogState {
     /// Project-owned hierarchy/view configuration manager.
     pub(crate) configuration_sets: ConfigurationSetsDialogState,
 
+    /// Project-owned sheet, variant, annotation, and hierarchy manager.
+    pub(crate) design_management: DesignManagementDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -1520,6 +1523,7 @@ impl DialogState {
             || self.replace_instance.open
             || self.create_hierarchy.open
             || self.check_and_save.open
+            || self.design_management.open
             || self.configuration_sets.open
             || self.object_properties.open
             || self.rename_selection.open
@@ -1551,6 +1555,7 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.copy_cell_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.rename_cell_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.rename_selection.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.design_management.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);

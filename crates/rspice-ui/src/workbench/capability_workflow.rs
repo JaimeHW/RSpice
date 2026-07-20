@@ -231,7 +231,7 @@ mod tests {
                 .into_iter()
                 .all(|workflow| workflow.owner_surface() == SurfaceId::FeatureAvailability)
         );
-        assert_eq!(SurfaceId::ALL.len(), 63);
+        assert_eq!(SurfaceId::ALL.len(), 64);
         assert!(
             CapabilityWorkflowId::ALL
                 .into_iter()

@@ -26,6 +26,10 @@ use crate::workbench::state::Workspace;
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
 use super::interaction::{PointerHit, PointerTarget, pointer_target};
+use super::sheet_visibility::{
+    object_is_on_active_sheet, retain_selection_on_active_sheet,
+    selection_filtered_to_active_sheet, with_hidden_wire_topology_preserved,
+};
 use super::viewport::Viewport;
 
 const DESKTOP_WIDTH: f32 = 286.0;
@@ -148,6 +152,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
 struct DeleteSelectionRequest {
     selection: Selection,
     topology_version: u64,
+    expected_junctions: Vec<crate::state::Junction>,
     expected_design_notes: Vec<crate::state::DesignNote>,
     expected_documentation_shapes: Vec<crate::state::DocumentationShape>,
 }
@@ -172,6 +177,7 @@ pub(super) fn handle_context_menu(
     routing_was_active: bool,
     symbol_context: &SchematicSymbolContext,
 ) {
+    retain_selection_on_active_sheet(state);
     if show_delete_confirmation(&response.ctx, state, symbol_context) {
         return;
     }
@@ -1005,16 +1011,19 @@ fn execute_context_action(
     click_pos: Point,
     symbol_context: &SchematicSymbolContext,
 ) {
+    retain_selection_on_active_sheet(state);
     match action {
         ContextAction::Properties => {
             crate::common::app::open_selected_object_properties(state);
         }
-        ContextAction::Rotate => state
-            .schematic
-            .rotate_selection_resolved(|component| symbol_context.terminal_points(component)),
-        ContextAction::Mirror => state
-            .schematic
-            .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component)),
+        ContextAction::Rotate => with_hidden_wire_topology_preserved(state, |schematic| {
+            schematic
+                .rotate_selection_resolved(|component| symbol_context.terminal_points(component))
+        }),
+        ContextAction::Mirror => with_hidden_wire_topology_preserved(state, |schematic| {
+            schematic
+                .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component))
+        }),
         ContextAction::Copy => state.schematic.copy_selection(),
         ContextAction::Duplicate => duplicate_selection_at(state, click_pos),
         ContextAction::Delete => request_delete_confirmation(ui.ctx(), state),
@@ -1062,6 +1071,16 @@ fn request_delete_confirmation(ctx: &Context, state: &mut AppState) {
     selection.wire_segments.clear();
     selection.wire_vertices.clear();
     let request = DeleteSelectionRequest {
+        expected_junctions: state
+            .schematic
+            .junctions
+            .iter()
+            .filter(|junction| {
+                selection.has_junction(junction.pos)
+                    && object_is_on_active_sheet(state, junction.id)
+            })
+            .copied()
+            .collect(),
         expected_design_notes: state
             .schematic
             .design_notes
@@ -1143,22 +1162,26 @@ fn delete_review(
 ) -> DeleteReview {
     let mut objects = Vec::new();
     for component in &state.schematic.components {
-        if request.selection.has_component(component.id) {
+        if request.selection.has_component(component.id)
+            && object_is_on_active_sheet(state, component.id)
+        {
             objects.push(component.name.clone());
         }
     }
     for wire in &state.schematic.wires {
-        if request.selection.has_wire(wire.id) {
+        if request.selection.has_wire(wire.id) && object_is_on_active_sheet(state, wire.id) {
             objects.push(format!("wire #{}", wire.id));
         }
     }
     for junction in &state.schematic.junctions {
-        if request.selection.has_junction(junction.pos) {
+        if request.selection.has_junction(junction.pos)
+            && object_is_on_active_sheet(state, junction.id)
+        {
             objects.push(format!("junction ({}, {})", junction.pos.x, junction.pos.y));
         }
     }
     for bus in &state.schematic.buses {
-        if request.selection.has_bus(bus.id) {
+        if request.selection.has_bus(bus.id) && object_is_on_active_sheet(state, bus.id) {
             objects.push(format!(
                 "bus {}",
                 bus.declaration
@@ -1168,22 +1191,24 @@ fn delete_review(
         }
     }
     for tap in &state.schematic.bus_taps {
-        if request.selection.has_bus_tap(tap.id) {
+        if request.selection.has_bus_tap(tap.id) && object_is_on_active_sheet(state, tap.id) {
             objects.push(format!("bus tap {}", tap.slice));
         }
     }
     for label in &state.schematic.net_labels {
-        if request.selection.has_net_label(label.id) {
+        if request.selection.has_net_label(label.id) && object_is_on_active_sheet(state, label.id) {
             objects.push(format!("net label {}", label.name));
         }
     }
     for note in &state.schematic.design_notes {
-        if request.selection.has_design_note(note.id) {
+        if request.selection.has_design_note(note.id) && object_is_on_active_sheet(state, note.id) {
             objects.push(format!("{} {}", note.kind.label(), note.text));
         }
     }
     for shape in &state.schematic.documentation_shapes {
-        if request.selection.has_documentation_shape(shape.id) {
+        if request.selection.has_documentation_shape(shape.id)
+            && object_is_on_active_sheet(state, shape.id)
+        {
             objects.push(format!(
                 "{} documentation shape #{}",
                 shape.kind().label(),
@@ -1199,7 +1224,9 @@ fn delete_review(
 
     let mut nets = BTreeSet::new();
     for component in &state.schematic.components {
-        if !request.selection.has_component(component.id) {
+        if !request.selection.has_component(component.id)
+            || !object_is_on_active_sheet(state, component.id)
+        {
             continue;
         }
         for point in symbol_context.terminal_points(component) {
@@ -1213,7 +1240,7 @@ fn delete_review(
         }
     }
     for wire in &state.schematic.wires {
-        if !request.selection.has_wire(wire.id) {
+        if !request.selection.has_wire(wire.id) || !object_is_on_active_sheet(state, wire.id) {
             continue;
         }
         for point in &wire.points {
@@ -1228,6 +1255,7 @@ fn delete_review(
     }
     for junction in &state.schematic.junctions {
         if request.selection.has_junction(junction.pos)
+            && object_is_on_active_sheet(state, junction.id)
             && let Some(net) = state.simulation.cross_probe.net_at_in(
                 &state.workspace.active_view,
                 state.schematic.topology_version(),
@@ -1238,7 +1266,9 @@ fn delete_review(
         }
     }
     for tap in &state.schematic.bus_taps {
-        if request.selection.has_bus_tap(tap.id) || request.selection.has_bus(tap.bus_id) {
+        if object_is_on_active_sheet(state, tap.id)
+            && (request.selection.has_bus_tap(tap.id) || request.selection.has_bus(tap.bus_id))
+        {
             // The review surface describes a vector selector as one typed
             // object. Expanding a legal wide range into hundreds of thousands
             // of strings would freeze the modal without adding useful review
@@ -1247,7 +1277,7 @@ fn delete_review(
         }
     }
     for label in &state.schematic.net_labels {
-        if request.selection.has_net_label(label.id) {
+        if request.selection.has_net_label(label.id) && object_is_on_active_sheet(state, label.id) {
             nets.insert(label.name.clone());
         }
     }
@@ -1293,6 +1323,17 @@ fn delete_review_row(ui: &mut Ui, label: &str, value: &str) {
 }
 
 fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
+    let active_selection = selection_filtered_to_active_sheet(state, &request.selection);
+    let live_junctions = state
+        .schematic
+        .junctions
+        .iter()
+        .filter(|junction| {
+            request.selection.has_junction(junction.pos)
+                && object_is_on_active_sheet(state, junction.id)
+        })
+        .copied()
+        .collect::<Vec<_>>();
     let live_design_notes: Vec<_> = state
         .schematic
         .design_notes
@@ -1308,6 +1349,8 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
         .cloned()
         .collect();
     if state.schematic.topology_version() != request.topology_version
+        || active_selection != request.selection
+        || live_junctions != request.expected_junctions
         || live_design_notes != request.expected_design_notes
         || live_documentation_shapes != request.expected_documentation_shapes
     {
@@ -1370,7 +1413,7 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
         return;
     }
     state.schematic.selection = request.selection;
-    if !state.schematic.delete_selection() {
+    if !with_hidden_wire_topology_preserved(state, |schematic| schematic.delete_selection()) {
         state.push_user_message(ConsoleMessage::warning(
             "The reviewed selection no longer contains deletable objects.".to_owned(),
         ));
@@ -1891,6 +1934,7 @@ mod tests {
         let request = DeleteSelectionRequest {
             selection: state.schematic.selection.clone(),
             topology_version: state.schematic.topology_version(),
+            expected_junctions: Vec::new(),
             expected_design_notes: Vec::new(),
             expected_documentation_shapes: Vec::new(),
         };
@@ -1913,6 +1957,7 @@ mod tests {
         let request = DeleteSelectionRequest {
             selection: state.schematic.selection.clone(),
             topology_version: state.schematic.topology_version(),
+            expected_junctions: Vec::new(),
             expected_design_notes: Vec::new(),
             expected_documentation_shapes: Vec::new(),
         };
@@ -1932,6 +1977,7 @@ mod tests {
         let request = DeleteSelectionRequest {
             selection: state.schematic.selection.clone(),
             topology_version: state.schematic.topology_version(),
+            expected_junctions: Vec::new(),
             expected_design_notes: Vec::new(),
             expected_documentation_shapes: Vec::new(),
         };
@@ -1961,6 +2007,7 @@ mod tests {
         let request = DeleteSelectionRequest {
             selection: state.schematic.selection.clone(),
             topology_version: state.schematic.topology_version(),
+            expected_junctions: Vec::new(),
             expected_design_notes: Vec::new(),
             expected_documentation_shapes: vec![shape],
         };

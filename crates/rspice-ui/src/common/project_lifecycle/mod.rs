@@ -1563,6 +1563,7 @@ fn revert_document_in_place(
         ProjectDocumentId::ProjectConfiguration => {
             state.workspace.project = baseline.workspace.project;
             state.workspace.configuration_sets = baseline.workspace.configuration_sets;
+            state.workspace.design_management = baseline.workspace.design_management;
             restore_project_structure_preserving_documents(state, baseline.libraries);
         }
         ProjectDocumentId::CellView(reference) => revert_cell_view(state, &baseline, &reference)?,
@@ -1787,6 +1788,7 @@ fn overlay_document(
         ProjectDocumentId::ProjectConfiguration => {
             target.workspace.project = working.workspace.project.clone();
             target.workspace.configuration_sets = working.workspace.configuration_sets.clone();
+            target.workspace.design_management = working.workspace.design_management.clone();
             target.libraries = merge_project_structure_with_document_content(
                 &working.libraries,
                 &target.libraries,
@@ -2454,6 +2456,11 @@ mod tests {
             "Release",
             CellViewRef::new("user", "top", "schematic"),
         );
+        state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view("user/top/schematic", "Main", [1])
+            .expect("design-management catalog");
         let edited = snapshot(&state).expect("edited");
         let mut accepted = baseline.clone();
 
@@ -2466,6 +2473,10 @@ mod tests {
         assert_eq!(
             accepted.workspace.configuration_sets,
             edited.workspace.configuration_sets
+        );
+        assert_eq!(
+            accepted.workspace.design_management,
+            edited.workspace.design_management
         );
         assert_eq!(
             accepted
@@ -2487,6 +2498,10 @@ mod tests {
         assert_eq!(
             state.workspace.configuration_sets,
             baseline.workspace.configuration_sets
+        );
+        assert_eq!(
+            state.workspace.design_management,
+            baseline.workspace.design_management
         );
         snapshot(&state).expect("reverted state remains valid");
     }
@@ -3099,6 +3114,11 @@ mod tests {
             "Release",
             CellViewRef::new("user", "top", "schematic"),
         );
+        state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view("user/top/schematic", "Main", [1])
+            .expect("design-management catalog");
         save_native(
             &mut state,
             SaveScope::ActiveDocument,
@@ -3113,6 +3133,10 @@ mod tests {
             state.workspace.configuration_sets
         );
         assert_eq!(
+            persisted.workspace.design_management,
+            state.workspace.design_management
+        );
+        assert_eq!(
             state
                 .project_lifecycle
                 .accepted
@@ -3123,17 +3147,47 @@ mod tests {
                 .configuration_sets,
             state.workspace.configuration_sets
         );
+        assert_eq!(
+            state
+                .project_lifecycle
+                .accepted
+                .as_ref()
+                .expect("accepted save")
+                .baseline
+                .workspace
+                .design_management,
+            state.workspace.design_management
+        );
 
         state
             .workspace
             .configuration_sets
             .clone_configuration(release_id, 1, "Characterization")
             .expect("unsaved catalog edit");
+        state
+            .workspace
+            .design_management
+            .sheet_catalog_mut("user/top/schematic")
+            .expect("sheet catalog")
+            .create_sheet(
+                crate::state::SheetDefinition {
+                    name: "Characterization".to_owned(),
+                    template: crate::state::SheetTemplate::AnalogSchematic,
+                    port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                None,
+            )
+            .expect("unsaved sheet edit");
         revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
             .expect("revert to exact saved catalog");
         assert_eq!(
             state.workspace.configuration_sets,
             persisted.workspace.configuration_sets
+        );
+        assert_eq!(
+            state.workspace.design_management,
+            persisted.workspace.design_management
         );
         assert_eq!(state.workspace.configuration_sets.configurations().len(), 1);
         remove_project_artifacts(&path);

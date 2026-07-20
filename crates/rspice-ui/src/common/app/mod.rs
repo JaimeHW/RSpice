@@ -53,7 +53,12 @@ pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewR
 
 mod app_configuration_sets_dialog;
 pub(crate) use app_configuration_sets_dialog::{
-    ConfigurationSetsDialogState, open_configuration_sets_dialog,
+    ConfigurationSetsDialogState, open_configuration_binding_dialog, open_configuration_sets_dialog,
+};
+
+mod app_design_management_dialog;
+pub(crate) use app_design_management_dialog::{
+    DesignManagementDialogState, open_design_management_dialog,
 };
 
 mod app_dialog_state;
@@ -108,6 +113,7 @@ pub(crate) use app_property_edit::{
 
 mod app_modal_workflows;
 mod app_project_design_history;
+pub(crate) use app_project_design_history::DesignManagementHistoryEntry;
 
 mod app_bus_tap_dialog;
 mod app_design_note_dialog;
@@ -875,6 +881,7 @@ impl RSpiceApp {
     }
 
     fn render_frame_dialogs(&mut self, ctx: &Context) {
+        self.synchronize_design_management_route();
         self.render_confirmation_dialog(ctx);
         crate::panels::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);
@@ -892,6 +899,7 @@ impl RSpiceApp {
         self.render_replace_instance_dialog(ctx);
         self.render_create_hierarchy_dialog(ctx);
         self.render_check_and_save_dialog(ctx);
+        self.render_design_management_dialog(ctx);
         self.render_configuration_sets_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
@@ -908,6 +916,46 @@ impl RSpiceApp {
         self.process_pending_library_deletions();
         self.process_exit_request(ctx);
         crate::workbench::show_route_overlays(ctx, self);
+    }
+
+    /// Keep browser-restored manager routes and the transient egui dialog
+    /// owner synchronized. Commands open both in one transaction; this hook
+    /// covers deep links, Back/Forward, and restored application sessions.
+    fn synchronize_design_management_route(&mut self) {
+        let route_active = self.state.workbench.current_route().surface_id()
+            == crate::workbench::SurfaceId::DesignManagement;
+        if route_active && !self.state.dialogs.design_management.open {
+            open_design_management_dialog(&mut self.state);
+        } else if !route_active && self.state.dialogs.design_management.open {
+            self.state.dialogs.design_management.close_and_discard();
+        }
+    }
+}
+
+/// Close the route-owned Design Management manager without stranding a
+/// `?surface=design-management` URL. Ordinary opens traverse back to their
+/// exact Design source; direct deep links fail safely to the canonical Design
+/// workspace using a replacement history entry.
+pub(crate) fn close_design_management_dialog_route(state: &mut AppState) {
+    if state.workbench.current_route().surface_id() != crate::workbench::SurfaceId::DesignManagement
+    {
+        return;
+    }
+    if state
+        .workbench
+        .navigate_back(crate::workbench::RouteTransitionSource::User)
+        .is_some()
+    {
+        return;
+    }
+    let fallback = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Design);
+    if let Err(error) = state
+        .workbench
+        .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
+    {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Could not close Design Management: {error}"
+        )));
     }
 }
 
@@ -1547,6 +1595,75 @@ mod tests {
 
         state.workbench.open_project_launcher();
         assert!(state.application_modal_open());
+    }
+
+    #[test]
+    fn design_management_route_hook_opens_and_dismisses_the_transient_dialog_owner() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .workbench
+            .replace_route(
+                crate::workbench::SurfaceRoute::surface(
+                    crate::workbench::SurfaceId::DesignManagement,
+                ),
+                crate::workbench::RouteTransitionSource::Restore,
+            )
+            .expect("Design Management route is executable");
+        assert!(!app.state.dialogs.design_management.open);
+
+        app.synchronize_design_management_route();
+        assert!(app.state.dialogs.design_management.open);
+
+        app.state
+            .workbench
+            .replace_route(
+                crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Design),
+                crate::workbench::RouteTransitionSource::BrowserPop,
+            )
+            .expect("Design workspace route is executable");
+        app.synchronize_design_management_route();
+        assert!(!app.state.dialogs.design_management.open);
+    }
+
+    #[test]
+    fn design_management_close_restores_design_with_canonical_history_effects() {
+        use crate::workbench::{
+            BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute,
+        };
+
+        let mut state = AppState::default();
+        let design = SurfaceRoute::surface(SurfaceId::Design);
+        let manager = SurfaceRoute::surface(SurfaceId::DesignManagement);
+        state
+            .workbench
+            .navigate(manager, RouteTransitionSource::User)
+            .expect("Design Management route is executable");
+        assert_eq!(
+            state.workbench.take_browser_history_effect(),
+            Some(BrowserHistoryEffect::Push(manager))
+        );
+
+        close_design_management_dialog_route(&mut state);
+        assert_eq!(state.workbench.current_route(), design);
+        assert_eq!(
+            state.workbench.take_browser_history_effect(),
+            Some(BrowserHistoryEffect::Traverse {
+                delta: -1,
+                destination: design,
+            })
+        );
+
+        state
+            .workbench
+            .replace_route(manager, RouteTransitionSource::Restore)
+            .expect("direct manager deep link restores");
+        let _ = state.workbench.take_browser_history_effect();
+        close_design_management_dialog_route(&mut state);
+        assert_eq!(state.workbench.current_route(), design);
+        assert_eq!(
+            state.workbench.take_browser_history_effect(),
+            Some(BrowserHistoryEffect::Replace(design))
+        );
     }
 
     #[test]

@@ -6,15 +6,17 @@ use crate::state::{Component, OperatingPointAnnotationPolicy, Point};
 use super::super::symbols::SymbolLibrary;
 use super::SchematicSymbolContext;
 use super::design_notes::{
-    conservative_world_bounds as design_note_world_bounds, draw_design_note, hovered_design_note,
+    conservative_world_bounds as design_note_world_bounds, design_note_at, draw_design_note,
 };
 use super::documentation_shapes::{
     documentation_shape_at, draw_documentation_shape, world_bounds as documentation_shape_bounds,
 };
 use super::drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire};
 use super::grid::draw_grid;
-use super::net_labels::{
-    draw_net_label, hovered_net_label, world_bounds as net_label_world_bounds,
+use super::net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds};
+use super::sheet_visibility::{
+    active_junction_at, active_sheet_has_objects, object_is_on_active_sheet,
+    objects_on_active_sheet,
 };
 use super::viewport::Viewport;
 
@@ -59,13 +61,7 @@ pub(super) fn draw_scene(
 
     // First-run guidance: an empty sheet says what to do next instead of
     // presenting a silent dot field.
-    if state.schematic.components.is_empty()
-        && state.schematic.wires.is_empty()
-        && state.schematic.buses.is_empty()
-        && state.schematic.net_labels.is_empty()
-        && state.schematic.design_notes.is_empty()
-        && state.schematic.documentation_shapes.is_empty()
-    {
+    if !active_sheet_has_objects(state) {
         draw_empty_hint(painter, available);
     }
 
@@ -82,6 +78,9 @@ pub(super) fn draw_scene(
     let cache = state.schematic.canvas_cache();
 
     for bus in &state.schematic.buses {
+        if !object_is_on_active_sheet(state, bus.id) {
+            continue;
+        }
         if !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1) {
             continue;
         }
@@ -95,6 +94,9 @@ pub(super) fn draw_scene(
     }
 
     for (index, wire) in state.schematic.wires.iter().enumerate() {
+        if !object_is_on_active_sheet(state, wire.id) {
+            continue;
+        }
         if let Some((min, max)) = cache.and_then(|c| c.wire_bounds.get(index))
             && ((max.x as f32) < wx0
                 || (min.x as f32) > wx1
@@ -117,6 +119,9 @@ pub(super) fn draw_scene(
     }
 
     for tap in &state.schematic.bus_taps {
+        if !object_is_on_active_sheet(state, tap.id) {
+            continue;
+        }
         let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
         let Some(first) = route.first() else {
             continue;
@@ -145,6 +150,9 @@ pub(super) fn draw_scene(
     }
 
     for component in &state.schematic.components {
+        if !object_is_on_active_sheet(state, component.id) {
+            continue;
+        }
         let (min, max) = component_cull_bounds(component, symbol_context);
         if (max.x as f32) < wx0
             || (min.x as f32) > wx1
@@ -170,6 +178,9 @@ pub(super) fn draw_scene(
     }
 
     for junction in &state.schematic.junctions {
+        if !object_is_on_active_sheet(state, junction.id) {
+            continue;
+        }
         let (jx, jy) = (junction.pos.x as f32, junction.pos.y as f32);
         if jx < wx0 || jx > wx1 || jy < wy0 || jy > wy1 {
             continue;
@@ -182,17 +193,20 @@ pub(super) fn draw_scene(
     // Presentation geometry is a background documentation layer. It remains
     // selectable, but is intentionally painted below authored text and names.
     let hovered_shape = if state.schematic.tool == crate::state::Tool::Select {
+        let shapes =
+            objects_on_active_sheet(state, &state.schematic.documentation_shapes, |item| item.id);
         painter
             .ctx()
             .pointer_hover_pos()
             .filter(|position| available.contains(*position))
-            .and_then(|position| {
-                documentation_shape_at(viewport, &state.schematic.documentation_shapes, position)
-            })
+            .and_then(|position| documentation_shape_at(viewport, shapes.as_ref(), position))
     } else {
         None
     };
     for shape in &state.schematic.documentation_shapes {
+        if !object_is_on_active_sheet(state, shape.id) {
+            continue;
+        }
         let (min, max) = documentation_shape_bounds(shape);
         if (max.x as f32) < wx0
             || (min.x as f32) > wx1
@@ -219,11 +233,19 @@ pub(super) fn draw_scene(
     // Net labels are authored text, not derived annotations. Paint them after
     // junction and OP overlays so the source net name always remains legible.
     let hovered_label = if state.schematic.tool == crate::state::Tool::Select {
-        hovered_net_label(painter, viewport, &state.schematic.net_labels, available)
+        let labels = objects_on_active_sheet(state, &state.schematic.net_labels, |item| item.id);
+        painter
+            .ctx()
+            .pointer_hover_pos()
+            .filter(|pointer| available.contains(*pointer))
+            .and_then(|pointer| net_label_at(painter.ctx(), viewport, labels.as_ref(), pointer))
     } else {
         None
     };
     for label in &state.schematic.net_labels {
+        if !object_is_on_active_sheet(state, label.id) {
+            continue;
+        }
         let (min, max) = net_label_world_bounds(label);
         if (max.x as f32) < wx0
             || (min.x as f32) > wx1
@@ -249,11 +271,21 @@ pub(super) fn draw_scene(
     // Documentation objects are painted above electrical names but below
     // validation markers. They never participate in conductor rendering.
     let hovered_note = if state.schematic.tool == crate::state::Tool::Select {
-        hovered_design_note(painter, viewport, state, available)
+        let notes = objects_on_active_sheet(state, &state.schematic.design_notes, |item| item.id);
+        painter
+            .ctx()
+            .pointer_hover_pos()
+            .filter(|pointer| available.contains(*pointer))
+            .and_then(|pointer| {
+                design_note_at(painter.ctx(), viewport, notes.as_ref(), state, pointer)
+            })
     } else {
         None
     };
     for note in &state.schematic.design_notes {
+        if !object_is_on_active_sheet(state, note.id) {
+            continue;
+        }
         let (min, max) = design_note_world_bounds(note);
         if (max.x as f32) < wx0
             || (min.x as f32) > wx1
@@ -278,10 +310,7 @@ pub(super) fn draw_scene(
 
     if let Some((hx, hy)) = state.dialogs.interaction.hover_wire_vertex {
         let hover_pos = Point::new(hx, hy);
-        let is_junction = match cache {
-            Some(cache) => cache.junctions.contains(&hover_pos),
-            None => state.schematic.junctions.iter().any(|j| j.pos == hover_pos),
-        };
+        let is_junction = active_junction_at(state, hover_pos).is_some();
         if !is_junction {
             let pos = viewport.schematic_to_screen(hover_pos);
             let radius = 3.0 * viewport.zoom;
@@ -372,6 +401,17 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
             points
                 .iter()
                 .copied()
+                .filter(|point| {
+                    super::sheet_visibility::active_wire_at(state, *point).is_some()
+                        || active_junction_at(state, *point).is_some()
+                        || state.schematic.components.iter().any(|component| {
+                            object_is_on_active_sheet(state, component.id)
+                                && component
+                                    .terminal_positions()
+                                    .iter()
+                                    .any(|(_, terminal)| terminal == point)
+                        })
+                })
                 .min_by_key(|point| (point.y, point.x))
         }) else {
             continue;
@@ -389,12 +429,10 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     }
 
     if policy == OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents {
-        for component in state
-            .schematic
-            .components
-            .iter()
-            .filter(|component| state.schematic.selection.has_component(component.id))
-        {
+        for component in state.schematic.components.iter().filter(|component| {
+            state.schematic.selection.has_component(component.id)
+                && object_is_on_active_sheet(state, component.id)
+        }) {
             let Some(current) = dc_op.branch_currents.iter().find(|current| {
                 current.value.is_finite()
                     && wrapped_signal_name(&current.name, 'I')

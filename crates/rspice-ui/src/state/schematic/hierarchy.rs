@@ -5,7 +5,7 @@
 //! child candidates. The application validates both candidates against the
 //! project hierarchy before publishing either document.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use super::{
     Component, ComponentType, LibraryCellInstance, NetLabel, Point, PortContract, PortDirection,
@@ -59,12 +59,200 @@ pub struct HierarchyExtractionPlan {
     nets: Vec<PlannedNet>,
 }
 
+/// One exact scalar boundary that must remain electrically identical when a
+/// group of instances moves to another sheet in the same cell view.
+///
+/// The stationary side is anchored to retained wire geometry while the moved
+/// side names the exact component terminal.  Keeping both identities avoids
+/// the ambiguous "object origin" anchors that previously made multi-terminal
+/// instances impossible to materialize safely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SheetMoveBoundary {
+    pub net_name: String,
+    pub direction: PortDirection,
+    pub discipline: PortDiscipline,
+    pub stationary_wire_id: u64,
+    pub stationary_point: Point,
+    pub moved_component_id: u64,
+    pub moved_terminal_name: String,
+}
+
+/// Complete, topology-bound object and boundary plan for a same-cell sheet
+/// move. Internal scalar conductors move with the selected instances; shared
+/// nets remain on the source sheet and receive explicit typed contracts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SheetMoveConnectivityPlan {
+    pub topology_version: u64,
+    pub source_component_ids: Vec<u64>,
+    pub moved_object_ids: Vec<u64>,
+    pub boundaries: Vec<SheetMoveBoundary>,
+}
+
 impl HierarchyExtractionPlan {
     pub(crate) fn internal_source_net_names(&self) -> impl Iterator<Item = &str> {
         self.nets
             .iter()
             .filter(|net| !net.boundary && !net.global_ground)
             .map(|net| net.source_name.as_str())
+    }
+
+    /// Convert the canonical hierarchy connectivity receipt into a same-cell
+    /// sheet-move plan without guessing at net or terminal identity.
+    pub(crate) fn sheet_move_connectivity(
+        &self,
+        schematic: &SchematicState,
+    ) -> Result<SheetMoveConnectivityPlan, HierarchyExtractionError> {
+        if self.topology_version != schematic.topology_version() {
+            return Err(HierarchyExtractionError::InvalidConnectivity(
+                "the schematic topology changed while the sheet move was being reviewed".to_owned(),
+            ));
+        }
+
+        let selected = self
+            .source_component_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        let mut moved_object_ids = self
+            .source_component_ids
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let mut boundaries = Vec::new();
+
+        for net in &self.nets {
+            let selected_terminals = self
+                .source_terminals
+                .iter()
+                .filter(|terminal| {
+                    selected.contains(&terminal.component_id)
+                        && self.point_to_net.get(&terminal.point) == Some(&net.source_name)
+                })
+                .collect::<Vec<_>>();
+            if selected_terminals.is_empty() {
+                continue;
+            }
+
+            if net.boundary || net.global_ground {
+                let direction = inferred_direction(&net.source_name, &selected_terminals);
+                let discipline = inferred_discipline(&net.source_name, &selected_terminals)?;
+                for terminal in selected_terminals {
+                    let connection = schematic
+                        .connections
+                        .iter()
+                        .find(|connection| {
+                            connection.component_id == terminal.component_id
+                                && connection
+                                    .terminal_name
+                                    .eq_ignore_ascii_case(&terminal.terminal_name)
+                        })
+                        .ok_or_else(|| {
+                            HierarchyExtractionError::InvalidConnectivity(format!(
+                                "terminal {}:{} has no canonical wire connection for a cross-sheet boundary",
+                                terminal.component_id, terminal.terminal_name
+                            ))
+                        })?;
+                    let wire = schematic
+                        .wires
+                        .iter()
+                        .find(|wire| wire.id == connection.wire_id)
+                        .ok_or_else(|| {
+                            HierarchyExtractionError::InvalidConnectivity(format!(
+                                "terminal {}:{} references missing wire {}",
+                                terminal.component_id, terminal.terminal_name, connection.wire_id
+                            ))
+                        })?;
+                    let stationary_point = wire
+                        .points
+                        .get(connection.point_index)
+                        .copied()
+                        .ok_or_else(|| {
+                            HierarchyExtractionError::InvalidConnectivity(format!(
+                                "terminal {}:{} references invalid point {} on wire {}",
+                                terminal.component_id,
+                                terminal.terminal_name,
+                                connection.point_index,
+                                connection.wire_id
+                            ))
+                        })?;
+                    if stationary_point != terminal.point
+                        || self.point_to_net.get(&stationary_point) != Some(&net.source_name)
+                    {
+                        return Err(HierarchyExtractionError::InvalidConnectivity(format!(
+                            "terminal {}:{} no longer resolves to retained net '{}'",
+                            terminal.component_id, terminal.terminal_name, net.source_name
+                        )));
+                    }
+                    boundaries.push(SheetMoveBoundary {
+                        net_name: net.source_name.clone(),
+                        direction,
+                        discipline,
+                        stationary_wire_id: wire.id,
+                        stationary_point,
+                        moved_component_id: terminal.component_id,
+                        moved_terminal_name: terminal.terminal_name.clone(),
+                    });
+                }
+                continue;
+            }
+
+            for wire in &schematic.wires {
+                let wire_net = wire
+                    .points
+                    .iter()
+                    .find_map(|point| self.point_to_net.get(point));
+                if wire_net == Some(&net.source_name) {
+                    if wire
+                        .points
+                        .iter()
+                        .filter_map(|point| self.point_to_net.get(point))
+                        .any(|resolved| resolved != &net.source_name)
+                    {
+                        return Err(HierarchyExtractionError::InvalidConnectivity(format!(
+                            "wire {} spans more than one canonical net",
+                            wire.id
+                        )));
+                    }
+                    moved_object_ids.insert(wire.id);
+                }
+            }
+            for junction in &schematic.junctions {
+                if self.point_to_net.get(&junction.pos) == Some(&net.source_name) {
+                    moved_object_ids.insert(junction.id);
+                }
+            }
+            for label in &schematic.net_labels {
+                if self.point_to_net.get(&label.pos) == Some(&net.source_name) {
+                    moved_object_ids.insert(label.id);
+                }
+            }
+        }
+
+        boundaries.sort_by(|left, right| {
+            (
+                left.net_name.to_ascii_lowercase(),
+                left.moved_component_id,
+                left.moved_terminal_name.to_ascii_lowercase(),
+                left.stationary_wire_id,
+                left.stationary_point.x,
+                left.stationary_point.y,
+            )
+                .cmp(&(
+                    right.net_name.to_ascii_lowercase(),
+                    right.moved_component_id,
+                    right.moved_terminal_name.to_ascii_lowercase(),
+                    right.stationary_wire_id,
+                    right.stationary_point.x,
+                    right.stationary_point.y,
+                ))
+        });
+
+        Ok(SheetMoveConnectivityPlan {
+            topology_version: self.topology_version,
+            source_component_ids: self.source_component_ids.clone(),
+            moved_object_ids: moved_object_ids.into_iter().collect(),
+            boundaries,
+        })
     }
 }
 
@@ -1663,6 +1851,7 @@ fn segments_intersect(a: (Point, Point), b: (Point, Point)) -> bool {
 mod tests {
     use super::*;
     use crate::simulation::netlist_gen::generate_netlist;
+    use crate::state::WireConnection;
 
     fn terminals(schematic: &SchematicState) -> Vec<HierarchyExtractionTerminal> {
         schematic
@@ -2099,6 +2288,125 @@ mod tests {
         candidate
             .validate_connectivity(&plan, &parent.point_to_net, &child.point_to_net)
             .expect("boundary extraction retains the electrical contract");
+    }
+
+    #[test]
+    fn sheet_move_plan_retains_boundary_wire_and_names_exact_moved_terminal() {
+        let mut schematic = SchematicState::default();
+        let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
+        let stationary = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
+        let selected_terminal = schematic
+            .components
+            .iter()
+            .find(|component| component.id == selected)
+            .expect("selected component")
+            .terminal_positions_resolved(None)
+            .into_iter()
+            .max_by_key(|(_, point)| point.x)
+            .expect("selected terminal");
+        let stationary_terminal = schematic
+            .components
+            .iter()
+            .find(|component| component.id == stationary)
+            .expect("stationary component")
+            .terminal_positions_resolved(None)
+            .into_iter()
+            .min_by_key(|(_, point)| point.x)
+            .expect("stationary terminal");
+        let wire = schematic
+            .add_wire(vec![selected_terminal.1, stationary_terminal.1])
+            .expect("boundary wire");
+        schematic.connections.push(WireConnection::new(
+            wire,
+            0,
+            selected,
+            selected_terminal.0.clone(),
+        ));
+        schematic.connections.push(WireConnection::new(
+            wire,
+            1,
+            stationary,
+            stationary_terminal.0,
+        ));
+        schematic.selection.select_component(selected);
+
+        let plan = schematic
+            .plan_hierarchy_extraction(
+                &terminals(&schematic),
+                &connectivity(&schematic),
+                &bounds(&schematic),
+            )
+            .expect("hierarchy connectivity plan");
+        let sheet_move = plan
+            .sheet_move_connectivity(&schematic)
+            .expect("typed sheet move");
+
+        assert_eq!(sheet_move.source_component_ids, [selected]);
+        assert_eq!(sheet_move.moved_object_ids, [selected]);
+        assert_eq!(sheet_move.boundaries.len(), 1);
+        let boundary = &sheet_move.boundaries[0];
+        assert_eq!(boundary.stationary_wire_id, wire);
+        assert_eq!(boundary.stationary_point, selected_terminal.1);
+        assert_eq!(boundary.moved_component_id, selected);
+        assert_eq!(boundary.moved_terminal_name, selected_terminal.0);
+    }
+
+    #[test]
+    fn sheet_move_plan_moves_complete_internal_scalar_topology() {
+        let mut schematic = SchematicState::default();
+        let left = schematic.add_component(ComponentType::Resistor, Point::origin());
+        let right = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
+        let left_terminal = schematic
+            .components
+            .iter()
+            .find(|component| component.id == left)
+            .expect("left component")
+            .terminal_positions_resolved(None)
+            .into_iter()
+            .max_by_key(|(_, point)| point.x)
+            .expect("left terminal");
+        let right_terminal = schematic
+            .components
+            .iter()
+            .find(|component| component.id == right)
+            .expect("right component")
+            .terminal_positions_resolved(None)
+            .into_iter()
+            .min_by_key(|(_, point)| point.x)
+            .expect("right terminal");
+        let wire = schematic
+            .add_wire(vec![left_terminal.1, right_terminal.1])
+            .expect("internal wire");
+        schematic
+            .connections
+            .push(WireConnection::new(wire, 0, left, left_terminal.0));
+        schematic
+            .connections
+            .push(WireConnection::new(wire, 1, right, right_terminal.0));
+        let label = schematic.add_net_label(left_terminal.1, "sense".to_owned());
+        schematic.selection.select_component(left);
+        schematic.selection.select_component(right);
+
+        let plan = schematic
+            .plan_hierarchy_extraction(
+                &terminals(&schematic),
+                &connectivity(&schematic),
+                &bounds(&schematic),
+            )
+            .expect("hierarchy connectivity plan");
+        let sheet_move = plan
+            .sheet_move_connectivity(&schematic)
+            .expect("verified internal sheet move");
+
+        assert!(sheet_move.boundaries.is_empty());
+        assert_eq!(
+            sheet_move.moved_object_ids,
+            [left, right, wire, label]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -104,6 +104,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui canonical Preferences manager",
             evidence_boundary: "Only the currently visible runtime-backed appearance, workspace, autosave, accessibility, capability, and local account/licensing controls are executable; incomplete mockup categories and actions remain omitted rather than inert.",
         },
+        SurfaceId::DesignManagement => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui canonical sheet, variant, annotation, and hierarchy manager",
+            evidence_boundary: "Versioned project-owned sheet ordering and assignment, immutable variant lineage and comparison, annotation allocation, and hierarchy audits are executable for an editable active schematic; the manager does not claim layout or sign-off authority.",
+        },
         SurfaceId::AccountOrganization => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui local account, organization, and licensing boundary manager",
             evidence_boundary: "The verified on-device license and current local application process are executable data owners; account identity, organization policy, remote sessions, server licensing, and external administration remain explicitly unconfigured and expose no speculative actions.",
@@ -176,6 +180,7 @@ mod tests {
                 SurfaceId::VisualizationStudio,
                 SurfaceId::ProjectLauncher,
                 SurfaceId::Preferences,
+                SurfaceId::DesignManagement,
                 SurfaceId::AccountOrganization,
                 SurfaceId::JobsManager,
                 SurfaceId::NotificationCenter,

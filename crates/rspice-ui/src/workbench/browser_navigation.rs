@@ -1167,6 +1167,18 @@ mod tests {
     }
 
     #[test]
+    fn design_management_uses_its_exact_canonical_surface_selector() {
+        let route = SurfaceRoute::surface(SurfaceId::DesignManagement);
+        let search = search_with_route("?locale=en-US&view=design", route)
+            .expect("Design Management route rewrites");
+        assert_eq!(search, "?surface=design-management&locale=en-US");
+        assert_eq!(
+            route_from_search(&search).expect("Design Management route parses"),
+            Some(route)
+        );
+    }
+
+    #[test]
     fn every_capability_workflow_route_preserves_host_parameters() {
         let original = "?locale=en-US&view=design&campaign=qualification";
 

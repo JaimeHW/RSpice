@@ -4090,6 +4090,51 @@ mod tests {
     }
 
     #[test]
+    fn project_file_round_trips_design_management_authority() {
+        let mut libraries = LibraryManager::with_primitives();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let owner = workspace.active_view.key();
+        workspace
+            .design_management
+            .bootstrap_for_cell_view(&owner, "Main", [11, 12])
+            .expect("design-management fixture");
+        let expected = workspace.design_management.clone();
+        let project = ProjectFile::new(workspace, libraries);
+
+        let json = serialize_project_file(&project).expect("design project serializes");
+        let loaded = load_project_text(&json, None).expect("design project loads");
+
+        assert_eq!(loaded.workspace.design_management, expected);
+        assert_eq!(
+            loaded
+                .workspace
+                .design_management
+                .semantic_digest()
+                .expect("loaded semantic digest"),
+            expected
+                .semantic_digest()
+                .expect("expected semantic digest")
+        );
+    }
+
+    #[test]
+    fn project_file_rejects_unsupported_design_management_schema() {
+        let mut libraries = LibraryManager::with_primitives();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        workspace
+            .design_management
+            .bootstrap_for_cell_view(&workspace.active_view.key(), "Main", [11])
+            .expect("design-management fixture");
+        let project = ProjectFile::new(workspace, libraries);
+        let mut value = serde_json::to_value(project).expect("project JSON value");
+        value["workspace"]["design_management"]["schema_version"] = serde_json::Value::from(999);
+        let json = serde_json::to_string(&value).expect("malformed project JSON");
+
+        let error = load_project_text(&json, None).expect_err("unsupported schema is rejected");
+        assert!(error.to_string().contains("schema 999 is unsupported"));
+    }
+
+    #[test]
     fn project_file_round_trips_project_owned_report_documents() {
         use crate::results::report_document::{
             ReportDocument, ReportEdit, ReportPageUpdatePolicy, ReportTemplate,

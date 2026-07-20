@@ -5,12 +5,16 @@ use crate::state::{ComponentType, NetGraph, Point, Tool};
 
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;
-use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate};
+use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_active_sheet};
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::design_notes::design_note_at;
 use super::documentation_shapes::documentation_shape_at;
 use super::drawing::{bus_tap_at, nearest_bus_hit, nearest_terminal};
 use super::net_labels::net_label_at;
+use super::sheet_visibility::{
+    active_junction_at, active_wire_at, active_wire_point_is_draggable, objects_on_active_sheet,
+    retain_selection_on_active_sheet, select_in_rect_on_active_sheet, with_active_wire_topology,
+};
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
 
@@ -21,6 +25,7 @@ pub(super) fn handle_tool_interactions(
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
+    retain_selection_on_active_sheet(state);
     let grid_size = state.schematic.grid_size;
     let current_tool = state.schematic.tool;
     if state.dialogs.move_selection.armed && current_tool != Tool::MoveSelection {
@@ -172,9 +177,10 @@ pub(super) fn handle_tool_interactions(
         // Hierarchical instances descend on double-click (the Virtuoso
         // gesture); the breadcrumb pops back out. Everything else opens
         // its properties.
+        let components =
+            objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
         let cell_instance = symbol_context
-            .component_at_resolved_symbol(&state.schematic.components, grid_pos)
-            .or_else(|| state.schematic.component_at(grid_pos))
+            .component_at_resolved_symbol(components.as_ref(), grid_pos)
             .and_then(|id| state.schematic.components.iter().find(|c| c.id == id))
             .filter(|c| c.kind == ComponentType::CellInstance)
             .map(|c| c.id);
@@ -521,7 +527,7 @@ fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Con
 }
 
 fn handle_bus_tap_click(ui: &Ui, state: &mut AppState, requested: Point, hit_radius: i32) {
-    let candidate = match resolve_bus_tap_candidate(&state.schematic, requested, hit_radius) {
+    let candidate = match resolve_bus_tap_candidate_on_active_sheet(state, requested, hit_radius) {
         Ok(candidate) => candidate,
         Err(error) => {
             report_bus_candidate_error(ui, state, error);
@@ -582,14 +588,17 @@ fn resolved_snap_position(
     symbol_context: &SchematicSymbolContext,
     grid_pos: Point,
 ) -> Point {
+    let components = objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
+    let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
+    let junctions = objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
     state
         .schematic
         .snap_engine
         .find_snap_target_resolved(
             grid_pos,
-            &state.schematic.components,
-            &state.schematic.wires,
-            &state.schematic.junctions,
+            components.as_ref(),
+            wires.as_ref(),
+            junctions.as_ref(),
             |component| symbol_context.resolved_symbol(component),
         )
         .snapped_position
@@ -609,7 +618,7 @@ fn handle_select_dragging(
 
     if let Some(pos) = response.hover_pos() {
         let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
-        if state.schematic.is_draggable_wire_point(wire_grid_pos) {
+        if active_wire_point_is_draggable(state, wire_grid_pos) {
             state.dialogs.interaction.hover_wire_vertex = Some((wire_grid_pos.x, wire_grid_pos.y));
         } else {
             state.dialogs.interaction.hover_wire_vertex = None;
@@ -677,7 +686,7 @@ fn handle_select_dragging(
                     start_selection_drag(state, grid_pos);
                 }
                 Some(PointerTarget::Junction(_))
-                    if state.schematic.is_draggable_wire_point(wire_grid_pos) =>
+                    if active_wire_point_is_draggable(state, wire_grid_pos) =>
                 {
                     start_wire_vertex_drag(state, wire_grid_pos);
                 }
@@ -688,7 +697,7 @@ fn handle_select_dragging(
                     start_selection_drag(state, grid_pos);
                 }
                 Some(PointerTarget::Wire(_))
-                    if state.schematic.is_draggable_wire_point(wire_grid_pos) =>
+                    if active_wire_point_is_draggable(state, wire_grid_pos) =>
                 {
                     start_wire_vertex_drag(state, wire_grid_pos);
                 }
@@ -705,7 +714,9 @@ fn handle_select_dragging(
 
         if let Some((old_x, old_y)) = state.dialogs.interaction.vertex_drag_pos {
             let old_pos = Point::new(old_x, old_y);
-            if state.schematic.move_all_vertices_at(old_pos, wire_grid_pos) {
+            if with_active_wire_topology(state, |schematic| {
+                schematic.move_all_vertices_at(old_pos, wire_grid_pos)
+            }) {
                 state.dialogs.interaction.vertex_drag_pos =
                     Some((wire_grid_pos.x, wire_grid_pos.y));
                 state
@@ -721,11 +732,11 @@ fn handle_select_dragging(
             );
 
             if delta.x != 0 || delta.y != 0 {
-                state
-                    .schematic
-                    .move_selection_with_rubber_band_resolved(delta, |component| {
+                with_active_wire_topology(state, |schematic| {
+                    schematic.move_selection_with_rubber_band_resolved(delta, |component| {
                         symbol_context.terminal_points(component)
-                    });
+                    })
+                });
                 state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
             }
         } else if state.schematic.selection_rect.is_active() {
@@ -740,9 +751,9 @@ fn handle_select_dragging(
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
-            state
-                .schematic
-                .cleanup_wire_topology_with_junction_policy(automatic_junctions);
+            with_active_wire_topology(state, |schematic| {
+                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions)
+            });
             // One undo entry for the whole gesture (no-ops deduplicate).
             state.schematic.end_operation();
             state.dialogs.interaction.vertex_drag_pos = None;
@@ -753,9 +764,9 @@ fn handle_select_dragging(
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
-            state
-                .schematic
-                .cleanup_wire_topology_with_junction_policy(automatic_junctions);
+            with_active_wire_topology(state, |schematic| {
+                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions)
+            });
             state.schematic.end_operation();
             state.dialogs.drag_start = None;
             state.dialogs.last_drag_pos = None;
@@ -771,8 +782,9 @@ fn handle_select_dragging(
                 .document_policy
                 .selection_crossing
                 .enclosed_only(left_to_right);
-            symbol_context.select_in_rect(
-                &mut state.schematic,
+            select_in_rect_on_active_sheet(
+                state,
+                symbol_context,
                 super::SelectionWindow::new(min_x, min_y, max_x, max_y, enclosed_only),
                 add_mode,
             );
@@ -1146,23 +1158,20 @@ enum JunctionPlacementOutcome {
 }
 
 fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionPlacementOutcome {
-    let Some(target) = state
-        .schematic
-        .nearest_junction_candidate(requested, state.schematic.grid_size)
-    else {
+    let grid_size = state.schematic.grid_size;
+    let active_wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
+    let mut hit_schematic = crate::state::SchematicState::default();
+    hit_schematic.wires = active_wires.into_owned();
+    let Some(target) = hit_schematic.nearest_junction_candidate(requested, grid_size) else {
         return JunctionPlacementOutcome::NoIntersection;
     };
 
-    if state
-        .schematic
-        .buses
-        .iter()
-        .any(|bus| bus.contains_point(target))
-    {
+    let buses = objects_on_active_sheet(state, &state.schematic.buses, |item| item.id);
+    if buses.iter().any(|bus| bus.contains_point(target)) {
         return JunctionPlacementOutcome::MixedBus;
     }
 
-    if let Some(junction_id) = state.schematic.junction_at(target) {
+    if let Some(junction_id) = active_junction_at(state, target) {
         state.schematic.with_undo("remove junction", |schematic| {
             schematic.remove_junction(junction_id);
         });
@@ -1250,42 +1259,34 @@ pub(super) fn pointer_target(
     viewport: &Viewport,
     pointer_pos: egui::Pos2,
 ) -> Option<PointerTarget> {
-    design_note_at(
-        ctx,
-        viewport,
-        &state.schematic.design_notes,
-        state,
-        pointer_pos,
-    )
-    .map(PointerTarget::DesignNote)
-    .or_else(|| {
-        net_label_at(ctx, viewport, &state.schematic.net_labels, pointer_pos)
-            .map(PointerTarget::NetLabel)
-    })
-    .or_else(|| {
-        symbol_context
-            .component_at_resolved_symbol(&state.schematic.components, hit.grid)
-            .or_else(|| state.schematic.component_at(hit.grid))
-            .map(PointerTarget::Component)
-    })
-    .or_else(|| {
-        bus_tap_at(&state.schematic.bus_taps, hit.schematic, hit_radius).map(PointerTarget::BusTap)
-    })
-    .or_else(|| {
-        state
-            .schematic
-            .junction_at(hit.grid)
-            .map(|_| PointerTarget::Junction(hit.grid))
-    })
-    .or_else(|| {
-        nearest_bus_hit(&state.schematic.buses, hit.schematic, hit_radius)
-            .map(|hit| PointerTarget::Bus(hit.bus_id))
-    })
-    .or_else(|| state.schematic.wire_at(hit.grid).map(PointerTarget::Wire))
-    .or_else(|| {
-        documentation_shape_at(viewport, &state.schematic.documentation_shapes, pointer_pos)
-            .map(PointerTarget::DocumentationShape)
-    })
+    let notes = objects_on_active_sheet(state, &state.schematic.design_notes, |item| item.id);
+    let labels = objects_on_active_sheet(state, &state.schematic.net_labels, |item| item.id);
+    let components = objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
+    let taps = objects_on_active_sheet(state, &state.schematic.bus_taps, |item| item.id);
+    let buses = objects_on_active_sheet(state, &state.schematic.buses, |item| item.id);
+    let shapes =
+        objects_on_active_sheet(state, &state.schematic.documentation_shapes, |item| item.id);
+    design_note_at(ctx, viewport, notes.as_ref(), state, pointer_pos)
+        .map(PointerTarget::DesignNote)
+        .or_else(|| {
+            net_label_at(ctx, viewport, labels.as_ref(), pointer_pos).map(PointerTarget::NetLabel)
+        })
+        .or_else(|| {
+            symbol_context
+                .component_at_resolved_symbol(components.as_ref(), hit.grid)
+                .map(PointerTarget::Component)
+        })
+        .or_else(|| bus_tap_at(taps.as_ref(), hit.schematic, hit_radius).map(PointerTarget::BusTap))
+        .or_else(|| active_junction_at(state, hit.grid).map(|_| PointerTarget::Junction(hit.grid)))
+        .or_else(|| {
+            nearest_bus_hit(buses.as_ref(), hit.schematic, hit_radius)
+                .map(|hit| PointerTarget::Bus(hit.bus_id))
+        })
+        .or_else(|| active_wire_at(state, hit.grid).map(PointerTarget::Wire))
+        .or_else(|| {
+            documentation_shape_at(viewport, shapes.as_ref(), pointer_pos)
+                .map(PointerTarget::DocumentationShape)
+        })
 }
 
 fn handle_select_click(
@@ -1454,7 +1455,7 @@ fn handle_probe_click(
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if let Some(_wire_id) = state.schematic.wire_at(grid_pos) {
+    if let Some(_wire_id) = active_wire_at(state, grid_pos) {
         if let Some(net_name) = state.simulation.cross_probe.net_at_in(
             &state.workspace.active_view,
             state.schematic.topology_version(),
@@ -1481,8 +1482,11 @@ fn handle_probe_click(
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
                 {
-                    let net_graph =
-                        NetGraph::build(&state.schematic.wires, &state.schematic.junctions);
+                    let wires =
+                        objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
+                    let junctions =
+                        objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
+                    let net_graph = NetGraph::build(wires.as_ref(), junctions.as_ref());
                     state
                         .schematic
                         .net_highlight
@@ -1503,14 +1507,17 @@ fn handle_probe_click(
                 "Wire not in netlist. Run simulation to update.".to_string(),
             ));
         }
-    } else if let Some(comp_id) = symbol_context
-        .component_at_resolved_symbol(&state.schematic.components, grid_pos)
-        .or_else(|| state.schematic.component_at(grid_pos))
-    {
-        handle_component_probe(ui, state, comp_id, grid_pos, symbol_context);
     } else {
-        state.schematic.net_highlight.clear();
-        log::debug!("Probe: clicked empty space at {:?}", grid_pos);
+        let components =
+            objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
+        let Some(comp_id) =
+            symbol_context.component_at_resolved_symbol(components.as_ref(), grid_pos)
+        else {
+            state.schematic.net_highlight.clear();
+            log::debug!("Probe: clicked empty space at {:?}", grid_pos);
+            return;
+        };
+        handle_component_probe(ui, state, comp_id, grid_pos, symbol_context);
     }
 }
 
@@ -1605,7 +1612,8 @@ mod tests {
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
         DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
         PendingDocumentationShapePlacement, PendingPortPlacement, PortDirection, PortDirectionType,
-        PortDiscipline, PortSignalType, Tool, Wire,
+        PortDiscipline, PortSignalType, SheetDefinition, SheetPortPolicy, SheetTemplate, Tool,
+        Wire,
     };
 
     fn pointer_viewport() -> Viewport {
@@ -2247,6 +2255,58 @@ mod tests {
                 screen_point,
             ),
             Some(PointerTarget::Wire(11))
+        );
+    }
+
+    #[test]
+    fn hidden_overlapping_component_cannot_block_active_component_hit() {
+        let point = Point::new(10, 10);
+        let mut state = AppState::default();
+        state.schematic.components = vec![
+            Component::new(20, ComponentType::Capacitor, point),
+            Component::new(10, ComponentType::Resistor, point),
+        ];
+        let key = state.workspace.active_schematic_reference().key();
+        let first = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Sheet 1", [10, 20])
+            .unwrap();
+        let catalog = state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&key)
+            .unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Sheet 2".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .unwrap();
+        catalog
+            .assign_objects(catalog.revision(), second, [20])
+            .unwrap();
+        catalog.set_active(first).unwrap();
+        let context = SchematicSymbolContext::default();
+        let ctx = egui::Context::default();
+        let viewport = pointer_viewport();
+
+        assert_eq!(
+            pointer_target(
+                &state,
+                PointerHit::new(point, point),
+                1,
+                &context,
+                &ctx,
+                &viewport,
+                egui::pos2(point.x as f32, point.y as f32),
+            ),
+            Some(PointerTarget::Component(10))
         );
     }
 

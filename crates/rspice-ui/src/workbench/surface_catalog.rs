@@ -132,7 +132,7 @@ macro_rules! define_surface_catalog {
 
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
-            pub const ALL: [Self; 63] = [$(Self::$variant),+];
+            pub const ALL: [Self; 64] = [$(Self::$variant),+];
 
             #[must_use]
             pub const fn metadata(self) -> SurfaceMetadata {
@@ -210,6 +210,7 @@ macro_rules! define_surface_catalog {
             pub const fn owner_workspace(self) -> Option<Workspace> {
                 match self {
                     Self::VisualizationStudio => Some(Workspace::Results),
+                    Self::DesignManagement => Some(Workspace::Design),
                     _ => self.workspace(),
                 }
             }
@@ -292,6 +293,7 @@ define_surface_catalog! {
     LibraryCellviewManager => { id: "library-cellview-manager", label: "Library, cellview, symbol and form authoring", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-cellview-manager" },
     ProjectLauncher => { id: "project-launcher", label: "Project launcher", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=project-launcher" },
     Preferences => { id: "preferences", label: "Preferences", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=preferences" },
+    DesignManagement => { id: "design-management", label: "Sheets, variants and annotation", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=design-management" },
     AccountOrganization => { id: "account-organization", label: "Account and administration", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=account-organization" },
     CommandPalette => { id: "command-palette", label: "Command palette", archetype: Overlay, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=command-palette" },
     JobsManager => { id: "jobs-manager", label: "Jobs, targets and run history", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=jobs-manager" },
@@ -368,7 +370,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_count_and_unique_contract_values() {
-        assert_eq!(SurfaceId::ALL.len(), 63);
+        assert_eq!(SurfaceId::ALL.len(), 64);
 
         let ids = SurfaceId::ALL
             .iter()
@@ -383,9 +385,9 @@ mod tests {
             .map(|surface| surface.deep_link())
             .collect::<HashSet<_>>();
 
-        assert_eq!(ids.len(), 63);
-        assert_eq!(labels.len(), 63);
-        assert_eq!(deep_links.len(), 63);
+        assert_eq!(ids.len(), 64);
+        assert_eq!(labels.len(), 64);
+        assert_eq!(deep_links.len(), 64);
     }
 
     #[test]
@@ -396,7 +398,7 @@ mod tests {
                 .filter(|surface| surface.release_status() == status)
                 .count()
         };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 46);
+        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 47);
         assert_eq!(count_status(ReleaseStatus::Preview), 10);
         assert_eq!(count_status(ReleaseStatus::ExternalFirst), 6);
         assert_eq!(count_status(ReleaseStatus::InternalOnly), 1);
@@ -409,7 +411,7 @@ mod tests {
         };
         assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 7);
         assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 41);
-        assert_eq!(count_archetype(SurfaceArchetype::Manager), 9);
+        assert_eq!(count_archetype(SurfaceArchetype::Manager), 10);
         assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
         assert_eq!(count_archetype(SurfaceArchetype::Overlay), 3);
         assert_eq!(count_archetype(SurfaceArchetype::Internal), 1);
@@ -504,6 +506,35 @@ mod tests {
         assert_eq!(
             SurfaceId::VisualizationStudio.deep_link(),
             "?surface=visualization-studio"
+        );
+    }
+
+    #[test]
+    fn design_management_keeps_manager_identity_with_design_ownership() {
+        assert_eq!(SurfaceId::DesignManagement.workspace(), None);
+        assert_eq!(
+            SurfaceId::DesignManagement.owner_workspace(),
+            Some(Workspace::Design)
+        );
+        assert_eq!(
+            SurfaceId::DesignManagement.label(),
+            "Sheets, variants and annotation"
+        );
+        assert_eq!(
+            SurfaceId::DesignManagement.archetype(),
+            SurfaceArchetype::Manager
+        );
+        assert_eq!(
+            SurfaceId::DesignManagement.canonical_tier(),
+            CanonicalTier::ReleaseTarget
+        );
+        assert_eq!(
+            SurfaceId::DesignManagement.release_status(),
+            ReleaseStatus::ReleaseScope
+        );
+        assert_eq!(
+            SurfaceId::DesignManagement.deep_link(),
+            "?surface=design-management"
         );
     }
 }

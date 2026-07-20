@@ -4,6 +4,7 @@
 //! Core data structures that are shared across multiple modules.
 
 mod configuration_set;
+mod design_management;
 pub mod library_browser;
 pub mod model_library;
 pub mod pdk_config;
@@ -22,6 +23,7 @@ pub use configuration_set::{
     ConfigurationSetError, ConfigurationSetId, ConfigurationSetLineage, ConfigurationSetOverride,
     UnresolvedBindingPolicy,
 };
+pub use design_management::*;
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryCellPlacementParameter, LibraryManager,
     NavColumn, View, ViewType, library_cell_placement_candidates,

@@ -13,8 +13,9 @@ use crate::services::drc::{DrcConfig, DrcViolation, run_drc_check_with_hierarchy
 use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
 use crate::state::{
     Cell, CellViewRef, HierarchyExtractionPlan, HierarchyExtractionTerminal,
-    HierarchyNetConnectivity, NetLabel, PortDirection, PortDiscipline, PortSpec, SymbolDocument,
-    View, ViewType, hierarchy_terminal_direction, hierarchy_terminal_discipline,
+    HierarchyNetConnectivity, NetLabel, PortDirection, PortDiscipline, PortSpec,
+    SheetMoveConnectivityPlan, SymbolDocument, View, ViewType, hierarchy_terminal_direction,
+    hierarchy_terminal_discipline,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -530,6 +531,24 @@ fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
             },
             &component_bounds,
         )
+        .map_err(|error| error.to_string())
+}
+
+/// Resolve the live selected-instance partition through the same canonical
+/// connectivity authority used by transactional hierarchy extraction.  Sheet
+/// management consumes this result to preserve internal conductors and create
+/// exact typed contracts for every source/destination boundary terminal.
+pub(super) fn selected_component_sheet_move_plan(
+    state: &AppState,
+) -> Result<SheetMoveConnectivityPlan, String> {
+    if !create_hierarchy_available(state) {
+        return Err(
+            "A governed sheet move requires one or more complete, writable schematic instances and no partial or non-instance selections."
+                .to_owned(),
+        );
+    }
+    source_plan(state)?
+        .sheet_move_connectivity(&state.schematic)
         .map_err(|error| error.to_string())
 }
 

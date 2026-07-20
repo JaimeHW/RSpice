@@ -91,6 +91,7 @@ pub enum Command {
     ArraySelection,
     ReplaceInstance,
     CreateHierarchy,
+    DesignManagement,
     ConfigurationSets,
     SymbolPinTool,
     SymbolPolylineTool,
@@ -284,6 +285,11 @@ impl Command {
             Self::CreateHierarchy => spec(
                 "create-hierarchy",
                 "Create hierarchy from selection\u{2026}",
+                "Design",
+            ),
+            Self::DesignManagement => spec(
+                "design-management",
+                "Sheets, variants and annotation\u{2026}",
                 "Design",
             ),
             Self::ConfigurationSets => {
@@ -656,6 +662,12 @@ impl Command {
                 active_schematic_editor(app)
                     && crate::common::app::create_hierarchy_available(state)
             }
+            Self::DesignManagement => {
+                active_schematic_editor(app)
+                    && state.project_lifecycle.project_open
+                    && !state.schematic.read_only
+                    && !state.active_view_read_only()
+            }
             Self::ConfigurationSets => state.project_lifecycle.project_open,
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -847,8 +859,14 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(true);
                 } else {
+                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
+                        &mut app.state,
+                    );
                     app.state.schematic.copy_selection();
-                    app.state.schematic.delete_selection();
+                    crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+                        &mut app.state,
+                        |schematic| schematic.delete_selection(),
+                    );
                 }
             }
             Self::Copy => {
@@ -859,6 +877,9 @@ impl Command {
                 } else if active_symbol_editor(app) {
                     app.copy_selected_symbol_shape();
                 } else {
+                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
+                        &mut app.state,
+                    );
                     app.state.schematic.copy_selection();
                 }
             }
@@ -880,6 +901,9 @@ impl Command {
                     app.copy_selected_symbol_shape();
                     app.paste_symbol_shape();
                 } else {
+                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
+                        &mut app.state,
+                    );
                     app.state.schematic.copy_selection();
                     let anchor =
                         app.state.schematic_paste_anchor() + crate::state::Point::new(2, 2);
@@ -895,7 +919,13 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(false);
                 } else {
-                    app.state.schematic.delete_selection();
+                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
+                        &mut app.state,
+                    );
+                    crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+                        &mut app.state,
+                        |schematic| schematic.delete_selection(),
+                    );
                 }
             }
             Self::SelectAll => {
@@ -907,7 +937,9 @@ impl Command {
                     // subset here previously made Ctrl+A silently omit buses,
                     // taps, and net labels even though every downstream edit
                     // operation already supported them.
-                    app.state.schematic.select_all_objects();
+                    crate::schematic::view::sheet_visibility::select_all_on_active_sheet(
+                        &mut app.state,
+                    );
                 }
             }
             Self::RenameSelection => {
@@ -1121,6 +1153,22 @@ impl Command {
             Self::CreateHierarchy => {
                 crate::common::app::open_create_hierarchy_dialog(&mut app.state);
             }
+            Self::DesignManagement => {
+                let route = super::SurfaceRoute::surface(super::SurfaceId::DesignManagement);
+                match app
+                    .state
+                    .workbench
+                    .navigate(route, super::RouteTransitionSource::User)
+                {
+                    Ok(_) => crate::common::app::open_design_management_dialog(&mut app.state),
+                    Err(error) => {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                                error.to_string(),
+                            ))
+                    }
+                }
+            }
             Self::ConfigurationSets => {
                 crate::common::app::open_configuration_sets_dialog(&mut app.state);
             }
@@ -1161,25 +1209,45 @@ impl Command {
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection => {
                 let symbol_context = SchematicSymbolContext::from_state(&app.state);
-                app.state.schematic.rotate_selection_resolved(|component| {
-                    symbol_context.terminal_points(component)
-                });
+                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
+                    &mut app.state,
+                );
+                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+                    &mut app.state,
+                    |schematic| {
+                        schematic.rotate_selection_resolved(|component| {
+                            symbol_context.terminal_points(component)
+                        })
+                    },
+                );
             }
             Self::MirrorSelectionHorizontal => {
                 let symbol_context = SchematicSymbolContext::from_state(&app.state);
-                app.state
-                    .schematic
-                    .mirror_selection_h_resolved(|component| {
-                        symbol_context.terminal_points(component)
-                    });
+                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
+                    &mut app.state,
+                );
+                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+                    &mut app.state,
+                    |schematic| {
+                        schematic.mirror_selection_h_resolved(|component| {
+                            symbol_context.terminal_points(component)
+                        })
+                    },
+                );
             }
             Self::MirrorSelectionVertical => {
                 let symbol_context = SchematicSymbolContext::from_state(&app.state);
-                app.state
-                    .schematic
-                    .mirror_selection_v_resolved(|component| {
-                        symbol_context.terminal_points(component)
-                    });
+                crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
+                    &mut app.state,
+                );
+                crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+                    &mut app.state,
+                    |schematic| {
+                        schematic.mirror_selection_v_resolved(|component| {
+                            symbol_context.terminal_points(component)
+                        })
+                    },
+                );
             }
             Self::Cancel => {
                 if app.state.dialogs.move_selection.armed {
@@ -1704,6 +1772,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ArraySelection,
     Command::ReplaceInstance,
     Command::CreateHierarchy,
+    Command::DesignManagement,
     Command::ConfigurationSets,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
@@ -2879,6 +2948,54 @@ mod tests {
         app.state.dialogs.configuration_sets.open = false;
         app.state.project_lifecycle.project_open = false;
         assert!(!Command::ConfigurationSets.is_enabled(&app));
+    }
+
+    #[test]
+    fn design_management_has_mockup_identity_authority_and_owned_workflow() {
+        assert_eq!(Command::DesignManagement.stable_id(), "design-management");
+        assert_eq!(
+            Command::DesignManagement.spec().label,
+            "Sheets, variants and annotation\u{2026}"
+        );
+        assert_eq!(Command::DesignManagement.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("design-management"),
+            Some(Command::DesignManagement)
+        );
+        assert!(Command::DesignManagement.shortcut_bindings().is_empty());
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::DesignManagement)
+            .expect("design-management must be registered");
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index - 1],
+            Command::CreateHierarchy
+        );
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index + 1],
+            Command::ConfigurationSets
+        );
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        assert!(Command::DesignManagement.is_enabled(&app));
+        Command::DesignManagement.execute(&mut app);
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            crate::workbench::SurfaceId::DesignManagement
+        );
+        assert_eq!(app.state.workbench.workspace, Workspace::Design);
+        assert!(app.state.dialogs.design_management.open);
+        assert!(app.state.dialogs.application_modal_open());
+
+        app.state.dialogs.design_management.open = false;
+        app.state.schematic.read_only = true;
+        assert!(!Command::DesignManagement.is_enabled(&app));
+
+        app.state.schematic.read_only = false;
+        app.state.project_lifecycle.project_open = false;
+        assert!(!Command::DesignManagement.is_enabled(&app));
     }
 
     #[test]

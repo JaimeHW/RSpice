@@ -178,6 +178,19 @@ pub(crate) fn open_configuration_sets_dialog(state: &mut AppState) {
     state.dialogs.configuration_sets.open(&catalog, root);
 }
 
+pub(crate) fn open_configuration_binding_dialog(state: &mut AppState) {
+    open_configuration_sets_dialog(state);
+    if !state.dialogs.configuration_sets.open {
+        return;
+    }
+    if state.dialogs.configuration_sets.draft.is_some() {
+        state.dialogs.configuration_sets.page = ConfigurationDialogPage::Binding;
+    } else {
+        state.dialogs.configuration_sets.error =
+            Some("Create a configuration set before editing hierarchy bindings.".to_owned());
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BodyAction {
     None,
@@ -1926,6 +1939,30 @@ mod tests {
             .create(definition("Release"))
             .expect("configuration");
         assert_eq!(unique_configuration_name(&catalog, "release"), "release 2");
+    }
+
+    #[test]
+    fn hierarchy_binding_entry_opens_the_binding_page_and_requires_a_configuration() {
+        let (mut app, _) = valid_configuration_app();
+        open_configuration_binding_dialog(&mut app.state);
+        assert!(app.state.dialogs.configuration_sets.open);
+        assert_eq!(
+            app.state.dialogs.configuration_sets.page,
+            ConfigurationDialogPage::Binding
+        );
+        assert!(app.state.dialogs.configuration_sets.error.is_none());
+
+        let mut empty = RSpiceApp::test_instance();
+        open_configuration_binding_dialog(&mut empty.state);
+        assert!(empty.state.dialogs.configuration_sets.open);
+        assert_eq!(
+            empty.state.dialogs.configuration_sets.page,
+            ConfigurationDialogPage::Manager
+        );
+        assert_eq!(
+            empty.state.dialogs.configuration_sets.error.as_deref(),
+            Some("Create a configuration set before editing hierarchy bindings.")
+        );
     }
 
     #[test]

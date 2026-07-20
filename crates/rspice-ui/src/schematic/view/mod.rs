@@ -31,6 +31,7 @@ mod net_labels;
 mod preview;
 pub(crate) mod resolved_symbol_render;
 mod scene;
+pub(crate) mod sheet_visibility;
 mod stretch_interaction;
 mod symbol_primitives;
 mod viewport;
@@ -45,6 +46,7 @@ use self::resolved_symbol_render::resolved_symbol_world_bounds;
 use self::scene::draw_scene;
 
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
+pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet;
 
 const SCHEMATIC_CANVAS_INTERACTION_ID: &str = "rspice-schematic-canvas-interaction";
 

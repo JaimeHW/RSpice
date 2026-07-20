@@ -565,23 +565,41 @@ impl RSpiceApp {
 
     fn rotate_schematic_selection_with_symbols(&mut self) {
         let symbol_context = SchematicSymbolContext::from_state(&self.state);
-        self.state
-            .schematic
-            .rotate_selection_resolved(|component| symbol_context.terminal_points(component));
+        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
+        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+            &mut self.state,
+            |schematic| {
+                schematic.rotate_selection_resolved(|component| {
+                    symbol_context.terminal_points(component)
+                })
+            },
+        );
     }
 
     fn mirror_schematic_selection_h_with_symbols(&mut self) {
         let symbol_context = SchematicSymbolContext::from_state(&self.state);
-        self.state
-            .schematic
-            .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component));
+        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
+        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+            &mut self.state,
+            |schematic| {
+                schematic.mirror_selection_h_resolved(|component| {
+                    symbol_context.terminal_points(component)
+                })
+            },
+        );
     }
 
     fn mirror_schematic_selection_v_with_symbols(&mut self) {
         let symbol_context = SchematicSymbolContext::from_state(&self.state);
-        self.state
-            .schematic
-            .mirror_selection_v_resolved(|component| symbol_context.terminal_points(component));
+        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
+        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+            &mut self.state,
+            |schematic| {
+                schematic.mirror_selection_v_resolved(|component| {
+                    symbol_context.terminal_points(component)
+                })
+            },
+        );
     }
 
     pub(crate) fn select_all_symbol_items(&mut self) {
@@ -917,6 +935,7 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_edit_copy(&mut self) {
+        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         self.state.schematic.copy_selection();
     }
 
@@ -930,16 +949,24 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_edit_cut(&mut self) {
+        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         self.state.schematic.copy_selection();
-        self.state.schematic.delete_selection();
+        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+            &mut self.state,
+            |schematic| schematic.delete_selection(),
+        );
     }
 
     pub(super) fn action_edit_delete(&mut self) {
-        self.state.schematic.delete_selection();
+        crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
+        crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
+            &mut self.state,
+            |schematic| schematic.delete_selection(),
+        );
     }
 
     pub(super) fn action_edit_select_all(&mut self) {
-        self.state.schematic.select_all_objects();
+        crate::schematic::view::sheet_visibility::select_all_on_active_sheet(&mut self.state);
     }
 }
 

@@ -1,6 +1,8 @@
+use crate::common::app::AppState;
 use crate::state::{Bus, BusDeclaration, BusTapOrientation, BusTargetKind, Point, SchematicState};
 
 use super::drawing::nearest_bus_hit;
+use super::sheet_visibility::object_is_on_active_sheet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct BusTapCandidate {
@@ -49,16 +51,45 @@ impl BusTapCandidateError {
     }
 }
 
+#[cfg(test)]
 pub(super) fn resolve_bus_tap_candidate(
     schematic: &SchematicState,
     requested: Point,
     source_hit_radius: i32,
 ) -> Result<BusTapCandidate, BusTapCandidateError> {
+    resolve_bus_tap_candidate_filtered(schematic, requested, source_hit_radius, |_| true)
+}
+
+pub(super) fn resolve_bus_tap_candidate_on_active_sheet(
+    state: &AppState,
+    requested: Point,
+    source_hit_radius: i32,
+) -> Result<BusTapCandidate, BusTapCandidateError> {
+    resolve_bus_tap_candidate_filtered(
+        &state.schematic,
+        requested,
+        source_hit_radius,
+        |object_id| object_is_on_active_sheet(state, object_id),
+    )
+}
+
+fn resolve_bus_tap_candidate_filtered(
+    schematic: &SchematicState,
+    requested: Point,
+    source_hit_radius: i32,
+    object_is_visible: impl Fn(u64) -> bool,
+) -> Result<BusTapCandidate, BusTapCandidateError> {
     let pending = schematic
         .pending_bus_tap
         .as_ref()
         .ok_or(BusTapCandidateError::MissingConfiguration)?;
-    let hit = nearest_bus_hit(&schematic.buses, requested, source_hit_radius.max(0))
+    let visible_buses = schematic
+        .buses
+        .iter()
+        .filter(|bus| object_is_visible(bus.id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let hit = nearest_bus_hit(&visible_buses, requested, source_hit_radius.max(0))
         .ok_or(BusTapCandidateError::NoSourceBus)?;
     let source = schematic
         .buses
@@ -88,15 +119,20 @@ pub(super) fn resolve_bus_tap_candidate(
         hit.segment_end,
     );
     let target = match pending.slice.target_kind() {
-        BusTargetKind::Wire => {
-            resolve_scalar_target(schematic, hit.bus_id, hit.point, &directions)?
-        }
+        BusTargetKind::Wire => resolve_scalar_target(
+            schematic,
+            hit.bus_id,
+            hit.point,
+            &directions,
+            &object_is_visible,
+        )?,
         BusTargetKind::Bus => resolve_bus_target(
             schematic,
             hit.bus_id,
             hit.point,
             &directions,
             &pending.slice,
+            &object_is_visible,
         )?,
     };
 
@@ -113,11 +149,13 @@ fn resolve_scalar_target(
     source_bus_id: u64,
     source: Point,
     directions: &[BusTapOrientation],
+    object_is_visible: &impl Fn(u64) -> bool,
 ) -> Result<(Point, BusTapOrientation), BusTapCandidateError> {
     for &orientation in directions {
         let mut candidates: Vec<(i64, Point)> = schematic
             .wires
             .iter()
+            .filter(|wire| object_is_visible(wire.id))
             .flat_map(|wire| wire.points.windows(2))
             .filter_map(|segment| {
                 ray_segment_intersection(source, orientation, segment[0], segment[1])
@@ -125,14 +163,24 @@ fn resolve_scalar_target(
             .collect();
         candidates.sort_by_key(|candidate| (candidate.0, candidate.1.x, candidate.1.y));
         if let Some((_, point)) = candidates.into_iter().next() {
-            if schematic.buses.iter().any(|bus| bus.contains_point(point)) {
+            if schematic
+                .buses
+                .iter()
+                .any(|bus| object_is_visible(bus.id) && bus.contains_point(point))
+            {
                 return Err(BusTapCandidateError::MixedScalarBusTarget);
             }
             return Ok((point, orientation));
         }
     }
 
-    if ray_hits_other_bus(schematic, source_bus_id, source, directions) {
+    if ray_hits_other_bus(
+        schematic,
+        source_bus_id,
+        source,
+        directions,
+        object_is_visible,
+    ) {
         Err(BusTapCandidateError::MixedScalarBusTarget)
     } else {
         Err(BusTapCandidateError::NoScalarWire)
@@ -145,6 +193,7 @@ fn resolve_bus_target(
     source: Point,
     directions: &[BusTapOrientation],
     slice: &crate::state::BusSlice,
+    object_is_visible: &impl Fn(u64) -> bool,
 ) -> Result<(Point, BusTapOrientation), BusTapCandidateError> {
     let expected = BusDeclaration::new(slice.name.clone(), slice.msb, slice.lsb, slice.notation)
         .map_err(|_| BusTapCandidateError::NoCompatibleBus)?;
@@ -152,7 +201,7 @@ fn resolve_bus_target(
         let mut candidates: Vec<(i64, Point, &Bus)> = schematic
             .buses
             .iter()
-            .filter(|bus| bus.id != source_bus_id)
+            .filter(|bus| bus.id != source_bus_id && object_is_visible(bus.id))
             .flat_map(|bus| {
                 bus.points.windows(2).filter_map(move |segment| {
                     ray_segment_intersection(source, orientation, segment[0], segment[1])
@@ -175,7 +224,7 @@ fn resolve_bus_target(
             if schematic
                 .wires
                 .iter()
-                .any(|wire| wire.contains_point(point))
+                .any(|wire| object_is_visible(wire.id) && wire.contains_point(point))
             {
                 return Err(BusTapCandidateError::MixedScalarBusTarget);
             }
@@ -185,9 +234,10 @@ fn resolve_bus_target(
 
     if directions.iter().any(|&orientation| {
         schematic.wires.iter().any(|wire| {
-            wire.points.windows(2).any(|segment| {
-                ray_segment_intersection(source, orientation, segment[0], segment[1]).is_some()
-            })
+            object_is_visible(wire.id)
+                && wire.points.windows(2).any(|segment| {
+                    ray_segment_intersection(source, orientation, segment[0], segment[1]).is_some()
+                })
         })
     }) {
         Err(BusTapCandidateError::MixedScalarBusTarget)
@@ -201,10 +251,12 @@ fn ray_hits_other_bus(
     source_bus_id: u64,
     source: Point,
     directions: &[BusTapOrientation],
+    object_is_visible: &impl Fn(u64) -> bool,
 ) -> bool {
     directions.iter().any(|&orientation| {
         schematic.buses.iter().any(|bus| {
             bus.id != source_bus_id
+                && object_is_visible(bus.id)
                 && bus.points.windows(2).any(|segment| {
                     ray_segment_intersection(source, orientation, segment[0], segment[1]).is_some()
                 })
@@ -398,6 +450,26 @@ mod tests {
         assert_eq!(candidate.bus_point, Point::new(20, 0));
         assert_eq!(candidate.connection_point, Point::new(20, 10));
         assert_eq!(candidate.orientation, BusTapOrientation::Down);
+    }
+
+    #[test]
+    fn hidden_nearer_target_cannot_intercept_bus_tap_resolution() {
+        let mut state = armed_state("DATA[3]");
+        state
+            .wires
+            .push(Wire::segment(2, Point::new(10, 5), Point::new(30, 5)));
+        state
+            .wires
+            .push(Wire::segment(3, Point::new(10, 10), Point::new(30, 10)));
+
+        let candidate =
+            resolve_bus_tap_candidate_filtered(&state, Point::new(20, 1), 2, |object_id| {
+                object_id != 2
+            })
+            .unwrap();
+
+        assert_eq!(candidate.bus_id, 1);
+        assert_eq!(candidate.connection_point, Point::new(20, 10));
     }
 
     #[test]

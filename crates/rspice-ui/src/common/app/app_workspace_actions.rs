@@ -760,6 +760,15 @@ impl AppState {
 
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
         if is_schematic_like(self.workspace.active_view_type()) {
+            let active = self.workspace.active_schematic_reference();
+            if let Err(error) = self
+                .workspace
+                .assign_unowned_objects_to_active_sheet(&active, &self.schematic)
+            {
+                self.push_user_message(super::ConsoleMessage::warning(format!(
+                    "Sheet membership could not be updated: {error}"
+                )));
+            }
             self.workspace.save_active_schematic(&self.schematic);
             self.sync_generated_symbol_view();
         }
@@ -1155,14 +1164,25 @@ impl AppState {
             ));
         }
 
+        self.sync_active_schematic_to_workspace();
+
         let mut candidate_sources = self.workspace.project_sources.clone();
         let copied_source_ids = candidate_sources
             .clone_cell_view_bundles(src_library, cell, dst_library, new_name)
             .map_err(|error| {
                 format!("Could not copy the cell's project source bundles: {error}")
             })?;
-
-        self.sync_active_schematic_to_workspace();
+        let mut candidate_design_management = self.workspace.design_management.clone();
+        let copied_sheet_catalogs = candidate_design_management
+            .copy_cell_sheet_catalogs(src_library, cell, dst_library, new_name)
+            .map_err(|error| format!("Could not copy the cell's sheet-catalog ownership: {error}"))?
+            .copied_sheet_catalogs;
+        if copied_sheet_catalogs > 0 {
+            self.workspace
+                .project
+                .next_revision()
+                .map_err(|error| format!("Could not advance the project revision: {error}"))?;
+        }
 
         copy.name = new_name.to_owned();
         let view_names: Vec<String> = copy.views.keys().cloned().collect();
@@ -1185,6 +1205,17 @@ impl AppState {
         if !copied_source_ids.is_empty() {
             self.workspace.project_sources = candidate_sources;
             self.workspace.project_sources_dirty = true;
+        }
+        if copied_sheet_catalogs > 0 {
+            self.workspace
+                .project
+                .advance_revision()
+                .expect("the project revision was preflighted without intervening mutation");
+            self.workspace.design_management = candidate_design_management;
+            self.workspace.project_metadata_dirty = true;
+            self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+            self.ui.netlist.current_generation_input_digest = None;
+            self.clear_project_design_history();
         }
 
         self.library_manager.select_cell(dst_library, new_name);
@@ -1236,6 +1267,21 @@ impl AppState {
             .rename_cell_roots(library, cell, new_name)
             .map_err(|error| {
                 format!("Could not move the cell's configuration-set roots: {error}")
+            })?;
+        let mut candidate_design_management = self.workspace.design_management.clone();
+        let design_management_receipt = candidate_design_management
+            .rename_cell_sheet_catalogs(library, cell, new_name)
+            .map_err(|error| {
+                format!("Could not move the cell's Design Management ownership: {error}")
+            })?;
+        let design_management_changed = design_management_receipt.affected_sheet_catalogs > 0
+            || design_management_receipt.remapped_variant_objects > 0
+            || design_management_receipt.remapped_annotation_objects > 0;
+        let design_management_project_revision = design_management_changed
+            .then(|| self.workspace.project.next_revision())
+            .transpose()
+            .map_err(|error| {
+                format!("Could not advance project revision for the cell rename: {error}")
             })?;
 
         let library_mut = self
@@ -1323,6 +1369,17 @@ impl AppState {
         if renamed_configuration_roots > 0 {
             self.workspace.configuration_sets = candidate_configurations;
             self.workspace.project_metadata_dirty = true;
+        }
+        if design_management_project_revision.is_some() {
+            self.workspace
+                .project
+                .advance_revision()
+                .expect("the project revision was preflighted without intervening mutation");
+            self.workspace.design_management = candidate_design_management;
+            self.workspace.project_metadata_dirty = true;
+            self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+            self.ui.netlist.current_generation_input_digest = None;
+            self.clear_project_design_history();
         }
 
         self.library_manager.select_cell(library, new_name);
@@ -2702,6 +2759,372 @@ mod tests {
         let ports = state.schematic.interface_ports();
         assert_eq!(ports.len(), 1);
         assert_eq!(ports[0].name, "PAIR");
+    }
+
+    #[test]
+    fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_variants() {
+        let mut state = state_with_work_cell("amp");
+        let main_component = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        let boundary_component = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(40, 0));
+        let moved_component = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(80, 0));
+        let owner = CellViewRef::new("work", "amp", "schematic").key();
+        let main_sheet = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(
+                &owner,
+                "Main",
+                [main_component, boundary_component, moved_component],
+            )
+            .expect("source sheet catalog");
+        let source_catalog = state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&owner)
+            .expect("source catalog");
+        let auxiliary_sheet = source_catalog
+            .create_sheet(
+                crate::state::SheetDefinition {
+                    name: "Auxiliary".to_owned(),
+                    template: crate::state::SheetTemplate::AnalogSchematic,
+                    port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(main_sheet),
+            )
+            .expect("auxiliary sheet");
+        source_catalog
+            .move_selection(crate::state::MoveSelectionRequest {
+                expected_catalog_revision: source_catalog.revision(),
+                object_ids: vec![moved_component],
+                destination_sheet_id: auxiliary_sheet,
+                boundary_resolution: crate::state::MoveBoundaryResolution::ExplicitPorts {
+                    ports: vec![crate::state::CrossSheetPortDefinition {
+                        net_name: "BIAS".to_owned(),
+                        first: crate::state::CrossSheetPortEndpoint {
+                            sheet_id: main_sheet,
+                            anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: boundary_component,
+                                terminal_name: "BIAS_OUT".to_owned(),
+                            },
+                        },
+                        second: crate::state::CrossSheetPortEndpoint {
+                            sheet_id: auxiliary_sheet,
+                            anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: moved_component,
+                                terminal_name: "BIAS_IN".to_owned(),
+                            },
+                        },
+                        direction: crate::state::CrossSheetPortDirection::Output,
+                        signal_type: crate::state::CrossSheetSignalType::Analog,
+                        discipline: crate::state::CrossSheetDiscipline::Electrical,
+                    }],
+                },
+            })
+            .expect("reviewed cross-sheet move");
+        let variant_id = state
+            .workspace
+            .design_management
+            .variants_mut()
+            .create(crate::state::AssemblyVariantDraft {
+                name: "Industrial".to_owned(),
+                parent_id: None,
+                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::from([(
+                    crate::state::SchematicObjectKey::new(&owner, main_component)
+                        .expect("scoped source object"),
+                    crate::state::VariantObjectOverride::DoNotPopulate {
+                        approval_reference: "ECO-42".to_owned(),
+                    },
+                )]),
+            })
+            .expect("source variant");
+
+        let source_sheet_ids = state
+            .workspace
+            .design_management
+            .sheet_catalog(&owner)
+            .expect("source catalog")
+            .sheets()
+            .iter()
+            .map(crate::state::DesignSheet::id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let source_port_ids = state
+            .workspace
+            .design_management
+            .sheet_catalog(&owner)
+            .expect("source catalog")
+            .cross_sheet_ports()
+            .iter()
+            .map(crate::state::CrossSheetPortContract::id)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        state
+            .copy_cell("work", "amp", "work", "amp_copy")
+            .expect("cell copy succeeds");
+
+        let copied_owner = CellViewRef::new("work", "amp_copy", "schematic").key();
+        let copied_catalog = state
+            .workspace
+            .design_management
+            .sheet_catalog(&copied_owner)
+            .expect("copied sheet catalog");
+        let copied_sheet_ids = copied_catalog
+            .sheets()
+            .iter()
+            .map(crate::state::DesignSheet::id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let copied_port_ids = copied_catalog
+            .cross_sheet_ports()
+            .iter()
+            .map(crate::state::CrossSheetPortContract::id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(copied_sheet_ids.len(), source_sheet_ids.len());
+        assert!(copied_sheet_ids.is_disjoint(&source_sheet_ids));
+        assert_eq!(copied_port_ids.len(), source_port_ids.len());
+        assert!(copied_port_ids.is_disjoint(&source_port_ids));
+
+        let resolved = state
+            .workspace
+            .design_management
+            .variants()
+            .resolve(variant_id)
+            .expect("source variant remains resolvable");
+        assert!(
+            resolved
+                .override_for(&owner, main_component)
+                .expect("source key is valid")
+                .is_some()
+        );
+        assert!(
+            resolved
+                .override_for(&copied_owner, main_component)
+                .expect("copied key is valid")
+                .is_none(),
+            "copying a cell must not silently clone project assembly-variant ownership"
+        );
+    }
+
+    #[test]
+    fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership() {
+        let mut state = state_with_work_cell("amp");
+        let object_id = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
+        let old_owner = CellViewRef::new("work", "amp", "schematic").key();
+        let sheet_id = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&old_owner, "Main", [object_id])
+            .expect("source sheet catalog");
+        let old_object = crate::state::SchematicObjectKey::new(&old_owner, object_id)
+            .expect("source scoped object");
+        let variant_id = state
+            .workspace
+            .design_management
+            .variants_mut()
+            .create(crate::state::AssemblyVariantDraft {
+                name: "Industrial".to_owned(),
+                parent_id: None,
+                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::from([(
+                    old_object.clone(),
+                    crate::state::VariantObjectOverride::DoNotPopulate {
+                        approval_reference: "ECO-17".to_owned(),
+                    },
+                )]),
+            })
+            .expect("source variant");
+        let renumber_request = crate::state::RenumberRequest {
+            scope: crate::state::RenumberScope::WholeProject,
+            order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+            protected_references:
+                crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![crate::state::AnnotationObject {
+                object: old_object.clone(),
+                current_reference: "R9".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: Some(sheet_id),
+                hierarchy_path: "/top".to_owned(),
+                position: crate::state::AnnotationPosition::default(),
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = state
+            .workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&renumber_request)
+            .expect("renumber preview");
+        state
+            .workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &renumber_request)
+            .expect("reviewed annotation");
+
+        state
+            .rename_cell("work", "amp", "amp_rev_b")
+            .expect("cell rename succeeds");
+
+        let new_owner = CellViewRef::new("work", "amp_rev_b", "schematic").key();
+        assert!(
+            state
+                .workspace
+                .design_management
+                .sheet_catalog(&old_owner)
+                .is_none()
+        );
+        assert_eq!(
+            state
+                .workspace
+                .design_management
+                .sheet_catalog(&new_owner)
+                .expect("renamed sheet catalog")
+                .active_sheet_id(),
+            Some(sheet_id),
+            "renaming ownership must preserve stable sheet identity"
+        );
+        let resolved = state
+            .workspace
+            .design_management
+            .variants()
+            .resolve(variant_id)
+            .expect("renamed variant remains resolvable");
+        assert!(
+            resolved
+                .override_for(&old_owner, object_id)
+                .expect("old key is valid")
+                .is_none()
+        );
+        assert!(
+            resolved
+                .override_for(&new_owner, object_id)
+                .expect("new key is valid")
+                .is_some()
+        );
+        assert!(
+            state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&old_owner, object_id)
+                .expect("old annotation lookup")
+                .is_none()
+        );
+        assert!(
+            state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&new_owner, object_id)
+                .expect("renamed annotation lookup")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog() {
+        let mut state = state_with_work_cell("amp");
+        let object_id = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
+        let old_owner = CellViewRef::new("work", "amp", "schematic").key();
+        let old_object = crate::state::SchematicObjectKey::new(&old_owner, object_id)
+            .expect("source scoped object");
+        let variant_id = state
+            .workspace
+            .design_management
+            .variants_mut()
+            .create(crate::state::AssemblyVariantDraft {
+                name: "Industrial".to_owned(),
+                parent_id: None,
+                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::from([(
+                    old_object.clone(),
+                    crate::state::VariantObjectOverride::DoNotPopulate {
+                        approval_reference: "ECO-18".to_owned(),
+                    },
+                )]),
+            })
+            .expect("source variant");
+        let renumber_request = crate::state::RenumberRequest {
+            scope: crate::state::RenumberScope::WholeProject,
+            order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+            protected_references:
+                crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![crate::state::AnnotationObject {
+                object: old_object,
+                current_reference: "R19".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: None,
+                hierarchy_path: "/top".to_owned(),
+                position: crate::state::AnnotationPosition::default(),
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = state
+            .workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&renumber_request)
+            .expect("renumber preview");
+        state
+            .workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &renumber_request)
+            .expect("reviewed annotation");
+
+        state
+            .rename_cell("work", "amp", "amp_rev_c")
+            .expect("cell rename succeeds");
+
+        let new_owner = CellViewRef::new("work", "amp_rev_c", "schematic").key();
+        let resolved = state
+            .workspace
+            .design_management
+            .variants()
+            .resolve(variant_id)
+            .expect("renamed variant remains resolvable");
+        assert!(
+            resolved
+                .override_for(&old_owner, object_id)
+                .expect("old key is valid")
+                .is_none()
+        );
+        assert!(
+            resolved
+                .override_for(&new_owner, object_id)
+                .expect("new key is valid")
+                .is_some()
+        );
+        assert!(
+            state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&new_owner, object_id)
+                .expect("renamed annotation lookup")
+                .is_some()
+        );
     }
 }
 

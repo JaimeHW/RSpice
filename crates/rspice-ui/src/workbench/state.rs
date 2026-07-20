@@ -1620,6 +1620,7 @@ impl WorkbenchState {
                 self.current_route().surface_id(),
                 SurfaceId::ProjectLauncher
                     | SurfaceId::Preferences
+                    | SurfaceId::DesignManagement
                     | SurfaceId::AccountOrganization
                     | SurfaceId::JobsManager
                     | SurfaceId::SpecialistToolBrowser
@@ -2713,6 +2714,14 @@ mod tests {
                 RouteTransitionSource::User,
             )
             .expect("Preferences has a registered executor");
+        assert!(state.application_modal_open());
+        state
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::DesignManagement),
+                RouteTransitionSource::User,
+            )
+            .expect("Design Management has a registered executor");
+        assert_eq!(state.workspace, Workspace::Design);
         assert!(state.application_modal_open());
         state
             .navigate(

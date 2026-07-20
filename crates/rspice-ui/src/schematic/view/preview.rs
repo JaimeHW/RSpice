@@ -9,7 +9,7 @@ use crate::state::{
 use super::super::symbols::{SymbolLibrary, draw_symbol};
 use super::SchematicSymbolContext;
 use super::array_interaction::array_placement;
-use super::bus_interaction::resolve_bus_tap_candidate;
+use super::bus_interaction::resolve_bus_tap_candidate_on_active_sheet;
 use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
 use super::design_notes::draw_design_note;
 use super::documentation_shapes::{
@@ -20,6 +20,9 @@ use super::drawing::{
 };
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
+use super::sheet_visibility::{
+    active_junction_at, object_is_on_active_sheet, objects_on_active_sheet,
+};
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_diode_symbol, draw_ground_symbol, draw_inductor_symbol,
     draw_isource_symbol, draw_nmos_symbol, draw_npn_symbol, draw_pmos_symbol, draw_pnp_symbol,
@@ -606,9 +609,10 @@ fn draw_junction_preview(
     };
 
     let requested = screen_to_wire_grid(viewport, state.schematic.grid_size, hover_pos);
-    let candidate = state
-        .schematic
-        .nearest_junction_candidate(requested, state.schematic.grid_size);
+    let active_wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
+    let mut hit_schematic = crate::state::SchematicState::default();
+    hit_schematic.wires = active_wires.into_owned();
+    let candidate = hit_schematic.nearest_junction_candidate(requested, state.schematic.grid_size);
     let preview = candidate.unwrap_or(requested);
     let pos = viewport.schematic_to_screen(preview);
     let palette = crate::ui::tokens::active_palette();
@@ -617,17 +621,17 @@ fn draw_junction_preview(
             .schematic
             .buses
             .iter()
-            .any(|bus| bus.contains_point(point))
+            .any(|bus| object_is_on_active_sheet(state, bus.id) && bus.contains_point(point))
     });
     let color = match candidate {
         Some(_) if mixed_bus => palette.err,
-        Some(point) if state.schematic.has_junction(point) => palette.warn,
+        Some(point) if active_junction_at(state, point).is_some() => palette.warn,
         Some(_) => palette.accent,
         None => palette.err,
     };
     let radius = (4.0 * viewport.zoom).max(3.0);
     painter.circle_stroke(pos, radius, Stroke::new(1.0, color));
-    if !mixed_bus && candidate.is_some_and(|point| !state.schematic.has_junction(point)) {
+    if !mixed_bus && candidate.is_some_and(|point| active_junction_at(state, point).is_none()) {
         painter.circle_filled(pos, (1.75 * viewport.zoom).max(1.5), color);
     }
 }
@@ -681,7 +685,7 @@ fn draw_bus_tap_preview(
     };
     let requested = screen_to_schematic(viewport, hover);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
-    match resolve_bus_tap_candidate(&state.schematic, requested, hit_radius) {
+    match resolve_bus_tap_candidate_on_active_sheet(state, requested, hit_radius) {
         Ok(candidate) => {
             let Some(pending) = state.schematic.pending_bus_tap.as_ref() else {
                 return;
@@ -765,14 +769,17 @@ fn wire_preview_snap_position(
     symbol_context: &SchematicSymbolContext,
     grid_pos: Point,
 ) -> Point {
+    let components = objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
+    let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
+    let junctions = objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
     state
         .schematic
         .snap_engine
         .find_snap_target_resolved(
             grid_pos,
-            &state.schematic.components,
-            &state.schematic.wires,
-            &state.schematic.junctions,
+            components.as_ref(),
+            wires.as_ref(),
+            junctions.as_ref(),
             |component| symbol_context.resolved_symbol(component),
         )
         .snapped_position

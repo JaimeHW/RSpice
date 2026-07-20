@@ -290,6 +290,7 @@ fn project_configuration_value(project: &ProjectFile) -> Result<serde_json::Valu
         &project.workspace.project,
         &project.libraries,
         &project.workspace.configuration_sets,
+        &project.workspace.design_management,
     ))
     .map_err(|error| error.to_string())?;
     // Paths are persistence bindings and browser/tree expansion is

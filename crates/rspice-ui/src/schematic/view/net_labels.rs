@@ -161,19 +161,6 @@ pub(super) fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -
     .map(|layout| layout.decoration_rect.union(layout.attachment_hit_rect))
 }
 
-pub(super) fn hovered_net_label(
-    painter: &Painter,
-    viewport: &Viewport,
-    labels: &[NetLabel],
-    canvas: Rect,
-) -> Option<u64> {
-    painter
-        .ctx()
-        .pointer_hover_pos()
-        .filter(|pointer| canvas.contains(*pointer))
-        .and_then(|pointer| net_label_at(painter.ctx(), viewport, labels, pointer))
-}
-
 /// Intrinsic world-space bounds used by fit-to-content and marquee selection.
 /// Pointer hit testing deliberately uses the exact shaped screen galley above.
 pub(super) fn world_bounds(label: &NetLabel) -> (Point, Point) {

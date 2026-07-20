@@ -73,6 +73,7 @@ pub use documentation_shape::{
     DocumentationShapePlacementAuthority, MAX_DOCUMENTATION_POLYGON_POINTS,
     PendingDocumentationShapePlacement, arc_parameters, geometry_from_points,
 };
+pub(crate) use hierarchy::SheetMoveConnectivityPlan;
 pub use hierarchy::{
     HierarchyExtractionCandidate, HierarchyExtractionError, HierarchyExtractionPlan,
     HierarchyExtractionPort, HierarchyExtractionTerminal, HierarchyNetConnectivity,
