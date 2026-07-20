@@ -83,7 +83,7 @@ jobs:
   native-feature-lint:
     name: Lint every native feature combination
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       # rspice-core's generated all-feature surface is large enough that
       # concurrent Clippy/rspice-python compilation exhausts the hosted

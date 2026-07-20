@@ -386,6 +386,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('CARGO_PROFILE_TEST_DEBUG: "0"', workflow)
         self.assertIn("shared-key: python-native-feature-lint-linux", workflow)
         test_job = workflow.split("  native-feature-lint:", maxsplit=1)[0]
+        native_lint_job = workflow.split("  native-feature-lint:", maxsplit=1)[1].split(
+            "  wheels:", maxsplit=1
+        )[0]
+        self.assertIn("timeout-minutes: 60", native_lint_job)
         self.assertNotIn(
             "Lint every native feature combination",
             test_job,
