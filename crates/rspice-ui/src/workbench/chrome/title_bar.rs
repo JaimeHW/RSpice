@@ -1191,6 +1191,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::MoveSelection | Command::StretchSelection => WorkbenchIcon::Select,
         Command::ArraySelection => WorkbenchIcon::Grid,
         Command::ReplaceInstance => WorkbenchIcon::Refresh,
+        Command::CreateHierarchy => WorkbenchIcon::Folder,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy => WorkbenchIcon::Folder,
         Command::RunSimulation => WorkbenchIcon::Run,
@@ -1343,10 +1344,8 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         command_item(ui, app, command);
     }
     menu_separator(ui);
-    command_item(ui, app, Command::RunChecks);
+    command_item(ui, app, Command::CreateHierarchy);
     command_item(ui, app, Command::CheckAndSave);
-    command_item(ui, app, Command::ClearChecks);
-    command_item(ui, app, Command::GenerateNetlist);
 }
 
 fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {

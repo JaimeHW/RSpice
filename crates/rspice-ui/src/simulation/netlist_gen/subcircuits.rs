@@ -199,15 +199,6 @@ fn emit_cell_definition(
     };
 
     let ports = master.interface_ports();
-    if ports.is_empty() {
-        errors.push(format!(
-            "Cell '{}/{}' declares no interface ports — place Port components \
-             in its schematic to define its pins",
-            library, cell
-        ));
-        emitted.insert(key);
-        return;
-    }
 
     // Children first: definitions appear before their first use.
     stack.push(lower_cell.clone());
@@ -473,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn cell_without_ports_is_an_error() {
+    fn legacy_instance_cannot_bind_a_zero_port_master() {
         let mut master = SchematicState::default();
         master.add_component(ComponentType::Resistor, Point::new(30, 0));
 
@@ -486,10 +477,27 @@ mod tests {
             result
                 .errors
                 .iter()
-                .any(|e| e.contains("declares no interface ports")),
+                .any(|e| e.contains("interface no longer matches")),
             "errors: {:?}",
             result.errors
         );
+    }
+
+    #[test]
+    fn explicit_zero_port_project_cell_is_netlistable() {
+        let mut master = SchematicState::default();
+        master.add_component(ComponentType::Resistor, Point::new(30, 0));
+
+        let mut hierarchy = HierarchySource::empty();
+        hierarchy.insert("work", "isolated", &master);
+
+        let mut top = SchematicState::default();
+        top.add_library_cell_component(Point::new(100, 0), binding_with_interface("isolated", &[]));
+        let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        assert!(result.netlist.contains(".subckt isolated"));
+        assert!(result.netlist.contains("X1  isolated"));
     }
 
     #[test]

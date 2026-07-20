@@ -437,7 +437,7 @@ mod tests {
         let resistor = resolve_instance_catalog_entry(&first, "resistor")
             .expect("primitive label resolves exactly");
         assert_eq!(resistor.template.kind, ComponentType::Resistor);
-        assert_eq!(resistor.terminal_names, ["1", "2"]);
+        assert_eq!(resistor.terminal_names, ["+", "-"]);
     }
 
     #[test]

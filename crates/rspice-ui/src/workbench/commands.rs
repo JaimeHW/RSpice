@@ -90,6 +90,7 @@ pub enum Command {
     StretchSelection,
     ArraySelection,
     ReplaceInstance,
+    CreateHierarchy,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolCircleTool,
@@ -279,6 +280,11 @@ impl Command {
             Self::StretchSelection => spec("stretch-selection", "Stretch selection", "Design"),
             Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Design"),
             Self::ReplaceInstance => spec("replace-instance", "Replace instance\u{2026}", "Design"),
+            Self::CreateHierarchy => spec(
+                "create-hierarchy",
+                "Create hierarchy from selection\u{2026}",
+                "Design",
+            ),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => {
                 spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
@@ -546,14 +552,18 @@ impl Command {
             }
             Self::CloseProject => state.project_lifecycle.project_open,
             Self::Undo => {
-                if active_symbol_editor(app) {
+                if state.can_undo_project_design() {
+                    true
+                } else if active_symbol_editor(app) {
                     state.can_undo_active_symbol_document()
                 } else {
                     active_schematic_editor(app) && state.schematic.can_undo()
                 }
             }
             Self::Redo => {
-                if active_symbol_editor(app) {
+                if state.can_redo_project_design() {
+                    true
+                } else if active_symbol_editor(app) {
                     state.can_redo_active_symbol_document()
                 } else {
                     active_schematic_editor(app) && state.schematic.can_redo()
@@ -637,6 +647,10 @@ impl Command {
             Self::ReplaceInstance => {
                 active_schematic_editor(app)
                     && crate::common::app::replace_instance_available(state)
+            }
+            Self::CreateHierarchy => {
+                active_schematic_editor(app)
+                    && crate::common::app::create_hierarchy_available(state)
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -816,30 +830,8 @@ impl Command {
                 }
             }
             Self::Exit => file_action(app, FileMenuAction::Exit),
-            Self::Undo => {
-                if active_symbol_editor(app) {
-                    if let Err(error) = app.state.undo_active_symbol_document() {
-                        app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(error));
-                    }
-                } else {
-                    if app.state.schematic.undo() {
-                        app.state.sync_active_schematic_to_workspace();
-                    }
-                }
-            }
-            Self::Redo => {
-                if active_symbol_editor(app) {
-                    if let Err(error) = app.state.redo_active_symbol_document() {
-                        app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(error));
-                    }
-                } else {
-                    if app.state.schematic.redo() {
-                        app.state.sync_active_schematic_to_workspace();
-                    }
-                }
-            }
+            Self::Undo => app.action_edit_undo(),
+            Self::Redo => app.action_edit_redo(),
             Self::Cut => {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(true);
@@ -1114,6 +1106,9 @@ impl Command {
             }
             Self::ReplaceInstance => {
                 crate::common::app::open_replace_instance_dialog(&mut app.state);
+            }
+            Self::CreateHierarchy => {
+                crate::common::app::open_create_hierarchy_dialog(&mut app.state);
             }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
@@ -1708,6 +1703,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StretchSelection,
     Command::ArraySelection,
     Command::ReplaceInstance,
+    Command::CreateHierarchy,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolCircleTool,
@@ -2136,7 +2132,10 @@ mod tests {
             COMMAND_REGISTRY[registry_index - 1],
             Command::ArraySelection
         );
-        assert_eq!(COMMAND_REGISTRY[registry_index + 1], Command::SymbolPinTool);
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index + 1],
+            Command::CreateHierarchy
+        );
     }
 
     #[test]

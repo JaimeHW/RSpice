@@ -544,6 +544,7 @@ pub(crate) fn accept_loaded_project(
     baseline: ProjectFile,
     binding: Option<PersistenceBinding>,
 ) {
+    state.clear_project_design_history();
     #[cfg(not(target_arch = "wasm32"))]
     let native_receipt = binding
         .as_ref()
@@ -578,6 +579,7 @@ pub(crate) fn accept_loaded_project(
 }
 
 pub(crate) fn reset_for_new_project(state: &mut AppState) {
+    state.clear_project_design_history();
     state.native_project_binding_receipt = None;
     state.browser_project_binding_receipt = None;
     #[cfg(target_arch = "wasm32")]
@@ -593,6 +595,7 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
 }
 
 pub(crate) fn mark_project_closed(state: &mut AppState) {
+    state.clear_project_design_history();
     state.native_project_binding_receipt = None;
     state.browser_project_binding_receipt = None;
     #[cfg(target_arch = "wasm32")]

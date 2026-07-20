@@ -413,27 +413,11 @@ impl RSpiceApp {
 
         match command {
             ShortcutCommand::Undo => {
-                match self.state.undo_active_symbol_document() {
-                    Ok(true) => self
-                        .state
-                        .push_user_message(ConsoleMessage::info("Undo: symbol edit")),
-                    Ok(false) => self
-                        .state
-                        .push_user_message(ConsoleMessage::info("Nothing to undo")),
-                    Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
-                }
+                self.action_edit_undo();
                 true
             }
             ShortcutCommand::Redo => {
-                match self.state.redo_active_symbol_document() {
-                    Ok(true) => self
-                        .state
-                        .push_user_message(ConsoleMessage::info("Redo: symbol edit")),
-                    Ok(false) => self
-                        .state
-                        .push_user_message(ConsoleMessage::info("Nothing to redo")),
-                    Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
-                }
+                self.action_edit_redo();
                 true
             }
             ShortcutCommand::Delete => {
@@ -820,42 +804,116 @@ impl RSpiceApp {
         }
     }
 
-    pub(super) fn action_edit_undo(&mut self) {
-        if self.state.schematic.can_undo() {
-            let desc = self
+    fn try_project_design_undo(&mut self) -> bool {
+        match self.state.undo_project_design() {
+            Ok(Some(description)) => self
                 .state
-                .schematic
-                .undo_description()
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            if self.state.schematic.undo() {
-                self.state.sync_active_schematic_to_workspace();
-                self.state
-                    .push_user_message(ConsoleMessage::info(format!("Undo: {}", desc)));
-            }
-        } else {
-            self.state
-                .push_user_message(ConsoleMessage::info("Nothing to undo"));
+                .push_user_message(ConsoleMessage::info(format!("Undo: {description}"))),
+            Ok(None) => return false,
+            Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
         }
+        true
     }
 
-    pub(super) fn action_edit_redo(&mut self) {
-        if self.state.schematic.can_redo() {
-            let desc = self
+    fn try_project_design_redo(&mut self) -> bool {
+        match self.state.redo_project_design() {
+            Ok(Some(description)) => self
                 .state
-                .schematic
-                .redo_description()
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            if self.state.schematic.redo() {
-                self.state.sync_active_schematic_to_workspace();
-                self.state
-                    .push_user_message(ConsoleMessage::info(format!("Redo: {}", desc)));
-            }
-        } else {
-            self.state
-                .push_user_message(ConsoleMessage::info("Nothing to redo"));
+                .push_user_message(ConsoleMessage::info(format!("Redo: {description}"))),
+            Ok(None) => return false,
+            Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
         }
+        true
+    }
+
+    fn try_active_document_undo(&mut self) -> bool {
+        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            return match self.state.undo_active_symbol_document() {
+                Ok(true) => {
+                    self.state
+                        .push_user_message(ConsoleMessage::info("Undo: symbol edit"));
+                    true
+                }
+                Ok(false) => false,
+                Err(error) => {
+                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    true
+                }
+            };
+        }
+        if !self.state.schematic.can_undo() {
+            return false;
+        }
+        let description = self
+            .state
+            .schematic
+            .undo_description()
+            .unwrap_or("schematic edit")
+            .to_owned();
+        if self.state.schematic.undo() {
+            self.state.sync_active_schematic_to_workspace();
+            self.state
+                .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
+            return true;
+        }
+        false
+    }
+
+    fn try_active_document_redo(&mut self) -> bool {
+        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            return match self.state.redo_active_symbol_document() {
+                Ok(true) => {
+                    self.state
+                        .push_user_message(ConsoleMessage::info("Redo: symbol edit"));
+                    true
+                }
+                Ok(false) => false,
+                Err(error) => {
+                    self.state.push_user_message(ConsoleMessage::warning(error));
+                    true
+                }
+            };
+        }
+        if !self.state.schematic.can_redo() {
+            return false;
+        }
+        let description = self
+            .state
+            .schematic
+            .redo_description()
+            .unwrap_or("schematic edit")
+            .to_owned();
+        if self.state.schematic.redo() {
+            self.state.sync_active_schematic_to_workspace();
+            self.state
+                .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn action_edit_undo(&mut self) {
+        let project_first = self.state.project_undo_owns_active_document();
+        if (project_first && self.try_project_design_undo())
+            || self.try_active_document_undo()
+            || (!project_first && self.try_project_design_undo())
+        {
+            return;
+        }
+        self.state
+            .push_user_message(ConsoleMessage::info("Nothing to undo"));
+    }
+
+    pub(crate) fn action_edit_redo(&mut self) {
+        let project_first = self.state.project_redo_owns_active_document();
+        if (project_first && self.try_project_design_redo())
+            || self.try_active_document_redo()
+            || (!project_first && self.try_project_design_redo())
+        {
+            return;
+        }
+        self.state
+            .push_user_message(ConsoleMessage::info("Nothing to redo"));
     }
 
     pub(super) fn action_edit_copy(&mut self) {

@@ -696,6 +696,91 @@ pub(crate) struct ReplaceInstanceOpen {
     pub(crate) mapping: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CreateHierarchyPortDraft {
+    pub(crate) name: String,
+    pub(crate) direction: crate::state::PortDirection,
+    pub(crate) discipline: crate::state::PortDiscipline,
+    pub(crate) source_net: String,
+}
+
+/// Isolated draft and complete source authority for Create hierarchy from
+/// selection. The live parent, library, and workspace remain untouched until
+/// the primary action validates and swaps a complete project candidate.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CreateHierarchyDialogState {
+    pub(crate) open: bool,
+    pub(crate) cell_name: String,
+    pub(crate) target_view: crate::state::ViewType,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) plan: Option<crate::state::HierarchyExtractionPlan>,
+    pub(crate) ports: Vec<CreateHierarchyPortDraft>,
+    pub(crate) library_revision: u64,
+    pub(crate) initial_cell_name: String,
+    pub(crate) initial_target_view: crate::state::ViewType,
+    pub(crate) initial_ports: Vec<CreateHierarchyPortDraft>,
+    pub(crate) validation_error: Option<String>,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl CreateHierarchyDialogState {
+    pub(crate) fn open(
+        &mut self,
+        authority: SchematicEditAuthority,
+        plan: crate::state::HierarchyExtractionPlan,
+        library_revision: u64,
+    ) {
+        let ports = plan
+            .ports
+            .iter()
+            .map(|port| CreateHierarchyPortDraft {
+                name: port.name.clone(),
+                direction: port.direction,
+                discipline: port.discipline,
+                source_net: port.source_net.clone(),
+            })
+            .collect::<Vec<_>>();
+        *self = Self {
+            open: true,
+            cell_name: "sensor_frontend".to_owned(),
+            target_view: crate::state::ViewType::Schematic,
+            authority: Some(authority),
+            plan: Some(plan),
+            ports: ports.clone(),
+            library_revision,
+            initial_cell_name: "sensor_frontend".to_owned(),
+            initial_target_view: crate::state::ViewType::Schematic,
+            initial_ports: ports,
+            validation_error: None,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = self.cell_name != self.initial_cell_name
+            || self.target_view != self.initial_target_view
+            || self.ports != self.initial_ports;
+        self.discard_confirm = false;
+        self.validation_error = None;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
+
 impl ReplaceInstanceDialogState {
     pub(crate) fn open(&mut self, request: ReplaceInstanceOpen) {
         let initial_replacement = request.replacement.clone();
@@ -1273,6 +1358,9 @@ pub struct DialogState {
 
     /// Pin-, parameter-, model-, and netlist-compatible instance replacement.
     pub(crate) replace_instance: ReplaceInstanceDialogState,
+
+    /// Multi-document selected-instance extraction transaction.
+    pub(crate) create_hierarchy: CreateHierarchyDialogState,
 
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.

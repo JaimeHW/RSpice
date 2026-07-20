@@ -25,6 +25,7 @@ mod component_type;
 mod design_note;
 mod document_policy;
 mod documentation_shape;
+mod hierarchy;
 mod net_highlight;
 mod net_label;
 mod point;
@@ -70,6 +71,11 @@ pub use documentation_shape::{
     DocumentationShapeGeometry, DocumentationShapeKind, DocumentationShapeLayer,
     DocumentationShapePlacementAuthority, MAX_DOCUMENTATION_POLYGON_POINTS,
     PendingDocumentationShapePlacement, arc_parameters, geometry_from_points,
+};
+pub use hierarchy::{
+    HierarchyExtractionCandidate, HierarchyExtractionError, HierarchyExtractionPlan,
+    HierarchyExtractionPort, HierarchyExtractionTerminal, HierarchyNetConnectivity,
+    hierarchy_terminal_direction, hierarchy_terminal_discipline,
 };
 pub use net_highlight::{NetGraph, NetHighlightState};
 pub use net_label::{Junction, NetLabel};

@@ -1,5 +1,6 @@
 use crate::common::app::{AppState, ConsoleMessage, RSpiceApp};
 use crate::panels::{LogAnchor, LogSeverity, LogSource};
+use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::state::{
     CellViewRef, Component, ComponentType, OpenCellView, PinFindingKind, Point, PortDirection,
@@ -189,6 +190,24 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
 }
 
 impl AppState {
+    pub(crate) fn rebuild_active_connections_from_symbols(&mut self) {
+        let terminals = {
+            let symbols = SchematicSymbolContext::from_state(self);
+            self.schematic
+                .components
+                .iter()
+                .flat_map(|component| {
+                    symbols
+                        .named_terminal_points(component)
+                        .into_iter()
+                        .map(move |(name, point)| (component.id, name, point))
+                })
+                .collect::<Vec<_>>()
+        };
+        self.schematic
+            .rebuild_connections_from_terminals(&terminals);
+    }
+
     /// Resolve the user defaults into one explicit, project-portable document
     /// policy. This is the only constructor production UI paths use for a new
     /// schematic/testbench document. Existing buffers are never rewritten.
@@ -758,6 +777,7 @@ impl AppState {
         if !reference.view.eq_ignore_ascii_case("schematic") {
             return;
         }
+        let mut symbol_error = None;
         let ports = self.schematic.interface_ports();
         let Some(cell) = self
             .library_manager
@@ -785,6 +805,11 @@ impl AppState {
         match cell.get_view_mut("symbol") {
             Some(view) if view.metadata.contains_key(GENERATED_KEY) => {
                 view.metadata.insert(PORTS_KEY.to_owned(), encoded);
+                if let Err(error) = SymbolDocument::generated_from_ports(&ports).store_in_view(view)
+                {
+                    symbol_error =
+                        Some(format!("Generated symbol could not be refreshed: {error}"));
+                }
             }
             Some(_) => {} // hand-authored symbol: leave it alone
             None => {
@@ -792,8 +817,17 @@ impl AppState {
                 view.metadata
                     .insert(GENERATED_KEY.to_owned(), "ports".to_owned());
                 view.metadata.insert(PORTS_KEY.to_owned(), encoded);
-                cell.add_view(view);
+                if let Err(error) =
+                    SymbolDocument::generated_from_ports(&ports).store_in_view(&mut view)
+                {
+                    symbol_error = Some(format!("Generated symbol could not be created: {error}"));
+                } else {
+                    cell.add_view(view);
+                }
             }
+        }
+        if let Some(error) = symbol_error {
+            self.push_user_message(ConsoleMessage::warning(error));
         }
     }
 
@@ -805,8 +839,9 @@ impl AppState {
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
         // Project persistence stores topology, not the derived rubber-band
-        // connection cache. Rebuild it whenever a schematic becomes active.
-        self.schematic.rebuild_connections();
+        // connection cache. Rebuild against the same authored/generated
+        // symbol geometry that is rendered and netlisted.
+        self.rebuild_active_connections_from_symbols();
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
     }

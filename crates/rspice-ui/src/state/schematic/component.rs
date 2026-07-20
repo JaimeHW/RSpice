@@ -39,6 +39,11 @@ pub struct LibraryCellInstance {
     /// generated symbol instead of the generic distributed block.
     #[serde(default)]
     pub terminal_dirs: Vec<super::port::PortDirection>,
+    /// Distinguishes an explicitly bound zero-port interface from legacy
+    /// bindings whose absent terminal metadata still requires compatibility
+    /// fallback geometry.
+    #[serde(default)]
+    pub interface_bound: bool,
 }
 
 impl LibraryCellInstance {
@@ -56,6 +61,7 @@ impl LibraryCellInstance {
             module_name: None,
             terminal_order: Vec::new(),
             terminal_dirs: Vec::new(),
+            interface_bound: false,
         }
     }
 
@@ -64,12 +70,15 @@ impl LibraryCellInstance {
     pub fn bind_interface(&mut self, ports: &[super::port::PortSpec]) {
         self.terminal_order = ports.iter().map(|port| port.name.clone()).collect();
         self.terminal_dirs = ports.iter().map(|port| port.direction).collect();
+        self.interface_bound = true;
     }
 
     /// The bound interface as port specs, when directions are available
     /// and consistent with the terminal order.
     pub fn interface(&self) -> Option<Vec<super::port::PortSpec>> {
-        if self.terminal_order.is_empty() || self.terminal_dirs.len() != self.terminal_order.len() {
+        if (!self.interface_bound && self.terminal_order.is_empty())
+            || self.terminal_dirs.len() != self.terminal_order.len()
+        {
             return None;
         }
         Some(

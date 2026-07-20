@@ -417,6 +417,7 @@ impl Command {
                 | Self::ExportWaveformsCsv
                 | Self::ExportNetlist(_)
                 | Self::FindInDesign
+                | Self::CreateHierarchy
                 | Self::ProjectPage(_)
                 | Self::PreflightChecks
                 | Self::SimulationOptions
@@ -462,6 +463,7 @@ impl Command {
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::CheckAndSave
+                | Self::CreateHierarchy
         )
     }
 
@@ -514,6 +516,7 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::ReplaceInstance
+            | Self::CreateHierarchy
             | Self::Place(_)
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -605,6 +608,7 @@ impl Command {
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
             Self::ReplaceInstance => NONE,
+            Self::CreateHierarchy => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
@@ -677,6 +681,7 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::ReplaceInstance
+            | Self::CreateHierarchy
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",

@@ -214,7 +214,7 @@ impl PortContract {
         }
     }
 
-    fn encoded_params(&self) -> String {
+    pub(crate) fn encoded_params(&self) -> String {
         let mut values = std::collections::HashMap::from([
             ("dir".to_owned(), self.direction.keyword().to_owned()),
             (
@@ -585,6 +585,7 @@ fn validate_contract_fields(contract: &PortContract) -> Result<(), PortPlacement
         (PortDirection::In, PortSignalType::Logic)
             | (PortDirection::In, PortSignalType::Analog)
             | (PortDirection::Out, PortSignalType::Analog)
+            | (PortDirection::InOut, PortSignalType::Analog)
             | (PortDirection::InOut, PortSignalType::Power)
             | (PortDirection::Supply, PortSignalType::Power)
     );

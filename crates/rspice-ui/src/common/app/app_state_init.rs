@@ -67,6 +67,7 @@ pub(super) fn default_app_state() -> AppState {
         simulation: crate::state::SimulationState::default(),
         design_execution_epoch: 0,
         active_schematic_epoch: 0,
+        project_design_history: Default::default(),
         dialogs: DialogState::default(),
         sim_setup,
         log_buffer: crate::panels::LogBuffer::default(),

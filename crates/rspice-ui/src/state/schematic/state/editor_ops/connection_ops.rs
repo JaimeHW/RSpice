@@ -21,6 +21,23 @@ impl SchematicState {
 
     /// Rebuild all wire connections based on current positions
     pub fn rebuild_connections(&mut self) {
+        let terminals = self
+            .components
+            .iter()
+            .flat_map(|component| {
+                component
+                    .terminal_positions()
+                    .into_iter()
+                    .map(move |(name, point)| (component.id, name.to_owned(), point))
+            })
+            .collect::<Vec<_>>();
+        self.rebuild_connections_from_terminals(&terminals);
+    }
+
+    /// Rebuild the rubber-band cache from authoritative resolved terminal
+    /// geometry. Authored library symbols must use this path because their pin
+    /// positions can differ from intrinsic fallback geometry.
+    pub fn rebuild_connections_from_terminals(&mut self, terminals: &[(u64, String, Point)]) {
         self.connections.clear();
 
         let wire_endpoints: Vec<(u64, Point, usize)> = self
@@ -38,12 +55,15 @@ impl SchematicState {
             .collect();
 
         for (wire_id, pos, point_index) in wire_endpoints {
-            if let Some((comp_id, term_name, _)) = self.find_terminal_at(pos) {
+            if let Some((comp_id, term_name, _)) = terminals.iter().find(|(_, _, terminal)| {
+                (pos.x - terminal.x).abs() <= SNAP_DISTANCE
+                    && (pos.y - terminal.y).abs() <= SNAP_DISTANCE
+            }) {
                 self.connections.push(WireConnection::new(
                     wire_id,
                     point_index,
-                    comp_id,
-                    term_name,
+                    *comp_id,
+                    term_name.clone(),
                 ));
             }
         }

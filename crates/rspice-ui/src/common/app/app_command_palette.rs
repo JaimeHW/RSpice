@@ -1530,6 +1530,7 @@ fn row_icon(entry: &PaletteEntry) -> Icon {
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::ArraySelection => Icon::Grid,
         Command::ReplaceInstance => Icon::Refresh,
+        Command::CreateHierarchy => Icon::Folder,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
         Command::RunChecks | Command::CheckAndSave | Command::PreflightChecks => Icon::Check,

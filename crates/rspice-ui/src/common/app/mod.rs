@@ -65,10 +65,15 @@ pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
 mod app_schematic_edit_authority;
 pub(crate) use app_schematic_edit_authority::SchematicEditAuthority;
 
+mod app_create_hierarchy_dialog;
+mod app_hierarchy_reference_impact;
 mod app_instance_catalog;
 mod app_mockup_operation;
 mod app_mockup_review;
 mod app_replace_instance_dialog;
+pub(crate) use app_create_hierarchy_dialog::{
+    create_hierarchy_available, open_create_hierarchy_dialog,
+};
 pub(crate) use app_replace_instance_dialog::{
     open_replace_instance_dialog, replace_instance_available,
 };
@@ -94,6 +99,7 @@ pub(crate) use app_property_edit::{
 };
 
 mod app_modal_workflows;
+mod app_project_design_history;
 
 mod app_bus_tap_dialog;
 mod app_design_note_dialog;
@@ -246,6 +252,9 @@ pub struct AppState {
     /// execution epoch, this advances on ordinary cell/view navigation so an
     /// A→B→A round trip cannot revive a stale editor transaction.
     pub(crate) active_schematic_epoch: u64,
+    /// Runtime-only cross-document design transactions. Schematic-local undo
+    /// cannot own operations that also create cells, views, or buffers.
+    pub(crate) project_design_history: app_project_design_history::ProjectDesignHistory,
     /// Dialog visibility
     pub(crate) dialogs: DialogState,
     /// Typed analysis configuration behind the Simulate view.
@@ -896,6 +905,7 @@ impl RSpiceApp {
         self.render_stretch_selection_dialog(ctx);
         self.render_array_selection_dialog(ctx);
         self.render_replace_instance_dialog(ctx);
+        self.render_create_hierarchy_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);
