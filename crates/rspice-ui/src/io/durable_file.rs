@@ -3020,17 +3020,20 @@ fn verify_windows_file_security_equivalence(source: &Path, destination: &Path) -
         while canonical.ends_with('\0') {
             canonical.pop();
         }
-        // SetFileSecurityW preserves every inherited ACE but Windows does not
-        // copy the SE_DACL_AUTO_INHERITED bookkeeping bit onto the sibling.
-        // That bit records how the ACL was produced; it does not change the
-        // owner, group, ACE order, inheritance flags, or effective access that
-        // ReplaceFileW must preserve. Normalize only this provenance flag and
-        // continue comparing the complete canonical security contract.
+        // SetFileSecurityW preserves every inherited ACE but Windows may not
+        // copy the SE_DACL_AUTO_INHERITED / SE_DACL_AUTO_INHERIT_REQ
+        // bookkeeping bits onto the sibling. Those bits record how the ACL
+        // was produced; they do not change the owner, group, ACE order,
+        // inheritance flags, or effective access that ReplaceFileW must
+        // preserve. Normalize only these provenance flags and continue
+        // comparing the complete canonical security contract.
         if let Some(dacl_start) = canonical.find("D:") {
             let flags_start = dacl_start + 2;
             if let Some(relative_end) = canonical[flags_start..].find('(') {
                 let flags_end = flags_start + relative_end;
-                let flags = canonical[flags_start..flags_end].replace("AI", "");
+                let flags = canonical[flags_start..flags_end]
+                    .replace("AI", "")
+                    .replace("AR", "");
                 canonical.replace_range(flags_start..flags_end, &flags);
             }
         }
