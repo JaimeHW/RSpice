@@ -165,55 +165,49 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         crate::io::NetlistFormat::Spice,
     );
     match generated {
-        Some(mut source) => {
-            if let Err(error) = append_project_veriloga_directive(&app.state, &mut source) {
-                app.state.ui.netlist.generation_error = Some(error);
-                return;
-            }
-            match publish_generated_document(&app.state, input_digest, source) {
-                Ok((generated_document, owned_document)) => {
-                    if let Some(previous) = app.state.ui.netlist.generated_document.as_ref()
-                        && previous.generated_artifact().content_digest()
-                            != generated_document.generated_artifact().content_digest()
+        Some(source) => match publish_generated_document(&app.state, input_digest, source) {
+            Ok((generated_document, owned_document)) => {
+                if let Some(previous) = app.state.ui.netlist.generated_document.as_ref()
+                    && previous.generated_artifact().content_digest()
+                        != generated_document.generated_artifact().content_digest()
+                {
+                    let predecessor = previous.generated_artifact().clone();
+                    if app
+                        .state
+                        .ui
+                        .netlist
+                        .generated_history
+                        .last()
+                        .is_none_or(|artifact| {
+                            artifact.content_digest() != predecessor.content_digest()
+                        })
                     {
-                        let predecessor = previous.generated_artifact().clone();
-                        if app
+                        app.state.ui.netlist.generated_history.push(predecessor);
+                        const RETAINED_GENERATED_REVISIONS: usize = 16;
+                        let excess = app
                             .state
                             .ui
                             .netlist
                             .generated_history
-                            .last()
-                            .is_none_or(|artifact| {
-                                artifact.content_digest() != predecessor.content_digest()
-                            })
-                        {
-                            app.state.ui.netlist.generated_history.push(predecessor);
-                            const RETAINED_GENERATED_REVISIONS: usize = 16;
-                            let excess = app
-                                .state
-                                .ui
-                                .netlist
-                                .generated_history
-                                .len()
-                                .saturating_sub(RETAINED_GENERATED_REVISIONS);
-                            if excess > 0 {
-                                app.state.ui.netlist.generated_history.drain(..excess);
-                            }
+                            .len()
+                            .saturating_sub(RETAINED_GENERATED_REVISIONS);
+                        if excess > 0 {
+                            app.state.ui.netlist.generated_history.drain(..excess);
                         }
                     }
-                    app.state.ui.netlist.generated_source =
-                        generated_document.generated_artifact().source().to_owned();
-                    app.state.ui.netlist.generated_document = Some(generated_document);
-                    app.state.workspace.netlist_document = owned_document.clone();
-                    app.state.ui.netlist.owned_document = owned_document;
-                    app.state.ui.netlist.generated_input_digest = Some(input_digest);
-                    app.state.ui.netlist.generation_error = None;
                 }
-                Err(error) => {
-                    app.state.ui.netlist.generation_error = Some(error);
-                }
+                app.state.ui.netlist.generated_source =
+                    generated_document.generated_artifact().source().to_owned();
+                app.state.ui.netlist.generated_document = Some(generated_document);
+                app.state.workspace.netlist_document = owned_document.clone();
+                app.state.ui.netlist.owned_document = owned_document;
+                app.state.ui.netlist.generated_input_digest = Some(input_digest);
+                app.state.ui.netlist.generation_error = None;
             }
-        }
+            Err(error) => {
+                app.state.ui.netlist.generation_error = Some(error);
+            }
+        },
         None => {
             let detail = app
                 .state
@@ -227,69 +221,6 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
             app.state.ui.netlist.generation_error = Some(detail);
         }
     }
-}
-
-fn append_project_veriloga_directive(state: &AppState, source: &mut String) -> Result<(), String> {
-    let Some(document) = state
-        .workspace
-        .project_sources
-        .get(crate::state::ProjectSourceLanguage::VerilogA)
-    else {
-        return Ok(());
-    };
-    let source_key = super::super::code_workspace::project_veriloga_source_key(
-        state.workspace.project.id(),
-        document,
-    );
-    let receipt = state
-        .ui
-        .code_workspace
-        .veriloga
-        .receipt
-        .as_ref()
-        .filter(|receipt| {
-            receipt.token.project_id == state.workspace.project.id()
-                && receipt.token.revision == document.revision().get()
-                && receipt.token.content_digest == document.content_digest()
-        })
-        .cloned()
-        .map(Ok)
-        .unwrap_or_else(|| {
-            if !document.validation_is_current() {
-                return Err(format!(
-                    "Compile the exact current project Verilog-A source '{}' before generating the executable netlist",
-                    document.file_name()
-                ));
-            }
-            super::super::code_workspace::compile_project_source_receipt(
-                state.workspace.project.id(),
-                document,
-            )
-            .map_err(|diagnostics| {
-                diagnostics
-                    .first()
-                    .map(|diagnostic| {
-                        format!(
-                            "Could not rebuild validated Verilog-A source '{}': {}: {}",
-                            document.file_name(),
-                            diagnostic.message,
-                            diagnostic.detail
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        format!(
-                            "Could not rebuild validated Verilog-A source '{}': the compiler returned no diagnostic",
-                            document.file_name()
-                        )
-                    })
-            })
-        })?;
-    super::super::code_workspace::append_project_veriloga_directive(
-        source,
-        &source_key,
-        &receipt.module_name,
-    );
-    Ok(())
 }
 
 fn publish_generated_document(
@@ -333,37 +264,187 @@ fn generated_project_source_dependencies(
     state: &AppState,
     source: &str,
 ) -> Result<Vec<super::super::code_workspace::DependencyMetadata>, String> {
-    let Some(document) = state
+    let include_directives = super::super::code_workspace::parse_include_directives(source);
+    let mut dependencies = Vec::new();
+
+    let projection = state
         .workspace
-        .project_sources
-        .get(crate::state::ProjectSourceLanguage::VerilogA)
-    else {
-        return Ok(Vec::new());
+        .configuration_execution_projection(
+            &state.library_manager,
+            &state.workspace.active_view,
+            &state.schematic,
+        )
+        .map_err(|error| error.to_string())?;
+    let Some(plan) = projection.plan() else {
+        return Ok(dependencies);
     };
-    let source_key = super::super::code_workspace::project_veriloga_source_key(
-        state.workspace.project.id(),
-        document,
-    );
-    let include_index = super::super::code_workspace::parse_include_directives(source)
-        .iter()
-        .position(|directive| directive.locator() == source_key)
-        .ok_or_else(|| {
-            "Generated source is missing its authenticated project Verilog-A directive".to_owned()
-        })?;
-    let locator = super::super::code_workspace::SourceLocator::try_new(
-        source_key.clone(),
-        document.file_name(),
+    let mut retained_keys = std::collections::HashSet::new();
+    for execution in plan.bindings() {
+        let Some(binding) = execution.project_veriloga() else {
+            continue;
+        };
+        if !retained_keys.insert(binding.source_key().to_owned()) {
+            continue;
+        }
+        let bundle = state
+            .workspace
+            .project_sources
+            .get_bundle(binding.source_bundle_id())
+            .ok_or_else(|| {
+                format!(
+                    "Generated Verilog-A binding at {} references missing bundle {}",
+                    execution.instance_path(),
+                    binding.source_bundle_id()
+                )
+            })?;
+        if bundle.closure_digest() != binding.source_closure_digest() {
+            return Err(format!(
+                "Generated Verilog-A bundle {} changed after hierarchy resolution",
+                bundle.id()
+            ));
+        }
+        let include_index = include_directives
+            .iter()
+            .position(|directive| directive.locator() == binding.source_key())
+            .ok_or_else(|| {
+                format!(
+                    "Generated source is missing the authenticated Verilog-A binding for {}",
+                    execution.instance_path()
+                )
+            })?;
+        let root_locator = super::super::code_workspace::SourceLocator::try_new(
+            binding.source_key(),
+            bundle.root().logical_path(),
+        )
+        .map_err(|error| error.to_string())?;
+        let virtual_bundle = super::super::code_workspace::project_bundle_as_virtual(bundle)?;
+        let compilation = rspice_veriloga::VerilogACompiler::default()
+            .compile_virtual_runtime_diagnosed(
+                &virtual_bundle,
+                binding.selected_module(),
+                super::super::code_workspace::project_virtual_compile_limits(),
+            )
+            .map_err(|failure| {
+                format!(
+                    "Could not authenticate generated Verilog-A provenance for {}: {failure}",
+                    execution.instance_path()
+                )
+            })?;
+        let compiled_root = compilation
+            .dependency_closure
+            .first()
+            .filter(|dependency| {
+                dependency
+                    .logical_path
+                    .eq_ignore_ascii_case(bundle.root().logical_path())
+            })
+            .ok_or_else(|| {
+                format!(
+                    "Compiler dependency closure for {} has no authenticated root",
+                    execution.instance_path()
+                )
+            })?;
+        dependencies.push(
+            super::super::code_workspace::DependencyMetadata::unresolved_direct_to(
+                include_index,
+                binding.source_key(),
+                root_locator.clone(),
+            )
+            .map_err(|error| error.to_string())?
+            .resolve_utf8(compiled_root.source.as_bytes().to_vec())
+            .map_err(|error| error.to_string())?,
+        );
+        for edge in &compilation.include_graph {
+            let parent = compilation
+                .dependency_closure
+                .iter()
+                .find(|dependency| {
+                    dependency
+                        .logical_path
+                        .eq_ignore_ascii_case(&edge.including_path)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "Compiler include parent '{}' is absent from the authenticated closure",
+                        edge.including_path
+                    )
+                })?;
+            let child = compilation
+                .dependency_closure
+                .iter()
+                .find(|dependency| {
+                    dependency
+                        .logical_path
+                        .eq_ignore_ascii_case(&edge.included_path)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "Compiler include target '{}' is absent from the authenticated closure",
+                        edge.included_path
+                    )
+                })?;
+            let parent_locator = compiler_dependency_locator(
+                binding.source_key(),
+                bundle.root().logical_path(),
+                parent,
+                &root_locator,
+            )?;
+            let child_locator = compiler_dependency_locator(
+                binding.source_key(),
+                bundle.root().logical_path(),
+                child,
+                &root_locator,
+            )?;
+            dependencies.push(
+                super::super::code_workspace::DependencyMetadata::unresolved_transitive_to(
+                    parent_locator,
+                    edge.include_index,
+                    edge.requested_path.clone(),
+                    child_locator,
+                )
+                .map_err(|error| error.to_string())?
+                .resolve_utf8(child.source.as_bytes().to_vec())
+                .map_err(|error| error.to_string())?,
+            );
+        }
+    }
+    Ok(dependencies)
+}
+
+fn project_bundle_locator(
+    source_key: &str,
+    logical_path: &str,
+) -> Result<super::super::code_workspace::SourceLocator, String> {
+    super::super::code_workspace::SourceLocator::try_new(
+        format!("{source_key}#/{logical_path}"),
+        logical_path,
     )
-    .map_err(|error| error.to_string())?;
-    let dependency = super::super::code_workspace::DependencyMetadata::unresolved_direct_to(
-        include_index,
-        source_key,
-        locator,
-    )
-    .map_err(|error| error.to_string())?
-    .resolve_utf8(document.content().as_bytes().to_vec())
-    .map_err(|error| error.to_string())?;
-    Ok(vec![dependency])
+    .map_err(|error| error.to_string())
+}
+
+fn compiler_dependency_locator(
+    source_key: &str,
+    root_path: &str,
+    dependency: &rspice_veriloga::VirtualSourceDependency,
+    root_locator: &super::super::code_workspace::SourceLocator,
+) -> Result<super::super::code_workspace::SourceLocator, String> {
+    if dependency.logical_path.eq_ignore_ascii_case(root_path) {
+        return Ok(root_locator.clone());
+    }
+    if dependency.origin == rspice_veriloga::SourceDocumentOrigin::BuiltIn {
+        let name = dependency
+            .logical_path
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| "Compiler returned a built-in dependency without a name".to_owned())?;
+        return super::super::code_workspace::SourceLocator::try_new(
+            format!("__rspice_builtin__/veriloga/{name}"),
+            dependency.logical_path.clone(),
+        )
+        .map_err(|error| error.to_string());
+    }
+    project_bundle_locator(source_key, &dependency.logical_path)
 }
 
 fn generated_source_map(
@@ -2063,11 +2144,100 @@ fn open_owned_source(state: &mut AppState) -> bool {
 mod tests {
     use super::*;
 
+    fn configured_veriloga_state() -> (AppState, String) {
+        let mut state = AppState::default();
+        let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
+        let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), "sealed_gain".to_owned());
+        view.metadata
+            .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
+        let mut cell = crate::state::Cell::new("gain");
+        cell.add_view(view);
+        let mut library = crate::state::Library::new("behavioral");
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(reference),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "behavioral/gain.va",
+            "`ifdef NEVER\n`include \"behavioral/inactive.va\"\n`endif\n`include \"behavioral/gain_constants.va\"\nmodule sealed_gain(p, n); inout p, n; electrical p, n; analog I(p,n) <+ `RSPICE_GAIN * V(p,n); endmodule\n",
+            [
+                crate::state::ProjectSourceFile::try_new(
+                    "behavioral/gain_constants.va",
+                    "`define RSPICE_GAIN 1.0\n",
+                )
+                .expect("valid included source"),
+                crate::state::ProjectSourceFile::try_new(
+                    "behavioral/inactive.va",
+                    "module must_not_enter_provenance; endmodule\n",
+                )
+                .expect("valid inactive source"),
+            ],
+            [
+                crate::state::ProjectSourceDependency::try_new(
+                    "behavioral/gain.va",
+                    "behavioral/gain_constants.va",
+                )
+                .expect("valid dependency edge"),
+                crate::state::ProjectSourceDependency::try_new(
+                    "behavioral/gain.va",
+                    "behavioral/inactive.va",
+                )
+                .expect("valid inactive dependency edge"),
+            ],
+        )
+        .expect("valid source closure");
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("attach cell-view source");
+
+        let mut placed = crate::state::LibraryCellInstance::new("behavioral", "gain", "schematic");
+        placed.terminal_order = vec!["p".to_owned(), "n".to_owned()];
+        state
+            .schematic
+            .add_library_cell_component(crate::state::Point::new(20, 20), placed);
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Mixed-signal".to_owned(),
+                root: crate::state::CellViewRef::default_top(),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["veriloga".to_owned()],
+                stop_views: vec!["veriloga".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Mixed-signal design".to_owned(),
+            })
+            .expect("create mixed-signal configuration");
+        let projection = state
+            .workspace
+            .configuration_execution_projection(
+                &state.library_manager,
+                &state.workspace.active_view,
+                &state.schematic,
+            )
+            .expect("resolve configured behavioral view");
+        let source_key = projection
+            .plan()
+            .and_then(|plan| plan.binding("/top/X1"))
+            .and_then(|binding| binding.project_veriloga())
+            .expect("project Verilog-A binding")
+            .source_key()
+            .to_owned();
+        (state, source_key)
+    }
+
     fn retain_generated(state: &mut AppState, source: &str) {
         let input_digest = crate::product::ContentDigest::from_bytes([0x41; 32]);
-        let mut source = source.to_owned();
-        append_project_veriloga_directive(state, &mut source)
-            .expect("canonical generated Verilog-A dependency is valid");
+        let source = source.to_owned();
         let (document, owned) = publish_generated_document(state, input_digest, source.clone())
             .expect("canonical generated fixture");
         state.ui.netlist.generated_source = source;
@@ -2195,31 +2365,50 @@ mod tests {
     }
 
     #[test]
-    fn generated_deck_references_project_veriloga_once_before_end() {
+    fn generated_deck_does_not_inject_unreferenced_code_workspace_veriloga() {
         let state = AppState::default();
-        let mut source = "R1 1 0 1k\n.end\n".to_owned();
-
-        append_project_veriloga_directive(&state, &mut source).unwrap();
-        append_project_veriloga_directive(&state, &mut source).unwrap();
-
-        let document = state
-            .workspace
-            .project_sources
-            .get(crate::state::ProjectSourceLanguage::VerilogA)
-            .expect("bootstrapped Verilog-A source");
-        let source_key = crate::workbench::code_workspace::project_veriloga_source_key(
-            state.workspace.project.id(),
-            document,
-        );
-        assert_eq!(
-            source,
-            format!("R1 1 0 1k\n.veriloga \"{source_key}\" sensor_bridge\n.end\n")
-        );
+        let source = "R1 1 0 1k\n.end\n".to_owned();
 
         let dependencies = generated_project_source_dependencies(&state, &source)
-            .expect("project dependency is sealed");
-        assert_eq!(dependencies.len(), 1);
-        assert_eq!(dependencies[0].requested_locator(), source_key);
-        assert_eq!(dependencies[0].source(), Some(document.content()));
+            .expect("unreferenced source does not create a dependency");
+        assert!(dependencies.is_empty());
+    }
+
+    #[test]
+    fn generated_deck_retains_the_exact_transitive_cell_view_source_closure() {
+        let (state, source_key) = configured_veriloga_state();
+        let source = format!("configured deck\n.veriloga \"{source_key}\" sealed_gain\n.end\n");
+
+        let dependencies = generated_project_source_dependencies(&state, &source)
+            .expect("retain exact project source closure");
+
+        assert_eq!(dependencies.len(), 2);
+        assert!(dependencies.iter().all(|dependency| {
+            !dependency
+                .resolution()
+                .source()
+                .is_some_and(|source| source.contains("must_not_enter_provenance"))
+        }));
+        let root = dependencies
+            .iter()
+            .find(|dependency| dependency.direct_include_index().is_some())
+            .expect("direct root dependency");
+        assert_eq!(root.requested_locator(), source_key);
+        assert!(root.parent().is_none());
+        assert!(
+            root.resolution()
+                .source()
+                .unwrap()
+                .contains("module sealed_gain")
+        );
+        let included = dependencies
+            .iter()
+            .find(|dependency| dependency.parent().is_some())
+            .expect("transitive included dependency");
+        assert_eq!(included.requested_locator(), "behavioral/gain_constants.va");
+        assert_eq!(
+            included.resolution().source(),
+            Some("`define RSPICE_GAIN 1.0\n")
+        );
     }
 }

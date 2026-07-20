@@ -23,11 +23,12 @@ use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, AnalysisType, CellViewRef, DcOpResult, ExecutionTarget,
-    LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, ProjectWorkspace,
+    AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey, CellViewRef, DcOpResult,
+    ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue,
+    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, ProjectWorkspace,
     SavedOutputMaterializationStatus, SavedOutputReceipt, SimulationRun, SimulationRunLifecycle,
     SimulationRunProvenance, SimulationState, ViewType, WaveformData,
+    canonical_cell_view_owner_key,
 };
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -114,6 +115,26 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for PersistedField<T> {
 struct ValidatedLibraryView {
     reference: CellViewRef,
     view_type: ViewType,
+}
+
+#[derive(Debug, Default)]
+struct ValidatedLibraryIndex {
+    exact: HashMap<String, ValidatedLibraryView>,
+    canonical: HashMap<CanonicalCellViewOwnerKey, String>,
+}
+
+impl ValidatedLibraryIndex {
+    fn get_exact(&self, key: &str) -> Option<&ValidatedLibraryView> {
+        self.exact.get(key)
+    }
+
+    fn get_owner(&self, reference: &CellViewRef) -> Option<&ValidatedLibraryView> {
+        let key =
+            canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view);
+        self.canonical
+            .get(&key)
+            .and_then(|exact| self.exact.get(exact))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -228,6 +249,7 @@ impl ProjectFile {
             .validate_simulation_configuration()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
         let view_index = self.validate_library_tree()?;
+        self.validate_project_source_owners(&view_index)?;
         self.validate_workspace_references(&view_index)?;
         if let Some(context) = &self.execution_context {
             context.validate().map_err(|error| {
@@ -572,10 +594,10 @@ impl ProjectFile {
         Ok(())
     }
 
-    fn validate_library_tree(
-        &self,
-    ) -> Result<HashMap<String, ValidatedLibraryView>, ProjectIoError> {
-        let mut view_index: HashMap<String, ValidatedLibraryView> = HashMap::new();
+    fn validate_library_tree(&self) -> Result<ValidatedLibraryIndex, ProjectIoError> {
+        let mut view_index = ValidatedLibraryIndex::default();
+        let mut canonical_libraries = HashMap::new();
+        let mut canonical_cells = HashMap::new();
         let mut first_invalid_name = None;
         let mut libraries = self.libraries.libraries_by_key().collect::<Vec<_>>();
         libraries.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -592,6 +614,14 @@ impl ProjectFile {
                 &format!("library '{library_key}'"),
                 library_key,
             );
+            let canonical_library = canonical_cell_view_owner_key(library_key, "", "");
+            if let Some(existing) =
+                canonical_libraries.insert(canonical_library, library_key.to_owned())
+            {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "library tree contains canonical library identity collision between '{existing}' and '{library_key}'"
+                )));
+            }
 
             let mut cells = library.cells.iter().collect::<Vec<_>>();
             cells.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -607,6 +637,14 @@ impl ProjectFile {
                     &format!("cell '{library_key}/{cell_key}'"),
                     cell_key,
                 );
+                let canonical_cell = canonical_cell_view_owner_key(library_key, cell_key, "");
+                if let Some(existing) =
+                    canonical_cells.insert(canonical_cell, format!("{library_key}/{cell_key}"))
+                {
+                    return Err(ProjectIoError::InvalidData(format!(
+                        "library tree contains canonical cell identity collision between '{existing}' and '{library_key}/{cell_key}'"
+                    )));
+                }
 
                 let mut views = cell.views.iter().collect::<Vec<_>>();
                 views.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -625,14 +663,31 @@ impl ProjectFile {
 
                     let reference = CellViewRef::new(library_key, cell_key, view_key);
                     let key = reference.key();
-                    if let Some(existing) = view_index.get(&key) {
+                    if let Some(existing) = view_index.exact.get(&key) {
                         return Err(ProjectIoError::InvalidData(format!(
                             "library tree generates duplicate cell-view key '{key}' for {} and {}; slash-delimited persisted keys must be injective",
                             format_lcv_segments(&existing.reference),
                             format_lcv_segments(&reference)
                         )));
                     }
-                    view_index.insert(
+                    let canonical = canonical_cell_view_owner_key(
+                        &reference.library,
+                        &reference.cell,
+                        &reference.view,
+                    );
+                    if let Some(existing_key) = view_index.canonical.get(&canonical) {
+                        let existing = view_index
+                            .exact
+                            .get(existing_key)
+                            .expect("canonical library index points at an exact view");
+                        return Err(ProjectIoError::InvalidData(format!(
+                            "library tree contains canonical cell-view identity collision between {} and {}",
+                            format_lcv_segments(&existing.reference),
+                            format_lcv_segments(&reference)
+                        )));
+                    }
+                    view_index.canonical.insert(canonical, key.clone());
+                    view_index.exact.insert(
                         key,
                         ValidatedLibraryView {
                             reference,
@@ -649,9 +704,66 @@ impl ProjectFile {
         Ok(view_index)
     }
 
+    fn validate_project_source_owners(
+        &self,
+        view_index: &ValidatedLibraryIndex,
+    ) -> Result<(), ProjectIoError> {
+        let mut owned_veriloga_views = HashSet::new();
+        for bundle in self.workspace.project_sources.iter_bundles() {
+            let crate::state::ProjectSourceOwner::CellView { reference } = bundle.owner() else {
+                continue;
+            };
+            let view = view_index.get_owner(reference).ok_or_else(|| {
+                ProjectIoError::InvalidData(format!(
+                    "project source bundle {} owns missing cell view '{}'",
+                    bundle.id(),
+                    reference.key()
+                ))
+            })?;
+            if view.reference != *reference {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "project source bundle {} owner '{}' does not match the canonical library/view identity '{}'",
+                    bundle.id(),
+                    reference.key(),
+                    view.reference.key()
+                )));
+            }
+            if view.view_type != ViewType::VerilogA {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "project source bundle {} owns {} view '{}'; cell-owned Verilog-A source requires a Verilog-A view",
+                    bundle.id(),
+                    view.view_type.display_name(),
+                    reference.key()
+                )));
+            }
+            owned_veriloga_views.insert(canonical_cell_view_owner_key(
+                &reference.library,
+                &reference.cell,
+                &reference.view,
+            ));
+        }
+        for view in view_index.exact.values() {
+            if view.view_type != ViewType::VerilogA {
+                continue;
+            }
+            let owner_key = canonical_cell_view_owner_key(
+                &view.reference.library,
+                &view.reference.cell,
+                &view.reference.view,
+            );
+            if !owned_veriloga_views.contains(&owner_key) {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "Verilog-A cell view '{}' has no project source bundle; every Verilog-A view must own exactly one persisted source closure",
+                    view.reference.key()
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_workspace_references(
         &self,
-        view_index: &HashMap<String, ValidatedLibraryView>,
+        view_index: &ValidatedLibraryIndex,
     ) -> Result<(), ProjectIoError> {
         let mut required_schematic_buffers = HashSet::new();
 
@@ -768,7 +880,7 @@ impl ProjectFile {
                     "workspace schematic buffer '{key}' has invalid validated revision history: {error}"
                 ))
             })?;
-            let Some(view) = view_index.get(key) else {
+            let Some(view) = view_index.get_exact(key) else {
                 let message = if persisted_lcv_key_is_well_formed(key) {
                     format!(
                         "workspace schematic/testbench buffer '{key}' is orphaned because no library view owns that key"
@@ -3775,6 +3887,111 @@ mod tests {
             .iter_mut()
             .find(|instance| instance["kind"] == kind)
             .unwrap_or_else(|| panic!("fixture contains {kind} analysis"))
+    }
+
+    fn cell_source_bundle(reference: CellViewRef) -> crate::state::ProjectSourceBundle {
+        crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(reference),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "behavior.va",
+            "module behavior(p, n); inout p, n; endmodule",
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .expect("valid cell source bundle")
+    }
+
+    #[test]
+    fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() {
+        let mut valid = project_with_execution_context();
+        let reference = CellViewRef::new(
+            valid.workspace.project.root_library.clone(),
+            valid.workspace.project.top_cell.clone(),
+            "behavior",
+        );
+        valid
+            .libraries
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+            .expect("top cell")
+            .add_view(crate::state::View::new(
+                reference.view.as_str(),
+                ViewType::VerilogA,
+            ));
+        valid
+            .workspace
+            .project_sources
+            .insert_bundle(cell_source_bundle(reference.clone()))
+            .expect("unique source owner");
+        valid.validate().expect("exact Verilog-A owner is valid");
+
+        let mut missing_source = valid.clone();
+        missing_source.workspace.project_sources = Default::default();
+        assert!(
+            missing_source
+                .validate()
+                .expect_err("a Verilog-A view without its source must fail")
+                .to_string()
+                .contains("has no project source bundle")
+        );
+
+        let mut canonical_alias = valid.clone();
+        canonical_alias.workspace.project_sources = Default::default();
+        canonical_alias
+            .workspace
+            .project_sources
+            .insert_bundle(cell_source_bundle(CellViewRef::new(
+                reference.library.to_uppercase(),
+                reference.cell.to_uppercase(),
+                reference.view.to_uppercase(),
+            )))
+            .expect("registry accepts one canonical owner until tree validation");
+        assert!(
+            canonical_alias
+                .validate()
+                .expect_err("canonical aliases must retain exact library-tree spelling")
+                .to_string()
+                .contains("does not match the canonical library/view identity")
+        );
+
+        let mut missing = valid.clone();
+        missing.workspace.project_sources = Default::default();
+        missing
+            .workspace
+            .project_sources
+            .insert_bundle(cell_source_bundle(CellViewRef::new(
+                &reference.library,
+                "missing_cell",
+                "behavior",
+            )))
+            .expect("registry permits unresolved owner until project validation");
+        assert!(
+            missing
+                .validate()
+                .expect_err("missing owner must fail")
+                .to_string()
+                .contains("owns missing cell view")
+        );
+
+        let mut wrong_type = valid;
+        wrong_type.workspace.project_sources = Default::default();
+        let schematic = CellViewRef::new(
+            &wrong_type.workspace.project.root_library,
+            &wrong_type.workspace.project.top_cell,
+            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+        );
+        wrong_type
+            .workspace
+            .project_sources
+            .insert_bundle(cell_source_bundle(schematic))
+            .expect("registry validates owner shape");
+        assert!(
+            wrong_type
+                .validate()
+                .expect_err("schematic owner must fail")
+                .to_string()
+                .contains("requires a Verilog-A view")
+        );
     }
 
     #[test]
@@ -6890,6 +7107,47 @@ mod tests {
             assert!(
                 err.to_string().contains(case) && err.to_string().contains("map key"),
                 "unexpected {case} mismatch error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn project_load_rejects_unicode_canonical_library_cell_and_view_collisions() {
+        for scope in ["library", "cell", "view"] {
+            let mut libraries = LibraryManager::with_primitives();
+            let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+            match scope {
+                "library" => {
+                    libraries.add_library(crate::state::Library::new("\u{c9}tage"));
+                    libraries.add_library(crate::state::Library::new("\u{e9}TAGE"));
+                }
+                "cell" => {
+                    let library = libraries.get_library_mut("user").expect("user library");
+                    library.add_cell(crate::state::Cell::new("\u{c9}tage"));
+                    library.add_cell(crate::state::Cell::new("\u{e9}TAGE"));
+                }
+                "view" => {
+                    let cell = libraries
+                        .get_library_mut("user")
+                        .expect("user library")
+                        .get_cell_mut("top")
+                        .expect("top cell");
+                    cell.add_view(crate::state::View::new("Mod\u{e8}le", ViewType::Symbol));
+                    cell.add_view(crate::state::View::new("MOD\u{c8}LE", ViewType::Symbol));
+                }
+                _ => unreachable!(),
+            }
+
+            let project = ProjectFile::new(workspace, libraries);
+            let json = serde_json::to_string_pretty(&project).expect("fixture serializes");
+            let error = load_project_text(&json, None)
+                .expect_err("canonical library identities must be unique");
+
+            assert!(
+                error.to_string().contains("canonical")
+                    && error.to_string().contains(scope)
+                    && error.to_string().contains("collision"),
+                "unexpected {scope} collision error: {error}"
             );
         }
     }

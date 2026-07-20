@@ -1403,8 +1403,12 @@ impl Engine {
                 // point. Verilog-A device stamping exposes the Jacobian
                 // through matrix callbacks.
                 let mut cloned = device.clone();
-                cloned.set_analysis_type(1);
                 let device_name = cloned.name.to_string();
+                cloned.try_set_analysis_type(1).map_err(|err| {
+                    SimulationError::Circuit(format!(
+                        "Verilog-A device '{device_name}' AC analysis setup failed: {err}"
+                    ))
+                })?;
                 cloned
                     .try_stamp(
                         op_voltages,

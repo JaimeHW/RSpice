@@ -335,6 +335,18 @@ pub(crate) fn operation_in_progress(state: &AppState) -> bool {
 }
 
 pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {
+    if state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+        && state.workspace.active_view_type() == ViewType::VerilogA
+        && state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+                state.workspace.active_view.clone(),
+            ))
+            .is_some()
+    {
+        return ProjectDocumentId::CellView(state.workspace.active_view.clone());
+    }
     registry::active_document(state.workbench.workspace, &state.workspace.active_view)
 }
 
@@ -1523,6 +1535,21 @@ fn revert_document(
     state: &mut AppState,
     id: ProjectDocumentId,
 ) -> Result<(), ProjectLifecycleError> {
+    // Revert can cross document boundaries (for example configuration roots,
+    // cell catalogs, source ownership, and editor focus). Build and validate
+    // the complete result away from live state so a failed registry rebuild
+    // can never leave a partially reverted project behind.
+    let mut candidate = state.clone();
+    revert_document_in_place(&mut candidate, id)?;
+    refresh_registry(&mut candidate)?;
+    *state = candidate;
+    Ok(())
+}
+
+fn revert_document_in_place(
+    state: &mut AppState,
+    id: ProjectDocumentId,
+) -> Result<(), ProjectLifecycleError> {
     let baseline = state
         .project_lifecycle
         .accepted
@@ -1535,6 +1562,7 @@ fn revert_document(
     match id {
         ProjectDocumentId::ProjectConfiguration => {
             state.workspace.project = baseline.workspace.project;
+            state.workspace.configuration_sets = baseline.workspace.configuration_sets;
             restore_project_structure_preserving_documents(state, baseline.libraries);
         }
         ProjectDocumentId::CellView(reference) => revert_cell_view(state, &baseline, &reference)?,
@@ -1589,7 +1617,11 @@ fn revert_document(
             state.workspace.netlist_source_path = baseline.workspace.netlist_source_path;
             state.workspace.netlist_document = baseline.workspace.netlist_document;
             state.workspace.netlist_descriptor = baseline.workspace.netlist_descriptor;
-            state.workspace.project_sources = baseline.workspace.project_sources;
+            state
+                .workspace
+                .project_sources
+                .synchronize_code_workspace_bundles_from(&baseline.workspace.project_sources)
+                .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
             state.workspace.netlist_source_dirty = false;
             state.workspace.project_sources_dirty = false;
             state.ui.netlist = Default::default();
@@ -1600,7 +1632,7 @@ fn revert_document(
             state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         }
     }
-    refresh_registry(state)
+    Ok(())
 }
 
 pub(crate) fn dirty_document_count(state: &AppState) -> usize {
@@ -1754,6 +1786,7 @@ fn overlay_document(
     match id {
         ProjectDocumentId::ProjectConfiguration => {
             target.workspace.project = working.workspace.project.clone();
+            target.workspace.configuration_sets = working.workspace.configuration_sets.clone();
             target.libraries = merge_project_structure_with_document_content(
                 &working.libraries,
                 &target.libraries,
@@ -1806,7 +1839,11 @@ fn overlay_document(
             target.workspace.netlist_source_path = working.workspace.netlist_source_path.clone();
             target.workspace.netlist_document = working.workspace.netlist_document.clone();
             target.workspace.netlist_descriptor = working.workspace.netlist_descriptor.clone();
-            target.workspace.project_sources = working.workspace.project_sources.clone();
+            target
+                .workspace
+                .project_sources
+                .synchronize_code_workspace_bundles_from(&working.workspace.project_sources)
+                .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
         }
     }
     target
@@ -1879,6 +1916,11 @@ fn overlay_cell_view(
         }
     }
     overlay_generated_symbol(target, working, reference);
+    target
+        .workspace
+        .project_sources
+        .synchronize_cell_view_bundle_from(reference, &working.workspace.project_sources)
+        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     Ok(())
 }
 
@@ -1928,7 +1970,28 @@ fn revert_cell_view(
         .and_then(|cell| cell.get_view(&reference.view))
         .cloned();
     let Some(baseline_view) = baseline_view else {
-        return Err(ProjectLifecycleError::NoAcceptedBaseline);
+        let removed = state
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+            .is_some_and(|cell| cell.remove_view(&reference.view));
+        if !removed {
+            return Err(ProjectLifecycleError::NoAcceptedBaseline);
+        }
+        let source_changed = state
+            .workspace
+            .project_sources
+            .synchronize_cell_view_bundle_from(reference, &baseline.workspace.project_sources)
+            .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
+        state.prune_workspace_after_view_deleted(
+            &reference.library,
+            &reference.cell,
+            &reference.view,
+        );
+        if source_changed {
+            state.ui.code_workspace.veriloga = Default::default();
+        }
+        return Ok(());
     };
     let target_cell = state
         .library_manager
@@ -1953,6 +2016,14 @@ fn revert_cell_view(
     if reference == &state.workspace.active_view {
         state.restore_active_schematic_from_workspace();
     }
+    let source_changed = state
+        .workspace
+        .project_sources
+        .synchronize_cell_view_bundle_from(reference, &baseline.workspace.project_sources)
+        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
+    if source_changed {
+        state.ui.code_workspace.veriloga = Default::default();
+    }
     Ok(())
 }
 
@@ -1960,8 +2031,69 @@ fn restore_project_structure_preserving_documents(
     state: &mut AppState,
     baseline: crate::state::LibraryManager,
 ) {
+    let previous_references = state
+        .library_manager
+        .libraries_by_key()
+        .flat_map(|(library_key, library)| {
+            library.cells.iter().flat_map(move |(cell_key, cell)| {
+                cell.views
+                    .keys()
+                    .map(move |view_key| CellViewRef::new(library_key, cell_key, view_key))
+            })
+        })
+        .collect::<Vec<_>>();
     state.library_manager =
         merge_project_structure_with_document_content(&baseline, &state.library_manager);
+    let removed_references = previous_references
+        .into_iter()
+        .filter(|reference| {
+            state
+                .library_manager
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .is_none()
+        })
+        .collect::<Vec<_>>();
+    for reference in removed_references {
+        state.prune_workspace_after_view_deleted(
+            &reference.library,
+            &reference.cell,
+            &reference.view,
+        );
+    }
+    let retained = state
+        .library_manager
+        .libraries_by_key()
+        .flat_map(|(library_key, library)| {
+            library.cells.iter().flat_map(move |(cell_key, cell)| {
+                cell.views
+                    .keys()
+                    .map(move |view_key| CellViewRef::new(library_key, cell_key, view_key))
+            })
+        })
+        .collect::<Vec<_>>();
+    let removed = state
+        .workspace
+        .project_sources
+        .retain_cell_view_bundles_for(retained);
+    if state
+        .ui
+        .code_workspace
+        .veriloga
+        .receipt
+        .as_ref()
+        .is_some_and(|receipt| removed.contains(&receipt.token.bundle_id))
+        || state
+            .ui
+            .code_workspace
+            .veriloga
+            .pending
+            .as_ref()
+            .is_some_and(|pending| removed.contains(&pending.token.bundle_id))
+    {
+        state.ui.code_workspace.veriloga = Default::default();
+    }
     state
         .workspace
         .ensure_library_model(&mut state.library_manager);
@@ -1972,7 +2104,24 @@ fn merge_project_structure_with_document_content(
     content: &crate::state::LibraryManager,
 ) -> crate::state::LibraryManager {
     let mut merged = structure.clone();
-    let references = merged
+    let cells = merged
+        .libraries_by_key()
+        .flat_map(|(library_key, library)| {
+            library
+                .cells
+                .keys()
+                .map(move |cell_key| (library_key.to_owned(), cell_key.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    for (library, cell) in cells {
+        if let Some(cell) = merged
+            .get_library_mut(&library)
+            .and_then(|library| library.get_cell_mut(&cell))
+        {
+            cell.views.clear();
+        }
+    }
+    let references = content
         .libraries_by_key()
         .flat_map(|(library_key, library)| {
             library.cells.iter().flat_map(move |(cell_key, cell)| {
@@ -2157,6 +2306,57 @@ mod tests {
         ));
     }
 
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
+        let mut state = AppState::default();
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Project);
+        let baseline = snapshot(&state).expect("baseline");
+        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.accepted = Some(AcceptedProject {
+            baseline: baseline.clone(),
+            binding: None,
+        });
+        insert_configuration_root(
+            &mut state,
+            "Browser release",
+            CellViewRef::new("user", "top", "schematic"),
+        );
+
+        let prepared = prepare_browser_save(
+            &mut state,
+            SaveScope::ActiveDocument,
+            false,
+            "browser-project.rspice".to_owned(),
+        )
+        .expect("prepare browser active save");
+        assert_eq!(
+            prepared.saved_document,
+            ProjectDocumentId::ProjectConfiguration
+        );
+        assert_eq!(
+            prepared.candidate.workspace.configuration_sets,
+            state.workspace.configuration_sets
+        );
+        let staged_text = std::str::from_utf8(&prepared.bytes).expect("UTF-8 project bytes");
+        let decoded = crate::io::project_io::load_project_text(staged_text, None)
+            .expect("decode staged browser project");
+        assert_eq!(
+            decoded.workspace.configuration_sets,
+            state.workspace.configuration_sets
+        );
+
+        state.project_lifecycle.transaction = None;
+        revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
+            .expect("browser revert");
+        assert_eq!(
+            state.workspace.configuration_sets,
+            baseline.workspace.configuration_sets
+        );
+    }
+
     fn ensure_veriloga_source(state: &mut AppState, content: &str) {
         if state
             .workspace
@@ -2177,6 +2377,380 @@ mod tests {
                 )
                 .unwrap();
         }
+    }
+
+    fn insert_cell_veriloga_source(
+        state: &mut AppState,
+        view_name: &str,
+        content: &str,
+    ) -> (CellViewRef, crate::state::ProjectSourceId) {
+        let reference = CellViewRef::new(
+            state.workspace.active_view.library.clone(),
+            state.workspace.active_view.cell.clone(),
+            view_name,
+        );
+        state
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+            .expect("active cell exists")
+            .add_view(crate::state::View::new(
+                view_name,
+                crate::state::ViewType::VerilogA,
+            ));
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(reference.clone()),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            format!("{view_name}.va"),
+            content,
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .expect("valid cell source bundle");
+        let id = bundle.id();
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("unique cell source owner");
+        (reference, id)
+    }
+
+    fn insert_configuration_root(
+        state: &mut AppState,
+        name: &str,
+        root: CellViewRef,
+    ) -> crate::state::ConfigurationSetId {
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: name.to_owned(),
+                root,
+                dut_path: "/top".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Lifecycle test".to_owned(),
+            })
+            .expect("valid configuration")
+    }
+
+    #[test]
+    fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
+        let mut state = AppState::default();
+        let baseline = snapshot(&state).expect("baseline");
+        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.accepted = Some(AcceptedProject {
+            baseline: baseline.clone(),
+            binding: None,
+        });
+        let id = insert_configuration_root(
+            &mut state,
+            "Release",
+            CellViewRef::new("user", "top", "schematic"),
+        );
+        let edited = snapshot(&state).expect("edited");
+        let mut accepted = baseline.clone();
+
+        overlay_document(
+            &mut accepted,
+            &edited,
+            &ProjectDocumentId::ProjectConfiguration,
+        )
+        .expect("overlay project configuration");
+        assert_eq!(
+            accepted.workspace.configuration_sets,
+            edited.workspace.configuration_sets
+        );
+        assert_eq!(
+            accepted
+                .workspace
+                .configuration_sets
+                .find(id)
+                .expect("configuration persisted")
+                .semantic_digest(),
+            edited
+                .workspace
+                .configuration_sets
+                .find(id)
+                .unwrap()
+                .semantic_digest()
+        );
+
+        revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
+            .expect("revert catalog");
+        assert_eq!(
+            state.workspace.configuration_sets,
+            baseline.workspace.configuration_sets
+        );
+        snapshot(&state).expect("reverted state remains valid");
+    }
+
+    #[test]
+    fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
+        let mut state = AppState::default();
+        let (reference, source_id) = insert_cell_veriloga_source(
+            &mut state,
+            "behavior",
+            "module behavior(p, n); inout p, n; endmodule",
+        );
+        state.workspace.active_view = reference.clone();
+        state
+            .workspace
+            .open_views
+            .push(crate::state::OpenCellView::new(
+                reference.clone(),
+                crate::state::ViewType::VerilogA,
+            ));
+        state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        let baseline = snapshot(&state).expect("baseline");
+        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.accepted = Some(AcceptedProject {
+            baseline: baseline.clone(),
+            binding: None,
+        });
+
+        assert_eq!(
+            active_document(&state),
+            ProjectDocumentId::CellView(reference.clone())
+        );
+        state
+            .workspace
+            .project_sources
+            .replace_bundle_file_content(
+                source_id,
+                "behavior.va",
+                "module behavior(p, n); inout p, n; analog V(p,n) <+ 1; endmodule".to_owned(),
+            )
+            .expect("edit cell source");
+        let edited = snapshot(&state).expect("edited");
+        let mut target = baseline.clone();
+
+        overlay_document(
+            &mut target,
+            &edited,
+            &ProjectDocumentId::CellView(reference.clone()),
+        )
+        .expect("overlay cell view");
+        assert_eq!(
+            target.workspace.project_sources.get_bundle(source_id),
+            edited.workspace.project_sources.get_bundle(source_id)
+        );
+
+        revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
+            .expect("revert cell source");
+        assert_eq!(
+            state.workspace.project_sources.get_bundle(source_id),
+            baseline.workspace.project_sources.get_bundle(source_id)
+        );
+        assert!(
+            state
+                .library_manager
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
+        let state = AppState::default();
+        let baseline = snapshot(&state).expect("baseline");
+        let mut working_state = state;
+        let (reference, source_id) = insert_cell_veriloga_source(
+            &mut working_state,
+            "behavior",
+            "module behavior(p, n); inout p, n; endmodule",
+        );
+        let working = snapshot(&working_state).expect("working");
+        let mut target = baseline.clone();
+
+        overlay_document(
+            &mut target,
+            &working,
+            &ProjectDocumentId::ProjectConfiguration,
+        )
+        .expect("overlay configuration");
+
+        assert!(
+            target
+                .libraries
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .is_none(),
+            "project configuration must not accept an unrelated view document"
+        );
+        assert!(
+            target
+                .workspace
+                .project_sources
+                .get_bundle(source_id)
+                .is_none()
+        );
+
+        working_state.project_lifecycle.project_open = true;
+        working_state.project_lifecycle.accepted = Some(AcceptedProject {
+            baseline,
+            binding: None,
+        });
+        revert_document(&mut working_state, ProjectDocumentId::ProjectConfiguration)
+            .expect("revert configuration");
+        assert!(
+            working_state
+                .library_manager
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .is_some(),
+            "reverting configuration must preserve a view in an accepted cell"
+        );
+        assert!(
+            working_state
+                .workspace
+                .project_sources
+                .get_bundle(source_id)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() {
+        let mut state = AppState::default();
+        let baseline = snapshot(&state).expect("baseline");
+        let reference = CellViewRef::new("user", "new_behavioral_cell", "behavior");
+        let mut cell = crate::state::Cell::new(reference.cell.as_str());
+        cell.add_view(crate::state::View::new(
+            "schematic",
+            crate::state::ViewType::Schematic,
+        ));
+        cell.add_view(crate::state::View::new(
+            reference.view.as_str(),
+            crate::state::ViewType::VerilogA,
+        ));
+        state
+            .library_manager
+            .get_library_mut(&reference.library)
+            .expect("project library")
+            .add_cell(cell);
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(reference.clone()),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "behavior.va",
+            "module behavior(p, n); inout p, n; endmodule",
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .expect("valid source bundle");
+        let source_id = bundle.id();
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("unique source owner");
+        insert_configuration_root(
+            &mut state,
+            "New cell root",
+            CellViewRef::new(&reference.library, &reference.cell, "schematic"),
+        );
+        state.workspace.active_view = reference.clone();
+        state
+            .workspace
+            .open_views
+            .push(crate::state::OpenCellView::new(
+                reference.clone(),
+                crate::state::ViewType::VerilogA,
+            ));
+        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.accepted = Some(AcceptedProject {
+            baseline,
+            binding: None,
+        });
+
+        revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
+            .expect("revert new cell configuration");
+
+        assert!(
+            state
+                .library_manager
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .is_none()
+        );
+        assert!(
+            state
+                .workspace
+                .project_sources
+                .get_bundle(source_id)
+                .is_none()
+        );
+        assert_ne!(state.workspace.active_view, reference);
+        assert!(
+            state
+                .library_manager
+                .get_library(&state.workspace.active_view.library)
+                .and_then(|library| library.get_cell(&state.workspace.active_view.cell))
+                .and_then(|cell| cell.get_view(&state.workspace.active_view.view))
+                .is_some()
+        );
+        assert!(
+            state
+                .workspace
+                .configuration_sets
+                .configurations()
+                .is_empty()
+        );
+        snapshot(&state).expect("atomic configuration revert remains valid");
+    }
+
+    #[test]
+    fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() {
+        let mut state = AppState::default();
+        ensure_veriloga_source(&mut state, "module workspace_model; endmodule");
+        let code_workspace = state.workspace.project_sources.clone();
+        let baseline = snapshot(&state).expect("baseline");
+        let (reference, source_id) = insert_cell_veriloga_source(
+            &mut state,
+            "behavior",
+            "module behavior(p, n); inout p, n; endmodule",
+        );
+        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.accepted = Some(AcceptedProject {
+            baseline,
+            binding: None,
+        });
+
+        revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
+            .expect("revert new view");
+
+        assert!(
+            state
+                .workspace
+                .project_sources
+                .get_bundle(source_id)
+                .is_none()
+        );
+        assert_eq!(
+            state
+                .workspace
+                .project_sources
+                .get(crate::state::ProjectSourceLanguage::VerilogA),
+            code_workspace.get(crate::state::ProjectSourceLanguage::VerilogA)
+        );
+        assert!(
+            state
+                .library_manager
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .is_none()
+        );
     }
 
     #[test]
@@ -2501,6 +3075,67 @@ mod tests {
         );
         assert!(has_unsaved_changes(&state));
         assert!(!active_document_is_dirty(&state));
+        remove_project_artifacts(&path);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
+        let path = unique_path("active-configuration-catalog");
+        let mut state = AppState::default();
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Project);
+        save_native(
+            &mut state,
+            SaveScope::AllDocuments,
+            &path,
+            DestinationAuthority::UserSelected,
+        )
+        .expect("establish baseline");
+
+        let release_id = insert_configuration_root(
+            &mut state,
+            "Release",
+            CellViewRef::new("user", "top", "schematic"),
+        );
+        save_native(
+            &mut state,
+            SaveScope::ActiveDocument,
+            &path,
+            DestinationAuthority::Canonical,
+        )
+        .expect("save active project configuration");
+
+        let persisted = crate::io::load_project_file(&path).expect("reload configuration save");
+        assert_eq!(
+            persisted.workspace.configuration_sets,
+            state.workspace.configuration_sets
+        );
+        assert_eq!(
+            state
+                .project_lifecycle
+                .accepted
+                .as_ref()
+                .expect("accepted save")
+                .baseline
+                .workspace
+                .configuration_sets,
+            state.workspace.configuration_sets
+        );
+
+        state
+            .workspace
+            .configuration_sets
+            .clone_configuration(release_id, 1, "Characterization")
+            .expect("unsaved catalog edit");
+        revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
+            .expect("revert to exact saved catalog");
+        assert_eq!(
+            state.workspace.configuration_sets,
+            persisted.workspace.configuration_sets
+        );
+        assert_eq!(state.workspace.configuration_sets.configurations().len(), 1);
         remove_project_artifacts(&path);
     }
 

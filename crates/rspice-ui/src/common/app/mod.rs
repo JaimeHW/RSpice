@@ -398,29 +398,6 @@ impl AppState {
         if self.schematic.components.is_empty() {
             return Some("Add a component before running a schematic simulation".to_string());
         }
-        if let Some(source) = self
-            .workspace
-            .project_sources
-            .get(crate::state::ProjectSourceLanguage::VerilogA)
-        {
-            let compiled = self
-                .ui
-                .code_workspace
-                .veriloga
-                .receipt
-                .as_ref()
-                .is_some_and(|receipt| {
-                    receipt.token.project_id == self.workspace.project.id()
-                        && receipt.token.revision == source.revision().get()
-                        && receipt.token.content_digest == source.content_digest()
-                });
-            if !compiled {
-                return Some(format!(
-                    "Compile the exact current {} project source before simulation",
-                    source.file_name()
-                ));
-            }
-        }
         if let Some(issue) = plan.validation_issues().first() {
             return Some(format!("Correct simulation plan: {issue}"));
         }
@@ -746,7 +723,7 @@ impl RSpiceApp {
         cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
-        restore_global_veriloga_library(&mut state.library_manager);
+        restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace);
         state.restore_active_schematic_from_workspace();
         crate::common::project_lifecycle::initialize_from_session(&mut state);
         #[cfg(target_arch = "wasm32")]
@@ -1245,7 +1222,9 @@ impl eframe::App for RSpiceApp {
         log::debug!("save: sync schematic");
         self.state.sync_active_schematic_to_workspace();
         log::debug!("save: veriloga library");
-        if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+        if let Err(err) =
+            save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)
+        {
             log::warn!(
                 "Failed to persist global Verilog-A library during app save: {}",
                 err
@@ -1413,6 +1392,36 @@ mod tests {
         assert!(
             state.can_run_simulation(),
             "warning-only DRC results should not block simulation"
+        );
+    }
+
+    #[test]
+    fn unreferenced_code_workspace_veriloga_never_blocks_schematic_run_readiness() {
+        let mut state = runnable_state();
+        state
+            .workspace
+            .project_sources
+            .insert(
+                crate::state::ProjectSourceDocument::try_new(
+                    "unreferenced.va",
+                    crate::state::ProjectSourceLanguage::VerilogA,
+                    "module unreferenced; endmodule\n",
+                )
+                .expect("valid unreferenced source"),
+            )
+            .expect("unique Code Workspace source");
+        assert!(
+            state
+                .workspace
+                .project_sources
+                .get(crate::state::ProjectSourceLanguage::VerilogA)
+                .is_some()
+        );
+        state.ui.code_workspace.veriloga.receipt = None;
+
+        assert!(
+            state.can_run_simulation(),
+            "only an executable deck that references project Verilog-A may require its runtime"
         );
     }
 

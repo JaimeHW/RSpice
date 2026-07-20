@@ -37,6 +37,10 @@ pub enum CompileError {
     #[error("Module selection error: {0}")]
     ModuleSelection(String),
 
+    /// Invalid or unsafe file-system-free source bundle.
+    #[error("Virtual source error: {0}")]
+    VirtualSource(#[from] crate::virtual_source::VirtualSourceError),
+
     /// Multiple errors collected during compilation
     #[error("Compilation failed with {} error(s)", .0.len())]
     Multiple(Vec<CompileError>),

@@ -2013,7 +2013,7 @@ mod tests {
             executable_netlist: "deck\n.op\n.end\n".to_owned(),
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities: Vec::new(),
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([0x72; 32])),
             advisories: Vec::new(),

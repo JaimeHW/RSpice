@@ -37,13 +37,13 @@ pub use registry::resolve_generated_registry_model_names;
 
 use crate::canonical_ir::CanonicalIrArtifact;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedRustFile {
     pub relative_path: String,
     pub contents: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedRustDevice {
     pub module_name: String,
     pub public_model_name: String,
@@ -52,7 +52,7 @@ pub struct GeneratedRustDevice {
     pub source_digest: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum RustBackendSelection {
     ScalarOptIr,
     SparseLocalKernel,
@@ -61,7 +61,7 @@ pub enum RustBackendSelection {
     LegacyDevice,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedRustDeviceReport {
     pub device: GeneratedRustDevice,
     pub backend: RustBackendSelection,

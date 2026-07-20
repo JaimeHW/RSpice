@@ -171,6 +171,17 @@ fn document_digests(
         // specifications participate in the simulation-plan payload digest.
         digest(&())?,
     );
+    let code_workspace_sources = project
+        .workspace
+        .project_sources
+        .iter_bundles()
+        .filter(|bundle| {
+            matches!(
+                bundle.owner(),
+                crate::state::ProjectSourceOwner::CodeWorkspace { .. }
+            )
+        })
+        .collect::<Vec<_>>();
     documents.insert(
         ProjectDocumentId::NetlistSource,
         digest(&(
@@ -178,7 +189,7 @@ fn document_digests(
             &project.workspace.netlist_source_path,
             &project.workspace.netlist_document,
             &project.workspace.netlist_descriptor,
-            &project.workspace.project_sources,
+            code_workspace_sources,
         ))?,
     );
 
@@ -207,9 +218,12 @@ fn document_digests(
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
             .map(ViewDocumentContent::from);
+        let project_source = project.workspace.project_sources.bundle_for_owner(
+            &crate::state::ProjectSourceOwner::cell_view(reference.clone()),
+        );
         documents.insert(
             ProjectDocumentId::CellView(reference),
-            digest(&(schematic, view))?,
+            digest(&(schematic, view, project_source))?,
         );
     }
 
@@ -287,8 +301,10 @@ fn project_configuration_value(project: &ProjectFile) -> Result<serde_json::Valu
         project.remove("revision");
     }
     scrub_library_presentation(&mut value);
-    // Cell-view metadata is owned by the corresponding CellView document,
-    // not by project configuration.
+    // Every view entry, including its existence and metadata, is owned by the
+    // corresponding CellView document. Project configuration owns the
+    // library/cell catalog only; otherwise saving configuration could silently
+    // accept an unrelated unsaved view or reverting it could discard one.
     if let Some(libraries) = value
         .pointer_mut("/1/libraries")
         .and_then(|v| v.as_object_mut())
@@ -300,15 +316,7 @@ fn project_configuration_value(project: &ProjectFile) -> Result<serde_json::Valu
             if let Some(cells) = library.get_mut("cells").and_then(|v| v.as_object_mut()) {
                 for cell in cells.values_mut() {
                     if let Some(views) = cell.get_mut("views").and_then(|v| v.as_object_mut()) {
-                        for view in views.values_mut() {
-                            if let Some(object) = view.as_object_mut() {
-                                object.remove("metadata");
-                                object.remove("modified");
-                                object.remove("is_open");
-                                object.remove("modified_time");
-                                object.remove("file_path");
-                            }
-                        }
+                        views.clear();
                     }
                 }
             }
@@ -700,5 +708,48 @@ mod tests {
 
         assert!(registry.is_dirty(&ProjectDocumentId::NetlistSource));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
+    }
+
+    #[test]
+    fn cell_view_existence_and_owned_source_are_not_project_configuration_content() {
+        let mut state = AppState::default();
+        let baseline = super::super::snapshot(&state).expect("baseline snapshot");
+        let reference = CellViewRef::new(
+            state.workspace.active_view.library.clone(),
+            state.workspace.active_view.cell.clone(),
+            "behavior",
+        );
+        state
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+            .expect("active cell")
+            .add_view(crate::state::View::new(
+                reference.view.as_str(),
+                crate::state::ViewType::VerilogA,
+            ));
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(
+                crate::state::ProjectSourceBundle::try_new(
+                    crate::state::ProjectSourceOwner::cell_view(reference.clone()),
+                    crate::state::ProjectSourceLanguage::VerilogA,
+                    "behavior.va",
+                    "module behavior(p, n); inout p, n; endmodule",
+                    std::iter::empty(),
+                    std::iter::empty(),
+                )
+                .expect("valid bundle"),
+            )
+            .expect("unique owner");
+
+        let current = super::super::snapshot(&state).expect("current snapshot");
+        let mut registry = DocumentRegistry::default();
+        registry.rebuild(&current, Some(&baseline)).unwrap();
+
+        assert!(registry.is_dirty(&ProjectDocumentId::CellView(reference)));
+        assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
+        assert!(!registry.is_dirty(&ProjectDocumentId::NetlistSource));
     }
 }

@@ -7,6 +7,7 @@ mod configuration_set;
 pub mod library_browser;
 pub mod model_library;
 pub mod pdk_config;
+mod project_sources;
 pub mod property_types;
 mod schematic;
 mod simulation;
@@ -27,6 +28,17 @@ pub use library_browser::{
 };
 pub use model_library::ModelLibraryManager;
 pub use pdk_config::{ConfigError, DiscoveredFile, LibraryPathEntry, PdkConfig};
+pub(crate) use project_sources::{CanonicalCellViewOwnerKey, canonical_cell_view_owner_key};
+pub use project_sources::{
+    MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+    MAX_PROJECT_SOURCE_DEPENDENCIES, MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH, MAX_PROJECT_SOURCE_FILES,
+    MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
+    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceDocument, ProjectSourceError,
+    ProjectSourceFile, ProjectSourceId, ProjectSourceIdError, ProjectSourceIdParseError,
+    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
+    ProjectSourceValidationIdentity, project_veriloga_bundle_alias,
+    project_veriloga_bundle_source_key,
+};
 pub use property_types::{
     DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet, PropertyType, PropertyValue,
     VisibilityCondition, format_engineering,
@@ -57,12 +69,10 @@ pub use symbol_resolver::{
 pub use workspace::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableRange, DesignVariableScope, DesignVariableScopeKind,
-    DesignVariableSweepEligibility, MAX_PROJECT_CODE_SOURCE_BYTES, OpenCellView,
-    OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistSaveRecord,
-    PROJECT_DESCRIPTOR_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
-    ProjectConfigurationMutationError, ProjectDescriptor, ProjectDescriptorError,
-    ProjectSourceDocument, ProjectSourceError, ProjectSourceLanguage, ProjectSourceRegistry,
-    ProjectSourceValidationIdentity, ProjectTechnologyBinding, ProjectWorkspace,
+    DesignVariableSweepEligibility, OpenCellView, OwnedNetlistDescriptor, OwnedNetlistEditStrategy,
+    OwnedNetlistSaveRecord, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+    PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION, ProjectConfigurationMutationError,
+    ProjectDescriptor, ProjectDescriptorError, ProjectTechnologyBinding, ProjectWorkspace,
     RegressionComparisonMethod, RegressionComparisonWindow, RegressionTargetKind,
     RegressionTargetSelector, RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput,
     SavedOutputCompatibility, SavedOutputCompatibilityKind, SavedOutputKind, SavedOutputPolicy,

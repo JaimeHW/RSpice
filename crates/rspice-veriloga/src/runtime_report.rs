@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::{Component, Path};
 
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use thiserror::Error;
 
@@ -19,7 +20,7 @@ use crate::rust_backend::{
 use crate::source::Span;
 
 /// The complete, mutually consistent output of an in-memory runtime compile.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeCompileReport {
     /// Bytecode-era model consumed by the simulator and portable interpreter.
     pub model: CompiledModel,
@@ -90,6 +91,10 @@ impl RuntimeCompileReport {
             return Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch);
         }
 
+        if !self.targets.is_exhaustive() {
+            return Err(RuntimeArtifactIntegrityError::InvalidTargetMatrix);
+        }
+
         let rust_is_qualified = self.targets.is_available(RuntimeTarget::GeneratedRust);
         if rust_is_qualified != self.generated_rust.is_some() {
             return Err(
@@ -109,7 +114,7 @@ impl RuntimeCompileReport {
 }
 
 /// Public ABI summary for a compiled behavioral model.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeAbiSummary {
     pub module_name: SmolStr,
     pub analog_ports: Vec<RuntimeAbiPort>,
@@ -167,7 +172,7 @@ impl RuntimeAbiSummary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeAbiPort {
     pub name: SmolStr,
     pub direction: SmolStr,
@@ -176,7 +181,7 @@ pub struct RuntimeAbiPort {
     pub flow_nature: Option<SmolStr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeAbiParameter {
     pub name: SmolStr,
     pub value_type: CanonicalValueType,
@@ -185,7 +190,7 @@ pub struct RuntimeAbiParameter {
 }
 
 /// Runtime/compiler targets represented by the behavioral-model workbench.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RuntimeTarget {
     SemanticIr,
     BytecodeVm,
@@ -195,7 +200,7 @@ pub enum RuntimeTarget {
 }
 
 /// Whether a target can consume this exact compiled artifact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeTargetReadiness {
     Available,
     Unavailable,
@@ -203,14 +208,14 @@ pub enum RuntimeTargetReadiness {
 }
 
 /// Product maturity of a target, independent of artifact readiness.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeTargetMaturity {
     Production,
     Preview,
     QualificationOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeTargetQualification {
     pub target: RuntimeTarget,
     pub readiness: RuntimeTargetReadiness,
@@ -225,7 +230,7 @@ impl RuntimeTargetQualification {
 }
 
 /// Complete target matrix. Every [`RuntimeTarget`] occurs exactly once.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeTargetQualifications {
     entries: Vec<RuntimeTargetQualification>,
 }
@@ -249,6 +254,24 @@ impl RuntimeTargetQualifications {
 
     pub fn is_available(&self, target: RuntimeTarget) -> bool {
         self.get(target).is_available()
+    }
+
+    fn is_exhaustive(&self) -> bool {
+        const TARGETS: [RuntimeTarget; 5] = [
+            RuntimeTarget::SemanticIr,
+            RuntimeTarget::BytecodeVm,
+            RuntimeTarget::NativeX64Jit,
+            RuntimeTarget::WasmInterpreter,
+            RuntimeTarget::GeneratedRust,
+        ];
+        self.entries.len() == TARGETS.len()
+            && TARGETS.iter().all(|target| {
+                self.entries
+                    .iter()
+                    .filter(|entry| entry.target == *target)
+                    .count()
+                    == 1
+            })
     }
 }
 
@@ -447,6 +470,8 @@ pub enum RuntimeArtifactIntegrityError {
     AbiModuleMismatch { abi: String, canonical: String },
     #[error("ABI surface does not match the canonical model")]
     AbiSurfaceMismatch,
+    #[error("runtime target qualification matrix is not exhaustive")]
+    InvalidTargetMatrix,
     #[error(
         "generated Rust qualification/artifact mismatch: qualified={qualified}, artifact_present={artifact_present}"
     )]
@@ -563,12 +588,14 @@ fn collect_compile_diagnostics(
             error.to_string(),
             None,
         )),
-        CompileError::IoError { .. } => diagnostics.push(diagnostic(
-            source,
-            CompileDiagnosticPhase::Input,
-            error.to_string(),
-            None,
-        )),
+        CompileError::IoError { .. } | CompileError::VirtualSource(_) => {
+            diagnostics.push(diagnostic(
+                source,
+                CompileDiagnosticPhase::Input,
+                error.to_string(),
+                None,
+            ))
+        }
     }
 }
 

@@ -271,13 +271,15 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             #[cfg(feature = "veriloga")]
             if circuit.has_veriloga_devices() {
-                circuit.prepare_veriloga_timepoint(
-                    time,
-                    dt,
-                    ctx.coeff,
-                    ctx.analysis_initial_step,
-                    ctx.analysis_final_step,
-                );
+                circuit
+                    .prepare_veriloga_timepoint(
+                        time,
+                        dt,
+                        ctx.coeff,
+                        ctx.analysis_initial_step,
+                        ctx.analysis_final_step,
+                    )
+                    .map_err(SimulationError::Circuit)?;
             }
             #[cfg(feature = "veriloga-builtins")]
             if circuit.has_generated_veriloga_devices() {

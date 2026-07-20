@@ -50,11 +50,13 @@ pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use advanced::{MaterializedStepRun, StepPlan, StepPlanLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{
-    VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
-    prune_veriloga_cache, register_precompiled_veriloga_model,
-    register_precompiled_veriloga_model_with_dependencies,
+    ProjectVerilogARuntimeRegistration, VerilogACacheEntry, VerilogACachePruneReport,
+    VerilogACacheStats, clear_veriloga_cache, prune_veriloga_cache,
+    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
     register_precompiled_veriloga_runtime_with_dependencies,
-    register_project_veriloga_runtime_for_session, veriloga_cache_entries, veriloga_cache_stats,
+    register_project_veriloga_runtime_for_session, register_project_veriloga_runtimes_for_session,
+    register_project_veriloga_runtimes_for_session_with_limits, veriloga_cache_entries,
+    veriloga_cache_stats,
 };
 pub use config::{
     BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,

@@ -524,7 +524,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     task: QueuedAnalysis,
     saved_output_contracts: Vec<PreparedSavedOutput>,
     executable_netlist: Arc<str>,
-    project_veriloga_runtime: Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
+    project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
     touchstone_export: TouchstoneExportPolicy,
 }
 
@@ -648,12 +648,12 @@ impl AuthorizedTaskDispatch {
     ) -> (
         QueuedAnalysis,
         Arc<str>,
-        Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
+        crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
     ) {
         (
             self.task,
             self.executable_netlist,
-            self.project_veriloga_runtime,
+            self.project_veriloga_runtimes,
         )
     }
 }
@@ -672,8 +672,8 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) executable_netlist: String,
     pub(in crate::simulation) save_policy: SavePolicy,
     pub(in crate::simulation) model_identities: Vec<ModelSourceIdentity>,
-    pub(in crate::simulation) project_veriloga_runtime:
-        Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
+    pub(in crate::simulation) project_veriloga_runtimes:
+        crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
     pub(in crate::simulation) receipt: RunSourceReceipt,
     pub(in crate::simulation) advisories: Vec<String>,
@@ -701,7 +701,7 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     executable_netlist: String,
     save_policy: SavePolicy,
     model_identities: Vec<ModelSourceIdentity>,
-    project_veriloga_runtime: Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
+    project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
@@ -879,7 +879,66 @@ impl PreparedRunSnapshot {
         // Model identities describe a set. Sort by canonical label/digest so
         // discovery or map insertion order cannot perturb snapshot identity;
         // executable model precedence remains bound by the netlist bytes.
-        if let Some(runtime) = &parts.project_veriloga_runtime {
+        parts
+            .project_veriloga_runtimes
+            .validate()
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!("Project Verilog-A runtime set is invalid: {error}"),
+                )
+            })?;
+        let parsed_netlist =
+            rspice_core::Netlist::parse(&parts.executable_netlist).map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::Netlist,
+                    format!("Prepared executable netlist is invalid: {error}"),
+                )
+            })?;
+        let expected_veriloga_bindings = parts
+            .project_veriloga_runtimes
+            .iter()
+            .map(|runtime| {
+                (
+                    runtime.source_key().to_owned(),
+                    runtime.netlist_alias().to_ascii_uppercase(),
+                )
+            })
+            .collect::<HashSet<_>>();
+        let mut observed_veriloga_bindings = HashSet::new();
+        for include in &parsed_netlist.veriloga_includes {
+            let Some(source_key) = include.file_path.to_str() else {
+                return Err(PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    "Prepared Verilog-A source identity is not valid UTF-8",
+                ));
+            };
+            let Some(alias) = include.model_name.as_deref() else {
+                return Err(PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!(
+                        "Prepared Verilog-A source '{source_key}' must declare its sealed model alias"
+                    ),
+                ));
+            };
+            if !observed_veriloga_bindings
+                .insert((source_key.to_owned(), alias.to_ascii_uppercase()))
+            {
+                return Err(PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!(
+                        "Prepared Verilog-A binding '{source_key}' with alias '{alias}' is duplicated"
+                    ),
+                ));
+            }
+        }
+        if observed_veriloga_bindings != expected_veriloga_bindings {
+            return Err(PreparationError::new(
+                PreparationStage::ModelBindings,
+                "Every executable Verilog-A directive must match exactly one sealed project runtime",
+            ));
+        }
+        for runtime in parts.project_veriloga_runtimes.iter() {
             runtime.validate().map_err(|error| {
                 PreparationError::new(
                     PreparationStage::ModelBindings,
@@ -888,16 +947,20 @@ impl PreparedRunSnapshot {
             })?;
             let directive = crate::workbench::code_workspace::project_veriloga_directive(
                 runtime.source_key(),
-                runtime.module_name(),
+                runtime.netlist_alias(),
             );
-            if !parts
+            let directive_count = parts
                 .executable_netlist
                 .lines()
-                .any(|line| line.trim().eq_ignore_ascii_case(&directive))
-            {
+                .filter(|line| line.trim().eq_ignore_ascii_case(&directive))
+                .count();
+            if directive_count != 1 {
                 return Err(PreparationError::new(
                     PreparationStage::ModelBindings,
-                    "Prepared project Verilog-A runtime is not referenced by the executable netlist",
+                    format!(
+                        "Prepared project Verilog-A runtime '{}' must be referenced exactly once by the executable netlist (found {directive_count})",
+                        runtime.netlist_alias()
+                    ),
                 ));
             }
             parts.model_identities.push(ModelSourceIdentity::new(
@@ -942,7 +1005,7 @@ impl PreparedRunSnapshot {
             executable_netlist: parts.executable_netlist,
             save_policy: parts.save_policy,
             model_identities: parts.model_identities,
-            project_veriloga_runtime: parts.project_veriloga_runtime,
+            project_veriloga_runtimes: parts.project_veriloga_runtimes,
             target: parts.target,
             receipt: parts.receipt,
             advisories: parts.advisories,
@@ -1003,7 +1066,7 @@ impl PreparedRunSnapshot {
         }
         let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
         let default_touchstone_export = self.touchstone_export.clone();
-        let project_veriloga_runtime = self.project_veriloga_runtime.clone();
+        let project_veriloga_runtimes = self.project_veriloga_runtimes.clone();
         let tasks = self
             .tasks
             .into_iter()
@@ -1028,7 +1091,7 @@ impl PreparedRunSnapshot {
                     task: prepared.task,
                     saved_output_contracts: prepared.saved_output_contracts,
                     executable_netlist: Arc::clone(&executable_netlist),
-                    project_veriloga_runtime: project_veriloga_runtime.clone(),
+                    project_veriloga_runtimes: project_veriloga_runtimes.clone(),
                     touchstone_export,
                 }
             })
@@ -1483,7 +1546,7 @@ mod tests {
             executable_netlist: "deck\n.op\n.end\n".to_owned(),
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities: Vec::new(),
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([4; 32])),
             advisories: Vec::new(),
@@ -1496,17 +1559,25 @@ mod tests {
 
     fn project_runtime() -> crate::workbench::code_workspace::PreparedVerilogARuntime {
         let project_id = crate::product::ProjectId::new();
-        let document = crate::state::ProjectSourceDocument::try_new(
-            "file_name_differs.va",
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::code_workspace(
+                crate::state::ProjectSourceLanguage::VerilogA,
+            ),
             crate::state::ProjectSourceLanguage::VerilogA,
+            "file_name_differs.va",
             "module snapshot_owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+            [],
+            [],
         )
         .unwrap();
-        let receipt =
-            crate::workbench::code_workspace::compile_project_source_receipt(project_id, &document)
-                .unwrap();
-        crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_receipt(
-            project_id, &document, &receipt,
+        let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
+            project_id,
+            &bundle,
+            Some("snapshot_owned"),
+        )
+        .unwrap();
+        crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
+            project_id, &bundle, &receipt,
         )
         .unwrap()
     }
@@ -1515,7 +1586,11 @@ mod tests {
     fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
         let runtime = project_runtime();
         let mut missing = parts();
-        missing.project_veriloga_runtime = Some(runtime.clone());
+        missing.project_veriloga_runtimes =
+            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![
+                runtime.clone(),
+            ])
+            .unwrap();
         assert!(matches!(
             PreparedRunSnapshot::new(missing),
             Err(PreparationError {
@@ -1526,17 +1601,59 @@ mod tests {
 
         let directive = crate::workbench::code_workspace::project_veriloga_directive(
             runtime.source_key(),
-            runtime.module_name(),
+            runtime.netlist_alias(),
         );
         let mut suffixed = parts();
         suffixed.executable_netlist = format!("deck\n{directive} unexpected\n.op\n.end\n");
-        suffixed.project_veriloga_runtime = Some(runtime.clone());
+        suffixed.project_veriloga_runtimes =
+            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![
+                runtime.clone(),
+            ])
+            .unwrap();
         assert!(PreparedRunSnapshot::new(suffixed).is_err());
 
         let mut exact = parts();
         exact.executable_netlist = format!("deck\n{directive}\n.op\n.end\n");
-        exact.project_veriloga_runtime = Some(runtime);
+        exact.project_veriloga_runtimes =
+            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+                .unwrap();
         assert!(PreparedRunSnapshot::new(exact).is_ok());
+    }
+
+    #[test]
+    fn snapshot_rejects_unsealed_or_duplicate_veriloga_directives() {
+        let runtime = project_runtime();
+        let directive = crate::workbench::code_workspace::project_veriloga_directive(
+            runtime.source_key(),
+            runtime.netlist_alias(),
+        );
+        let runtime_set =
+            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+                .unwrap();
+
+        let mut unsealed = parts();
+        unsealed.executable_netlist = format!(
+            "deck\n{directive}\n.veriloga \"__rspice_project__/foreign.va\" FOREIGN\n.op\n.end\n"
+        );
+        unsealed.project_veriloga_runtimes = runtime_set.clone();
+        assert!(matches!(
+            PreparedRunSnapshot::new(unsealed),
+            Err(PreparationError {
+                stage: PreparationStage::ModelBindings,
+                ..
+            })
+        ));
+
+        let mut duplicated = parts();
+        duplicated.executable_netlist = format!("deck\n{directive}\n{directive}\n.op\n.end\n");
+        duplicated.project_veriloga_runtimes = runtime_set;
+        assert!(matches!(
+            PreparedRunSnapshot::new(duplicated),
+            Err(PreparationError {
+                stage: PreparationStage::ModelBindings,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1887,9 +2004,9 @@ mod tests {
         assert!(authorized.dependencies().is_empty());
         assert_eq!(authorized.label(), "DC Operating Point");
         assert_eq!(authorized.config_digest(), parts().tasks[0].config_digest());
-        let (_, netlist, runtime) = authorized.into_runner_parts();
+        let (_, netlist, runtimes) = authorized.into_runner_parts();
         assert_eq!(&*netlist, "deck\n.op\n.end\n");
-        assert!(runtime.is_none());
+        assert!(runtimes.is_empty());
         assert!(tasks.is_empty());
     }
 

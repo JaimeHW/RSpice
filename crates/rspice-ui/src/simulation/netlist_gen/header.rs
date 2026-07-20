@@ -109,4 +109,186 @@ impl<'a> NetlistGenerator<'a> {
         }
         self.lines.push(String::new());
     }
+
+    /// `.VERILOGA` registers a source/runtime globally for the executable
+    /// deck. Nested subcircuit generators discover their own dependencies,
+    /// so collect, validate, deduplicate, and hoist those directives once
+    /// after the full hierarchy has been assembled.
+    pub(super) fn hoist_veriloga_directives(&mut self) {
+        let mut directives = std::collections::BTreeMap::<String, (Option<String>, String)>::new();
+        let mut retained = Vec::with_capacity(self.lines.len());
+        for line in self.lines.drain(..) {
+            let Some((path, model)) = parse_veriloga_directive(&line) else {
+                retained.push(line);
+                continue;
+            };
+            let model_key = model.as_deref().map(str::to_ascii_lowercase);
+            match directives.get(&path) {
+                Some((existing, _)) if *existing == model_key => {}
+                Some((existing, _)) => self.errors.push(format!(
+                    "Verilog-A source '{path}' has conflicting module selections '{}' and '{}'",
+                    existing.as_deref().unwrap_or("<compiler selected>"),
+                    model_key.as_deref().unwrap_or("<compiler selected>")
+                )),
+                None => {
+                    directives.insert(path, (model_key, line.trim().to_owned()));
+                }
+            }
+        }
+        remove_empty_library_include_sections(&mut retained);
+        if directives.is_empty() {
+            self.lines = retained;
+            return;
+        }
+        let insertion = retained
+            .iter()
+            .position(String::is_empty)
+            .map_or(retained.len(), |index| index + 1);
+        let mut section = Vec::with_capacity(directives.len() + 2);
+        section.push("* Verilog-A sources".to_owned());
+        section.extend(directives.into_values().map(|(_, line)| line));
+        section.push(String::new());
+        retained.splice(insertion..insertion, section);
+        self.lines = retained;
+    }
+}
+
+fn parse_veriloga_directive(line: &str) -> Option<(String, Option<String>)> {
+    let (command, remainder) = take_token(line)?;
+    if !command.eq_ignore_ascii_case(".veriloga") {
+        return None;
+    }
+    let (path, remainder) = take_token(remainder)?;
+    let remainder = remainder.trim();
+    if remainder.is_empty() {
+        return Some((path.to_owned(), None));
+    }
+    let (model, trailing) = take_token(remainder)?;
+    trailing
+        .trim()
+        .is_empty()
+        .then(|| (path.to_owned(), Some(model.to_owned())))
+}
+
+fn take_token(input: &str) -> Option<(&str, &str)> {
+    let input = input.trim_start();
+    let first = input.chars().next()?;
+    if matches!(first, '\'' | '"') {
+        let quoted = &input[first.len_utf8()..];
+        let mut escaped = false;
+        for (index, character) in quoted.char_indices() {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == first {
+                return Some((&quoted[..index], &quoted[index + character.len_utf8()..]));
+            }
+        }
+        return None;
+    }
+    let end = input.find(char::is_whitespace).unwrap_or(input.len());
+    (end > 0).then_some((&input[..end], &input[end..]))
+}
+
+fn remove_empty_library_include_sections(lines: &mut Vec<String>) {
+    let mut index = 0;
+    while index < lines.len() {
+        if lines[index].trim() != "* Library includes" {
+            index += 1;
+            continue;
+        }
+        let end = (index + 1..lines.len())
+            .find(|candidate| lines[*candidate].is_empty())
+            .unwrap_or(lines.len());
+        let has_include = lines[index + 1..end].iter().any(|line| {
+            let command = line.split_whitespace().next().unwrap_or_default();
+            matches!(
+                command.to_ascii_lowercase().as_str(),
+                ".include" | ".inc" | ".lib"
+            )
+        });
+        if has_include {
+            index = end.saturating_add(1);
+        } else {
+            let drain_end = usize::min(end.saturating_add(1), lines.len());
+            lines.drain(index..drain_end);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hierarchical_veriloga_directives_are_hoisted_and_deduplicated_once() {
+        let schematic = crate::state::SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        generator.lines = vec![
+            "* RSpice Netlist".to_owned(),
+            String::new(),
+            "* Library includes".to_owned(),
+            ".VERILOGA \"__rspice_project__/exact/model.va\" owned".to_owned(),
+            String::new(),
+            ".subckt child p n".to_owned(),
+            "* Library includes".to_owned(),
+            ".veriloga \"__rspice_project__/exact/model.va\" OWNED".to_owned(),
+            String::new(),
+            ".ends child".to_owned(),
+        ];
+
+        generator.hoist_veriloga_directives();
+
+        assert!(generator.errors.is_empty(), "{:?}", generator.errors);
+        assert_eq!(
+            generator
+                .lines
+                .iter()
+                .filter(|line| line
+                    .trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with(".veriloga"))
+                .count(),
+            1
+        );
+        let directive = generator
+            .lines
+            .iter()
+            .position(|line| {
+                line.trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with(".veriloga")
+            })
+            .unwrap();
+        let subcircuit = generator
+            .lines
+            .iter()
+            .position(|line| line.starts_with(".subckt"))
+            .unwrap();
+        assert!(directive < subcircuit);
+        assert!(
+            !generator
+                .lines
+                .iter()
+                .any(|line| line == "* Library includes")
+        );
+    }
+
+    #[test]
+    fn conflicting_module_selections_fail_closed() {
+        let schematic = crate::state::SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        generator.lines = vec![
+            "* RSpice Netlist".to_owned(),
+            String::new(),
+            ".veriloga \"models/device core.va\" first".to_owned(),
+            ".veriloga \"models/device core.va\" second".to_owned(),
+        ];
+
+        generator.hoist_veriloga_directives();
+
+        assert_eq!(generator.errors.len(), 1);
+        assert!(generator.errors[0].contains("conflicting module selections"));
+    }
 }

@@ -295,7 +295,7 @@ pub(crate) fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
             let tokens = tokenize_card(trimmed);
             let head = tokens.first()?.text.to_ascii_lowercase();
             let kind = match head.as_str() {
-                ".include" | ".inc" => IncludeKind::Include,
+                ".include" | ".inc" | "`include" => IncludeKind::Include,
                 // `.lib section` opens an in-file library section. A source
                 // dependency requires both a locator and a section token.
                 ".lib" if tokens.len() >= 3 => IncludeKind::Library,
@@ -435,10 +435,10 @@ mod tests {
 
     #[test]
     fn quoted_include_paths_and_library_sections_are_exact() {
-        let source = "deck\n  .include \"models/Si Ge.lib\"\n.lib 'corners/process.lib' TT\n.lib LOCAL\n.veriloga \"models/device core.va\"\n.end\n";
+        let source = "deck\n  .include \"models/Si Ge.lib\"\n.lib 'corners/process.lib' TT\n.lib LOCAL\n.veriloga \"models/device core.va\"\n`include \"constants.vams\"\n.end\n";
         let includes = parse_include_directives(source);
 
-        assert_eq!(includes.len(), 3);
+        assert_eq!(includes.len(), 4);
         assert_eq!(includes[0].kind(), IncludeKind::Include);
         assert_eq!(includes[0].locator(), "models/Si Ge.lib");
         assert_eq!(includes[0].line(), 2);
@@ -450,6 +450,9 @@ mod tests {
         assert_eq!(includes[2].locator(), "models/device core.va");
         assert_eq!(includes[2].section(), None);
         assert_eq!(includes[2].line(), 5);
+        assert_eq!(includes[3].kind(), IncludeKind::Include);
+        assert_eq!(includes[3].locator(), "constants.vams");
+        assert_eq!(includes[3].line(), 6);
 
         let outline = NetlistOutline::parse(source);
         assert_eq!(

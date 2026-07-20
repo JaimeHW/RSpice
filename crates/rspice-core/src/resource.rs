@@ -331,6 +331,74 @@ where
         value
     }
 
+    /// Atomically replace or insert a prevalidated batch of distinct keys.
+    ///
+    /// All fallible capacity reservations happen before the cache is mutated.
+    /// Callers can therefore use this as the commit point for a transaction:
+    /// an allocation or aggregate-budget failure leaves every existing entry,
+    /// its insertion order, and the retained-byte accounting unchanged.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn try_replace_batch(
+        &mut self,
+        replacements: Vec<(K, V, usize)>,
+        limit: usize,
+    ) -> Result<(), String> {
+        let replacement_bytes = replacements
+            .iter()
+            .map(|(_, _, retained_bytes)| (*retained_bytes).max(1))
+            .fold(0usize, usize::saturating_add);
+        ResourceLimitError::ensure(ResourceKind::SharedCacheBytes, replacement_bytes, limit)
+            .map_err(|error| error.to_string())?;
+
+        self.entries
+            .try_reserve(replacements.len())
+            .map_err(|error| {
+                format!(
+                    "unable to reserve {} shared-cache entries for an atomic batch: {error}",
+                    replacements.len()
+                )
+            })?;
+        self.insertion_order
+            .try_reserve(replacements.len())
+            .map_err(|error| {
+                format!(
+                    "unable to reserve {} shared-cache order entries for an atomic batch: {error}",
+                    replacements.len()
+                )
+            })?;
+
+        // Capacity is now reserved for the entire commit. From this point on,
+        // the operations below are infallible and cannot expose a partial batch.
+        for (key, _, _) in &replacements {
+            self.remove(key);
+        }
+        while self.retained_bytes.saturating_add(replacement_bytes) > limit {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                self.entries.clear();
+                self.retained_bytes = 0;
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&oldest) {
+                self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
+            }
+        }
+
+        for (key, value, retained_bytes) in replacements {
+            let retained_bytes = retained_bytes.max(1);
+            self.insertion_order.push_back(key.clone());
+            let previous = self.entries.insert(
+                key,
+                BoundedCacheEntry {
+                    value,
+                    retained_bytes,
+                },
+            );
+            debug_assert!(previous.is_none(), "batch keys must be distinct");
+            self.retained_bytes = self.retained_bytes.saturating_add(retained_bytes);
+        }
+        Ok(())
+    }
+
     pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) {
         self.entries.retain(|key, entry| keep(key, &entry.value));
         self.retained_bytes = self
@@ -355,6 +423,11 @@ where
         self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
         self.insertion_order.retain(|queued| queued != key);
         Some(entry.value)
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.entries.iter().map(|(key, entry)| (key, &entry.value))
     }
 
     #[cfg(test)]

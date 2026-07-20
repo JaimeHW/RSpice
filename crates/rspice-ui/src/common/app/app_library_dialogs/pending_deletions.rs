@@ -3,10 +3,19 @@ use super::{ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME};
 impl RSpiceApp {
     pub(in crate::common::app) fn process_pending_library_deletions(&mut self) {
         if let Some((lib_name, cell_name)) = self.state.pending_delete_cell.take() {
+            if block_configuration_root_deletion(&mut self.state, &lib_name, &cell_name, None) {
+                return;
+            }
             let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
+                    remove_project_sources_for_deleted_scope(
+                        &mut self.state,
+                        &lib_name,
+                        &cell_name,
+                        None,
+                    );
                     self.state
                         .prune_workspace_after_cell_deleted(&lib_name, &cell_name);
                     self.state.push_user_message(ConsoleMessage::info(format!(
@@ -21,12 +30,26 @@ impl RSpiceApp {
         }
 
         if let Some((lib_name, cell_name, view_name)) = self.state.pending_delete_view.take() {
+            if block_configuration_root_deletion(
+                &mut self.state,
+                &lib_name,
+                &cell_name,
+                Some(&view_name),
+            ) {
+                return;
+            }
             let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name)
                 && let Some(cell) = lib.get_cell_mut(&cell_name)
             {
                 deleted = cell.remove_view(&view_name);
                 if deleted {
+                    remove_project_sources_for_deleted_scope(
+                        &mut self.state,
+                        &lib_name,
+                        &cell_name,
+                        Some(&view_name),
+                    );
                     self.state
                         .prune_workspace_after_view_deleted(&lib_name, &cell_name, &view_name);
                     self.state.push_user_message(ConsoleMessage::info(format!(
@@ -39,6 +62,71 @@ impl RSpiceApp {
                 self.persist_global_veriloga_library_with_feedback();
             }
         }
+    }
+}
+
+fn block_configuration_root_deletion(
+    state: &mut crate::common::app::AppState,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> bool {
+    let roots = state
+        .workspace
+        .configuration_sets
+        .roots_in_scope(library, cell, view);
+    if roots.is_empty() {
+        return false;
+    }
+    let mut names = roots
+        .iter()
+        .take(4)
+        .map(|configuration| configuration.name())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if roots.len() > 4 {
+        names.push_str(&format!(" and {} more", roots.len() - 4));
+    }
+    let target = view.map_or_else(
+        || format!("cell '{library}/{cell}'"),
+        |view| format!("view '{library}/{cell}/{view}'"),
+    );
+    state.push_user_message(ConsoleMessage::error(format!(
+        "Cannot delete {target}: configuration set roots still reference it ({names}). Rebind or remove those configurations first."
+    )));
+    true
+}
+
+fn remove_project_sources_for_deleted_scope(
+    state: &mut crate::common::app::AppState,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) {
+    let removed = state
+        .workspace
+        .project_sources
+        .remove_cell_view_bundles(library, cell, view);
+    if removed.is_empty() {
+        return;
+    }
+    state.workspace.project_sources_dirty = true;
+    let transient_uses_removed = state
+        .ui
+        .code_workspace
+        .veriloga
+        .receipt
+        .as_ref()
+        .is_some_and(|receipt| removed.contains(&receipt.token.bundle_id))
+        || state
+            .ui
+            .code_workspace
+            .veriloga
+            .pending
+            .as_ref()
+            .is_some_and(|pending| removed.contains(&pending.token.bundle_id));
+    if transient_uses_removed {
+        state.ui.code_workspace.veriloga = Default::default();
     }
 }
 
@@ -98,6 +186,59 @@ mod tests {
         state.workspace.hierarchy_instances = vec!["XAMP".to_string()];
         state.schematic = amp_schematic;
         state
+    }
+
+    fn insert_cell_source(
+        state: &mut crate::common::app::AppState,
+        cell: &str,
+        view: &str,
+    ) -> crate::state::ProjectSourceId {
+        state
+            .library_manager
+            .get_library_mut("work")
+            .and_then(|library| library.get_cell_mut(cell))
+            .expect("fixture cell")
+            .add_view(View::new(view, ViewType::VerilogA));
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("work", cell, view)),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            format!("{view}.va"),
+            format!("module {view}(p, n); inout p, n; endmodule"),
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .expect("valid source bundle");
+        let id = bundle.id();
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("unique source owner");
+        id
+    }
+
+    fn add_configuration_root(
+        state: &mut crate::common::app::AppState,
+        name: &str,
+        root: CellViewRef,
+    ) -> crate::state::ConfigurationSetId {
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: name.to_owned(),
+                root,
+                dut_path: "/top".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Lifecycle test".to_owned(),
+            })
+            .expect("valid configuration root")
     }
 
     fn state_with_active_leaf_under_amp() -> crate::common::app::AppState {
@@ -199,6 +340,7 @@ mod tests {
     #[test]
     fn deleting_open_cell_prunes_workspace_references_and_restores_valid_focus() {
         let mut app = app_with_state(state_with_open_amp_cell());
+        let source_id = insert_cell_source(&mut app.state, "amp", "behavior");
         app.state.pending_delete_cell = Some(("work".to_string(), "amp".to_string()));
 
         app.process_pending_library_deletions();
@@ -235,6 +377,14 @@ mod tests {
             CellViewRef::new("work", "amp", "schematic")
         );
         assert!(app.state.workspace.active_context_schematic().is_some());
+        assert!(
+            app.state
+                .workspace
+                .project_sources
+                .get_bundle(source_id)
+                .is_none()
+        );
+        assert!(app.state.workspace.project_sources_dirty);
     }
 
     #[test]
@@ -281,6 +431,72 @@ mod tests {
             CellViewRef::new("work", "amp", "schematic")
         );
         assert!(app.state.workspace.active_context_schematic().is_some());
+    }
+
+    #[test]
+    fn deleting_veriloga_view_removes_only_its_owned_source_bundle() {
+        let mut state = state_with_open_amp_cell();
+        let removed_id = insert_cell_source(&mut state, "amp", "behavior");
+        let retained_id = insert_cell_source(&mut state, "keep", "behavior");
+        let mut app = app_with_state(state);
+        app.state.pending_delete_view =
+            Some(("work".to_owned(), "amp".to_owned(), "behavior".to_owned()));
+
+        app.process_pending_library_deletions();
+
+        assert!(
+            app.state
+                .workspace
+                .project_sources
+                .get_bundle(removed_id)
+                .is_none()
+        );
+        assert!(
+            app.state
+                .workspace
+                .project_sources
+                .get_bundle(retained_id)
+                .is_some()
+        );
+        assert!(app.state.workspace.project_sources_dirty);
+    }
+
+    #[test]
+    fn deleting_cell_or_view_is_blocked_while_any_configuration_owns_the_root() {
+        let mut state = state_with_open_amp_cell();
+        let root = CellViewRef::new("work", "amp", "schematic");
+        let active = add_configuration_root(&mut state, "Release", root.clone());
+        let inactive = state
+            .workspace
+            .configuration_sets
+            .clone_configuration(active, 1, "Characterization")
+            .expect("inactive configuration");
+        assert_ne!(active, inactive);
+        let before_catalog = state.workspace.configuration_sets.clone();
+        let mut app = app_with_state(state);
+
+        app.state.pending_delete_view =
+            Some(("work".to_owned(), "amp".to_owned(), "schematic".to_owned()));
+        app.process_pending_library_deletions();
+        assert!(
+            app.state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .and_then(|cell| cell.get_view("schematic"))
+                .is_some()
+        );
+
+        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.process_pending_library_deletions();
+        assert!(
+            app.state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .is_some()
+        );
+        assert_eq!(app.state.workspace.configuration_sets, before_catalog);
     }
 
     #[test]

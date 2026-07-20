@@ -45,16 +45,23 @@ enum ConfigurationTemplate {
     #[default]
     AnalogSchematic,
     PostLayoutExtracted,
+    MixedSignal,
     Rf,
 }
 
 impl ConfigurationTemplate {
-    const ALL: [Self; 3] = [Self::AnalogSchematic, Self::PostLayoutExtracted, Self::Rf];
+    const ALL: [Self; 4] = [
+        Self::AnalogSchematic,
+        Self::PostLayoutExtracted,
+        Self::MixedSignal,
+        Self::Rf,
+    ];
 
     const fn label(self) -> &'static str {
         match self {
             Self::AnalogSchematic => "Analog schematic",
             Self::PostLayoutExtracted => "Post-layout extracted",
+            Self::MixedSignal => "Mixed-signal",
             Self::Rf => "RF",
         }
     }
@@ -63,10 +70,12 @@ impl ConfigurationTemplate {
         let views: &[&str] = match self {
             Self::AnalogSchematic => &["schematic", "extracted", "spice"],
             Self::PostLayoutExtracted => &["extracted", "schematic", "spice"],
+            Self::MixedSignal => &["schematic", "veriloga", "spice"],
             Self::Rf => &["schematic", "spice"],
         };
         let stops: &[&str] = match self {
             Self::AnalogSchematic | Self::PostLayoutExtracted => &["extracted", "spice"],
+            Self::MixedSignal => &["veriloga", "spice"],
             Self::Rf => &["spice"],
         };
         (
@@ -1447,9 +1456,14 @@ fn binding_body(
                 ui,
                 "Ordered view search",
                 &mut draft.executable_view_policy,
-                "schematic, extracted, spice",
+                "schematic, veriloga, extracted, spice",
             );
-            comma_list_field(ui, "Stop views", &mut draft.stop_views, "extracted, spice");
+            comma_list_field(
+                ui,
+                "Stop views",
+                &mut draft.stop_views,
+                "veriloga, extracted, spice",
+            );
         });
         property_row(ui, "Black-box boundary", draft.black_box_policy.label());
         property_row(
@@ -1491,7 +1505,7 @@ fn binding_body(
                             ui,
                             "Executable views",
                             &mut scoped.executable_views,
-                            "schematic, extracted, spice",
+                            "schematic, veriloga, extracted, spice",
                         );
                         optional_text_field(ui, "Stop view", &mut scoped.stop_view, "spice");
                         optional_text_field(ui, "Model section", &mut scoped.model_section, "tt");
@@ -1509,7 +1523,7 @@ fn binding_body(
                                 &mut columns[1],
                                 "Executable views",
                                 &mut scoped.executable_views,
-                                "schematic, extracted, spice",
+                                "schematic, veriloga, extracted, spice",
                             );
                         });
                         ui.columns(2, |columns| {

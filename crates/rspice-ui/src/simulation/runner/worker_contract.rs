@@ -34,7 +34,7 @@ mod tests {
             }),
             netlist: "V1 in 0 1\nR1 in 0 1k\n.tran 1n 1u\n.end\n".to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let encoded = serde_json::to_string(&request).expect("request serializes");
@@ -46,20 +46,27 @@ mod tests {
     #[test]
     fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         let project_id = crate::product::ProjectId::new();
-        let document = crate::state::ProjectSourceDocument::try_new(
-            "different_file_name.va",
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::code_workspace(
+                crate::state::ProjectSourceLanguage::VerilogA,
+            ),
             crate::state::ProjectSourceLanguage::VerilogA,
+            "different_file_name.va",
             "module worker_owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+            [],
+            [],
         )
         .unwrap();
-        let receipt =
-            crate::workbench::code_workspace::compile_project_source_receipt(project_id, &document)
-                .unwrap();
-        let runtime =
-            crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_receipt(
-                project_id, &document, &receipt,
-            )
-            .unwrap();
+        let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
+            project_id,
+            &bundle,
+            Some("worker_owned"),
+        )
+        .unwrap();
+        let runtime = crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
+            project_id, &bundle, &receipt,
+        )
+        .unwrap();
         let request = WorkerRequest {
             id: 8,
             request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::Transient {
@@ -77,7 +84,9 @@ mod tests {
                 )
             ),
             source_path: None,
-            project_veriloga_runtime: Some(runtime),
+            project_veriloga_runtimes:
+                crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+                    .unwrap(),
         };
 
         let encoded = serde_json::to_vec(&request).unwrap();
@@ -85,8 +94,9 @@ mod tests {
         assert_eq!(restored, request);
         assert!(
             restored
-                .project_veriloga_runtime
-                .as_ref()
+                .project_veriloga_runtimes
+                .iter()
+                .next()
                 .unwrap()
                 .validate()
                 .is_ok()
@@ -956,7 +966,7 @@ mod tests {
             netlist: "V1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.mc 10 R1 0.05 gaussian\n.end\n"
                 .to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let worker =
@@ -1003,7 +1013,7 @@ mod tests {
             netlist: "Vstim in 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.tf V(out) Vstim\n.end\n"
                 .to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let worker =
@@ -1083,7 +1093,7 @@ mod tests {
         let input = NetlistInput {
             netlist: "V1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let pac_worker =
@@ -1164,7 +1174,7 @@ mod tests {
         let input = NetlistInput {
             netlist: "V1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let pnoise_worker =
@@ -1220,7 +1230,7 @@ mod tests {
             netlist: "V1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.step temp -40 125 55\n.end\n"
                 .to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let worker =
@@ -1281,7 +1291,7 @@ mod tests {
         let input = NetlistInput {
             netlist: "VDD vdd 0 1\nR1 vdd out 1k\nR2 out 0 1k\n.temp 25\n.end\n".to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let worker =
@@ -1667,7 +1677,7 @@ mod tests {
         let input = NetlistInput {
             netlist: "V1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
             source_path: Some(std::path::PathBuf::from("deck.cir")),
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let worker =
@@ -1689,7 +1699,7 @@ mod tests {
             request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp),
             netlist: "* worker op\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
 
         let response = worker_response_from_request(request);
@@ -1732,7 +1742,7 @@ mod tests {
         let input = NetlistInput {
             netlist: "* worker tf\nVstim in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
             source_path: None,
-            project_veriloga_runtime: None,
+            project_veriloga_runtimes: Default::default(),
         };
         let worker =
             WorkerRequest::from_runner_parts(13, &request, &input).expect("request converts");
@@ -2013,7 +2023,7 @@ pub(crate) struct WorkerRequest {
     pub netlist: String,
     pub source_path: Option<String>,
     #[serde(default)]
-    pub project_veriloga_runtime: Option<crate::workbench::code_workspace::PreparedVerilogARuntime>,
+    pub project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
 }
 
 impl WorkerRequest {
@@ -2030,7 +2040,7 @@ impl WorkerRequest {
                 .source_path
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
-            project_veriloga_runtime: input.project_veriloga_runtime.clone(),
+            project_veriloga_runtimes: input.project_veriloga_runtimes.clone(),
         })
     }
 
@@ -2040,7 +2050,7 @@ impl WorkerRequest {
             NetlistInput {
                 netlist: self.netlist,
                 source_path: self.source_path.map(PathBuf::from),
-                project_veriloga_runtime: self.project_veriloga_runtime,
+                project_veriloga_runtimes: self.project_veriloga_runtimes,
             },
         )
     }

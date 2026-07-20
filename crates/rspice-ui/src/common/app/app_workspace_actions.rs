@@ -896,11 +896,7 @@ impl AppState {
     /// Copy a whole cell — every view and its drawn content — into a
     /// writable library under a new name. Returns the number of views
     /// copied, or the user-facing error.
-    pub(in crate::common::app) fn prune_workspace_after_cell_deleted(
-        &mut self,
-        library: &str,
-        cell: &str,
-    ) {
+    pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
         self.sync_active_schematic_to_workspace();
         let active_removed = self.workspace.active_view.library == library
             && self.workspace.active_view.cell == cell;
@@ -933,7 +929,7 @@ impl AppState {
         );
     }
 
-    pub(in crate::common::app) fn prune_workspace_after_view_deleted(
+    pub(crate) fn prune_workspace_after_view_deleted(
         &mut self,
         library: &str,
         cell: &str,
@@ -1133,7 +1129,6 @@ impl AppState {
         dst_library: &str,
         new_name: &str,
     ) -> Result<usize, String> {
-        self.sync_active_schematic_to_workspace();
         let source = self
             .library_manager
             .get_library(src_library)
@@ -1149,18 +1144,33 @@ impl AppState {
         if destination.read_only {
             return Err(format!("Library '{dst_library}' is read-only"));
         }
-        if destination.get_cell(new_name).is_some() {
+        let requested_identity =
+            crate::state::canonical_cell_view_owner_key(dst_library, new_name, "");
+        if destination.cells.values().any(|candidate| {
+            crate::state::canonical_cell_view_owner_key(dst_library, &candidate.name, "")
+                == requested_identity
+        }) {
             return Err(format!(
-                "Cell '{new_name}' already exists in library '{dst_library}'"
+                "Cell '{new_name}' conflicts with an existing canonical cell identity in library '{dst_library}'"
             ));
         }
+
+        let mut candidate_sources = self.workspace.project_sources.clone();
+        let copied_source_ids = candidate_sources
+            .clone_cell_view_bundles(src_library, cell, dst_library, new_name)
+            .map_err(|error| {
+                format!("Could not copy the cell's project source bundles: {error}")
+            })?;
+
+        self.sync_active_schematic_to_workspace();
 
         copy.name = new_name.to_owned();
         let view_names: Vec<String> = copy.views.keys().cloned().collect();
         let view_count = view_names.len();
-        if let Some(destination) = self.library_manager.get_library_mut(dst_library) {
-            destination.add_cell(copy);
-        }
+        self.library_manager
+            .get_library_mut(dst_library)
+            .ok_or_else(|| format!("Library '{dst_library}' disappeared during the copy"))?
+            .add_cell(copy);
 
         // The drawn content lives in the workspace buffers, keyed
         // "library/cell/view" — a copy without it would be a lie.
@@ -1170,6 +1180,11 @@ impl AppState {
             if let Some(buffer) = self.workspace.schematic_buffers.get(&old_key).cloned() {
                 self.workspace.schematic_buffers.insert(new_key, buffer);
             }
+        }
+
+        if !copied_source_ids.is_empty() {
+            self.workspace.project_sources = candidate_sources;
+            self.workspace.project_sources_dirty = true;
         }
 
         self.library_manager.select_cell(dst_library, new_name);
@@ -1196,18 +1211,43 @@ impl AppState {
         if lib.get_cell(cell).is_none() {
             return Err(format!("Cell '{cell}' not found in library '{library}'"));
         }
-        if lib.get_cell(new_name).is_some() {
+        if cell == new_name {
+            return Err(format!("Cell '{cell}' already has that name"));
+        }
+        let requested_identity = crate::state::canonical_cell_view_owner_key(library, new_name, "");
+        if lib.cells.iter().any(|(candidate_key, candidate)| {
+            candidate_key != cell
+                && crate::state::canonical_cell_view_owner_key(library, &candidate.name, "")
+                    == requested_identity
+        }) {
             return Err(format!(
-                "Cell '{new_name}' already exists in library '{library}'"
+                "Cell '{new_name}' conflicts with an existing canonical cell identity in library '{library}'"
             ));
         }
 
-        if let Some(lib) = self.library_manager.get_library_mut(library)
-            && let Some(mut moved) = lib.cells.remove(cell)
-        {
-            moved.name = new_name.to_owned();
-            lib.cells.insert(new_name.to_owned(), moved);
-        }
+        let mut candidate_sources = self.workspace.project_sources.clone();
+        let renamed_source_ids = candidate_sources
+            .rename_cell_view_bundles(library, cell, new_name)
+            .map_err(|error| {
+                format!("Could not move the cell's project source ownership: {error}")
+            })?;
+        let mut candidate_configurations = self.workspace.configuration_sets.clone();
+        let renamed_configuration_roots = candidate_configurations
+            .rename_cell_roots(library, cell, new_name)
+            .map_err(|error| {
+                format!("Could not move the cell's configuration-set roots: {error}")
+            })?;
+
+        let library_mut = self
+            .library_manager
+            .get_library_mut(library)
+            .ok_or_else(|| format!("Library '{library}' disappeared during the rename"))?;
+        let mut moved = library_mut
+            .cells
+            .remove(cell)
+            .ok_or_else(|| format!("Cell '{cell}' disappeared during the rename"))?;
+        moved.name = new_name.to_owned();
+        library_mut.cells.insert(new_name.to_owned(), moved);
 
         // Buffers move with the cell.
         let old_prefix = format!("{library}/{cell}/");
@@ -1237,6 +1277,9 @@ impl AppState {
         for reference in &mut self.workspace.hierarchy_stack {
             remap_ref(reference);
         }
+        for open in &mut self.workspace.open_views {
+            remap_ref(&mut open.reference);
+        }
 
         // Instance bindings follow — in every buffer and the live sheet.
         let mut remapped = 0usize;
@@ -1255,6 +1298,32 @@ impl AppState {
             remap_schematic(buffer);
         }
         remap_schematic(&mut self.schematic);
+
+        if !renamed_source_ids.is_empty() {
+            self.workspace.project_sources = candidate_sources;
+            self.workspace.project_sources_dirty = true;
+            let transient_uses_renamed = self
+                .ui
+                .code_workspace
+                .veriloga
+                .receipt
+                .as_ref()
+                .is_some_and(|receipt| renamed_source_ids.contains(&receipt.token.bundle_id))
+                || self
+                    .ui
+                    .code_workspace
+                    .veriloga
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| renamed_source_ids.contains(&pending.token.bundle_id));
+            if transient_uses_renamed {
+                self.ui.code_workspace.veriloga = Default::default();
+            }
+        }
+        if renamed_configuration_roots > 0 {
+            self.workspace.configuration_sets = candidate_configurations;
+            self.workspace.project_metadata_dirty = true;
+        }
 
         self.library_manager.select_cell(library, new_name);
         Ok(remapped)
@@ -1466,6 +1535,31 @@ mod tests {
         state.library_manager.add_library(library);
         state.open_workspace_view(CellViewRef::new("work", cell_name, "schematic"));
         state
+    }
+
+    fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::ProjectSourceId {
+        state
+            .library_manager
+            .get_library_mut("work")
+            .and_then(|library| library.get_cell_mut(cell))
+            .expect("fixture cell")
+            .add_view(View::new("behavior", ViewType::VerilogA));
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("work", cell, "behavior")),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "behavior.va",
+            "module behavior(p, n); inout p, n; endmodule",
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .expect("valid source bundle");
+        let id = bundle.id();
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("unique source owner");
+        id
     }
 
     fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppState {
@@ -2250,6 +2344,169 @@ mod tests {
         assert_eq!(copied, 1);
         assert_eq!(copy.components.len(), 1);
         assert_eq!(copy.components[0].kind, ComponentType::Resistor);
+    }
+
+    #[test]
+    fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
+        let mut state = state_with_work_cell("amp");
+        let original_id = add_cell_veriloga_source(&mut state, "amp");
+        let configuration_id = state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Release".to_owned(),
+                root: CellViewRef::new("work", "amp", "schematic"),
+                dut_path: "/top".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Lifecycle test".to_owned(),
+            })
+            .expect("configuration root");
+        let inactive_configuration_id = state
+            .workspace
+            .configuration_sets
+            .clone_configuration(configuration_id, 1, "Characterization")
+            .expect("inactive configuration root");
+
+        state
+            .copy_cell("work", "amp", "work", "amp_copy")
+            .expect("copy succeeds");
+        let copied_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+            "work", "amp_copy", "behavior",
+        ));
+        let copied = state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&copied_owner)
+            .expect("copied source exists");
+        assert_ne!(copied.id(), original_id);
+        assert_eq!(
+            copied.root().content(),
+            state
+                .workspace
+                .project_sources
+                .get_bundle(original_id)
+                .expect("original source")
+                .root()
+                .content()
+        );
+
+        let revision = state
+            .workspace
+            .project_sources
+            .get_bundle(original_id)
+            .expect("original source")
+            .revision();
+        state
+            .rename_cell("work", "amp", "amp_renamed")
+            .expect("rename succeeds");
+        let renamed_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+            "work",
+            "amp_renamed",
+            "behavior",
+        ));
+        let renamed = state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&renamed_owner)
+            .expect("renamed source exists");
+        assert_eq!(renamed.id(), original_id);
+        assert!(renamed.revision() > revision);
+        assert!(
+            state
+                .workspace
+                .project_sources
+                .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+                    CellViewRef::new("work", "amp", "behavior")
+                ))
+                .is_none()
+        );
+        assert!(state.workspace.project_sources_dirty);
+        for id in [configuration_id, inactive_configuration_id] {
+            let configuration = state
+                .workspace
+                .configuration_sets
+                .find(id)
+                .expect("configuration remains");
+            assert_eq!(configuration.root().cell, "amp_renamed");
+            assert_eq!(configuration.revision(), 2);
+        }
+        assert!(state.workspace.project_metadata_dirty);
+    }
+
+    #[test]
+    fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
+        let mut state = state_with_work_cell("\u{c9}tage");
+        let original_id = add_cell_veriloga_source(&mut state, "\u{c9}tage");
+        let persisted_key = CellViewRef::new("work", "\u{c9}tage", "schematic").key();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
+        let before_sources = state.workspace.project_sources.clone();
+
+        let copy_error = state
+            .copy_cell("work", "\u{c9}tage", "work", "\u{e9}TAGE")
+            .expect_err("accented case aliases cannot create a second cell identity");
+        assert!(copy_error.contains("canonical cell identity"));
+        assert_eq!(state.workspace.project_sources, before_sources);
+        assert_eq!(
+            state
+                .workspace
+                .schematic_buffers
+                .get(&persisted_key)
+                .expect("source buffer remains")
+                .components
+                .len(),
+            0,
+            "a rejected copy must not flush or partially copy live document state"
+        );
+        assert_eq!(
+            state
+                .library_manager
+                .get_library("work")
+                .expect("work library")
+                .cell_count(),
+            1
+        );
+
+        state
+            .library_manager
+            .get_library_mut("work")
+            .expect("work library")
+            .add_cell(Cell::new("Cible"));
+        let before_sources = state.workspace.project_sources.clone();
+        let before_revision = state
+            .workspace
+            .project_sources
+            .get_bundle(original_id)
+            .expect("owned source")
+            .revision();
+        let rename_error = state
+            .rename_cell("work", "\u{c9}tage", "cIBLE")
+            .expect_err("rename cannot alias an existing canonical identity");
+        assert!(rename_error.contains("canonical cell identity"));
+        assert_eq!(state.workspace.project_sources, before_sources);
+        assert_eq!(
+            state
+                .workspace
+                .project_sources
+                .get_bundle(original_id)
+                .expect("owned source remains")
+                .revision(),
+            before_revision
+        );
+        let library = state
+            .library_manager
+            .get_library("work")
+            .expect("work library");
+        assert!(library.get_cell("\u{c9}tage").is_some());
+        assert!(library.get_cell("Cible").is_some());
+        assert!(library.get_cell("cIBLE").is_none());
     }
 
     #[test]

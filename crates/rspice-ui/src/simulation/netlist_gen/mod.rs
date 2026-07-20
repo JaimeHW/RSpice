@@ -611,6 +611,11 @@ impl<'a> NetlistGenerator<'a> {
         // Phase 6: Add models if needed
         self.generate_models();
 
+        // Phase 6b: Verilog-A source registration is deck-global. Nested
+        // hierarchy generators may discover the same source independently;
+        // publish each exact identity once before any subcircuit definition.
+        self.hoist_veriloga_directives();
+
         // Phase 7: Add analysis commands (if requested)
         if !analysis_lines.is_empty() {
             self.lines.push(String::new());

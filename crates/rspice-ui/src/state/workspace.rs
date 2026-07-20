@@ -281,6 +281,41 @@ pub struct ConfigurationExecutionBinding {
     materialized_binding: Option<LibraryCellInstance>,
     model_section: Option<String>,
     stop_boundary: bool,
+    project_veriloga: Option<ConfigurationVerilogABinding>,
+}
+
+/// Exact project-owned behavioral source selected for one configuration
+/// binding. This is derived from the active configuration and source registry;
+/// it is never accepted from placed-instance or filesystem metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigurationVerilogABinding {
+    source_bundle_id: ProjectSourceId,
+    source_closure_digest: ContentDigest,
+    selected_module: String,
+    source_key: String,
+    netlist_alias: String,
+}
+
+impl ConfigurationVerilogABinding {
+    pub const fn source_bundle_id(&self) -> ProjectSourceId {
+        self.source_bundle_id
+    }
+
+    pub const fn source_closure_digest(&self) -> ContentDigest {
+        self.source_closure_digest
+    }
+
+    pub fn selected_module(&self) -> &str {
+        &self.selected_module
+    }
+
+    pub fn source_key(&self) -> &str {
+        &self.source_key
+    }
+
+    pub fn netlist_alias(&self) -> &str {
+        &self.netlist_alias
+    }
 }
 
 impl ConfigurationExecutionBinding {
@@ -306,6 +341,10 @@ impl ConfigurationExecutionBinding {
 
     pub const fn stop_boundary(&self) -> bool {
         self.stop_boundary
+    }
+
+    pub const fn project_veriloga(&self) -> Option<&ConfigurationVerilogABinding> {
+        self.project_veriloga.as_ref()
     }
 }
 
@@ -2302,425 +2341,19 @@ pub struct OwnedNetlistDescriptor {
     pub save_history: Vec<OwnedNetlistSaveRecord>,
 }
 
-/// Stable language identity for a project-owned source document in the Code
-/// workspace. A language is an engineering contract, not an editor hint: it
-/// determines which validator and execution path may consume the exact bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProjectSourceLanguage {
-    VerilogA,
-    #[serde(rename = "rspice-automation")]
-    RSpiceAutomation,
-}
-
-impl ProjectSourceLanguage {
-    pub const ALL: [Self; 2] = [Self::VerilogA, Self::RSpiceAutomation];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::VerilogA => "Verilog-A",
-            Self::RSpiceAutomation => "RSpice Automation",
-        }
-    }
-
-    pub const fn required_extension(self) -> &'static str {
-        match self {
-            Self::VerilogA => ".va",
-            Self::RSpiceAutomation => ".rspice",
-        }
-    }
-}
-
-/// Identity of validation evidence for exact source bytes. Validation remains
-/// current only while both the document revision and SHA-256 digest match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectSourceValidationIdentity {
-    revision: ObjectRevision,
-    content_digest: ContentDigest,
-}
-
-impl ProjectSourceValidationIdentity {
-    #[must_use]
-    pub const fn revision(self) -> ObjectRevision {
-        self.revision
-    }
-
-    #[must_use]
-    pub const fn content_digest(self) -> ContentDigest {
-        self.content_digest
-    }
-}
-
-/// One exact UTF-8 source document owned by the project.
-///
-/// File name and language are immutable after construction. Mutating content
-/// is possible only through [`ProjectSourceRegistry::replace_content`], which
-/// advances the revision and invalidates prior validation evidence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectSourceDocument {
-    file_name: String,
-    language: ProjectSourceLanguage,
-    content: String,
-    revision: ObjectRevision,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    validated_identity: Option<ProjectSourceValidationIdentity>,
-}
-
-impl ProjectSourceDocument {
-    pub fn try_new(
-        file_name: impl Into<String>,
-        language: ProjectSourceLanguage,
-        content: impl Into<String>,
-    ) -> Result<Self, ProjectSourceError> {
-        let document = Self {
-            file_name: file_name.into(),
-            language,
-            content: content.into(),
-            revision: ObjectRevision::INITIAL,
-            validated_identity: None,
-        };
-        document.validate()?;
-        Ok(document)
-    }
-
-    #[must_use]
-    pub fn file_name(&self) -> &str {
-        &self.file_name
-    }
-
-    #[must_use]
-    pub const fn language(&self) -> ProjectSourceLanguage {
-        self.language
-    }
-
-    #[must_use]
-    pub fn content(&self) -> &str {
-        &self.content
-    }
-
-    #[must_use]
-    pub const fn revision(&self) -> ObjectRevision {
-        self.revision
-    }
-
-    /// SHA-256 over the exact UTF-8 content bytes. No newline normalization,
-    /// Unicode normalization, trimming, or transcoding is performed.
-    #[must_use]
-    pub fn content_digest(&self) -> ContentDigest {
-        ContentDigest::from_bytes(sha2::Sha256::digest(self.content.as_bytes()).into())
-    }
-
-    #[must_use]
-    pub const fn validated_identity(&self) -> Option<ProjectSourceValidationIdentity> {
-        self.validated_identity
-    }
-
-    #[must_use]
-    pub fn validation_is_current(&self) -> bool {
-        self.validated_identity.is_some_and(|identity| {
-            identity.revision == self.revision && identity.content_digest == self.content_digest()
-        })
-    }
-
-    fn replace_content(&mut self, content: String) -> Result<bool, ProjectSourceError> {
-        if self.content == content {
-            return Ok(false);
-        }
-        self.revision =
-            self.revision
-                .next()
-                .map_err(|_| ProjectSourceError::RevisionExhausted {
-                    file_name: self.file_name.clone(),
-                })?;
-        self.content = content;
-        self.validated_identity = None;
-        Ok(true)
-    }
-
-    fn replace_imported(
-        &mut self,
-        file_name: String,
-        content: String,
-    ) -> Result<bool, ProjectSourceError> {
-        if self.file_name == file_name && self.content == content {
-            return Ok(false);
-        }
-        let revision = self
-            .revision
-            .next()
-            .map_err(|_| ProjectSourceError::RevisionExhausted {
-                file_name: self.file_name.clone(),
-            })?;
-        let replacement = Self {
-            file_name,
-            language: self.language,
-            content,
-            revision,
-            validated_identity: None,
-        };
-        replacement.validate()?;
-        *self = replacement;
-        Ok(true)
-    }
-
-    fn mark_validated(&mut self) -> ProjectSourceValidationIdentity {
-        let identity = ProjectSourceValidationIdentity {
-            revision: self.revision,
-            content_digest: self.content_digest(),
-        };
-        self.validated_identity = Some(identity);
-        identity
-    }
-
-    fn validate(&self) -> Result<(), ProjectSourceError> {
-        validate_project_source_file_name(&self.file_name, self.language)?;
-        if self.content.contains('\0') {
-            return Err(ProjectSourceError::NulInContent {
-                file_name: self.file_name.clone(),
-            });
-        }
-        if self.content.len() > MAX_PROJECT_CODE_SOURCE_BYTES {
-            return Err(ProjectSourceError::SourceTooLarge {
-                file_name: self.file_name.clone(),
-                bytes: self.content.len(),
-                limit: MAX_PROJECT_CODE_SOURCE_BYTES,
-            });
-        }
-        if self.validated_identity.is_some() && !self.validation_is_current() {
-            return Err(ProjectSourceError::StaleValidationIdentity {
-                file_name: self.file_name.clone(),
-            });
-        }
-        Ok(())
-    }
-}
-
-/// Maximum exact UTF-8 payload accepted for one project-owned code document.
-/// This bound applies before compilation and worker transfer on every target.
-pub const MAX_PROJECT_CODE_SOURCE_BYTES: usize = 16 * 1024 * 1024;
-
-/// Typed registry of project-owned Code & Automation sources. Fixed language
-/// slots make document identity stable and prevent duplicate compiler inputs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectSourceRegistry {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    verilog_a: Option<ProjectSourceDocument>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    automation: Option<ProjectSourceDocument>,
-}
-
-impl ProjectSourceRegistry {
-    pub fn try_from_documents(
-        documents: impl IntoIterator<Item = ProjectSourceDocument>,
-    ) -> Result<Self, ProjectSourceError> {
-        let mut registry = Self::default();
-        for document in documents {
-            registry.insert(document)?;
-        }
-        registry.validate()?;
-        Ok(registry)
-    }
-
-    pub fn insert(&mut self, document: ProjectSourceDocument) -> Result<(), ProjectSourceError> {
-        document.validate()?;
-        let language = document.language;
-        let slot = match language {
-            ProjectSourceLanguage::VerilogA => &mut self.verilog_a,
-            ProjectSourceLanguage::RSpiceAutomation => &mut self.automation,
-        };
-        if slot.is_some() {
-            return Err(ProjectSourceError::DuplicateLanguage { language });
-        }
-        *slot = Some(document);
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn get(&self, language: ProjectSourceLanguage) -> Option<&ProjectSourceDocument> {
-        match language {
-            ProjectSourceLanguage::VerilogA => self.verilog_a.as_ref(),
-            ProjectSourceLanguage::RSpiceAutomation => self.automation.as_ref(),
-        }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &ProjectSourceDocument> {
-        [self.verilog_a.as_ref(), self.automation.as_ref()]
-            .into_iter()
-            .flatten()
-    }
-
-    pub fn remove(&mut self, language: ProjectSourceLanguage) -> Option<ProjectSourceDocument> {
-        match language {
-            ProjectSourceLanguage::VerilogA => self.verilog_a.take(),
-            ProjectSourceLanguage::RSpiceAutomation => self.automation.take(),
-        }
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.verilog_a.is_none() && self.automation.is_none()
-    }
-
-    pub fn replace_content(
-        &mut self,
-        language: ProjectSourceLanguage,
-        content: String,
-    ) -> Result<bool, ProjectSourceError> {
-        self.get_mut(language)
-            .ok_or(ProjectSourceError::MissingLanguage { language })?
-            .replace_content(content)
-    }
-
-    pub fn replace_imported(
-        &mut self,
-        language: ProjectSourceLanguage,
-        file_name: String,
-        content: String,
-    ) -> Result<bool, ProjectSourceError> {
-        match self.get_mut(language) {
-            Some(document) => document.replace_imported(file_name, content),
-            None => {
-                self.insert(ProjectSourceDocument::try_new(
-                    file_name, language, content,
-                )?)?;
-                Ok(true)
-            }
-        }
-    }
-
-    pub fn mark_validated(
-        &mut self,
-        language: ProjectSourceLanguage,
-    ) -> Result<ProjectSourceValidationIdentity, ProjectSourceError> {
-        Ok(self
-            .get_mut(language)
-            .ok_or(ProjectSourceError::MissingLanguage { language })?
-            .mark_validated())
-    }
-
-    pub fn validate(&self) -> Result<(), ProjectSourceError> {
-        for (expected_language, document) in [
-            (ProjectSourceLanguage::VerilogA, self.verilog_a.as_ref()),
-            (
-                ProjectSourceLanguage::RSpiceAutomation,
-                self.automation.as_ref(),
-            ),
-        ] {
-            if let Some(document) = document {
-                if document.language != expected_language {
-                    return Err(ProjectSourceError::RegistryLanguageMismatch {
-                        slot: expected_language,
-                        document: document.language,
-                    });
-                }
-                document.validate()?;
-            }
-        }
-        Ok(())
-    }
-
-    fn get_mut(&mut self, language: ProjectSourceLanguage) -> Option<&mut ProjectSourceDocument> {
-        match language {
-            ProjectSourceLanguage::VerilogA => self.verilog_a.as_mut(),
-            ProjectSourceLanguage::RSpiceAutomation => self.automation.as_mut(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ProjectSourceError {
-    #[error("{language} source file name is empty or not trimmed")]
-    InvalidFileNameWhitespace { language: ProjectSourceLanguage },
-    #[error("{language} source file name must be one file name without path separators")]
-    InvalidFileNamePath { language: ProjectSourceLanguage },
-    #[error("{language} source file name contains a reserved or non-portable character")]
-    InvalidFileNameCharacters { language: ProjectSourceLanguage },
-    #[error("{language} source file name is reserved by a supported desktop platform")]
-    ReservedFileName { language: ProjectSourceLanguage },
-    #[error("{language} source file name must end in '{required_extension}'")]
-    InvalidFileNameExtension {
-        language: ProjectSourceLanguage,
-        required_extension: &'static str,
-    },
-    #[error("source file '{file_name}' contains a NUL byte")]
-    NulInContent { file_name: String },
-    #[error("source file '{file_name}' is {bytes} bytes; the supported limit is {limit} bytes")]
-    SourceTooLarge {
-        file_name: String,
-        bytes: usize,
-        limit: usize,
-    },
-    #[error("source file '{file_name}' has stale validation evidence")]
-    StaleValidationIdentity { file_name: String },
-    #[error("source file '{file_name}' exhausted its revision space")]
-    RevisionExhausted { file_name: String },
-    #[error("the project already owns a {language} source document")]
-    DuplicateLanguage { language: ProjectSourceLanguage },
-    #[error("the project has no {language} source document")]
-    MissingLanguage { language: ProjectSourceLanguage },
-    #[error("the {slot} registry slot contains a {document} document")]
-    RegistryLanguageMismatch {
-        slot: ProjectSourceLanguage,
-        document: ProjectSourceLanguage,
-    },
-}
-
-impl std::fmt::Display for ProjectSourceLanguage {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.label())
-    }
-}
-
-fn validate_project_source_file_name(
-    file_name: &str,
-    language: ProjectSourceLanguage,
-) -> Result<(), ProjectSourceError> {
-    if file_name.is_empty()
-        || file_name != file_name.trim()
-        || file_name.chars().any(char::is_control)
-    {
-        return Err(ProjectSourceError::InvalidFileNameWhitespace { language });
-    }
-    if file_name.contains('/') || file_name.contains('\\') || matches!(file_name, "." | "..") {
-        return Err(ProjectSourceError::InvalidFileNamePath { language });
-    }
-    if file_name
-        .chars()
-        .any(|character| matches!(character, '"' | '\'' | ':' | '*' | '?' | '<' | '>' | '|'))
-    {
-        return Err(ProjectSourceError::InvalidFileNameCharacters { language });
-    }
-    let portable_stem = file_name
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_uppercase();
-    if matches!(portable_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || portable_stem
-            .strip_prefix("COM")
-            .and_then(|suffix| suffix.parse::<u8>().ok())
-            .is_some_and(|number| (1..=9).contains(&number))
-        || portable_stem
-            .strip_prefix("LPT")
-            .and_then(|suffix| suffix.parse::<u8>().ok())
-            .is_some_and(|number| (1..=9).contains(&number))
-    {
-        return Err(ProjectSourceError::ReservedFileName { language });
-    }
-    let required_extension = language.required_extension();
-    if !file_name.to_ascii_lowercase().ends_with(required_extension)
-        || file_name.len() == required_extension.len()
-    {
-        return Err(ProjectSourceError::InvalidFileNameExtension {
-            language,
-            required_extension,
-        });
-    }
-    Ok(())
-}
+// Re-export the source bundle API from its historical workspace path so
+// downstream integrations keep compiling while the implementation remains an
+// independently testable state subsystem.
+pub use super::project_sources::{
+    MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+    MAX_PROJECT_SOURCE_DEPENDENCIES, MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH, MAX_PROJECT_SOURCE_FILES,
+    MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
+    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceDocument, ProjectSourceError,
+    ProjectSourceFile, ProjectSourceId, ProjectSourceIdError, ProjectSourceIdParseError,
+    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
+    ProjectSourceValidationIdentity, project_veriloga_bundle_alias,
+    project_veriloga_bundle_source_key,
+};
 
 /// Project-level workspace state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3626,7 +3259,7 @@ impl<'a> HierarchyResolver<'a> {
                 .as_ref()
                 .and_then(|value| value.materialized_binding.as_ref())
                 .and_then(|binding| binding.source_path.as_ref())
-                .is_some()
+                .is_some_and(|path| !is_project_virtual_source_path(path))
         {
             status = HierarchyBindingStatus::Unresolved;
             diagnostic = Some(format!(
@@ -3662,6 +3295,28 @@ impl<'a> HierarchyResolver<'a> {
             ));
         }
 
+        let project_veriloga = if status.is_resolved()
+            && master
+                .as_ref()
+                .and_then(|value| value.view_type)
+                .is_some_and(|view_type| view_type == ViewType::VerilogA)
+        {
+            match project_veriloga_binding_for_view(
+                self.workspace,
+                self.libraries,
+                &resolved_reference,
+            ) {
+                Ok(binding) => Some(binding),
+                Err(error) => {
+                    status = HierarchyBindingStatus::Unresolved;
+                    diagnostic = Some(error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let stop_boundary = master
             .as_ref()
             .and_then(|value| value.view_type)
@@ -3693,6 +3348,7 @@ impl<'a> HierarchyResolver<'a> {
                     materialized_binding,
                     model_section: configured_model_section,
                     stop_boundary,
+                    project_veriloga,
                 },
             );
         }
@@ -4116,6 +3772,8 @@ impl<'a> HierarchyResolver<'a> {
                     library.expect("view implies library"),
                     cell.expect("view implies cell"),
                     view,
+                    self.workspace,
+                    self.libraries,
                 )?;
                 self.validate_source_binding(&materialized)?;
                 return Ok(Some((
@@ -4184,6 +3842,24 @@ impl<'a> HierarchyResolver<'a> {
             .source_path
             .as_deref()
             .expect("validated only for source-backed bindings");
+        if view.view_type == ViewType::VerilogA
+            && self.workspace.configuration_sets.active().is_some()
+        {
+            let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
+            let project_binding =
+                project_veriloga_binding_for_view(self.workspace, self.libraries, &reference)?;
+            if source_path != Path::new(project_binding.source_key())
+                || binding.module_name.as_deref().is_none_or(|module| {
+                    !module.eq_ignore_ascii_case(project_binding.netlist_alias())
+                })
+            {
+                return Err(format!(
+                    "source-backed binding {} does not match its exact project-owned Verilog-A bundle",
+                    reference.display_path()
+                ));
+            }
+            return Ok(());
+        }
         if !source_path.is_absolute() {
             return Err(format!(
                 "source-backed binding {}/{}/{} does not have an absolute source identity",
@@ -4285,6 +3961,11 @@ fn find_schematic<'a>(
         .map(|(_, schematic)| schematic)
 }
 
+fn is_project_virtual_source_path(path: &Path) -> bool {
+    path.to_str()
+        .is_some_and(|value| value.starts_with("__rspice_project__/"))
+}
+
 fn materialize_schematic_binding(
     placed: &LibraryCellInstance,
     reference: &CellViewRef,
@@ -4314,18 +3995,27 @@ fn materialize_authoritative_source_binding(
     library: &Library,
     cell: &Cell,
     view: &View,
+    workspace: &ProjectWorkspace,
+    libraries: &LibraryManager,
 ) -> Result<LibraryCellInstance, String> {
-    let source_path = view
-        .file_path
-        .clone()
-        .or_else(|| metadata_source_path(&view.metadata).map(Path::to_path_buf))
-        .or_else(|| metadata_source_path(&cell.metadata).map(Path::to_path_buf))
-        .ok_or_else(|| {
-            format!(
-                "authoritative source view {}/{}/{} has no source identity",
-                library.name, cell.name, view.name
-            )
-        })?;
+    let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
+    let project_veriloga = (view.view_type == ViewType::VerilogA)
+        .then(|| project_veriloga_binding_for_view(workspace, libraries, &reference))
+        .transpose()?;
+    let source_path = if let Some(binding) = project_veriloga.as_ref() {
+        PathBuf::from(binding.source_key())
+    } else {
+        view.file_path
+            .clone()
+            .or_else(|| metadata_source_path(&view.metadata).map(Path::to_path_buf))
+            .or_else(|| metadata_source_path(&cell.metadata).map(Path::to_path_buf))
+            .ok_or_else(|| {
+                format!(
+                    "authoritative source view {}/{}/{} has no source identity",
+                    library.name, cell.name, view.name
+                )
+            })?
+    };
     let terminal_order = metadata_terminal_names(&view.metadata)
         .or_else(|| metadata_terminal_names(&cell.metadata))
         .ok_or_else(|| {
@@ -4350,13 +4040,17 @@ fn materialize_authoritative_source_binding(
     }
     let mut materialized = LibraryCellInstance::new(&library.name, &cell.name, &view.name);
     materialized.source_path = Some(source_path);
-    materialized.module_name = view
-        .metadata
-        .get("veriloga.module")
-        .or_else(|| view.metadata.get("netlist.module"))
-        .or_else(|| cell.metadata.get("veriloga.module"))
-        .or_else(|| cell.metadata.get("netlist.module"))
-        .cloned();
+    materialized.module_name = project_veriloga
+        .as_ref()
+        .map(|binding| binding.netlist_alias().to_owned())
+        .or_else(|| {
+            view.metadata
+                .get("veriloga.module")
+                .or_else(|| view.metadata.get("netlist.module"))
+                .or_else(|| cell.metadata.get("veriloga.module"))
+                .or_else(|| cell.metadata.get("netlist.module"))
+                .cloned()
+        });
     let ports = terminal_order
         .into_iter()
         .map(|name| crate::state::PortSpec {
@@ -4366,6 +4060,78 @@ fn materialize_authoritative_source_binding(
         .collect::<Vec<_>>();
     materialized.bind_interface(&ports);
     Ok(materialized)
+}
+
+fn project_veriloga_binding_for_view(
+    workspace: &ProjectWorkspace,
+    libraries: &LibraryManager,
+    reference: &CellViewRef,
+) -> Result<ConfigurationVerilogABinding, String> {
+    let library = find_library(libraries, &reference.library).ok_or_else(|| {
+        format!(
+            "project Verilog-A source owner {} has no authoritative library",
+            reference.display_path()
+        )
+    })?;
+    let cell = find_cell(library, &reference.cell).ok_or_else(|| {
+        format!(
+            "project Verilog-A source owner {} has no authoritative cell",
+            reference.display_path()
+        )
+    })?;
+    let view = find_view(cell, &reference.view).ok_or_else(|| {
+        format!(
+            "project Verilog-A source owner {} has no authoritative view",
+            reference.display_path()
+        )
+    })?;
+    if view.view_type != ViewType::VerilogA {
+        return Err(format!(
+            "project source owner {} is not a Verilog-A view",
+            reference.display_path()
+        ));
+    }
+    let owner = ProjectSourceOwner::cell_view(reference.clone());
+    let bundle = workspace
+        .project_sources
+        .bundle_for_owner(&owner)
+        .ok_or_else(|| {
+            format!(
+                "Verilog-A view {} has no project-owned source bundle",
+                reference.display_path()
+            )
+        })?;
+    let selected_module = view
+        .metadata
+        .get("veriloga.module")
+        .or_else(|| view.metadata.get("netlist.module"))
+        .or_else(|| cell.metadata.get("veriloga.module"))
+        .or_else(|| cell.metadata.get("netlist.module"))
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Verilog-A view {} has no explicit module binding",
+                reference.display_path()
+            )
+        })?
+        .to_owned();
+    let source_key = super::project_sources::project_veriloga_bundle_source_key(
+        workspace.project.id(),
+        bundle,
+        &selected_module,
+    )
+    .map_err(|error| error.to_string())?;
+    let netlist_alias =
+        super::project_sources::project_veriloga_bundle_alias(bundle, &selected_module)
+            .map_err(|error| error.to_string())?;
+    Ok(ConfigurationVerilogABinding {
+        source_bundle_id: bundle.id(),
+        source_closure_digest: bundle.closure_digest(),
+        selected_module,
+        source_key,
+        netlist_alias,
+    })
 }
 
 fn metadata_terminal_names(metadata: &HashMap<String, String>) -> Option<Vec<String>> {
@@ -6253,6 +6019,93 @@ mod tests {
         );
     }
 
+    #[test]
+    fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = LibraryManager::default();
+        workspace.ensure_library_model(&mut libraries);
+        let reference = CellViewRef::new("models", "amp", "veriloga");
+        let mut view = View::new("veriloga", ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), "project_amp".to_owned());
+        view.metadata
+            .insert("veriloga.ports".to_owned(), r#"["in","out"]"#.to_owned());
+        let mut cell = Cell::new("amp");
+        cell.add_view(view);
+        let mut library = Library::new("models");
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let bundle = ProjectSourceBundle::try_new(
+            ProjectSourceOwner::cell_view(reference.clone()),
+            ProjectSourceLanguage::VerilogA,
+            "models/amp.va",
+            "module project_amp(input in, output out); electrical in, out; analog V(out) <+ V(in); endmodule\n",
+            [],
+            [],
+        )
+        .expect("valid project source bundle");
+        let bundle_id = bundle.id();
+        workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("attach project source bundle");
+
+        let mut placed = LibraryCellInstance::new("models", "amp", "schematic");
+        placed.terminal_order = vec!["in".to_owned(), "out".to_owned()];
+        workspace
+            .schematic_buffers
+            .get_mut(&CellViewRef::default_top().key())
+            .expect("top buffer")
+            .add_library_cell_component(Point::new(20, 20), placed);
+        workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Mixed-signal".to_owned(),
+                root: CellViewRef::default_top(),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["veriloga".to_owned()],
+                stop_views: vec!["veriloga".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Mixed-signal design".to_owned(),
+            })
+            .expect("create mixed-signal configuration");
+
+        let active = workspace
+            .active_schematic()
+            .expect("active schematic")
+            .clone();
+        let projection = workspace
+            .configuration_execution_projection(&libraries, &CellViewRef::default_top(), &active)
+            .expect("resolve project-owned Verilog-A binding");
+        let execution = projection
+            .plan()
+            .and_then(|plan| plan.binding("/top/X1"))
+            .expect("exact execution binding");
+        let behavioral = execution
+            .project_veriloga()
+            .expect("project Verilog-A contract");
+        assert_eq!(behavioral.source_bundle_id(), bundle_id);
+        assert_eq!(behavioral.selected_module(), "project_amp");
+        assert!(behavioral.source_key().starts_with("__rspice_project__/"));
+        assert_eq!(
+            execution
+                .materialized_binding()
+                .and_then(|binding| binding.source_path.as_deref()),
+            Some(Path::new(behavioral.source_key()))
+        );
+        assert_eq!(
+            execution
+                .materialized_binding()
+                .and_then(|binding| binding.module_name.as_deref()),
+            Some(behavioral.netlist_alias())
+        );
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn hierarchy_resolution_rejects_missing_and_conflicting_source_bindings() {
@@ -7040,19 +6893,17 @@ mod tests {
             .mark_validated(ProjectSourceLanguage::VerilogA)
             .unwrap();
         let mut value = serde_json::to_value(&registry).unwrap();
-        value["verilog_a"]["content"] = serde_json::Value::String("changed".to_owned());
-        let stale: ProjectSourceRegistry = serde_json::from_value(value).unwrap();
-        assert!(matches!(
-            stale.validate(),
-            Err(ProjectSourceError::StaleValidationIdentity { .. })
-        ));
+        value["bundles"][0]["root"]["content"] = serde_json::Value::String("changed".to_owned());
+        assert!(serde_json::from_value::<ProjectSourceRegistry>(value).is_err());
 
-        let mut value = serde_json::to_value(&registry).unwrap();
-        value["verilog_a"]["language"] = serde_json::Value::String("rspice-automation".to_owned());
-        let mismatched: ProjectSourceRegistry = serde_json::from_value(value).unwrap();
-        assert!(matches!(
-            mismatched.validate(),
-            Err(ProjectSourceError::RegistryLanguageMismatch { .. })
-        ));
+        let root = serde_json::to_value(
+            registry
+                .get(ProjectSourceLanguage::VerilogA)
+                .expect("fixture root exists"),
+        )
+        .unwrap();
+        let mut legacy = serde_json::json!({ "verilog_a": root });
+        legacy["verilog_a"]["language"] = serde_json::Value::String("rspice-automation".to_owned());
+        assert!(serde_json::from_value::<ProjectSourceRegistry>(legacy).is_err());
     }
 }

@@ -149,9 +149,13 @@ impl RSpiceApp {
             self.state.dialogs.new_cell_error = Some(format!("Library '{}' not found", library));
             return outcome;
         };
-        if lib_ro.get_cell(&name).is_some() {
+        let requested_identity = crate::state::canonical_cell_view_owner_key(&library, &name, "");
+        if lib_ro.cells.values().any(|cell| {
+            crate::state::canonical_cell_view_owner_key(&library, &cell.name, "")
+                == requested_identity
+        }) {
             self.state.dialogs.new_cell_error = Some(format!(
-                "Cell '{}' already exists in library '{}'",
+                "Cell '{}' conflicts with an existing canonical cell identity in library '{}'",
                 name, library
             ));
             return outcome;
@@ -277,5 +281,36 @@ mod tests {
                 OperatingPointAnnotationPolicy::Hidden
             );
         }
+    }
+
+    #[test]
+    fn new_cell_rejects_accented_canonical_collision_without_mutation() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("identity_test");
+        library.add_cell(crate::state::Cell::new("\u{c9}tage"));
+        app.state.library_manager.add_library(library);
+        app.state.dialogs.new_cell_library = "identity_test".to_owned();
+        app.state.dialogs.new_cell_name = "\u{e9}TAGE".to_owned();
+        app.state.dialogs.new_cell_create_schematic = true;
+        let buffers_before = app.state.workspace.schematic_buffers.len();
+
+        let outcome = app.handle_new_cell_create_action();
+
+        assert!(!outcome.close);
+        let library = app
+            .state
+            .library_manager
+            .get_library("identity_test")
+            .expect("identity library remains");
+        assert_eq!(library.cell_count(), 1);
+        assert!(library.get_cell("\u{c9}tage").is_some());
+        assert_eq!(app.state.workspace.schematic_buffers.len(), buffers_before);
+        assert!(
+            app.state
+                .dialogs
+                .new_cell_error
+                .as_deref()
+                .is_some_and(|error| error.contains("canonical cell identity"))
+        );
     }
 }

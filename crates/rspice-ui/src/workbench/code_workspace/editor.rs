@@ -32,18 +32,24 @@ pub enum CodeEditorLanguage {
     Automation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum CodeEditorSeverity {
     Info,
     Warning,
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CodeEditorDiagnostic {
     pub severity: CodeEditorSeverity,
     pub message: String,
     pub detail: String,
+    /// Stable logical source identity for multi-file diagnostics.
+    pub source_path: Option<String>,
+    /// Exact retained UTF-8 source paired with `source_path`.
+    pub source: Option<String>,
     pub byte_range: Option<std::ops::Range<usize>>,
     pub line: Option<usize>,
     pub column: Option<usize>,
@@ -414,6 +420,8 @@ mod tests {
             severity: CodeEditorSeverity::Error,
             message: "broken".to_owned(),
             detail: String::new(),
+            source_path: None,
+            source: None,
             byte_range: None,
             line: Some(2),
             column: Some(1),

@@ -31,8 +31,8 @@ pub const MAX_CONFIGURATION_MODEL_SECTION_BYTES: usize = 256;
 /// Canonical executable view types understood by the hierarchy resolver and
 /// source-backed netlist generator. Persisted policies use these exact names;
 /// aliases are normalized only at the mutation boundary.
-pub const ALLOWED_EXECUTABLE_VIEW_TYPES: [&str; 4] =
-    ["schematic", "testbench", "extracted", "spice"];
+pub const ALLOWED_EXECUTABLE_VIEW_TYPES: [&str; 5] =
+    ["schematic", "testbench", "extracted", "spice", "veriloga"];
 
 /// Stable project identity for one configuration set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -406,6 +406,68 @@ impl ConfigurationSetCatalog {
     #[must_use]
     pub fn active(&self) -> Option<&ConfigurationSet> {
         self.active_configuration_id.and_then(|id| self.find(id))
+    }
+
+    /// Return every configuration whose executable root is owned by the
+    /// requested cell or exact view. Callers use this before destructive
+    /// library operations so a valid catalog can never be made dangling.
+    #[must_use]
+    pub fn roots_in_scope(
+        &self,
+        library: &str,
+        cell: &str,
+        view: Option<&str>,
+    ) -> Vec<&ConfigurationSet> {
+        self.configurations
+            .iter()
+            .filter(|configuration| {
+                let root = configuration.root();
+                root.library.eq_ignore_ascii_case(library)
+                    && root.cell.eq_ignore_ascii_case(cell)
+                    && view.is_none_or(|view| root.view.eq_ignore_ascii_case(view))
+            })
+            .collect()
+    }
+
+    /// Remap configuration roots as part of a cell rename. Every affected
+    /// configuration receives a new revision and semantic digest, while the
+    /// catalog is committed only after the complete candidate validates.
+    pub fn rename_cell_roots(
+        &mut self,
+        library: &str,
+        old_cell: &str,
+        new_cell: &str,
+    ) -> Result<usize, ConfigurationSetError> {
+        self.validate()?;
+        let mut candidate = self.clone();
+        let mut changed = 0usize;
+        for configuration in &mut candidate.configurations {
+            if configuration
+                .definition
+                .root
+                .library
+                .eq_ignore_ascii_case(library)
+                && configuration
+                    .definition
+                    .root
+                    .cell
+                    .eq_ignore_ascii_case(old_cell)
+            {
+                configuration.definition.root.cell = new_cell.to_owned();
+                configuration.revision = configuration
+                    .revision
+                    .checked_add(1)
+                    .ok_or(ConfigurationSetError::RevisionExhausted(configuration.id))?;
+                configuration.semantic_digest = semantic_digest(&configuration.definition)?;
+                changed += 1;
+            }
+        }
+        if changed == 0 {
+            return Ok(0);
+        }
+        candidate.validate()?;
+        *self = candidate;
+        Ok(changed)
     }
 
     pub fn validate(&self) -> Result<(), ConfigurationSetError> {
@@ -1271,6 +1333,42 @@ mod tests {
             .expect("remove inactive source");
         assert!(catalog.find(source_id).is_none());
         assert_eq!(catalog.active_configuration_id(), Some(clone_id));
+    }
+
+    #[test]
+    fn cell_root_rename_revises_all_affected_configurations_atomically() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let first = catalog.create(definition("Release")).expect("first");
+        let second = catalog
+            .clone_configuration(first, 1, "Characterization")
+            .expect("second");
+        let old_first_digest = catalog.find(first).unwrap().semantic_digest();
+        let old_second_digest = catalog.find(second).unwrap().semantic_digest();
+
+        assert_eq!(
+            catalog.rename_cell_roots("USER", "TOP_TB", "renamed_tb"),
+            Ok(2)
+        );
+        for id in [first, second] {
+            let configuration = catalog.find(id).expect("configuration remains");
+            assert_eq!(configuration.root().cell, "renamed_tb");
+            assert_eq!(configuration.revision(), 2);
+        }
+        assert_ne!(
+            catalog.find(first).unwrap().semantic_digest(),
+            old_first_digest
+        );
+        assert_ne!(
+            catalog.find(second).unwrap().semantic_digest(),
+            old_second_digest
+        );
+        assert_eq!(
+            catalog
+                .roots_in_scope("user", "renamed_tb", Some("testbench"))
+                .len(),
+            2
+        );
+        catalog.validate().expect("remapped catalog validates");
     }
 
     #[test]

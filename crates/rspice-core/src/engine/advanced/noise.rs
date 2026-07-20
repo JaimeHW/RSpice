@@ -843,7 +843,11 @@ impl Engine {
         for device in circuit.veriloga_devices().iter() {
             let mut probe = device.clone();
             let instance = probe.name.clone();
-            probe.set_analysis_type(3);
+            probe.try_set_analysis_type(3).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "Verilog-A device '{instance}' noise analysis setup failed: {err}"
+                ))
+            })?;
             let sources = probe.try_noise_sources(dc_solution).map_err(|err| {
                 SimulationError::Circuit(format!(
                     "Verilog-A device '{instance}' noise evaluation failed: {err}"

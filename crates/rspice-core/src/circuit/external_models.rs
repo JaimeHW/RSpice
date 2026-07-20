@@ -1756,7 +1756,7 @@ impl CircuitData {
         coefficients: &crate::analysis::CompanionCoefficients,
         initial_step: bool,
         final_step: bool,
-    ) {
+    ) -> Result<(), String> {
         const INTEGRATION_EPSILON: Value = 1.0e-20;
         let integration = if dt.is_finite() && dt.abs() > INTEGRATION_EPSILON {
             let inverse_timestep = 1.0 / dt;
@@ -1779,12 +1779,32 @@ impl CircuitData {
             rspice_veriloga::vm::IntegrationCoefficients::inactive()
         };
         for device in self.veriloga_devices.iter_mut() {
-            device.set_analysis_type(2);
-            device.set_analysis_step(initial_step, final_step);
-            device.set_time(time);
-            device.set_timestep(dt);
-            device.set_integration_coefficients(integration);
+            let instance = device.name.clone();
+            device.try_set_analysis_type(2).map_err(|error| {
+                format!("Verilog-A device '{instance}' transient analysis setup failed: {error}")
+            })?;
+            device
+                .try_set_analysis_step(initial_step, final_step)
+                .map_err(|error| {
+                    format!(
+                        "Verilog-A device '{instance}' transient analysis-step setup failed: {error}"
+                    )
+                })?;
+            device.try_set_time(time).map_err(|error| {
+                format!("Verilog-A device '{instance}' transient time setup failed: {error}")
+            })?;
+            device.try_set_timestep(dt).map_err(|error| {
+                format!("Verilog-A device '{instance}' transient timestep setup failed: {error}")
+            })?;
+            device
+                .try_set_integration_coefficients(integration)
+                .map_err(|error| {
+                    format!(
+                        "Verilog-A device '{instance}' transient integration setup failed: {error}"
+                    )
+                })?;
         }
+        Ok(())
     }
 
     /// Commit Verilog-A integrator state after an accepted timestep.

@@ -101,6 +101,7 @@ pub mod semantic;
 pub mod source;
 pub mod stdlib;
 pub mod types;
+pub mod virtual_source;
 
 /// Laplace (s-domain) filters for transient analysis
 pub mod laplace;
@@ -124,7 +125,10 @@ pub use codegen::{CodeGenerator, CompiledModel};
 pub use error::{CompileError, CompileResult};
 pub use lexer::{Lexer, Token, TokenKind};
 pub use parser::Parser;
-pub use preprocessor::{Preprocessor, PreprocessorError};
+pub use preprocessor::{
+    FileSystemSourceProvider, PreprocessedDependency, PreprocessedInclude, Preprocessor,
+    PreprocessorError, SourceDocument, SourceDocumentOrigin, SourceProvider, SourceProviderLimits,
+};
 pub use runtime_report::{
     CompileDiagnostic, CompileDiagnosticPhase, CompileDiagnosticSeverity, CompileDiagnosticSpan,
     CompileSourcePosition, RuntimeAbiParameter, RuntimeAbiPort, RuntimeAbiSummary,
@@ -135,6 +139,11 @@ pub use runtime_report::{
 pub use semantic::SemanticAnalyzer;
 pub use source::{SourceId, SourceMap, Span};
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
+pub use virtual_source::{
+    VirtualCompileLimits, VirtualRuntimeCompilation, VirtualRuntimeCompileFailure,
+    VirtualSourceBundle, VirtualSourceDependency, VirtualSourceDiagnostic, VirtualSourceError,
+    VirtualSourceFile, VirtualSourceInclude,
+};
 
 /// Result of compiling a Verilog-A source file from disk.
 ///
@@ -341,7 +350,100 @@ impl VerilogACompiler {
         let preprocessed = pp
             .preprocess_source(source)
             .map_err(|error| CompileError::io_error(format!("Preprocessor error: {error}")))?;
-        let analyzed = self.analyze_preprocessed("<input>", &preprocessed)?;
+        self.compile_runtime_preprocessed("<input>", &preprocessed, module_name)
+    }
+
+    /// Compile one explicitly selected module from a sealed virtual source
+    /// bundle without consulting the file system.
+    ///
+    /// The result retains the exact active dependency closure, portable
+    /// BLAKE3 identities for the source/compiler/runtime contracts, and the
+    /// compiler-derived ABI evidence exposed by [`RuntimeCompileReport`].
+    pub fn compile_virtual_runtime(
+        &self,
+        bundle: &VirtualSourceBundle,
+        module_name: &str,
+        limits: VirtualCompileLimits,
+    ) -> CompileResult<VirtualRuntimeCompilation> {
+        self.compile_virtual_runtime_diagnosed(bundle, module_name, limits)
+            .map_err(|failure| failure.error)
+    }
+
+    /// Compile a sealed virtual source bundle while retaining source-authentic
+    /// diagnostics when preprocessing or a later compiler phase fails.
+    pub fn compile_virtual_runtime_diagnosed(
+        &self,
+        bundle: &VirtualSourceBundle,
+        module_name: &str,
+        limits: VirtualCompileLimits,
+    ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
+        let limits = virtual_source::validate_compile_request(bundle, module_name, limits)
+            .map_err(CompileError::from)
+            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+        let provider = virtual_source::VirtualBundleProvider::new(bundle, limits);
+        let mut preprocessor = self.configured_in_memory_preprocessor();
+        let preprocessed = preprocessor
+            .preprocess_provider_root_mapped(&provider, std::path::Path::new(bundle.root_path()))
+            .map_err(|error| {
+                VirtualRuntimeCompileFailure::from_preprocessor(
+                    error,
+                    preprocessor.dependency_documents(),
+                )
+            })?;
+        let dependency_closure = virtual_source::dependencies_from_preprocessor(
+            preprocessor.take_dependency_documents(),
+        );
+        let include_graph =
+            virtual_source::includes_from_preprocessor(preprocessor.take_include_graph());
+        let source_bundle_identity = virtual_source::source_bundle_identity(bundle);
+        let dependency_closure_identity =
+            virtual_source::dependency_closure_identity(&dependency_closure, &include_graph);
+        let compiler_contract_identity = virtual_source::compiler_contract_identity(
+            &self.options,
+            bundle.root_path(),
+            module_name,
+            &dependency_closure_identity,
+        );
+        let runtime = self
+            .compile_runtime_preprocessed(
+                bundle.root_path(),
+                &preprocessed.source,
+                Some(module_name),
+            )
+            .map_err(|error| {
+                VirtualRuntimeCompileFailure::from_compiler(
+                    error,
+                    &preprocessed,
+                    &dependency_closure,
+                )
+            })?;
+        let runtime_contract_identity =
+            virtual_source::runtime_contract_identity(&compiler_contract_identity, &runtime);
+        let compilation = VirtualRuntimeCompilation {
+            runtime,
+            root_path: bundle.root_path().to_owned(),
+            selected_module: module_name.to_owned(),
+            dependency_closure,
+            include_graph,
+            source_bundle_identity,
+            dependency_closure_identity,
+            compiler_contract_identity,
+            runtime_contract_identity,
+            source_bundle: bundle.clone(),
+            compiler_options: self.options.clone(),
+        };
+        virtual_source::validate_compilation(&compilation)
+            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+        Ok(compilation)
+    }
+
+    fn compile_runtime_preprocessed(
+        &self,
+        source_package: &str,
+        preprocessed: &str,
+        module_name: Option<&str>,
+    ) -> CompileResult<RuntimeCompileReport> {
+        let analyzed = self.analyze_preprocessed(source_package, preprocessed)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         let model = CodeGenerator::new().generate_module_with_source_digest(
             &analyzed,
@@ -349,7 +451,7 @@ impl VerilogACompiler {
             source_digest,
         )?;
         let canonical_ir =
-            self.build_canonical_ir_artifact("<input>", &preprocessed, &analyzed, module_name)?;
+            self.build_canonical_ir_artifact(source_package, preprocessed, &analyzed, module_name)?;
         let report = RuntimeCompileReport::from_artifacts(model, canonical_ir);
         report.validate_integrity().map_err(|error| {
             CompileError::CodeGen(error::CodeGenError::new(error::CodeGenErrorKind::Internal(

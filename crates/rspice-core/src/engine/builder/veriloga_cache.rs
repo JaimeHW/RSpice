@@ -1385,46 +1385,319 @@ pub fn register_precompiled_veriloga_runtime_with_dependencies(
     )
 }
 
-/// Register an exact in-memory project-owned Verilog-A runtime for this
-/// process session.
+/// One exact project-owned Verilog-A runtime prepared for atomic registration.
 ///
-/// Unlike file-backed registration, this entry has no filesystem dependency
-/// fingerprints and is never persisted to the shared disk cache. Its key is
-/// still normalized exactly like an `.include` path, so a generated deck can
-/// resolve the project-owned logical file name without writing source bytes to
-/// an ambient directory.
+/// `aliases` are the model identities that a generated deck may use for this
+/// artifact. They are checked case-insensitively within each project represented
+/// by one submitted runtime set; the compiled module name is always included
+/// automatically.
 #[cfg(feature = "veriloga")]
-pub fn register_project_veriloga_runtime_for_session(
-    source_key: impl AsRef<Path>,
-    model: rspice_veriloga::CompiledModel,
-    canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
-) -> Result<(), String> {
-    let source_key = source_key.as_ref();
-    let key_text = source_key.to_string_lossy().replace('\\', "/");
-    if !key_text.starts_with("__rspice_project__/")
-        || key_text
-            .split('/')
-            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+#[derive(Debug, Clone)]
+pub struct ProjectVerilogARuntimeRegistration {
+    /// Normalized, project-scoped virtual source identity.
+    pub source_key: PathBuf,
+    /// Additional netlist model aliases claimed by this artifact.
+    pub aliases: Vec<String>,
+    /// Validated executable bytecode model.
+    pub model: rspice_veriloga::CompiledModel,
+    /// Canonical IR paired with `model` for the native runtime.
+    pub canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug)]
+struct PreparedProjectVerilogARegistration {
+    key: PathBuf,
+    folded_key: String,
+    project_scope: String,
+    aliases: BTreeSet<String>,
+    artifact_fingerprint: [u8; 32],
+    entry: CachedVerilogAModel,
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Default)]
+struct ArtifactFingerprintWriter(blake3::Hasher);
+
+#[cfg(feature = "veriloga")]
+impl std::io::Write for ArtifactFingerprintWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "veriloga")]
+fn runtime_artifact_fingerprint(
+    model: &rspice_veriloga::CompiledModel,
+    canonical_ir: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+) -> Result<[u8; 32], String> {
+    let mut writer = ArtifactFingerprintWriter::default();
+    serde_json::to_writer(&mut writer, &(model, canonical_ir))
+        .map_err(|error| format!("failed to fingerprint Verilog-A runtime artifact: {error}"))?;
+    Ok(*writer.0.finalize().as_bytes())
+}
+
+#[cfg(feature = "veriloga")]
+fn validate_project_runtime_source_key(
+    source_key: &Path,
+) -> Result<(PathBuf, String, String), String> {
+    let key_text = source_key
+        .to_str()
+        .ok_or_else(|| "project Verilog-A runtime keys must contain valid UTF-8 text".to_owned())?;
+    let components = key_text.split('/').collect::<Vec<_>>();
+    if key_text.contains('\\')
+        || key_text.chars().any(char::is_control)
+        || components.len() < 3
+        || components.first().copied() != Some("__rspice_project__")
+        || components
+            .iter()
+            .any(|component| component.is_empty() || matches!(*component, "." | ".."))
     {
         return Err(
             "project Verilog-A runtime keys must be normalized content-addressed virtual paths under __rspice_project__/"
                 .to_owned(),
         );
     }
-    validate_runtime_artifact_pair(&model, Some(&canonical_ir))?;
+
     let normalized = canonicalize_for_cache(source_key);
-    let entry = CachedVerilogAModel {
-        dependencies: Vec::new(),
-        model: std::sync::Arc::new(model),
-        canonical_ir: Some(std::sync::Arc::new(canonical_ir)),
-    };
-    retain_veriloga_model(
+    Ok((
         normalized,
-        entry,
-        ResourceLimits::default().max_shared_cache_bytes,
-        true,
-    )?;
-    Ok(())
+        key_text.to_ascii_lowercase(),
+        components[1].to_ascii_lowercase(),
+    ))
+}
+
+#[cfg(feature = "veriloga")]
+fn validate_project_runtime_alias(alias: &str) -> Result<String, String> {
+    if alias.is_empty()
+        || alias.trim() != alias
+        || alias
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return Err(format!(
+            "project Verilog-A runtime alias '{alias}' is not a valid model identity"
+        ));
+    }
+    Ok(normalize_model_key(alias))
+}
+
+#[cfg(feature = "veriloga")]
+fn prepare_project_veriloga_registration(
+    registration: ProjectVerilogARuntimeRegistration,
+) -> Result<PreparedProjectVerilogARegistration, String> {
+    let (key, folded_key, project_scope) =
+        validate_project_runtime_source_key(&registration.source_key)?;
+    validate_runtime_artifact_pair(&registration.model, Some(&registration.canonical_ir))?;
+
+    let mut aliases = BTreeSet::new();
+    aliases.insert(validate_project_runtime_alias(
+        registration.model.name.as_str(),
+    )?);
+    for alias in registration.aliases {
+        aliases.insert(validate_project_runtime_alias(&alias)?);
+    }
+    let artifact_fingerprint =
+        runtime_artifact_fingerprint(&registration.model, Some(&registration.canonical_ir))?;
+    Ok(PreparedProjectVerilogARegistration {
+        key,
+        folded_key,
+        project_scope,
+        aliases,
+        artifact_fingerprint,
+        entry: CachedVerilogAModel {
+            dependencies: Vec::new(),
+            model: std::sync::Arc::new(registration.model),
+            canonical_ir: Some(std::sync::Arc::new(registration.canonical_ir)),
+        },
+    })
+}
+
+#[cfg(feature = "veriloga")]
+fn register_project_veriloga_runtimes_for_session_with_limit(
+    registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
+    max_shared_cache_bytes: usize,
+) -> Result<(), String> {
+    let mut prepared_by_key = BTreeMap::<PathBuf, PreparedProjectVerilogARegistration>::new();
+    for registration in registrations {
+        let prepared = prepare_project_veriloga_registration(registration)?;
+        if let Some(existing) = prepared_by_key.get_mut(&prepared.key) {
+            if existing.artifact_fingerprint != prepared.artifact_fingerprint {
+                return Err(format!(
+                    "project Verilog-A runtime key '{}' is claimed by differing artifacts",
+                    prepared.key.display()
+                ));
+            }
+            existing.aliases.extend(prepared.aliases);
+        } else {
+            prepared_by_key.insert(prepared.key.clone(), prepared);
+        }
+    }
+
+    let prepared = prepared_by_key.into_values().collect::<Vec<_>>();
+    if prepared.is_empty() {
+        return Ok(());
+    }
+    let mut folded_keys = BTreeMap::<&str, [u8; 32]>::new();
+    let mut scoped_aliases = BTreeMap::<(&str, &str), [u8; 32]>::new();
+    for runtime in &prepared {
+        if let Some(existing) =
+            folded_keys.insert(runtime.folded_key.as_str(), runtime.artifact_fingerprint)
+            && existing != runtime.artifact_fingerprint
+        {
+            return Err(format!(
+                "case-colliding project Verilog-A runtime key '{}' is claimed by differing artifacts",
+                runtime.key.display()
+            ));
+        }
+        for alias in &runtime.aliases {
+            if let Some(existing) = scoped_aliases.insert(
+                (runtime.project_scope.as_str(), alias.as_str()),
+                runtime.artifact_fingerprint,
+            ) && existing != runtime.artifact_fingerprint
+            {
+                return Err(format!(
+                    "project Verilog-A alias '{alias}' is claimed by differing artifacts in project '{}'",
+                    runtime.project_scope
+                ));
+            }
+        }
+    }
+
+    let incoming_bytes = prepared
+        .iter()
+        .map(|runtime| veriloga_model_cache_entry_bytes(&runtime.key, &runtime.entry))
+        .collect::<Result<Vec<_>, _>>()?;
+    let aggregate_incoming_bytes = incoming_bytes
+        .iter()
+        .copied()
+        .fold(0usize, usize::saturating_add);
+    ResourceLimitError::ensure(
+        ResourceKind::SharedCacheBytes,
+        aggregate_incoming_bytes,
+        max_shared_cache_bytes,
+    )
+    .map_err(|error| error.to_string())?;
+
+    let mut cache = veriloga_model_cache()
+        .write()
+        .map_err(|_| "failed to acquire Verilog-A cache lock".to_owned())?;
+
+    // Compare the whole candidate set against the live registry while holding
+    // the one cache lock. Nothing can change between validation and commit.
+    for (cached_key, cached_entry) in cache.iter() {
+        if !is_project_veriloga_virtual_path(cached_key) {
+            continue;
+        }
+        let (_, cached_folded_key, _) = validate_project_runtime_source_key(cached_key)?;
+        let cached_fingerprint = runtime_artifact_fingerprint(
+            cached_entry.model.as_ref(),
+            cached_entry.canonical_ir.as_deref(),
+        )?;
+        for runtime in &prepared {
+            if cached_folded_key == runtime.folded_key
+                && cached_fingerprint != runtime.artifact_fingerprint
+            {
+                return Err(format!(
+                    "project Verilog-A runtime key '{}' collides with a differing installed artifact",
+                    runtime.key.display()
+                ));
+            }
+        }
+    }
+
+    let mut replacements = Vec::with_capacity(prepared.len());
+    for runtime in prepared {
+        let entry = if let Some(installed) = cache.get(&runtime.key) {
+            let installed_fingerprint = runtime_artifact_fingerprint(
+                installed.model.as_ref(),
+                installed.canonical_ir.as_deref(),
+            )?;
+            if installed_fingerprint != runtime.artifact_fingerprint {
+                return Err(format!(
+                    "project Verilog-A runtime key '{}' is already installed with a differing artifact",
+                    runtime.key.display()
+                ));
+            }
+            installed.clone()
+        } else {
+            runtime.entry
+        };
+        let retained_bytes = veriloga_model_cache_entry_bytes(&runtime.key, &entry)?;
+        replacements.push((runtime.key, entry, retained_bytes));
+    }
+
+    let replacement_bytes = replacements
+        .iter()
+        .map(|(_, _, retained_bytes)| *retained_bytes)
+        .fold(0usize, usize::saturating_add);
+    ResourceLimitError::ensure(
+        ResourceKind::SharedCacheBytes,
+        replacement_bytes,
+        max_shared_cache_bytes,
+    )
+    .map_err(|error| error.to_string())?;
+    cache.try_replace_batch(replacements, max_shared_cache_bytes)
+}
+
+/// Atomically register a set of exact in-memory project-owned Verilog-A
+/// runtimes for this process session.
+///
+/// The entire set is validated, collision-checked, and budgeted before the
+/// shared cache changes. Duplicate or case-colliding keys and model aliases
+/// may only identify byte-for-byte identical runtime artifacts. Any validation,
+/// collision, allocation, or resource failure leaves the cache unchanged.
+/// File-backed cache persistence is intentionally bypassed for these sealed
+/// project artifacts.
+#[cfg(feature = "veriloga")]
+pub fn register_project_veriloga_runtimes_for_session(
+    registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
+) -> Result<(), String> {
+    register_project_veriloga_runtimes_for_session_with_limits(
+        registrations,
+        ResourceLimits::default(),
+    )
+}
+
+/// Atomically register project-owned Verilog-A runtimes under caller-selected
+/// resource governance.
+///
+/// This is equivalent to [`register_project_veriloga_runtimes_for_session`]
+/// except that `limits.max_shared_cache_bytes` bounds the aggregate retained
+/// size of the requested runtime set.
+#[cfg(feature = "veriloga")]
+pub fn register_project_veriloga_runtimes_for_session_with_limits(
+    registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
+    limits: ResourceLimits,
+) -> Result<(), String> {
+    register_project_veriloga_runtimes_for_session_with_limit(
+        registrations,
+        limits.max_shared_cache_bytes,
+    )
+}
+
+/// Register one exact in-memory project-owned Verilog-A runtime for this
+/// process session.
+///
+/// This compatibility wrapper delegates to the atomic plural API. The compiled
+/// module identity is registered as the runtime's sole model alias.
+#[cfg(feature = "veriloga")]
+pub fn register_project_veriloga_runtime_for_session(
+    source_key: impl AsRef<Path>,
+    model: rspice_veriloga::CompiledModel,
+    canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+) -> Result<(), String> {
+    register_project_veriloga_runtimes_for_session([ProjectVerilogARuntimeRegistration {
+        source_key: source_key.as_ref().to_path_buf(),
+        aliases: Vec::new(),
+        model,
+        canonical_ir,
+    }])
 }
 
 /// Register a precompiled Verilog-A model in the global engine cache.
@@ -1496,6 +1769,34 @@ endmodule
             dependencies,
             model: std::sync::Arc::new(runtime.model),
             canonical_ir: Some(std::sync::Arc::new(runtime.canonical_ir)),
+        }
+    }
+
+    fn project_registration(
+        source_key: impl Into<PathBuf>,
+        module_name: &str,
+        aliases: &[&str],
+    ) -> ProjectVerilogARuntimeRegistration {
+        let report = rspice_veriloga::VerilogACompiler::default()
+            .compile_runtime(
+                &format!(
+                    "module {module_name}(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n"
+                ),
+                None,
+            )
+            .expect("compile project runtime");
+        ProjectVerilogARuntimeRegistration {
+            source_key: source_key.into(),
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            model: report.model,
+            canonical_ir: report.canonical_ir,
+        }
+    }
+
+    fn remove_project_runtime_keys(keys: &[&Path]) {
+        let mut cache = veriloga_model_cache().write().expect("cache lock");
+        for key in keys {
+            cache.remove(&canonicalize_for_cache(key));
         }
     }
 
@@ -1758,6 +2059,197 @@ endmodule
         let mut cache = veriloga_model_cache().write().unwrap();
         cache.remove(&canonicalize_for_cache(&first_key));
         cache.remove(&canonicalize_for_cache(&second_key));
+    }
+
+    #[test]
+    fn plural_project_runtime_registration_installs_the_entire_batch() {
+        let first_key =
+            PathBuf::from("__rspice_project__/00000000-0000-0000-0000-000000000101/a/first.va");
+        let second_key =
+            PathBuf::from("__rspice_project__/00000000-0000-0000-0000-000000000101/b/second.va");
+
+        register_project_veriloga_runtimes_for_session([
+            project_registration(&first_key, "batch_first", &["FIRST_ALIAS"]),
+            project_registration(&second_key, "batch_second", &["SECOND_ALIAS"]),
+        ])
+        .expect("register complete project runtime batch");
+
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&first_key)
+                .expect("first runtime")
+                .model
+                .name
+                .as_str(),
+            "batch_first"
+        );
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&second_key)
+                .expect("second runtime")
+                .model
+                .name
+                .as_str(),
+            "batch_second"
+        );
+        remove_project_runtime_keys(&[&first_key, &second_key]);
+    }
+
+    #[test]
+    fn plural_registration_rolls_back_every_entry_on_an_installed_key_collision() {
+        let project = "00000000-0000-0000-0000-000000000102";
+        let installed_key = PathBuf::from(format!("__rspice_project__/{project}/stable/model.va"));
+        let candidate_key =
+            PathBuf::from(format!("__rspice_project__/{project}/candidate/model.va"));
+        register_project_veriloga_runtimes_for_session([project_registration(
+            &installed_key,
+            "stable_model",
+            &[],
+        )])
+        .expect("install stable runtime");
+
+        let error = register_project_veriloga_runtimes_for_session([
+            project_registration(&candidate_key, "candidate_model", &[]),
+            project_registration(&installed_key, "conflicting_model", &[]),
+        ])
+        .expect_err("a differing installed artifact must reject the whole batch");
+        assert!(error.contains("differing installed artifact"), "{error}");
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&installed_key)
+                .expect("stable runtime remains installed")
+                .model
+                .name
+                .as_str(),
+            "stable_model"
+        );
+        assert!(
+            resolve_cached_or_compile_veriloga(&candidate_key).is_err(),
+            "a rejected batch must not publish an earlier candidate"
+        );
+        remove_project_runtime_keys(&[&installed_key, &candidate_key]);
+    }
+
+    #[test]
+    fn plural_registration_rolls_back_on_aggregate_resource_failure() {
+        let stable_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000103/stable/model.va",
+        );
+        let candidate_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000103/candidate/model.va",
+        );
+        register_project_veriloga_runtimes_for_session([project_registration(
+            &stable_key,
+            "resource_stable",
+            &[],
+        )])
+        .expect("install stable runtime");
+
+        let candidate = project_registration(&candidate_key, "resource_candidate", &[]);
+        let prepared = prepare_project_veriloga_registration(candidate.clone())
+            .expect("prepare candidate runtime");
+        let required = veriloga_model_cache_entry_bytes(&prepared.key, &prepared.entry)
+            .expect("size candidate runtime");
+        let error = register_project_veriloga_runtimes_for_session_with_limit(
+            [candidate],
+            required.saturating_sub(1),
+        )
+        .expect_err("an undersized aggregate budget must reject the whole batch");
+        assert!(
+            error.contains("shared_cache_bytes limit exceeded"),
+            "{error}"
+        );
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&stable_key)
+                .expect("stable runtime remains installed")
+                .model
+                .name
+                .as_str(),
+            "resource_stable"
+        );
+        assert!(resolve_cached_or_compile_veriloga(&candidate_key).is_err());
+        remove_project_runtime_keys(&[&stable_key, &candidate_key]);
+    }
+
+    #[test]
+    fn differing_case_colliding_keys_are_rejected_without_partial_installation() {
+        let upper_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000104/digest/Model.va",
+        );
+        let lower_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000104/digest/model.va",
+        );
+        let error = register_project_veriloga_runtimes_for_session([
+            project_registration(&upper_key, "upper_model", &[]),
+            project_registration(&lower_key, "lower_model", &[]),
+        ])
+        .expect_err("case-colliding keys with differing artifacts must fail");
+        assert!(error.contains("case-colliding"), "{error}");
+        assert!(resolve_cached_or_compile_veriloga(&upper_key).is_err());
+        assert!(resolve_cached_or_compile_veriloga(&lower_key).is_err());
+    }
+
+    #[test]
+    fn differing_case_colliding_aliases_are_rejected_within_one_project() {
+        let first_key =
+            PathBuf::from("__rspice_project__/00000000-0000-0000-0000-000000000105/a/first.va");
+        let second_key =
+            PathBuf::from("__rspice_project__/00000000-0000-0000-0000-000000000105/b/second.va");
+        let error = register_project_veriloga_runtimes_for_session([
+            project_registration(&first_key, "alias_first", &["SharedAlias"]),
+            project_registration(&second_key, "alias_second", &["sharedalias"]),
+        ])
+        .expect_err("case-colliding aliases with differing artifacts must fail");
+        assert!(error.contains("alias 'SHAREDALIAS'"), "{error}");
+        assert!(resolve_cached_or_compile_veriloga(&first_key).is_err());
+        assert!(resolve_cached_or_compile_veriloga(&second_key).is_err());
+    }
+
+    #[test]
+    fn identical_reinstall_is_idempotent_and_preserves_the_cached_artifact() {
+        let key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000106/digest/model.va",
+        );
+        let registration = project_registration(&key, "idempotent_model", &["stable_alias"]);
+        register_project_veriloga_runtimes_for_session([registration.clone()])
+            .expect("initial registration");
+        let before = resolve_cached_or_compile_veriloga(&key).expect("initial cached runtime");
+
+        register_project_veriloga_runtimes_for_session([registration])
+            .expect("identical reinstall");
+        let after = resolve_cached_or_compile_veriloga(&key).expect("reinstalled cached runtime");
+        assert!(std::sync::Arc::ptr_eq(&before.model, &after.model));
+        remove_project_runtime_keys(&[&key]);
+    }
+
+    #[test]
+    fn same_filename_and_alias_remain_isolated_between_projects() {
+        let first_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000107/digest/device.va",
+        );
+        let second_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000108/digest/device.va",
+        );
+        register_project_veriloga_runtimes_for_session([
+            project_registration(&first_key, "isolated_first", &["device_alias"]),
+            project_registration(&second_key, "isolated_second", &["DEVICE_ALIAS"]),
+        ])
+        .expect("project-scoped aliases may be reused across projects");
+
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&first_key)
+                .expect("first project runtime")
+                .model
+                .name
+                .as_str(),
+            "isolated_first"
+        );
+        assert_eq!(
+            resolve_cached_or_compile_veriloga(&second_key)
+                .expect("second project runtime")
+                .model
+                .name
+                .as_str(),
+            "isolated_second"
+        );
+        remove_project_runtime_keys(&[&first_key, &second_key]);
     }
 
     #[test]

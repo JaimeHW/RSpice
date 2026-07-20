@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{Cell, Library, View, ViewType};
+use crate::state::canonical_cell_view_owner_key;
 
 // Library Manager
 // =============================================================================
@@ -189,7 +190,12 @@ impl LibraryManager {
             if lib.read_only {
                 return false;
             }
-            if !lib.cells.contains_key(cell_name) {
+            let requested = canonical_cell_view_owner_key(library, cell_name, "");
+            if !lib
+                .cells
+                .values()
+                .any(|cell| canonical_cell_view_owner_key(library, &cell.name, "") == requested)
+            {
                 lib.add_cell(Cell::new(cell_name));
                 self.revision = self.revision.wrapping_add(1);
                 return true;
@@ -211,7 +217,12 @@ impl LibraryManager {
                 return false;
             }
             if let Some(c) = lib.cells.get_mut(cell)
-                && !c.views.contains_key(view_name)
+                && {
+                    let requested = canonical_cell_view_owner_key(library, cell, view_name);
+                    !c.views.values().any(|view| {
+                        canonical_cell_view_owner_key(library, cell, &view.name) == requested
+                    })
+                }
             {
                 c.add_view(View::new(view_name, view_type));
                 self.revision = self.revision.wrapping_add(1);

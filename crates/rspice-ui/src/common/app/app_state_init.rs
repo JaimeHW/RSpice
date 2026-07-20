@@ -32,14 +32,16 @@ pub(super) fn default_app_state() -> AppState {
         workspace.migrate_active_plan_data(plan.id());
     }
     let mut ui = crate::workbench::UiSessionState::new();
-    if let Some(document) = workspace
-        .project_sources
-        .get(crate::state::ProjectSourceLanguage::VerilogA)
-    {
+    if let Some(bundle) = workspace.project_sources.bundle_for_owner(
+        &crate::state::ProjectSourceOwner::code_workspace(
+            crate::state::ProjectSourceLanguage::VerilogA,
+        ),
+    ) {
         ui.code_workspace.veriloga.receipt = Some(
-            crate::workbench::code_workspace::compile_project_source_receipt(
+            crate::workbench::code_workspace::compile_project_bundle_receipt(
                 workspace.project.id(),
-                document,
+                bundle,
+                None,
             )
             .expect("the canonical bootstrapped Verilog-A source must compile"),
         );

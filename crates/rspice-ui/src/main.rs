@@ -99,6 +99,14 @@ pub fn run_rspice_ui_worker_request(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = runRspiceUiVerilogACompileRequest)]
+pub fn run_rspice_ui_veriloga_compile_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    rspice_ui::run_rspice_ui_veriloga_compile_request(value)
+}
+
+#[cfg(target_arch = "wasm32")]
 const WEB_STARTUP_REQUIREMENT: &str = "A WebGPU-capable browser (current Chrome/Edge) is required.";
 
 #[cfg(target_arch = "wasm32")]

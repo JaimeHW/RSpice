@@ -3,7 +3,6 @@
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::common::RSpiceApp;
-use crate::state::ProjectSourceLanguage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
@@ -30,41 +29,46 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     super::super::code_workspace::poll_veriloga_import(app);
     super::super::code_workspace::poll_veriloga_compile(app);
     let t = Tokens::get(ui.ctx());
-    let document = app
-        .state
-        .workspace
-        .project_sources
-        .get(ProjectSourceLanguage::VerilogA)
-        .cloned();
+    let selected = super::super::code_workspace::selected_veriloga_source(app);
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        let file_name = document
+        let file_name = selected
             .as_ref()
-            .map_or("Verilog-A source", |source| source.file_name());
+            .map_or("Verilog-A source", |source| source.document().file_name());
         title_row(ui, app, file_name);
-        let Some(document) = document else {
-            super::super::design_system::empty_state(
-                ui,
-                super::super::design_system::WorkbenchIcon::Code,
-                "No Verilog-A source",
-                "This project does not own a Verilog-A source document.",
-            );
-            return;
+        let selected = match selected {
+            Ok(selected) => selected,
+            Err(error) => {
+                super::super::design_system::empty_state(
+                    ui,
+                    super::super::design_system::WorkbenchIcon::Code,
+                    "No Verilog-A source",
+                    &error,
+                );
+                return;
+            }
         };
-        let mut source = document.content().to_owned();
-        let diagnostics = current_diagnostics(app, &document);
-        let stacked = ui.ctx().content_rect().width() <= 820.0;
+        let active_path = super::super::code_workspace::active_veriloga_file_path(app, &selected);
+        let mut source = selected
+            .bundle()
+            .file_content(&active_path)
+            .unwrap_or_else(|| selected.document().content())
+            .to_owned();
+        let diagnostics = current_diagnostics(app, &selected);
+        // Match the mockup's 820 px content-column breakpoint. Docked panels
+        // can narrow this surface while the outer viewport remains wide.
+        let stacked = ui.available_width() <= 820.0;
         if stacked {
             ScrollArea::vertical()
                 .id_salt("workbench.veriloga.stacked")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let editor_height = ui.clip_rect().height().max(1.0);
+                    let editor_height = ui.available_height().max(1.0);
                     let code_pane =
                         ui.allocate_ui(Vec2::new(ui.available_width(), editor_height), |ui| {
-                            code_pane(ui, app, &document, &mut source, &diagnostics);
+                            code_pane(ui, app, &selected, &active_path, &mut source, &diagnostics);
                         });
                     ui.painter().hline(
                         code_pane.response.rect.x_range(),
@@ -73,7 +77,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     );
                     egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        inspector(ui, app, &document);
+                        inspector(ui, app, &selected);
                     });
                 });
         } else {
@@ -95,7 +99,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     .max_rect(editor_rect)
                     .layout(Layout::top_down(Align::Min)),
             );
-            code_pane(&mut editor_ui, app, &document, &mut source, &diagnostics);
+            code_pane(
+                &mut editor_ui,
+                app,
+                &selected,
+                &active_path,
+                &mut source,
+                &diagnostics,
+            );
             ui.painter().vline(
                 editor_rect.right(),
                 editor_rect.y_range(),
@@ -109,7 +120,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ScrollArea::vertical()
                 .id_salt("workbench.veriloga.inspector")
                 .auto_shrink([false, false])
-                .show(&mut inspector_ui, |ui| inspector(ui, app, &document));
+                .show(&mut inspector_ui, |ui| inspector(ui, app, &selected));
             ui.allocate_rect(available, Sense::hover());
         }
     });
@@ -220,7 +231,19 @@ fn title_button_width(ui: &Ui, label: &str, accent: bool) -> f32 {
 fn code_pane(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    document: &crate::state::ProjectSourceDocument,
+    selected: &super::super::code_workspace::SelectedVerilogASource,
+    active_path: &str,
+    source: &mut String,
+    diagnostics: &[super::super::code_workspace::CodeEditorDiagnostic],
+) {
+    source_editor(ui, app, selected, active_path, source, diagnostics);
+}
+
+fn source_editor(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    selected: &super::super::code_workspace::SelectedVerilogASource,
+    active_path: &str,
     source: &mut String,
     diagnostics: &[super::super::code_workspace::CodeEditorDiagnostic],
 ) {
@@ -238,7 +261,7 @@ fn code_pane(
     ui.painter().text(
         egui::pos2(toolbar.left() + 8.0, toolbar.center().y),
         egui::Align2::LEFT_CENTER,
-        document.file_name(),
+        active_path,
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_dim,
     );
@@ -251,9 +274,7 @@ fn code_pane(
         .receipt
         .as_ref()
         .is_some_and(|receipt| {
-            receipt.token.project_id == app.state.workspace.project.id()
-                && receipt.token.revision == document.revision().get()
-                && receipt.token.content_digest == document.content_digest()
+            selected.matches_token(app.state.workspace.project.id(), receipt.token)
         });
     let (status, color) = if compiling {
         ("compiling", t.color.info)
@@ -284,29 +305,40 @@ fn code_pane(
         color,
     );
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
+        let editor_diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .source_path
+                    .as_deref()
+                    .is_none_or(|path| path.eq_ignore_ascii_case(active_path))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         if show_code_editor(
             ui,
-            "workbench.veriloga.source",
+            (
+                "workbench.veriloga.source",
+                selected.bundle().id(),
+                active_path,
+            ),
             source,
             CodeEditorLanguage::VerilogA,
-            diagnostics,
+            &editor_diagnostics,
         ) {
-            match app
-                .state
-                .workspace
-                .replace_project_source(ProjectSourceLanguage::VerilogA, source.clone())
-            {
-                Ok(true) => {
-                    app.state.ui.code_workspace.veriloga.receipt = None;
-                    app.state.ui.code_workspace.veriloga.last_failure.clear();
-                    app.state.ui.code_workspace.veriloga.last_failure_token = None;
-                }
+            match super::super::code_workspace::replace_selected_veriloga_file(
+                app,
+                selected,
+                active_path,
+                source.clone(),
+            ) {
+                Ok(true) => {}
                 Ok(false) => {}
                 Err(error) => app
                     .state
                     .push_user_message(crate::common::ConsoleMessage::error(format!(
                         "Could not update {}: {error}",
-                        document.file_name()
+                        active_path
                     ))),
             }
         }
@@ -315,26 +347,22 @@ fn code_pane(
 
 fn current_diagnostics(
     app: &RSpiceApp,
-    document: &crate::state::ProjectSourceDocument,
+    selected: &super::super::code_workspace::SelectedVerilogASource,
 ) -> Vec<super::super::code_workspace::CodeEditorDiagnostic> {
     let state = &app.state.ui.code_workspace.veriloga;
-    current_receipt(app, document)
+    current_receipt(app, selected)
         .map(|receipt| receipt.diagnostics.clone())
         .unwrap_or_else(|| {
             state
                 .last_failure_token
-                .filter(|token| {
-                    token.project_id == app.state.workspace.project.id()
-                        && token.revision == document.revision().get()
-                        && token.content_digest == document.content_digest()
-                })
+                .filter(|token| selected.matches_token(app.state.workspace.project.id(), *token))
                 .map_or_else(Vec::new, |_| state.last_failure.clone())
         })
 }
 
 fn current_receipt<'a>(
     app: &'a RSpiceApp,
-    document: &crate::state::ProjectSourceDocument,
+    selected: &super::super::code_workspace::SelectedVerilogASource,
 ) -> Option<&'a super::super::code_workspace::VerilogACompileReceipt> {
     app.state
         .ui
@@ -342,19 +370,19 @@ fn current_receipt<'a>(
         .veriloga
         .receipt
         .as_ref()
-        .filter(|receipt| {
-            receipt.token.project_id == app.state.workspace.project.id()
-                && receipt.token.revision == document.revision().get()
-                && receipt.token.content_digest == document.content_digest()
-        })
+        .filter(|receipt| selected.matches_token(app.state.workspace.project.id(), receipt.token))
 }
 
-fn inspector(ui: &mut Ui, app: &RSpiceApp, document: &crate::state::ProjectSourceDocument) {
+fn inspector(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    selected: &super::super::code_workspace::SelectedVerilogASource,
+) {
     let t = Tokens::get(ui.ctx());
     ui.set_width(ui.available_width());
     code_inspector_section(ui, "Build targets", None, |ui| {
         code_inspector_property_list(ui, |ui| {
-            if let Some(receipt) = current_receipt(app, document) {
+            if let Some(receipt) = current_receipt(app, selected) {
                 property_row_status(
                     ui,
                     "Semantic IR",
@@ -392,7 +420,7 @@ fn inspector(ui: &mut Ui, app: &RSpiceApp, document: &crate::state::ProjectSourc
         });
     });
 
-    let diagnostics = current_diagnostics(app, document);
+    let diagnostics = current_diagnostics(app, selected);
     let error_count = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.severity == CodeEditorSeverity::Error)
@@ -435,7 +463,7 @@ fn inspector(ui: &mut Ui, app: &RSpiceApp, document: &crate::state::ProjectSourc
 
     code_inspector_section(ui, "ABI contract", None, |ui| {
         code_inspector_property_list(ui, |ui| {
-            if let Some(receipt) = current_receipt(app, document) {
+            if let Some(receipt) = current_receipt(app, selected) {
                 property_row(ui, "Analog ports", &receipt.analog_ports.to_string());
                 property_row(ui, "Noise sources", &receipt.noise_sources.to_string());
                 property_row(ui, "State variables", &receipt.state_variables.to_string());

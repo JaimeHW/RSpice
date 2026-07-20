@@ -20,7 +20,9 @@ pub(super) fn validate_lcv_name(name: &str, field_label: &str) -> Option<String>
 
 impl RSpiceApp {
     pub(super) fn persist_global_veriloga_library_with_feedback(&mut self) {
-        if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+        if let Err(err) =
+            save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)
+        {
             log::warn!("Failed to persist global Verilog-A library: {}", err);
             self.state
                 .push_user_message(ConsoleMessage::warning(format!(

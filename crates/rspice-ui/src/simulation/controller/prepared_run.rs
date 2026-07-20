@@ -305,6 +305,8 @@ impl SimulationController {
             .iter()
             .map(crate::simulation::plan::FrozenAnalysisInstance::id)
             .collect::<Vec<_>>();
+        let project_veriloga_runtimes =
+            prepared_configuration_veriloga_runtimes(state, &execution_projection)?;
         let generated =
             crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
                 root_schematic,
@@ -335,17 +337,9 @@ impl SimulationController {
         let (expanded_netlist, sealed_source_dependencies) =
             expand_generated_dependencies(&netlist, root_schematic.current_file.as_deref())?;
         netlist = expanded_netlist;
-        let project_veriloga_runtime = prepared_project_veriloga_runtime(state)?;
-        if let Some(runtime) = &project_veriloga_runtime {
-            crate::workbench::code_workspace::append_project_veriloga_directive(
-                &mut netlist,
-                runtime.source_key(),
-                runtime.module_name(),
-            );
-        }
-        reject_deferred_external_sources_with_project_runtime(
+        reject_deferred_external_sources_with_project_runtimes(
             &netlist,
-            project_veriloga_runtime.as_ref(),
+            &project_veriloga_runtimes,
         )?;
 
         let source_digest =
@@ -393,7 +387,7 @@ impl SimulationController {
             executable_netlist: netlist,
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities,
-            project_veriloga_runtime,
+            project_veriloga_runtimes,
             target: ExecutionTargetCapabilities::current(),
             receipt,
             advisories,
@@ -464,10 +458,10 @@ impl SimulationController {
         }
         let (expanded, canonical_origin, sealed_source_dependencies) =
             expand_manual_dependencies(&composed, origin)?;
-        let project_veriloga_runtime = project_veriloga_runtime_referenced_by(state, &expanded)?;
-        reject_deferred_external_sources_with_project_runtime(
+        let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?;
+        reject_deferred_external_sources_with_project_runtimes(
             &expanded,
-            project_veriloga_runtime.as_ref(),
+            &project_veriloga_runtimes,
         )?;
         let queued_tasks =
             manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
@@ -519,7 +513,7 @@ impl SimulationController {
             executable_netlist: expanded,
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities,
-            project_veriloga_runtime,
+            project_veriloga_runtimes,
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
             advisories: Vec::new(),
@@ -557,28 +551,136 @@ impl SimulationController {
     }
 }
 
-fn prepared_project_veriloga_runtime(
+fn prepared_configuration_veriloga_runtimes(
     state: &AppState,
-) -> Result<Option<crate::workbench::code_workspace::PreparedVerilogARuntime>, PreparationError> {
-    let Some(document) = state
-        .workspace
-        .project_sources
-        .get(crate::state::ProjectSourceLanguage::VerilogA)
-    else {
-        return Ok(None);
+    projection: &crate::state::workspace::ConfigurationExecutionProjection,
+) -> Result<crate::workbench::code_workspace::PreparedVerilogARuntimeSet, PreparationError> {
+    let Some(plan) = projection.plan() else {
+        return Ok(Default::default());
     };
+    let mut prepared =
+        HashMap::<String, crate::workbench::code_workspace::PreparedVerilogARuntime>::new();
+    for execution in plan.bindings() {
+        let Some(binding) = execution.project_veriloga() else {
+            continue;
+        };
+        let bundle = state
+            .workspace
+            .project_sources
+            .get_bundle(binding.source_bundle_id())
+            .ok_or_else(|| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!(
+                        "Configured Verilog-A source bundle {} at {} no longer exists",
+                        binding.source_bundle_id(),
+                        execution.instance_path()
+                    ),
+                )
+            })?;
+        if bundle.closure_digest() != binding.source_closure_digest() {
+            return Err(PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!(
+                    "Configured Verilog-A source bundle {} changed after hierarchy resolution",
+                    binding.source_bundle_id()
+                ),
+            ));
+        }
+        let runtime = crate::workbench::code_workspace::compile_project_source_bundle_runtime(
+            state.workspace.project.id(),
+            bundle,
+            binding.selected_module(),
+        )
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        if runtime.source_key() != binding.source_key()
+            || !runtime
+                .netlist_alias()
+                .eq_ignore_ascii_case(binding.netlist_alias())
+        {
+            return Err(PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!(
+                    "Configured Verilog-A binding at {} changed while compiling its sealed source",
+                    execution.instance_path()
+                ),
+            ));
+        }
+        let materialized = execution.materialized_binding().ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!(
+                    "Configured Verilog-A binding at {} has no materialized interface",
+                    execution.instance_path()
+                ),
+            )
+        })?;
+        let compiled_terminals = runtime
+            .terminal_names()
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        if compiled_terminals.len() != materialized.terminal_order.len()
+            || !compiled_terminals
+                .iter()
+                .zip(&materialized.terminal_order)
+                .all(|(compiled, declared)| compiled.eq_ignore_ascii_case(declared))
+        {
+            return Err(PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!(
+                    "Compiled Verilog-A module '{}' at {} does not match the exact declared terminal order [{}]",
+                    binding.selected_module(),
+                    execution.instance_path(),
+                    materialized.terminal_order.join(", ")
+                ),
+            ));
+        }
+        if let Some(existing) = prepared.get(runtime.source_key()) {
+            if existing != &runtime {
+                return Err(PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!(
+                        "Configured Verilog-A source key '{}' resolves to conflicting artifacts",
+                        runtime.source_key()
+                    ),
+                ));
+            }
+        } else {
+            prepared.insert(runtime.source_key().to_owned(), runtime);
+        }
+    }
+    crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(
+        prepared.into_values().collect(),
+    )
+    .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+}
+
+fn prepared_project_veriloga_runtimes(
+    state: &AppState,
+) -> Result<crate::workbench::code_workspace::PreparedVerilogARuntimeSet, PreparationError> {
+    let Some(bundle) = state.workspace.project_sources.bundle_for_owner(
+        &crate::state::ProjectSourceOwner::code_workspace(
+            crate::state::ProjectSourceLanguage::VerilogA,
+        ),
+    ) else {
+        return Ok(Default::default());
+    };
+    let document = bundle.root();
     let retained = state.ui.code_workspace.veriloga.receipt.as_ref();
     if let Some(receipt) = retained
         && receipt.token.project_id == state.workspace.project.id()
-        && receipt.token.revision == document.revision().get()
-        && receipt.token.content_digest == document.content_digest()
+        && receipt.token.bundle_id == bundle.id()
+        && receipt.token.revision == bundle.revision().get()
+        && receipt.token.closure_digest == bundle.closure_digest()
     {
-        return crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_receipt(
-            state.workspace.project.id(),
-            document,
-            receipt,
-        )
-        .map(Some)
+        let runtime = crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
+                state.workspace.project.id(),
+                bundle,
+                receipt,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        return crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![
+            runtime,
+        ])
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
     }
     if !document.validation_is_current() {
@@ -593,9 +695,10 @@ fn prepared_project_veriloga_runtime(
     // Persisted validation authenticates only the exact source bytes. Rebuild
     // transient executable artifacts rather than trusting serialized code or
     // requiring a redundant manual compile after project/session restore.
-    let receipt = crate::workbench::code_workspace::compile_project_source_receipt(
+    let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
         state.workspace.project.id(),
-        document,
+        bundle,
+        None,
     )
     .map_err(|diagnostics| {
         let detail = diagnostics
@@ -610,46 +713,56 @@ fn prepared_project_veriloga_runtime(
             ),
         )
     })?;
-    crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_receipt(
-        state.workspace.project.id(),
-        document,
-        &receipt,
-    )
-    .map(Some)
-    .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+    let runtime =
+        crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
+            state.workspace.project.id(),
+            bundle,
+            &receipt,
+        )
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+    crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
-fn project_veriloga_runtime_referenced_by(
+fn project_veriloga_runtimes_referenced_by(
     state: &AppState,
     source: &str,
-) -> Result<Option<crate::workbench::code_workspace::PreparedVerilogARuntime>, PreparationError> {
-    let Some(document) = state
-        .workspace
-        .project_sources
-        .get(crate::state::ProjectSourceLanguage::VerilogA)
-    else {
-        return Ok(None);
+) -> Result<crate::workbench::code_workspace::PreparedVerilogARuntimeSet, PreparationError> {
+    let Some(bundle) = state.workspace.project_sources.bundle_for_owner(
+        &crate::state::ProjectSourceOwner::code_workspace(
+            crate::state::ProjectSourceLanguage::VerilogA,
+        ),
+    ) else {
+        return Ok(Default::default());
     };
-    let source_key = crate::workbench::code_workspace::project_veriloga_source_key(
+    let key_prefix = format!(
+        "__rspice_project__/{}/{}/{}/",
         state.workspace.project.id(),
-        document,
+        bundle.id(),
+        bundle.closure_digest()
     );
-    let references_project_key = executable_logical_lines(source).iter().any(|(_, line)| {
-        parse_veriloga_directive_identity(line).is_some_and(|(path, _)| path == source_key.as_str())
-    });
+    let key_suffix = format!("/{}", bundle.root().logical_path());
+    let references_project_key = executable_logical_lines(source)
+        .iter()
+        .filter_map(|(_, line)| parse_veriloga_directive_identity(line))
+        .any(|(path, _)| path.starts_with(&key_prefix) && path.ends_with(&key_suffix));
     if !references_project_key {
-        return Ok(None);
+        return Ok(Default::default());
     }
-    let runtime = prepared_project_veriloga_runtime(state)?;
-    let Some(runtime) = runtime else {
-        return Ok(None);
-    };
-    if !executable_logical_lines(source).iter().any(|(_, line)| {
-        project_veriloga_directive_matches_exact_identity(line, &source_key, runtime.module_name())
-    }) {
-        return Ok(None);
+    let runtimes = prepared_project_veriloga_runtimes(state)?;
+    let exact_reference = runtimes.iter().any(|runtime| {
+        executable_logical_lines(source).iter().any(|(_, line)| {
+            project_veriloga_directive_matches_exact_identity(
+                line,
+                runtime.source_key(),
+                runtime.netlist_alias(),
+            )
+        })
+    });
+    if !exact_reference {
+        return Ok(Default::default());
     }
-    Ok(Some(runtime))
+    Ok(runtimes)
 }
 
 /// Parse the identity-bearing fields from the one project Verilog-A directive
@@ -909,19 +1022,19 @@ fn contains_external_include_directive(source: &str) -> bool {
 
 #[cfg(test)]
 fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationError> {
-    reject_deferred_external_sources_with_project_runtime(netlist, None)
+    reject_deferred_external_sources_with_project_runtimes(netlist, &Default::default())
 }
 
-fn reject_deferred_external_sources_with_project_runtime(
+fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
-    project_runtime: Option<&crate::workbench::code_workspace::PreparedVerilogARuntime>,
+    project_runtimes: &crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
 ) -> Result<(), PreparationError> {
     for (line_number, logical_line) in executable_logical_lines(netlist) {
-        if project_runtime.is_some_and(|runtime| {
+        if project_runtimes.iter().any(|runtime| {
             project_veriloga_directive_matches_exact_identity(
                 &logical_line,
                 runtime.source_key(),
-                runtime.module_name(),
+                runtime.netlist_alias(),
             )
         }) {
             continue;
@@ -1486,50 +1599,54 @@ mod tests {
                 .to_owned(),
         )
             .expect("replace bootstrapped project Verilog-A source");
-        let document = state
+        let bundle = state
             .workspace
             .project_sources
-            .get(crate::state::ProjectSourceLanguage::VerilogA)
-            .expect("installed project source");
-        let receipt = crate::workbench::code_workspace::compile_project_source_receipt(
+            .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
+                crate::state::ProjectSourceLanguage::VerilogA,
+            ))
+            .expect("installed project source bundle");
+        let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
             state.workspace.project.id(),
-            document,
+            bundle,
+            None,
         )
         .expect("compile project Verilog-A source");
         state.ui.code_workspace.veriloga.receipt = Some(receipt);
 
-        let document = state
+        let bundle = state
             .workspace
             .project_sources
-            .get(crate::state::ProjectSourceLanguage::VerilogA)
-            .expect("installed project source");
-        let source_key = crate::workbench::code_workspace::project_veriloga_source_key(
+            .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
+                crate::state::ProjectSourceLanguage::VerilogA,
+            ))
+            .expect("installed project source bundle");
+        let source_key = crate::state::project_veriloga_bundle_source_key(
             state.workspace.project.id(),
-            document,
-        );
+            bundle,
+            "owned",
+        )
+        .expect("derive exact project source key");
         let exact_directive =
             crate::workbench::code_workspace::project_veriloga_directive(&source_key, "owned");
-        let exact_runtime = project_veriloga_runtime_referenced_by(&state, &exact_directive)
-            .expect("inspect exact project directive")
-            .expect("exact project directive owns a runtime");
-        reject_deferred_external_sources_with_project_runtime(
-            &exact_directive,
-            Some(&exact_runtime),
-        )
-        .expect("exact project identity is permitted");
+        let exact_runtimes = project_veriloga_runtimes_referenced_by(&state, &exact_directive)
+            .expect("inspect exact project directive");
+        assert_eq!(exact_runtimes.len(), 1);
+        reject_deferred_external_sources_with_project_runtimes(&exact_directive, &exact_runtimes)
+            .expect("exact project identity is permitted");
 
         let altered_key = source_key.replacen("__rspice_project__", "__RSPICE_PROJECT__", 1);
         let altered_directive =
             crate::workbench::code_workspace::project_veriloga_directive(&altered_key, "owned");
-        let altered_runtime = project_veriloga_runtime_referenced_by(&state, &altered_directive)
+        let altered_runtimes = project_veriloga_runtimes_referenced_by(&state, &altered_directive)
             .expect("inspect altered project directive");
         assert!(
-            altered_runtime.is_none(),
+            altered_runtimes.is_empty(),
             "case-altered virtual paths must not acquire the exact project runtime"
         );
-        let error = reject_deferred_external_sources_with_project_runtime(
+        let error = reject_deferred_external_sources_with_project_runtimes(
             &altered_directive,
-            altered_runtime.as_ref(),
+            &altered_runtimes,
         )
         .expect_err("case-altered project key must remain an external dependency");
         assert_eq!(error.stage(), PreparationStage::SourceChecks);
@@ -1549,6 +1666,116 @@ mod tests {
             source_key,
             "owned",
         ));
+    }
+
+    #[test]
+    fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
+        let mut state = AppState::default();
+        let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
+
+        let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), "sealed_gain".to_owned());
+        view.metadata
+            .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
+        let mut cell = crate::state::Cell::new("gain");
+        cell.add_view(view);
+        let mut library = crate::state::Library::new("behavioral");
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(reference),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "behavioral/gain.va",
+            "`include \"behavioral/gain_constants.va\"\nmodule sealed_gain(p, n); inout p, n; electrical p, n; analog I(p,n) <+ `RSPICE_GAIN * V(p,n); endmodule\n",
+            [crate::state::ProjectSourceFile::try_new(
+                "behavioral/gain_constants.va",
+                "`define RSPICE_GAIN 1.0\n",
+            )
+            .expect("valid included source")],
+            [crate::state::ProjectSourceDependency::try_new(
+                "behavioral/gain.va",
+                "behavioral/gain_constants.va",
+            )
+            .expect("valid dependency edge")],
+        )
+        .expect("valid sealed Verilog-A bundle");
+        let expected_digest = bundle.closure_digest();
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("attach cell-view source");
+
+        let mut placed = crate::state::LibraryCellInstance::new("behavioral", "gain", "schematic");
+        placed.terminal_order = vec!["p".to_owned(), "n".to_owned()];
+        state
+            .schematic
+            .add_library_cell_component(crate::state::Point::new(20, 20), placed);
+        state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Mixed-signal".to_owned(),
+                root: crate::state::CellViewRef::default_top(),
+                dut_path: "/top/X1".to_owned(),
+                executable_view_policy: vec!["veriloga".to_owned()],
+                stop_views: vec!["veriloga".to_owned()],
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Mixed-signal design".to_owned(),
+            })
+            .expect("create executable mixed-signal configuration");
+
+        let projection = state
+            .workspace
+            .configuration_execution_projection(
+                &state.library_manager,
+                &state.workspace.active_view,
+                &state.schematic,
+            )
+            .expect("resolve configured behavioral view");
+        let runtimes = prepared_configuration_veriloga_runtimes(&state, &projection)
+            .expect("compile exact configured source closure");
+
+        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+            &state.library_manager,
+            &projection,
+        );
+        let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+            projection.root_schematic().expect("materialized root"),
+            &[],
+            &hierarchy,
+        );
+        assert!(generated.errors.is_empty(), "{:?}", generated.errors);
+
+        assert_eq!(runtimes.len(), 1);
+        let runtime = runtimes.iter().next().expect("prepared runtime");
+        assert_eq!(runtime.source_digest(), expected_digest);
+        assert_eq!(runtime.module_name(), "sealed_gain");
+        assert_eq!(runtime.terminal_names().unwrap(), ["p", "n"]);
+        assert!(runtime.source_key().starts_with("__rspice_project__/"));
+        assert_eq!(
+            generated
+                .netlist
+                .lines()
+                .filter(|line| line.trim().eq_ignore_ascii_case(
+                    &crate::workbench::code_workspace::project_veriloga_directive(
+                        runtime.source_key(),
+                        runtime.netlist_alias(),
+                    )
+                ))
+                .count(),
+            1,
+            "configured netlist must reference the exact prepared runtime once"
+        );
+        runtime
+            .install()
+            .expect("sealed configured runtime installs in the session cache");
     }
 
     #[test]

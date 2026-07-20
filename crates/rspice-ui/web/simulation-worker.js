@@ -16,6 +16,7 @@ function executableAsset(name) {
 
 let initPromise = null;
 let runWorkerRequest = null;
+let runVerilogACompileRequest = null;
 const WORKER_PROTOCOL_VERSION = 3;
 
 function asErrorMessage(error) {
@@ -47,7 +48,11 @@ async function initializeWorkerModule() {
   if (typeof module.runRspiceUiWorkerRequest !== "function") {
     throw new Error("RSpice worker package is missing its request executor.");
   }
+  if (typeof module.runRspiceUiVerilogACompileRequest !== "function") {
+    throw new Error("RSpice worker package is missing its Verilog-A compiler executor.");
+  }
   runWorkerRequest = module.runRspiceUiWorkerRequest;
+  runVerilogACompileRequest = module.runRspiceUiVerilogACompileRequest;
 }
 
 async function ensureReady() {
@@ -63,6 +68,22 @@ async function ensureReady() {
 
 self.addEventListener("message", (event) => {
   const message = event.data || {};
+  if (message.type === "compile-veriloga") {
+    void (async () => {
+      try {
+        await ensureReady();
+        const response = runVerilogACompileRequest(message.request);
+        postMessage({ type: "veriloga-result", id: message.id, response });
+      } catch (error) {
+        postMessage({
+          type: "veriloga-error",
+          id: message.id ?? 0,
+          error: asErrorMessage(error),
+        });
+      }
+    })();
+    return;
+  }
   if (message.type !== "run") {
     return;
   }

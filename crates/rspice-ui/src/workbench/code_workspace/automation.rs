@@ -889,6 +889,8 @@ fn editor_diagnostics(diagnostics: &DiagnosticSet) -> Vec<CodeEditorDiagnostic> 
             severity: CodeEditorSeverity::Error,
             message: diagnostic.message.clone(),
             detail: diagnostic.code.as_str().to_owned(),
+            source_path: None,
+            source: None,
             byte_range: Some(diagnostic.span.start..diagnostic.span.end),
             line: Some(diagnostic.start.line),
             column: Some(diagnostic.start.column),

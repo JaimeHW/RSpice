@@ -216,11 +216,46 @@ pub const CONSTANTS_VAMS: &str = r#"
 `endif
 "#;
 
+const BUILTIN_INCLUDE_DOCUMENTS: [(&str, &str); 2] = [
+    ("@rspice/stdlib/disciplines.vams", DISCIPLINES_VAMS),
+    ("@rspice/stdlib/constants.vams", CONSTANTS_VAMS),
+];
+
+const fn builtin_include_source_bytes() -> usize {
+    let mut total = 0usize;
+    let mut index = 0usize;
+    while index < BUILTIN_INCLUDE_DOCUMENTS.len() {
+        total = total.saturating_add(BUILTIN_INCLUDE_DOCUMENTS[index].1.len());
+        index += 1;
+    }
+    total
+}
+
+/// Maximum number of distinct built-in include documents that preprocessing
+/// can add to a dependency closure.
+///
+/// These compiler-owned documents are outside a project's virtual source
+/// bundle and therefore receive a separate, fixed reservation in the sealed
+/// virtual-source provider limits.
+pub(crate) const BUILTIN_INCLUDE_DOCUMENT_COUNT: usize = BUILTIN_INCLUDE_DOCUMENTS.len();
+
+/// Exact source-byte reservation for all distinct built-in include documents.
+pub(crate) const BUILTIN_INCLUDE_SOURCE_BYTES: usize = builtin_include_source_bytes();
+
 /// Resolve a built-in standard header by include filename.
 ///
 /// Recognizes both the modern `.vams` names and the legacy `.h` names used
 /// by older ADMS-era compact models.
 pub fn builtin_include(filename: &str) -> Option<&'static str> {
+    builtin_include_document(filename).map(|(_, source)| source)
+}
+
+/// Resolve a built-in standard header to its canonical logical identity and
+/// exact versioned contents.
+///
+/// The canonical identity is independent of the alias used by source code,
+/// making dependency receipts reproducible across desktop and WebAssembly.
+pub fn builtin_include_document(filename: &str) -> Option<(&'static str, &'static str)> {
     // Compare against the basename so `include "vams/disciplines.vams" also
     // resolves when only the path prefix differs.
     let basename = filename
@@ -231,9 +266,9 @@ pub fn builtin_include(filename: &str) -> Option<&'static str> {
 
     match basename.as_str() {
         "disciplines.vams" | "disciplines.h" | "discipline.vams" | "discipline.h" => {
-            Some(DISCIPLINES_VAMS)
+            Some(BUILTIN_INCLUDE_DOCUMENTS[0])
         }
-        "constants.vams" | "constants.h" => Some(CONSTANTS_VAMS),
+        "constants.vams" | "constants.h" => Some(BUILTIN_INCLUDE_DOCUMENTS[1]),
         _ => None,
     }
 }
