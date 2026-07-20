@@ -373,11 +373,17 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("wheel smoke passed", workflow)
         self.assertIn("Python 3.10 abi3 smoke passed", workflow)
         self.assertIn(
-            "cargo clippy --locked -p rspice-core -p rspice-python --all-targets --all-features -- -D warnings",
+            "cargo clippy --locked -p rspice-core --all-targets --all-features -- -D warnings",
+            workflow,
+        )
+        self.assertIn(
+            "cargo clippy --locked -p rspice-python --all-targets --all-features -- -D warnings",
             workflow,
         )
         self.assertIn("native-feature-lint:", workflow)
-        self.assertIn('CARGO_BUILD_JOBS: "2"', workflow)
+        self.assertIn('CARGO_BUILD_JOBS: "1"', workflow)
+        self.assertIn('CARGO_PROFILE_DEV_DEBUG: "0"', workflow)
+        self.assertIn('CARGO_PROFILE_TEST_DEBUG: "0"', workflow)
         self.assertIn("shared-key: python-native-feature-lint-linux", workflow)
         test_job = workflow.split("  native-feature-lint:", maxsplit=1)[0]
         self.assertNotIn(
