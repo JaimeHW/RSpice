@@ -3657,6 +3657,14 @@ impl XyceAddResistorsKind {
         }
     }
 
+    fn source_relative_path(self) -> &'static str {
+        match self {
+            Self::NoDcPath => "Netlists/PREPROC_ADDRES/nodcpath.cir",
+            Self::OneTerminal => "Netlists/PREPROC_ADDRES/oneterm.cir",
+            Self::RedundantBridge => "Netlists/REDUND_REMOVE/gnd_and_redund_addres.cir",
+        }
+    }
+
     fn source_identity(self) -> (usize, &'static str) {
         match self {
             Self::NoDcPath => (
@@ -9650,7 +9658,16 @@ impl XyceTestRunner {
         expected_names_hash: &str,
         expected_content_hash: &str,
     ) -> Result<(), String> {
-        let family = self.root.join(Path::new(prefix));
+        let source_relative_path = match prefix {
+            XYCE_ABM_TRANSIENT_TIME_FAMILY_PREFIX => "Netlists/ABM_TIME",
+            XYCE_ABM_TRANSIENT_SQRT_FAMILY_PREFIX => "Netlists/ABM_SQRT",
+            _ => {
+                return Err(format!(
+                    "ABM transient family prefix is not recognized: {prefix}"
+                ));
+            }
+        };
+        let family = self.root.join(source_relative_path);
         let metadata = fs::symlink_metadata(&family)
             .map_err(|error| format!("failed to inspect ABM transient family: {error}"))?;
         if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
@@ -12945,7 +12962,7 @@ impl XyceTestRunner {
         let mut candidate_content = BTreeSet::new();
         for candidate in XyceAddResistorsKind::ALL {
             let record = candidate.record();
-            let path = self.root.join(Path::new(record));
+            let path = self.root.join(Path::new(candidate.source_relative_path()));
             let bytes = fs::read(&path).map_err(|error| {
                 format!(
                     "ADDRESISTORS candidate {} is missing: {error}",
