@@ -1655,6 +1655,7 @@ mod tests {
 
         let _ = ctx.run(move_keyboard_input(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
+                // accessibility-pointer-shim: test-only canvas focus harness.
                 let response = ui.interact(
                     ui.max_rect(),
                     egui::Id::new("unfocused-move-canvas"),
@@ -1683,6 +1684,7 @@ mod tests {
 
         let _ = ctx.run(move_keyboard_input(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
+                // accessibility-pointer-shim: test-only canvas focus harness.
                 let response = ui.interact(
                     ui.max_rect(),
                     egui::Id::new("focused-move-canvas"),
@@ -2002,6 +2004,7 @@ mod tests {
             };
             let _ = ctx.run(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
+                    // accessibility-pointer-shim: test-only canvas event harness.
                     let response = ui.interact(
                         ui.max_rect(),
                         egui::Id::new("documentation-shape-keyboard-test"),

@@ -210,6 +210,7 @@ mod tests {
         let mut outcome = (false, false);
         let _ = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
+                // accessibility-pointer-shim: test-only canvas focus harness.
                 let response = ui.interact(
                     ui.max_rect(),
                     Id::new("test-schematic-canvas"),

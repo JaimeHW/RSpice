@@ -297,7 +297,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo audit", workflow)
         self.assertIn("cargo cyclonedx --format json --spec-version 1.5", workflow)
         self.assertEqual(workflow.count("actions/attest@"), 2)
-        self.assertIn("sha256sum --check --strict *.sha256", workflow)
+        self.assertIn("sha256sum --check --strict ./*.sha256", workflow)
         self.assertIn("gh release upload", workflow)
         self.assertNotIn("--clobber", workflow)
         self.assertIn("cmp --silent", workflow)
@@ -375,6 +375,15 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn(
             "cargo clippy --locked -p rspice-core -p rspice-python --all-targets --all-features -- -D warnings",
             workflow,
+        )
+        self.assertIn("native-feature-lint:", workflow)
+        self.assertIn('CARGO_BUILD_JOBS: "2"', workflow)
+        self.assertIn("shared-key: python-native-feature-lint-linux", workflow)
+        test_job = workflow.split("  native-feature-lint:", maxsplit=1)[0]
+        self.assertNotIn(
+            "Lint every native feature combination",
+            test_job,
+            "all-feature Clippy must not run after building every Python matrix variant",
         )
         self.assertIn("python scripts/repair_sdist_lock.py", workflow)
         self.assertIn("CARGO_NET_OFFLINE=true", workflow)

@@ -70,9 +70,11 @@ jobs:
           git merge-base --is-ancestor "$commit" origin/main
           source_date_epoch=$(git show -s --format=%ct "$commit")
           git diff --exit-code
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "commit=$commit" >> "$GITHUB_OUTPUT"
-          echo "source_date_epoch=$source_date_epoch" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "source_date_epoch=$source_date_epoch"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Package ${{ matrix.target }}
@@ -257,7 +259,7 @@ jobs:
             echo "expected seven checksum sidecars, found $checksum_count" >&2
             exit 1
           fi
-          sha256sum --check --strict *.sha256
+          sha256sum --check --strict ./*.sha256
       - name: Create or repair release from verified assets
         shell: bash
         env:

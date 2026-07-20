@@ -1098,6 +1098,14 @@ fn configuration_table_row(
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), 29.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            format!("Select configuration set {}", definition.name),
+        )
+    });
     let fill = if selected {
         t.color.accent_dim
     } else if response.hovered() {
@@ -1138,6 +1146,7 @@ fn configuration_table_row(
         t.color.text,
         status_color,
     );
+    crate::ui::theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(format!(
         "{} · {} · revision {} · {}",
         definition.root.display_path(),
