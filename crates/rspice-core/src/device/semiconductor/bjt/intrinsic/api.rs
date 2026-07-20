@@ -423,4 +423,19 @@ mod tests {
             first_currents.map(Value::to_bits)
         );
     }
+
+    #[test]
+    fn repeated_unlimited_legacy_bjt_candidate_advances_convergence_history() {
+        let mut bjt = Bjt::new_npn("q".to_string(), 1, 2, 3);
+        let candidate = [0.0, 0.0, 0.0];
+
+        bjt.update(&candidate);
+        assert!(!bjt.legacy_junction_limited_for_trace());
+        bjt.update(&candidate);
+
+        assert!(
+            bjt.is_converged(NonlinearConvergenceCriteria::default()),
+            "an unchanged cached candidate must advance convergence history"
+        );
+    }
 }

@@ -1511,6 +1511,20 @@ impl NonlinearDevice for Bjt {
         if self.reduced_linearization_cache_valid.get()
             && self.cache_exactly_matches_external_biases(vc, vb, ve, vs)
         {
+            // The solver can revisit the stamped candidate without changing
+            // any BJT terminal bias (for example, when only voltage-source
+            // branch-current unknowns changed). Preserve pnjlim idempotence,
+            // but advance the convergence comparison to the identical cached
+            // evaluation so legacy GP devices do not remain permanently
+            // non-converged after their first load.
+            if self.charge_model == BjtChargeModel::LegacyGummelPoon
+                && !self.legacy_junction_limited
+            {
+                self.previous_reduced_linearization_valid = true;
+                self.vbe_prev = self.vbe;
+                self.vbc_prev = self.vbc;
+                self.intrinsic_linearization_prev = self.intrinsic_linearization;
+            }
             return;
         }
         let previous_linearization_available = self.reduced_linearization_cache_valid.get();
