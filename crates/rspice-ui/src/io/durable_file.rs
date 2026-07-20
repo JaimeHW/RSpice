@@ -596,6 +596,29 @@ fn compare_exchange_bytes_impl(
         .map(|metadata| metadata.permissions());
     let (temp, mut file) = create_unique_sibling(path)?;
 
+    // ReplaceFileW cannot reliably merge the destination ACL when the caller
+    // lacks WRITE_DAC, so the Windows publication path intentionally asks it
+    // to ignore ACL merge errors. That is safe only when the staged successor
+    // already carries the predecessor's complete owner/group/DACL contract.
+    // `atomic_write_with` establishes the same invariant; compare-and-
+    // exchange must do so as well before it can enter `replace_file_checked`.
+    #[cfg(windows)]
+    if initially_observed.is_some()
+        && let Err(error) = copy_windows_file_security(path, &temp)
+    {
+        drop(file);
+        remove_unpublished_temp(&temp);
+        return Err(io::Error::new(
+            error.kind(),
+            format!(
+                "could not stage the security contract from '{}' onto '{}': {error}",
+                path.display(),
+                temp.display()
+            ),
+        )
+        .into());
+    }
+
     let staged = (|| -> io::Result<()> {
         file.write_all(bytes)?;
         file.flush()?;
@@ -3698,6 +3721,37 @@ mod tests {
             b"verified successor"
         );
         #[cfg(windows)]
+        assert_no_windows_recovery_artifacts(&target);
+        assert_only_target_and_lease(&root, &target);
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn compare_exchange_preserves_the_existing_windows_security_contract() {
+        let root = unique_temp_dir("cas-windows-security");
+        let target = root.join("state.json");
+        let contract_reference = root.join("security-reference.json");
+        std::fs::write(&target, b"accepted").expect("write predecessor");
+        std::fs::write(&contract_reference, b"reference").expect("write contract reference");
+        copy_windows_file_security(&target, &contract_reference)
+            .expect("capture predecessor security contract");
+        let accepted: [u8; 32] = Sha256::digest(b"accepted").into();
+
+        compare_exchange_bytes(
+            &target,
+            ExpectedContent::Digest(accepted),
+            b"verified successor",
+        )
+        .expect("publish successor with predecessor security");
+
+        verify_windows_file_security_equivalence(&contract_reference, &target)
+            .expect("published successor retained predecessor security contract");
+        assert_eq!(
+            std::fs::read(&target).expect("read successor"),
+            b"verified successor"
+        );
+        std::fs::remove_file(contract_reference).expect("remove contract reference");
         assert_no_windows_recovery_artifacts(&target);
         assert_only_target_and_lease(&root, &target);
         std::fs::remove_dir_all(root).expect("remove fixture");

@@ -2752,6 +2752,14 @@ impl XyceAbmPowKind {
         }
     }
 
+    fn source_relative_path(self) -> &'static str {
+        match self {
+            Self::UnaryMinusPrecedence => "Netlists/ABM_POW/abmpow1.cir",
+            Self::NegativeIntegerExponent => "Netlists/ABM_POW/abmpow2.cir",
+            Self::FractionalPrincipalComplex => "Netlists/ABM_POW/abmpow3.cir",
+        }
+    }
+
     fn source_identity(self) -> (usize, &'static str) {
         match self {
             Self::UnaryMinusPrecedence => (
@@ -2848,6 +2856,14 @@ impl XyceAbmTransientKind {
             Self::DirectTime => "netlists/abm_time/time.cir",
             Self::ParameterTime => "netlists/abm_time/time_param.cir",
             Self::SquareRoot => "netlists/abm_sqrt/sqrt.cir",
+        }
+    }
+
+    fn source_relative_path(self) -> &'static str {
+        match self {
+            Self::DirectTime => "Netlists/ABM_TIME/time.cir",
+            Self::ParameterTime => "Netlists/ABM_TIME/time_param.cir",
+            Self::SquareRoot => "Netlists/ABM_SQRT/sqrt.cir",
         }
     }
 
@@ -9500,7 +9516,7 @@ impl XyceTestRunner {
             .map_err(|error| format!("failed to canonicalize ABM transient record: {error}"))?;
         let canonical_expected = self
             .root
-            .join(Path::new(kind.record()))
+            .join(Path::new(kind.source_relative_path()))
             .canonicalize()
             .map_err(|error| format!("canonical ABM transient record is missing: {error}"))?;
         if canonical_deck != canonical_expected {
@@ -9527,7 +9543,7 @@ impl XyceTestRunner {
         let mut candidates = BTreeSet::new();
         let mut candidate_content = BTreeSet::new();
         for candidate in XyceAbmTransientKind::ALL {
-            let path = self.root.join(Path::new(candidate.record()));
+            let path = self.root.join(Path::new(candidate.source_relative_path()));
             let metadata = fs::symlink_metadata(&path).map_err(|error| {
                 format!(
                     "ABM transient candidate {} is missing: {error}",
@@ -10222,7 +10238,7 @@ impl XyceTestRunner {
             .map_err(|error| format!("failed to canonicalize ABM_POW record: {error}"))?;
         let canonical_expected = self
             .root
-            .join(Path::new(kind.record()))
+            .join(Path::new(kind.source_relative_path()))
             .canonicalize()
             .map_err(|error| format!("canonical ABM_POW record is missing: {error}"))?;
         if canonical_deck != canonical_expected {
@@ -10291,7 +10307,7 @@ impl XyceTestRunner {
         let mut candidates = BTreeSet::new();
         let mut candidate_content = BTreeSet::new();
         for candidate in XyceAbmPowKind::ALL {
-            let path = self.root.join(Path::new(candidate.record()));
+            let path = self.root.join(Path::new(candidate.source_relative_path()));
             let metadata = fs::symlink_metadata(&path).map_err(|error| {
                 format!("ABM_POW candidate {} is missing: {error}", path.display())
             })?;

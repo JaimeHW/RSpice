@@ -85,7 +85,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      CARGO_BUILD_JOBS: "2"
+      # rspice-core's generated all-feature surface is large enough that
+      # concurrent Clippy/rspice-python compilation exhausts the hosted
+      # runner. Keep the full lint coverage while bounding peak memory.
+      CARGO_BUILD_JOBS: "1"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install Rust toolchain
@@ -97,7 +102,9 @@ jobs:
         with:
           python-version: "3.14"
       - name: Run warnings-denied Clippy
-        run: cargo clippy --locked -p rspice-core -p rspice-python --all-targets --all-features -- -D warnings
+        run: |
+          cargo clippy --locked -p rspice-core --all-targets --all-features -- -D warnings
+          cargo clippy --locked -p rspice-python --all-targets --all-features -- -D warnings
 
   wheels:
     name: abi3 wheel (${{ matrix.platform.name }})

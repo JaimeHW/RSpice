@@ -315,7 +315,12 @@ mod tests {
         });
         let _ = ctx.run(
             dialog_input(vec![
-                key_event_with_modifiers(egui::Key::A, egui::Modifiers::CTRL),
+                // Move explicitly to the end. Ctrl+A is Select All on
+                // Windows/Linux but an Emacs-style line-start command on
+                // macOS, which made this retained-source contract depend on
+                // the host platform rather than the editor behavior under
+                // test.
+                key_event(egui::Key::End),
                 egui::Event::Text("1e".to_owned()),
             ]),
             |ctx| {

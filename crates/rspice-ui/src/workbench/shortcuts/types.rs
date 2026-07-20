@@ -667,14 +667,18 @@ mod tests {
     #[test]
     fn display_labels_use_product_key_symbols_but_wire_keys_use_stable_names() {
         let labels = [
-            (Key::Plus, "Ctrl++", "Plus"),
-            (Key::Minus, "Ctrl+\u{2212}", "Minus"),
-            (Key::OpenBracket, "Ctrl+[", "OpenBracket"),
-            (Key::CloseBracket, "Ctrl+]", "CloseBracket"),
+            (Key::Plus, "Ctrl++", "Cmd++", "Plus"),
+            (Key::Minus, "Ctrl+\u{2212}", "Cmd+\u{2212}", "Minus"),
+            (Key::OpenBracket, "Ctrl+[", "Cmd+[", "OpenBracket"),
+            (Key::CloseBracket, "Ctrl+]", "Cmd+]", "CloseBracket"),
         ];
-        for (key, label, wire_name) in labels {
+        for (key, windows_label, mac_label, wire_name) in labels {
             let stroke = ShortcutStroke::new(key, true, false, false);
-            assert_eq!(stroke.display_label(), label);
+            assert_eq!(
+                stroke.display_label_for(OperatingSystem::Windows),
+                windows_label
+            );
+            assert_eq!(stroke.display_label_for(OperatingSystem::Mac), mac_label);
             assert_eq!(serde_json::to_value(stroke).unwrap()["key"], wire_name);
         }
     }

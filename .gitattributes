@@ -5,5 +5,10 @@ crates/rspice-veriloga/Cargo.toml text eol=lf
 crates/rspice-veriloga/src/** text eol=lf
 models/veriloga/** -text
 
+# The vendored Xyce regression identities were pinned from the upstream CRLF
+# artifacts. Materialize detected text files identically on every runner while
+# leaving binary fixtures untouched.
+tests/xyce/** text=auto eol=crlf
+
 # Regenerated built-in Rust must stay clean after generator rewrites.
 crates/rspice-core/src/device/veriloga_generated/** text eol=lf

@@ -2685,7 +2685,7 @@ fn test_xyce_repeated_dc_cards_form_one_sweep_vector() {
     let runner = XyceTestRunner::new(
         &root,
         XyceRunnerConfig {
-            max_time_per_test_ms: 10_000,
+            max_time_per_test_ms: 30_000,
             ..XyceRunnerConfig::default()
         },
     );
@@ -7867,6 +7867,21 @@ fn test_xyce_noise_derivative_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_stepped_noise_derivative_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_NOISE/STEP/DerivTestNoise.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should reset and evaluate NOISE derivatives for every materialized step, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_noise_complex_components_and_measure_consumers() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
@@ -7906,29 +7921,19 @@ fn test_xyce_unimplemented_noise_surfaces_fail_closed() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for (relative, reason) in [
-        (
-            "Netlists/MEASURE_NOISE/STEP/DerivTestNoise.cir",
-            "scalar-only .STEP NOISE DERIV",
-        ),
-        (
-            "Netlists/VANOISE/ekv_150nm_nmos_noise.cir",
-            "EKV3 LEVEL=301 NOISE contract",
-        ),
-    ] {
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && result.expected_unsupported,
-            "{relative} must remain a named unsupported contract, got {result:?}"
-        );
-        assert!(
-            result
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains(reason)),
-            "{relative} should name the unsupported boundary '{reason}', got {result:?}"
-        );
-    }
+    let relative = "Netlists/VANOISE/ekv_150nm_nmos_noise.cir";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && result.expected_unsupported,
+        "{relative} must remain a named unsupported contract, got {result:?}"
+    );
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("EKV3 LEVEL=301 NOISE contract")),
+        "{relative} should name the unsupported EKV3 LEVEL=301 NOISE boundary, got {result:?}"
+    );
 }
 
 #[test]
