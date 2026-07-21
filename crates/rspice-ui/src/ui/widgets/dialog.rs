@@ -50,8 +50,9 @@ pub enum DialogSize {
     /// 760 pt, and edge-to-edge at the mockup's 820 pt breakpoint.
     WideWorkflow,
     /// Account, organization, and licensing manager: the mockup's 920 pt
-    /// desktop surface, content-height capped at 760 pt, and edge-to-edge at
-    /// the shared 820 pt manager breakpoint.
+    /// desktop surface, content-height capped at 820 pt so the final license
+    /// action clears the fixed footer, and edge-to-edge at the shared 820 pt
+    /// manager breakpoint.
     AccountManager,
     /// Governed capability matrices: 1040 pt wide, content-height capped at
     /// 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
@@ -180,7 +181,7 @@ impl DialogSize {
             },
             Self::AccountManager => DialogSurfaceSpec {
                 width: 920.0,
-                max_height: 760.0,
+                max_height: 820.0,
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 820.0,
@@ -1705,6 +1706,11 @@ mod tests {
 
     #[test]
     fn account_manager_geometry_matches_its_mockup_width_and_breakpoint() {
+        let tall_desktop = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 1_080.0));
+        let tall = DialogLayout::resolve(DialogSize::AccountManager, tall_desktop, None);
+        assert_eq!(tall.surface_rect.size(), vec2(920.0, 820.0));
+        assert_eq!(tall.surface_rect.center(), tall_desktop.center());
+
         let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_000.0, 800.0));
         let desktop =
             DialogLayout::resolve(DialogSize::AccountManager, desktop_screen, Some(640.0));
