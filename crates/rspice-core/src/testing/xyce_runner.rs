@@ -5574,6 +5574,24 @@ struct XyceFrequencyDataPoint {
     overrides: Vec<(String, Value)>,
 }
 
+/// Xyce's `.AC DATA` analysis-initialization diagnostics when the referenced
+/// table cannot be resolved.  These are semantic failures after parsing, not
+/// parser errors, and therefore have a dedicated native oracle contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAcDataAnalysisInitFailure {
+    NoDataTables,
+    UnknownTable,
+}
+
+impl XyceAcDataAnalysisInitFailure {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::NoDataTables => "expected_error_ac_data_analysis_init_no_data",
+            Self::UnknownTable => "expected_error_ac_data_analysis_init_unknown_table",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct XyceNoiseAnalysis {
     output_node: String,
@@ -14572,6 +14590,22 @@ impl XyceTestRunner {
         }
 
         let source = fs::read_to_string(&deck.path).ok()?;
+        match Self::expected_ac_data_analysis_init_failure(&source, &deck.path) {
+            Ok(Some(failure)) => {
+                return Some(self.passed_result(deck, start, failure.result_contract()));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Some(self.failure_result(
+                    deck,
+                    start,
+                    "expected_error_ac_data_analysis_init",
+                    error,
+                    Vec::new(),
+                ));
+            }
+        }
+
         if Self::is_expected_missing_inductor_value_error_deck(&deck.relative_path, &source) {
             let contract = "expected_error_missing_inductor_value";
             return Self::validate_expected_missing_inductor_value_error_source(
@@ -23076,6 +23110,54 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         ) && source
             .to_ascii_lowercase()
             .contains("l value missing from instance line")
+    }
+
+    fn expected_ac_data_analysis_init_failure(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<Option<XyceAcDataAnalysisInitFailure>, String> {
+        let netlist = match Self::parse_xyce_netlist(source, deck_path) {
+            Ok(netlist) => netlist,
+            Err(_) => return Ok(None),
+        };
+
+        let mut table_name = None;
+        for analysis in &netlist.analyses {
+            let AnalysisCommand::AcData { table_name: name } = analysis else {
+                return Ok(None);
+            };
+            if table_name.replace(name.as_str()).is_some() {
+                return Ok(None);
+            }
+        }
+        let Some(table_name) = table_name else {
+            return Ok(None);
+        };
+        if !netlist.output_requests.iter().any(|request| {
+            request.directive == OutputDirectiveKind::Print
+                && request.analysis == Some(crate::netlist::OutputAnalysisKind::Ac)
+        }) {
+            return Ok(None);
+        }
+
+        if netlist
+            .data_tables
+            .iter()
+            .any(|table| table.name.eq_ignore_ascii_case(table_name))
+        {
+            return Ok(None);
+        }
+
+        // Xyce 7.10 emits one of the following ordered analysis-init
+        // diagnostics, followed by `Invalid data=<name> parameter on .AC
+        // line.`.  The table-state classification is structural and does not
+        // depend on a deck path or filename.
+        let failure = if netlist.data_tables.is_empty() {
+            XyceAcDataAnalysisInitFailure::NoDataTables
+        } else {
+            XyceAcDataAnalysisInitFailure::UnknownTable
+        };
+        Ok(Some(failure))
     }
 
     fn validate_expected_missing_inductor_value_error_source(
@@ -55760,103 +55842,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         table_name: &str,
         analysis: &str,
     ) -> Result<Vec<XyceFrequencyDataPoint>, String> {
-        let table = netlist
-            .data_tables
-            .iter()
-            .find(|table| table.name.eq_ignore_ascii_case(table_name))
-            .ok_or_else(|| format!("{analysis} references unknown .DATA table '{table_name}'"))?;
-        if table.params.is_empty() {
-            return Err(format!("{analysis} table '{}' has no columns", table.name));
-        }
-        if table.rows.is_empty() {
-            return Err(format!("{analysis} table '{}' has no rows", table.name));
-        }
-        let mut unique_params = BTreeSet::new();
-        for param in &table.params {
-            if !unique_params.insert(param.to_ascii_uppercase()) {
-                return Err(format!(
-                    "{analysis} table '{}' has duplicate column '{}'",
-                    table.name, param
-                ));
-            }
-        }
-        let frequency_columns = table
-            .params
-            .iter()
-            .enumerate()
-            .filter_map(|(index, param)| {
-                (param.eq_ignore_ascii_case("FREQ") || param.eq_ignore_ascii_case("HERTZ"))
-                    .then_some(index)
+        let points = netlist
+            .frequency_data_table_points(table_name)
+            .map_err(|error| format!("{analysis} {error}"))?;
+        Ok(points
+            .into_iter()
+            .map(|point| XyceFrequencyDataPoint {
+                frequency: point.frequency,
+                overrides: point.overrides,
             })
-            .collect::<Vec<_>>();
-        let freq_column = match frequency_columns.as_slice() {
-            [index] => *index,
-            [] => {
-                return Err(format!(
-                    "{analysis} table '{}' has no FREQ or HERTZ column",
-                    table.name
-                ));
-            }
-            _ => {
-                return Err(format!(
-                    "{analysis} table '{}' has ambiguous frequency columns; expected exactly one FREQ or HERTZ column",
-                    table.name
-                ));
-            }
-        };
-        let points = table
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(row_index, row)| {
-                if row.len() != table.params.len() {
-                    return Err(format!(
-                        "{analysis} table '{}' row {} has {} value(s), expected {}",
-                        table.name,
-                        row_index + 1,
-                        row.len(),
-                        table.params.len()
-                    ));
-                }
-                if let Some((column_index, value)) =
-                    row.iter().enumerate().find(|(_, value)| !value.is_finite())
-                {
-                    return Err(format!(
-                        "{analysis} table '{}' row {} column '{}' must be finite, got {}",
-                        table.name,
-                        row_index + 1,
-                        table.params[column_index],
-                        value
-                    ));
-                }
-                let frequency = row.get(freq_column).copied().ok_or_else(|| {
-                    format!(
-                        "{analysis} table '{}' row {} does not contain frequency column {}",
-                        table.name,
-                        row_index + 1,
-                        freq_column + 1
-                    )
-                })?;
-                let overrides = table
-                    .params
-                    .iter()
-                    .cloned()
-                    .zip(row.iter().copied())
-                    .collect::<Vec<_>>();
-                if !frequency.is_finite() || frequency <= 0.0 {
-                    return Err(format!(
-                        "{analysis} table '{}' row {} frequency must be positive and finite, got {frequency}",
-                        table.name,
-                        row_index + 1
-                    ));
-                }
-                Ok(XyceFrequencyDataPoint {
-                    frequency,
-                    overrides,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(points)
+            .collect())
     }
 
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
@@ -82977,6 +82972,57 @@ L1 1 0 1u
         assert!(
             err.contains("parsed successfully"),
             "unexpected validation error: {err}"
+        );
+    }
+
+    #[test]
+    fn expected_ac_data_analysis_init_contract_classifies_only_unresolved_tables() {
+        let unknown_table = "\
+ac data unknown table
+V1 in 0 AC 1
+R1 in 0 1k
+.AC DATA=missing
+.PRINT AC V(in)
+.END
+";
+        assert_eq!(
+            XyceTestRunner::expected_ac_data_analysis_init_failure(
+                unknown_table,
+                Path::new("unknown-table.cir")
+            )
+            .expect("unknown-table source validates"),
+            Some(XyceAcDataAnalysisInitFailure::NoDataTables)
+        );
+
+        let missing_named_table = "\
+ac data missing named table
+V1 in 0 AC 1
+R1 in 0 1k
+.DATA points
++ FREQ
++ 1
+.ENDDATA
+.AC DATA=missing
+.PRINT AC V(in)
+.END
+";
+        assert_eq!(
+            XyceTestRunner::expected_ac_data_analysis_init_failure(
+                missing_named_table,
+                Path::new("missing-named-table.cir")
+            )
+            .expect("missing-table source validates"),
+            Some(XyceAcDataAnalysisInitFailure::UnknownTable)
+        );
+
+        let resolved_table = missing_named_table.replace("DATA=missing", "DATA=points");
+        assert_eq!(
+            XyceTestRunner::expected_ac_data_analysis_init_failure(
+                &resolved_table,
+                Path::new("resolved-table.cir")
+            )
+            .expect("resolved-table source validates"),
+            None
         );
     }
 
