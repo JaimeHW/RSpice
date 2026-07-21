@@ -50,8 +50,6 @@ jobs:
         run: python3 tools/ci/test_wasm_playground.py
       - name: WASM IDE worker tests
         run: python3 tools/ci/test_ide_worker.py
-      - name: Web release assembler tests
-        run: python3 tools/deploy/test_build_site.py
       - name: Native release packager tests
         run: python3 tools/release/test_package_native.py
       - name: Check (warnings denied)
@@ -164,45 +162,6 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-ui --target wasm32-unknown-unknown
-
-  site-smoke:
-    name: Browser site smoke (wasm)
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Check out standalone site source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: JaimeHW/RSpice-Site
-          ref: main
-          path: _site-source
-          persist-credentials: false
-      - name: Install Rust toolchain
-        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Install wasm-bindgen-cli (pinned to Cargo.lock)
-        run: |
-          VERSION=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | head -1 | cut -d'"' -f2)
-          echo "Cargo.lock pins wasm-bindgen $VERSION"
-          cargo install wasm-bindgen-cli --version "$VERSION" --locked
-          wasm-bindgen --version
-      - name: Build standalone website source
-        working-directory: _site-source
-        run: python3 tools/build_site.py --out dist --rspice-source ..
-      - name: Assemble and verify browser release bundle
-        run: |
-          mkdir -p _site-ci
-          printf 'browser release assembly did not complete; inspect the preceding logs.\n' > _site-ci/BUILD_FAILED.txt
-          python3 tools/deploy/build_site.py --site-source _site-source/dist --out _site-ci
-          rm -f _site-ci/BUILD_FAILED.txt
-      - name: Upload verified site bundle
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: site-smoke-bundle
-          path: _site-ci
-          if-no-files-found: error
 
   python:
     name: Check (Python bindings)

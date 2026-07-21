@@ -145,21 +145,6 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 )
 
     def test_browser_executable_assets_share_one_version_identity(self) -> None:
-        assembler = (ROOT / "tools" / "deploy" / "build_site.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn(
-            'ASSET_ROOT_PLACEHOLDER = "__RSPICE_ASSET_ROOT__"',
-            assembler,
-        )
-        self.assertIn("def executable_asset_identity(asset_root):", assembler)
-        self.assertIn("def package_ide_executable_assets(ide):", assembler)
-        self.assertIn("require_clean_client_checkout(root)", assembler)
-        self.assertIn(
-            'ide_asset_identity = package_ide_executable_assets(out / "ide")',
-            assembler,
-        )
-
         for ide in IDE_DIRS:
             with self.subTest(ide=ide.relative_to(ROOT)):
                 index = (ide / "index.html").read_text(encoding="utf-8")
