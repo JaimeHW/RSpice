@@ -439,15 +439,28 @@ impl Engine {
         solution: &[Value],
         num_nodes: usize,
         time: Value,
+        uic_requested: bool,
         derived_branches: &[DerivedTransientBranchCurrent],
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
         let mut currents: Vec<Vec<Value>> = (0..circuit.num_branches())
             .map(|i| vec![solution.get(num_nodes + i).copied().unwrap_or(0.0)])
             .collect();
         for &branch in derived_branches {
-            currents.push(vec![Self::derived_transient_branch_current(
-                circuit, solution, time, branch,
-            )?]);
+            let current = if uic_requested
+                && matches!(
+                    branch.kind,
+                    DerivedTransientBranchCurrentKind::IndependentCurrentSource
+                ) {
+                // Xyce's NOOP/UIC initialization emits the pre-source-load
+                // lead-current state at t=0.  The source value becomes
+                // observable on the first accepted transient step; ordinary
+                // operating-point startup continues to report its value at
+                // the initial sample.
+                0.0
+            } else {
+                Self::derived_transient_branch_current(circuit, solution, time, branch)?
+            };
+            currents.push(vec![current]);
         }
         Ok(currents)
     }
@@ -1304,6 +1317,7 @@ impl Engine {
                 &solution,
                 num_nodes,
                 resume_time,
+                uic_requested,
                 &derived_branch_currents,
             )?,
             num_nodes,
@@ -5111,6 +5125,33 @@ mod tests {
                 .iter()
                 .all(|value| (*value - 2.0e-3).abs() <= 1.0e-15),
             "current-source waveform must preserve its exact source value: {current:?}"
+        );
+    }
+
+    #[test]
+    fn noop_transient_starts_independent_current_source_branch_at_zero() {
+        let netlist = Netlist::parse(
+            "NOOP independent current source output\n\
+             I1 out 0 10\n\
+             R1 out 0 1\n\
+             .TRAN 1 2 NOOP\n\
+             .END\n",
+        )
+        .expect("NOOP deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 2.0, 1.0)
+            .expect("NOOP transient solves");
+        let current = result
+            .try_branch_current_waveform_named("I1")
+            .expect("current-source branch waveform exists");
+        assert!(
+            current.len() >= 2,
+            "NOOP transient must advance: {current:?}"
+        );
+        assert_eq!(current[0], 0.0, "NOOP t=0 lead current: {current:?}");
+        assert_eq!(
+            current[1], 10.0,
+            "NOOP first-step lead current: {current:?}"
         );
     }
 
