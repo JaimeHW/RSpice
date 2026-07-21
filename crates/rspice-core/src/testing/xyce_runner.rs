@@ -49160,11 +49160,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_element_is_native_static_ac_exact_bf_is_pnp(
                         netlist, element,
                     ) => {}
+                ElementKind::Bjt { .. }
+                    if max_frequency <= 10_000.0 + 1.0e-9
+                        && Self::netlist_element_is_native_static_ac_exact_bf_is_npn(
+                            netlist, element,
+                        ) => {}
                 ElementKind::Diode { .. }
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes and high-frequency IS/BF PNPs, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 10 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -54280,10 +54285,43 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 .is_some_and(Self::model_is_native_static_ac_exact_bf_is_pnp)
     }
 
+    fn netlist_element_is_native_static_ac_exact_bf_is_npn(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 3
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_static_ac_exact_bf_is_npn)
+    }
+
     fn model_is_native_static_ac_exact_bf_is_pnp(model: &crate::netlist::ModelDef) -> bool {
+        Self::model_is_native_static_ac_exact_bf_is_bjt(model)
+            && matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "PNP" | "LPNP"
+            )
+    }
+
+    fn model_is_native_static_ac_exact_bf_is_npn(model: &crate::netlist::ModelDef) -> bool {
+        Self::model_is_native_static_ac_exact_bf_is_bjt(model)
+            && model.model_type.eq_ignore_ascii_case("NPN")
+    }
+
+    fn model_is_native_static_ac_exact_bf_is_bjt(model: &crate::netlist::ModelDef) -> bool {
         if !matches!(
             model.model_type.to_ascii_uppercase().as_str(),
-            "PNP" | "LPNP"
+            "NPN" | "PNP" | "LPNP"
         ) || !model.expr_params.is_empty()
             || !model.string_params.is_empty()
             || !model.string_vector_params.is_empty()
@@ -82680,9 +82718,15 @@ Q1 c b 0 QN
             validate(&source("IS=8e-16 BF=250", "IS=8e-16 N=1.1")).is_err(),
             "the broad hierarchy path must not admit unvalidated diode parameters"
         );
+        validate(
+            &source("IS=8e-16 BF=250", "IS=8e-16")
+                .replace(".AC DEC 10 100 100k", ".AC DEC 10 100 10k")
+                .replace("PNP", "NPN"),
+        )
+        .expect("exact NPN BF/IS hierarchy is supported through the validated 10 kHz envelope");
         assert!(
             validate(&source("IS=8e-16 BF=250", "IS=8e-16").replace("PNP", "NPN")).is_err(),
-            "high-frequency NPN hierarchy remains outside the oracle-validated subset"
+            "NPN BF/IS hierarchy above the validated 10 kHz envelope remains unsupported"
         );
     }
 
