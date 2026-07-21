@@ -2414,6 +2414,58 @@ impl Engine {
             .map(|&freq| solve_at_freq(&mut circuit, &mut workspace, freq))
             .collect()
     }
+
+    /// Execute a Xyce-style table-driven AC analysis.
+    ///
+    /// Each validated row from `table_name` is applied to a fresh netlist and
+    /// solved at its literal `FREQ`/`HERTZ` value. Returning the materialized
+    /// row netlists alongside their results preserves the parameter state used
+    /// for each point for callers that evaluate `.PRINT` expressions after
+    /// solving.
+    pub fn run_ac_data(
+        &self,
+        netlist: &Netlist,
+        table_name: &str,
+    ) -> Result<(Vec<Netlist>, Vec<AcResult>), SimulationError> {
+        self.run_ac_data_with_abort(netlist, table_name, &NoAbort)
+    }
+
+    /// Cancellable variant of [`Engine::run_ac_data`].
+    pub fn run_ac_data_with_abort(
+        &self,
+        netlist: &Netlist,
+        table_name: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<Netlist>, Vec<AcResult>), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let points = netlist
+            .frequency_data_table_points(table_name)
+            .map_err(|error| SimulationError::Circuit(format!(".AC DATA {error}")))?;
+        let mut row_netlists = Vec::with_capacity(points.len());
+        let mut results = Vec::with_capacity(points.len());
+        for (row_index, point) in points.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let (row_netlist, _) =
+                Self::create_perturbed_netlist_multi_with_abort(netlist, &point.overrides, abort)?;
+            let mut row_results =
+                self.run_ac_with_abort(&row_netlist, &[point.frequency], abort)?;
+            if row_results.len() != 1 {
+                return Err(SimulationError::Circuit(format!(
+                    ".AC DATA table '{}' row {} produced {} results, expected one",
+                    table_name,
+                    row_index + 1,
+                    row_results.len()
+                )));
+            }
+            row_netlists.push(row_netlist);
+            results.push(row_results.remove(0));
+        }
+        Ok((row_netlists, results))
+    }
 }
 
 fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), SimulationError> {
@@ -2547,5 +2599,42 @@ mod tests {
                 result.voltages[0]
             );
         }
+    }
+
+    #[test]
+    fn ac_data_resolves_rows_and_rejects_unknown_tables() {
+        let netlist = Netlist::parse(
+            "AC DATA deck\n\
+             .PARAM RVAL=1k\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 {RVAL}\n\
+             .DATA points\n\
+             + FREQ RVAL\n\
+             + 10 1k\n\
+             + 100 2k\n\
+             .ENDDATA\n\
+             .AC DATA=points\n\
+             .END\n",
+        )
+        .expect("AC DATA deck parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let (row_netlists, results) = engine
+            .run_ac_data(&netlist, "POINTS")
+            .expect("AC DATA rows solve");
+        assert_eq!(row_netlists.len(), 2);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].frequency, 10.0);
+        assert_eq!(results[1].frequency, 100.0);
+
+        let error = engine
+            .run_ac_data(&netlist, "missing")
+            .expect_err("unknown AC DATA table must fail before solving");
+        assert_eq!(
+            error.to_string(),
+            "Circuit error: .AC DATA references unknown .DATA table 'missing'"
+        );
     }
 }

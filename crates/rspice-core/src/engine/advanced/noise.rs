@@ -1454,95 +1454,18 @@ impl Engine {
         default_temperature: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Netlist>, Vec<NoiseResult>), SimulationError> {
-        let table = netlist
-            .data_tables
-            .iter()
-            .find(|table| table.name.eq_ignore_ascii_case(table_name))
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    ".NOISE DATA references unknown .DATA table '{table_name}'"
-                ))
-            })?;
-        if table.params.is_empty() || table.rows.is_empty() {
-            return Err(SimulationError::Circuit(format!(
-                ".NOISE DATA table '{}' must contain columns and at least one row",
-                table.name
-            )));
-        }
-        let mut names = std::collections::BTreeSet::new();
-        for name in &table.params {
-            if !names.insert(name.to_ascii_uppercase()) {
-                return Err(SimulationError::Circuit(format!(
-                    ".NOISE DATA table '{}' has duplicate column '{name}'",
-                    table.name
-                )));
-            }
-        }
-        let axes = table
-            .params
-            .iter()
-            .enumerate()
-            .filter_map(|(index, name)| {
-                (name.eq_ignore_ascii_case("FREQ") || name.eq_ignore_ascii_case("HERTZ"))
-                    .then_some(index)
-            })
-            .collect::<Vec<_>>();
-        let frequency_column = match axes.as_slice() {
-            [index] => *index,
-            [] => {
-                return Err(SimulationError::Circuit(format!(
-                    ".NOISE DATA table '{}' has no FREQ or HERTZ column",
-                    table.name
-                )));
-            }
-            _ => {
-                return Err(SimulationError::Circuit(format!(
-                    ".NOISE DATA table '{}' has ambiguous frequency columns",
-                    table.name
-                )));
-            }
-        };
+        let points = netlist
+            .frequency_data_table_points(table_name)
+            .map_err(|error| SimulationError::Circuit(format!(".NOISE DATA {error}")))?;
 
-        let mut row_netlists = Vec::with_capacity(table.rows.len());
-        let mut results = Vec::with_capacity(table.rows.len());
-        for (row_index, row) in table.rows.iter().enumerate() {
+        let mut row_netlists = Vec::with_capacity(points.len());
+        let mut results = Vec::with_capacity(points.len());
+        for (row_index, point) in points.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            if row.len() != table.params.len() {
-                return Err(SimulationError::Circuit(format!(
-                    ".NOISE DATA table '{}' row {} has {} values, expected {}",
-                    table.name,
-                    row_index + 1,
-                    row.len(),
-                    table.params.len()
-                )));
-            }
-            if let Some((column, value)) =
-                row.iter().enumerate().find(|(_, value)| !value.is_finite())
-            {
-                return Err(SimulationError::Circuit(format!(
-                    ".NOISE DATA table '{}' row {} column '{}' must be finite, got {value}",
-                    table.name,
-                    row_index + 1,
-                    table.params[column]
-                )));
-            }
-            let frequency = row[frequency_column];
-            if frequency <= 0.0 {
-                return Err(SimulationError::Circuit(format!(
-                    ".NOISE DATA table '{}' row {} frequency must be positive, got {frequency}",
-                    table.name,
-                    row_index + 1
-                )));
-            }
-            let overrides = table
-                .params
-                .iter()
-                .cloned()
-                .zip(row.iter().copied())
-                .collect::<Vec<_>>();
-            let (row_netlist, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+            let (row_netlist, _) =
+                Self::create_perturbed_netlist_multi_with_abort(netlist, &point.overrides, abort)?;
             let temperature = row_netlist
                 .options
                 .temp
@@ -1553,14 +1476,14 @@ impl Engine {
                 output_pos,
                 output_neg,
                 input_source,
-                &[frequency],
+                &[point.frequency],
                 temperature,
                 abort,
             )?;
             if row_result.len() != 1 {
                 return Err(SimulationError::Circuit(format!(
                     ".NOISE DATA table '{}' row {} produced {} results, expected one",
-                    table.name,
+                    table_name,
                     row_index + 1,
                     row_result.len()
                 )));

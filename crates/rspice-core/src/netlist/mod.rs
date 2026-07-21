@@ -14,6 +14,7 @@
 
 mod add_resistors;
 mod ast;
+mod data_table;
 pub mod expr;
 mod flattener;
 pub mod hierarchy_path;
@@ -34,6 +35,7 @@ mod xspice_parser;
 
 pub use add_resistors::*;
 pub use ast::*;
+pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
 pub use expr::{
     ExpressionDialect, ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
 };
@@ -684,6 +686,25 @@ pub struct Netlist {
 }
 
 impl Netlist {
+    /// Resolve a named `.DATA` table into validated frequency-axis rows.
+    ///
+    /// AC and noise table-driven analyses share this semantic contract.  The
+    /// table lookup is case-insensitive, while the authored column spelling
+    /// and row order are retained for parameter override application.
+    pub fn frequency_data_table_points(
+        &self,
+        table_name: &str,
+    ) -> Result<Vec<FrequencyDataPoint>, FrequencyDataTableError> {
+        let table = self
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case(table_name))
+            .ok_or_else(|| FrequencyDataTableError::UnknownTable {
+                table_name: table_name.to_string(),
+            })?;
+        table.frequency_points()
+    }
+
     fn enforce_root_source_limits_with_abort(
         input: &str,
         limits: crate::resource::ResourceLimits,
