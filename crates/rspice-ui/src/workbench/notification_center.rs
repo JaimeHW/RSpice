@@ -29,6 +29,13 @@ const ROW_HEADING_GAP: f32 = 8.0;
 const ROW_PADDING_X: i8 = 12;
 const ROW_PADDING_Y: i8 = 10;
 const FOOTER_MIN_HEIGHT: f32 = 38.0;
+const FOOTER_COMPACT_BREAKPOINT: f32 = 520.0;
+const FOOTER_RETENTION_WIDTH: f32 = 142.0;
+const FOOTER_ACTION_WIDTH: f32 = 80.0;
+const FOOTER_COLUMN_GAP: f32 = 12.0;
+const FOOTER_RETENTION_COPY: &str = "Retention · this session";
+const FOOTER_ACTIVITY_COPY: &str =
+    "Simulation, file, validation, and export activity is retained for this application session.";
 const LARGE_TARGET_MAX_WIDTH: f32 = 820.0;
 
 pub(super) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
@@ -189,16 +196,6 @@ fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
         if fill != egui::Color32::TRANSPARENT {
             ui.painter().rect_filled(cell.shrink(1.0), 0.0, fill);
         }
-        if selected {
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(
-                    pos2(cell.left() + 1.0, cell.bottom() - 2.0),
-                    pos2(cell.right() - 1.0, cell.bottom()),
-                ),
-                0.0,
-                tokens.color.accent,
-            );
-        }
         if index + 1 < NotificationFilter::ALL.len() {
             ui.painter().line_segment(
                 [
@@ -219,7 +216,14 @@ fn filter_buttons(ui: &mut Ui, app: &mut RSpiceApp, control_height: f32) {
                 tokens.color.text_dim
             },
         );
-        theme::paint_focus_ring(ui, &response, cell.shrink(1.0));
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                cell.shrink(2.0),
+                0.0,
+                Stroke::new(1.0, tokens.color.border_strong),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
 
     if let Some(index) = focused {
@@ -508,31 +512,36 @@ fn activity_footer(ui: &mut Ui, app: &mut RSpiceApp) {
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.set_min_height((FOOTER_MIN_HEIGHT - 12.0).max(control_height));
-            if ui.available_width() < 520.0 {
-                ui.horizontal_wrapped(|ui| {
-                    footer_copy(ui, &t);
-                    clear_read_button(ui, app, has_read, control_height);
+            if ui.available_width() < FOOTER_COMPACT_BREAKPOINT {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(control_height);
+                        ui.add(footer_label(FOOTER_RETENTION_COPY, &t));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            clear_read_button(ui, app, has_read, control_height);
+                        });
+                    });
+                    ui.add(footer_label(FOOTER_ACTIVITY_COPY, &t).wrap());
                 });
             } else {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Retention · this session")
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
+                let (retention_width, activity_width, action_width) =
+                    footer_column_widths(ui.available_width());
+                ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = FOOTER_COLUMN_GAP;
+                    ui.add_sized(
+                        vec2(retention_width, control_height),
+                        footer_label(FOOTER_RETENTION_COPY, &t).truncate(),
                     );
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        clear_read_button(ui, app, has_read, control_height);
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(
-                                    "Simulation, file, validation, and export activity is retained for this application session.",
-                                )
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                            )
-                            .wrap(),
-                        );
-                    });
+                    ui.add_sized(
+                        vec2(activity_width, control_height),
+                        footer_label(FOOTER_ACTIVITY_COPY, &t).truncate(),
+                    );
+                    ui.allocate_ui_with_layout(
+                        vec2(action_width, control_height),
+                        egui::Layout::right_to_left(Align::Center),
+                        |ui| clear_read_button(ui, app, has_read, control_height),
+                    );
                 });
             }
         });
@@ -545,25 +554,28 @@ fn activity_footer(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn footer_copy(ui: &mut Ui, t: &Tokens) {
-    ui.label(
-        egui::RichText::new("Retention · this session")
+fn footer_label(text: &str, tokens: &Tokens) -> egui::Label {
+    egui::Label::new(
+        egui::RichText::new(text)
             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
-    ui.label(
-        egui::RichText::new(
-            "Simulation, file, validation, and export activity is retained for this application session.",
-        )
-        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-        .color(t.color.text_dim),
-    );
+            .color(tokens.color.text_dim),
+    )
+}
+
+fn footer_column_widths(available_width: f32) -> (f32, f32, f32) {
+    let content_width = (available_width - FOOTER_COLUMN_GAP * 2.0).max(0.0);
+    let action_width = FOOTER_ACTION_WIDTH.min(content_width);
+    let copy_width = (content_width - action_width).max(0.0);
+    let retention_width = FOOTER_RETENTION_WIDTH.min(copy_width);
+    let activity_width = (copy_width - retention_width).max(0.0);
+    (retention_width, activity_width, action_width)
 }
 
 fn clear_read_button(ui: &mut Ui, app: &mut RSpiceApp, enabled: bool, control_height: f32) {
     if Button::new("Clear read")
         .ghost()
         .enabled(enabled)
+        .min_width(FOOTER_ACTION_WIDTH)
         .min_height(control_height)
         .show(ui)
         .clicked()
@@ -693,6 +705,25 @@ mod tests {
         assert_eq!(ROW_GAP, 10.0);
         assert_eq!(ROW_HEADING_GAP, 8.0);
         assert_eq!(FOOTER_MIN_HEIGHT, 38.0);
+        assert_eq!(FOOTER_COMPACT_BREAKPOINT, 520.0);
+        assert_eq!(FOOTER_RETENTION_WIDTH, 142.0);
+        assert_eq!(FOOTER_ACTION_WIDTH, 80.0);
+        assert_eq!(FOOTER_COLUMN_GAP, 12.0);
+    }
+
+    #[test]
+    fn wide_footer_columns_are_disjoint_and_fill_the_available_track() {
+        for available_width in [FOOTER_COMPACT_BREAKPOINT, 760.0, 1_200.0] {
+            let (retention_width, activity_width, action_width) =
+                footer_column_widths(available_width);
+            assert_eq!(retention_width, FOOTER_RETENTION_WIDTH);
+            assert_eq!(action_width, FOOTER_ACTION_WIDTH);
+            assert!(activity_width >= 0.0);
+            assert_eq!(
+                retention_width + activity_width + action_width + FOOTER_COLUMN_GAP * 2.0,
+                available_width
+            );
+        }
     }
 
     #[test]

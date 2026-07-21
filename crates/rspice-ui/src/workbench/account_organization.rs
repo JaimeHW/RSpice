@@ -31,6 +31,7 @@ const ACCOUNT_TABLE_CELL_INSET: f32 = 8.0;
 const ACCOUNT_TABLE_COLUMNS: f32 = 6.0;
 const ACCOUNT_LICENSE_ACTION_BREAKPOINT: f32 = 560.0;
 const ACCOUNT_SECTION_HEADER_HEIGHT: f32 = 29.0;
+const ACCOUNT_SCROLL_END_PADDING: f32 = 12.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AccountOrganizationSnapshot {
@@ -511,6 +512,10 @@ fn render_license_section(
                 });
             }
         });
+    // Keep the final action completely reachable above the dialog footer at
+    // maximum scroll. Without an end inset, browser pixel rounding could
+    // leave the lower half of the button beneath the viewport edge.
+    ui.add_space(ACCOUNT_SCROLL_END_PADDING);
 }
 
 fn button_width(ui: &Ui, label: &str) -> f32 {
@@ -674,6 +679,11 @@ mod tests {
 
     fn account_route() -> SurfaceRoute {
         SurfaceRoute::surface(SurfaceId::AccountOrganization)
+    }
+
+    #[test]
+    fn account_scroll_track_keeps_the_final_action_above_the_footer() {
+        assert_eq!(ACCOUNT_SCROLL_END_PADDING, 12.0);
     }
 
     #[test]

@@ -21,6 +21,7 @@ use super::super::netlist_document::{ActiveNetlistDocument, source_content_diges
 const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
 const CODE_TOOLBAR_GAP: f32 = 5.0;
+const CODE_TOOLBAR_ACTION_GUTTER: f32 = 12.0;
 const CODE_TOOLBAR_COMPACT_BREAKPOINT: f32 = 720.0;
 const PHONE_BREAKPOINT: f32 = 560.0;
 const PHONE_PRIMARY_WIDTH: f32 = 154.0;
@@ -567,18 +568,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             ActiveNetlistDocument::GeneratedDiff => 152.0,
         }
     };
-    let action_width = action_width.min(content.width());
-    let right_rect = egui::Rect::from_min_max(
-        egui::pos2(content.right() - action_width, content.top()),
-        content.right_bottom(),
-    );
-    let left_rect = egui::Rect::from_min_max(
-        content.left_top(),
-        egui::pos2(
-            (right_rect.left() - CODE_TOOLBAR_GAP).max(content.left()),
-            content.bottom(),
-        ),
-    );
+    let (left_rect, right_rect) = code_toolbar_regions(content, action_width);
     let language = match active {
         ActiveNetlistDocument::Generated => "SPICE · GENERATED · IMMUTABLE · SOURCE MAPPED",
         ActiveNetlistDocument::OwnedSource => {
@@ -907,6 +897,22 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
 
 const fn code_toolbar_compact(width: f32) -> bool {
     width <= CODE_TOOLBAR_COMPACT_BREAKPOINT
+}
+
+fn code_toolbar_regions(content: egui::Rect, action_width: f32) -> (egui::Rect, egui::Rect) {
+    let action_width = action_width.clamp(0.0, content.width());
+    let right = egui::Rect::from_min_max(
+        egui::pos2(content.right() - action_width, content.top()),
+        content.right_bottom(),
+    );
+    let left = egui::Rect::from_min_max(
+        content.left_top(),
+        egui::pos2(
+            (right.left() - CODE_TOOLBAR_ACTION_GUTTER).max(content.left()),
+            content.bottom(),
+        ),
+    );
+    (left, right)
 }
 
 fn toolbar_advisory_fits(
@@ -2297,6 +2303,7 @@ mod tests {
         assert_eq!(CODE_TOOLBAR_HEIGHT, 33.0);
         assert_eq!(CODE_TOOLBAR_PADDING_X, 8.0);
         assert_eq!(CODE_TOOLBAR_GAP, 5.0);
+        assert_eq!(CODE_TOOLBAR_ACTION_GUTTER, 12.0);
         assert_eq!(CODE_TOOLBAR_COMPACT_BREAKPOINT, 720.0);
         assert_eq!(PHONE_BREAKPOINT, 560.0);
         assert_eq!(PHONE_PRIMARY_WIDTH, 154.0);
@@ -2311,6 +2318,14 @@ mod tests {
             !toolbar_advisory_fits(430.0, 260.0, 110.0, 70.0),
             "advisory must yield before language, blocking status, or actions clip"
         );
+        let content = egui::Rect::from_min_size(egui::pos2(8.0, 0.0), vec2(526.0, 33.0));
+        let (status_and_language, actions) = code_toolbar_regions(content, 342.0);
+        assert_eq!(actions.right(), content.right());
+        assert_eq!(
+            actions.left() - status_and_language.right(),
+            CODE_TOOLBAR_ACTION_GUTTER
+        );
+        assert!(status_and_language.right() < actions.left());
     }
 
     #[test]

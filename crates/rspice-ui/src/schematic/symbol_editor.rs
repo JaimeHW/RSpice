@@ -169,7 +169,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             &response,
             state.workspace.active_view_type(),
         );
-        theme::paint_focus_ring(ui, &response, rect);
         if changed && let Err(error) = state.store_active_symbol_document(&document) {
             state.push_user_message(ConsoleMessage::warning(error));
         }

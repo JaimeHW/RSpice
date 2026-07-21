@@ -9,7 +9,7 @@ use crate::ui::tokens::{self, Tokens};
 
 use super::super::design_system::{
     PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row, property_row_status,
-    section_header as design_section_header, status_dot,
+    section_header as design_section_header,
 };
 use super::super::state::{VerificationPage, Workspace};
 
@@ -809,9 +809,21 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(ui, "Revision", &revision.get().to_string());
     property_row(ui, "Prerequisites", &dependency_count.to_string());
     if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(&draft) {
-        validation(ui, &error);
+        property_row_status(
+            ui,
+            "Validation",
+            &error,
+            Tokens::get(ui.ctx()).color.err,
+            StatusMark::Failure,
+        );
     } else {
-        status_dot(ui, Tokens::get(ui.ctx()).color.ok, "Configuration valid");
+        property_row_status(
+            ui,
+            "Validation",
+            "Configuration valid",
+            Tokens::get(ui.ctx()).color.ok,
+            StatusMark::Success,
+        );
     }
     section_header(ui, "Execution context", None);
     property_row(
@@ -1822,15 +1834,6 @@ fn diagnostic_severity_name(
         super::super::netlist_document::DiagnosticSeverity::Warning => "Warning",
         super::super::netlist_document::DiagnosticSeverity::Error => "Error",
     }
-}
-
-fn validation(ui: &mut Ui, message: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(message)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.err),
-    );
 }
 
 #[cfg(test)]

@@ -1133,7 +1133,6 @@ pub fn render_schematic_view(
         &response,
         state.workspace.active_view_type(),
     );
-    crate::ui::theme::paint_focus_ring(ui, &response, available);
 }
 
 /// Paint a component symbol centered in `rect` — used by the component
