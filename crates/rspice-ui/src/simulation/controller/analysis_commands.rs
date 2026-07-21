@@ -30,7 +30,15 @@ impl SimulationController {
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
             AnalysisSpec::Pxf => self.build_pxf_command(state),
             AnalysisSpec::Pstb => self.build_pstb_command(state),
-            AnalysisSpec::Tf => self.build_tf_command(state),
+            AnalysisSpec::Tf {
+                input_source,
+                output_expression,
+                ..
+            } => Ok(format!(
+                ".tf {} {}",
+                output_expression.trim(),
+                input_source.trim()
+            )),
             AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Hbsp { .. }
             | AnalysisSpec::Hbnoise { .. }
@@ -234,15 +242,6 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PSTB settings: {}", e))?;
         Ok(pstb_cfg.to_spice())
-    }
-
-    pub(super) fn build_tf_command(&self, state: &AppState) -> Result<String, String> {
-        let mut xf_state = state.sim_setup.xf.clone();
-        xf_state.ensure_initialized();
-        let xf_cfg = xf_state
-            .to_config()
-            .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
-        Ok(xf_cfg.to_spice())
     }
 
     pub(super) fn build_disto_command(&self, state: &AppState) -> Result<String, String> {

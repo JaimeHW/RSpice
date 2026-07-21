@@ -34,7 +34,50 @@ pub(super) fn run_frequency_spec(
             },
             abort,
         ),
-        AnalysisSpec::Tf => run_tf(netlist, options, abort),
+        AnalysisSpec::Tf {
+            input_source,
+            output_expression,
+            transfer_gain,
+            input_resistance,
+            output_resistance,
+            normalization,
+            accuracy,
+        } => run_tf(
+            netlist,
+            svc_runner::TfRunConfig {
+                input_source,
+                output_expression,
+                transfer_gain,
+                input_resistance,
+                output_resistance,
+                normalization: match normalization {
+                    crate::simulation::multi_run::TfNormalization::None => {
+                        svc_runner::TfNormalization::None
+                    }
+                    crate::simulation::multi_run::TfNormalization::RelativeToNominal => {
+                        svc_runner::TfNormalization::RelativeToNominal
+                    }
+                    crate::simulation::multi_run::TfNormalization::PerSourceUnit => {
+                        svc_runner::TfNormalization::PerSourceUnit
+                    }
+                },
+                accuracy: match accuracy {
+                    crate::simulation::multi_run::TfAccuracy::Fast => svc_runner::TfAccuracy::Fast,
+                    crate::simulation::multi_run::TfAccuracy::Balanced => {
+                        svc_runner::TfAccuracy::Balanced
+                    }
+                    crate::simulation::multi_run::TfAccuracy::Accurate => {
+                        svc_runner::TfAccuracy::Accurate
+                    }
+                    crate::simulation::multi_run::TfAccuracy::Robust => {
+                        svc_runner::TfAccuracy::Robust
+                    }
+                },
+            },
+            normalization,
+            accuracy,
+            abort,
+        ),
         AnalysisSpec::Pac => run_pac(netlist, options, abort),
         AnalysisSpec::Pxf => run_pxf(netlist, options, abort),
         AnalysisSpec::Pnoise => run_pnoise(netlist, options, abort),
@@ -122,47 +165,212 @@ fn run_sparameter(
 
 fn run_tf(
     netlist: &str,
-    options: SpecExecutionOptions,
+    config: svc_runner::TfRunConfig,
+    normalization: crate::simulation::multi_run::TfNormalization,
+    accuracy: crate::simulation::multi_run::TfAccuracy,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    let data = if let Some(tf_cfg) = options.tf {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_tf_analysis_with_config_and_abort(netlist, &tf_cfg, abort)
-        })?
-    } else {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_tf_analysis_with_abort(netlist, abort)
-        })?
-    };
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_tf_analysis_with_config_and_abort(netlist, &config, abort)
+    })?;
+    super::ensure_not_aborted(abort)?;
 
-    let mut waveforms = HashMap::new();
-    let transfer_name = format!("H({}/{})", data.output_label, data.input_source);
-    let transfer = complex_waveform(
-        transfer_name.clone(),
-        &data.frequencies,
-        &data.transfer,
-        abort,
-    )?;
-    waveforms.insert(transfer_name, transfer);
-    insert_group_delay(&mut waveforms, data.group_delay, abort)?;
-
-    if let Some(zin) = data.input_impedance {
-        let zin_name = format!("Zin({})", data.input_source);
-        let waveform = complex_waveform(zin_name.clone(), &data.frequencies, &zin, abort)?;
-        waveforms.insert(zin_name, waveform);
-    }
-
-    if let Some(zout) = data.output_impedance {
-        let zout_name = format!("Zout({})", data.output_label);
-        let waveform = complex_waveform(zout_name.clone(), &data.frequencies, &zout, abort)?;
-        waveforms.insert(zout_name, waveform);
-    }
-
-    Ok(SimulationResult::Ac {
-        frequencies: data.frequencies,
-        waveforms,
-        measurements: Vec::new(),
+    let input_quantity = transfer_quantity(data.gain_metadata.input_quantity);
+    let output_quantity = transfer_quantity(data.gain_metadata.output_quantity);
+    Ok(SimulationResult::TransferFunction {
+        input_source: data.input_source,
+        output_expression: data.output_label,
+        input_quantity,
+        output_quantity,
+        input_unit: quantity_unit(input_quantity).to_owned(),
+        output_unit: quantity_unit(output_quantity).to_owned(),
+        gain_unit: gain_unit(data.gain_metadata.unit).to_owned(),
+        normalization,
+        accuracy,
+        gain: data
+            .gain
+            .map(|value| transfer_scalar(value, "transfer gain"))
+            .transpose()?,
+        input_resistance: data
+            .input_resistance
+            .map(|value| transfer_scalar(value, "input resistance"))
+            .transpose()?,
+        output_resistance: data
+            .output_resistance
+            .map(|value| transfer_scalar(value, "output resistance"))
+            .transpose()?,
+        nominal_input: finite_optional(data.nominal_input, "nominal input")?,
+        nominal_output: finite_optional(data.nominal_output, "nominal output")?,
     })
+}
+
+fn transfer_quantity(
+    quantity: svc_runner::TfQuantity,
+) -> crate::simulation::results::TransferFunctionQuantity {
+    match quantity {
+        svc_runner::TfQuantity::Voltage => {
+            crate::simulation::results::TransferFunctionQuantity::Voltage
+        }
+        svc_runner::TfQuantity::Current => {
+            crate::simulation::results::TransferFunctionQuantity::Current
+        }
+    }
+}
+
+fn quantity_unit(quantity: crate::simulation::results::TransferFunctionQuantity) -> &'static str {
+    match quantity {
+        crate::simulation::results::TransferFunctionQuantity::Voltage => "V",
+        crate::simulation::results::TransferFunctionQuantity::Current => "A",
+    }
+}
+
+fn gain_unit(unit: svc_runner::TfGainUnit) -> &'static str {
+    match unit {
+        svc_runner::TfGainUnit::Dimensionless => "1",
+        svc_runner::TfGainUnit::VoltsPerVolt => "V/V",
+        svc_runner::TfGainUnit::AmpsPerVolt => "A/V",
+        svc_runner::TfGainUnit::VoltsPerAmpere => "V/A",
+        svc_runner::TfGainUnit::AmpsPerAmpere => "A/A",
+    }
+}
+
+fn transfer_scalar(
+    value: f64,
+    label: &str,
+) -> Result<crate::simulation::results::TransferFunctionScalar, SimulationError> {
+    if value.is_nan() {
+        return Err(SimulationError::InvalidConfig(format!(
+            "TF {label} is not a number"
+        )));
+    }
+    Ok(crate::simulation::results::TransferFunctionScalar::from_f64(value))
+}
+
+fn finite_optional(value: Option<f64>, label: &str) -> Result<Option<f64>, SimulationError> {
+    value
+        .map(|value| {
+            if value.is_finite() {
+                Ok(value)
+            } else {
+                Err(SimulationError::InvalidConfig(format!(
+                    "TF {label} is non-finite"
+                )))
+            }
+        })
+        .transpose()
+}
+
+#[cfg(test)]
+mod transfer_function_tests {
+    use super::*;
+    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+    use crate::simulation::results::{TransferFunctionQuantity, TransferFunctionScalar};
+    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+
+    const DIVIDER: &str = "\
+structured TF runner
+VIN in 0 1
+R1 in out 1k
+R2 out 0 1k
+.end
+";
+
+    fn tf_spec() -> AnalysisSpec {
+        AnalysisSpec::Tf {
+            input_source: "VIN".to_owned(),
+            output_expression: "V(out)".to_owned(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
+        }
+    }
+
+    fn assert_finite_scalar_close(
+        scalar: Option<TransferFunctionScalar>,
+        expected: f64,
+        label: &str,
+    ) {
+        let Some(TransferFunctionScalar::Finite(actual)) = scalar else {
+            panic!("{label} must be a retained finite scalar, got {scalar:?}")
+        };
+        let tolerance = 1.0e-9 * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{label}: expected {expected:.16e}, got {actual:.16e}"
+        );
+    }
+
+    #[test]
+    fn structured_tf_spec_returns_exact_typed_scalars() {
+        let result = run_frequency_spec(
+            tf_spec(),
+            SpecExecutionOptions::default(),
+            DIVIDER,
+            &NoAbort,
+        )
+        .expect("TF runner succeeds");
+
+        let SimulationResult::TransferFunction {
+            input_source,
+            output_expression,
+            input_quantity,
+            output_quantity,
+            input_unit,
+            output_unit,
+            gain_unit,
+            normalization,
+            accuracy,
+            gain,
+            input_resistance,
+            output_resistance,
+            nominal_input,
+            nominal_output,
+        } = result
+        else {
+            panic!("expected transfer-function result")
+        };
+        assert_eq!(input_source, "VIN");
+        assert_eq!(output_expression, "V(out)");
+        assert_eq!(input_quantity, TransferFunctionQuantity::Voltage);
+        assert_eq!(output_quantity, TransferFunctionQuantity::Voltage);
+        assert_eq!(input_unit, "V");
+        assert_eq!(output_unit, "V");
+        assert_eq!(gain_unit, "V/V");
+        assert_eq!(normalization, TfNormalization::None);
+        assert_eq!(accuracy, TfAccuracy::Balanced);
+        assert_finite_scalar_close(gain, 0.5, "gain");
+        assert_finite_scalar_close(input_resistance, 2_000.0, "input resistance");
+        assert_finite_scalar_close(output_resistance, 500.0, "output resistance");
+        assert_eq!(nominal_input, None);
+        assert_eq!(nominal_output, None);
+    }
+
+    #[test]
+    fn structured_tf_spec_preserves_typed_cancellation() {
+        let result = run_frequency_spec(
+            tf_spec(),
+            SpecExecutionOptions::default(),
+            "not a netlist",
+            &ImmediateAbort,
+        );
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+    }
+
+    #[test]
+    fn scalar_conversion_is_json_safe_for_infinite_resistance() {
+        assert_eq!(
+            transfer_scalar(f64::INFINITY, "input resistance").unwrap(),
+            TransferFunctionScalar::PositiveInfinity
+        );
+        assert_eq!(
+            transfer_scalar(f64::NEG_INFINITY, "output resistance").unwrap(),
+            TransferFunctionScalar::NegativeInfinity
+        );
+        assert!(transfer_scalar(f64::NAN, "input resistance").is_err());
+    }
 }
 
 fn run_pac(

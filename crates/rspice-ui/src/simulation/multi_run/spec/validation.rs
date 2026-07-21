@@ -812,8 +812,32 @@ impl AnalysisSpec {
                 }
                 Ok(())
             }
-            AnalysisSpec::Tf
-            | AnalysisSpec::Pac
+            AnalysisSpec::Tf {
+                input_source,
+                output_expression,
+                transfer_gain,
+                input_resistance,
+                output_resistance,
+                ..
+            } => {
+                if input_source.trim().is_empty() {
+                    return Err("TF input_source is required".to_owned());
+                }
+                if input_source != input_source.trim()
+                    || input_source.trim().chars().any(char::is_whitespace)
+                {
+                    return Err("TF input_source must be one independent-source name".to_owned());
+                }
+                validate_tf_output_expression(output_expression)?;
+                if !transfer_gain && !input_resistance && !output_resistance {
+                    return Err(
+                        "TF requires transfer gain, input resistance, or output resistance"
+                            .to_owned(),
+                    );
+                }
+                Ok(())
+            }
+            AnalysisSpec::Pac
             | AnalysisSpec::Pnoise
             | AnalysisSpec::Pxf
             | AnalysisSpec::Pstb
@@ -822,6 +846,41 @@ impl AnalysisSpec {
             | AnalysisSpec::Corner => Ok(()),
         }
     }
+}
+
+fn validate_tf_output_expression(expression: &str) -> Result<(), String> {
+    let trimmed = expression.trim();
+    if expression != trimmed {
+        return Err("TF output_expression must not contain surrounding whitespace".to_owned());
+    }
+    let expression = trimmed;
+    let Some(open) = expression.find('(') else {
+        return Err("TF output_expression must use V(node), V(node,ref), or I(element)".to_owned());
+    };
+    if !expression.ends_with(')') || expression[open + 1..expression.len() - 1].contains(['(', ')'])
+    {
+        return Err("TF output_expression must contain one balanced probe call".to_owned());
+    }
+    let function = &expression[..open];
+    let arguments = expression[open + 1..expression.len() - 1]
+        .split(',')
+        .collect::<Vec<_>>();
+    let valid = if function.eq_ignore_ascii_case("V") {
+        matches!(arguments.as_slice(), [node] if !node.is_empty())
+            || matches!(arguments.as_slice(), [node, reference] if !node.is_empty() && !reference.is_empty())
+    } else if function.eq_ignore_ascii_case("I") {
+        matches!(arguments.as_slice(), [element] if !element.is_empty())
+    } else {
+        false
+    };
+    if !valid
+        || arguments.iter().any(|argument| {
+            *argument != argument.trim() || argument.chars().any(char::is_whitespace)
+        })
+    {
+        return Err("TF output_expression must use V(node), V(node,ref), or I(element)".to_owned());
+    }
+    Ok(())
 }
 
 fn validate_frequency_sweep(start: f64, stop: f64, points: usize) -> Result<(), String> {
@@ -896,8 +955,80 @@ mod tests {
     use super::*;
     use crate::simulation::multi_run::{
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
-        PssMethod,
+        PssMethod, TfAccuracy, TfNormalization,
     };
+
+    fn tf_spec(output_expression: &str) -> AnalysisSpec {
+        AnalysisSpec::Tf {
+            input_source: "VIN_DIFF".to_owned(),
+            output_expression: output_expression.to_owned(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
+        }
+    }
+
+    #[test]
+    fn tf_validation_accepts_only_exact_probe_grammar_and_one_source_token() {
+        for valid in ["V(out)", "v(out,ref)", "I(Vsense)"] {
+            assert!(tf_spec(valid).validate().is_ok(), "{valid}");
+        }
+        for invalid in [
+            "",
+            "out",
+            "V()",
+            "V(out,)",
+            "V(a,b,c)",
+            "I(V1,V2)",
+            "P(R1)",
+            " V(out)",
+            "V(out) ",
+            "V (out)",
+            "V( out)",
+            "V(out, ref)",
+            "V((out))",
+            "V(out) extra",
+        ] {
+            assert!(tf_spec(invalid).validate().is_err(), "{invalid}");
+        }
+
+        let mut invalid_source = tf_spec("V(out)");
+        let AnalysisSpec::Tf { input_source, .. } = &mut invalid_source else {
+            unreachable!()
+        };
+        *input_source = " VIN_DIFF".to_owned();
+        assert!(invalid_source.validate().is_err());
+        let AnalysisSpec::Tf { input_source, .. } = &mut invalid_source else {
+            unreachable!()
+        };
+        *input_source = "VIN DIFF".to_owned();
+        assert!(invalid_source.validate().is_err());
+    }
+
+    #[test]
+    fn tf_validation_rejects_an_all_disabled_result_contract() {
+        let mut spec = tf_spec("V(out)");
+        let AnalysisSpec::Tf {
+            transfer_gain,
+            input_resistance,
+            output_resistance,
+            ..
+        } = &mut spec
+        else {
+            unreachable!()
+        };
+        *transfer_gain = false;
+        *input_resistance = false;
+        *output_resistance = false;
+
+        assert!(
+            spec.validate()
+                .expect_err("TF must retain at least one scalar")
+                .contains("requires transfer gain")
+        );
+    }
 
     #[test]
     fn legacy_pss_specs_receive_compatible_execution_defaults() {

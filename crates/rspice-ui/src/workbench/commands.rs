@@ -393,6 +393,11 @@ impl Command {
                 "Open sensitivity-contribution viewer",
                 "Results",
             ),
+            Self::ResultViewer(crate::workbench::ResultViewer::TransferFunction) => spec(
+                "result-transfer-function",
+                "Open transfer-function viewer",
+                "Results",
+            ),
             Self::ResultViewer(crate::workbench::ResultViewer::Specs) => spec(
                 "result-specifications",
                 "Open specification results",
@@ -1817,6 +1822,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Op),
     Command::ResultViewer(crate::workbench::ResultViewer::NoiseContrib),
     Command::ResultViewer(crate::workbench::ResultViewer::Contribution),
+    Command::ResultViewer(crate::workbench::ResultViewer::TransferFunction),
     Command::ResultViewer(crate::workbench::ResultViewer::Specs),
     Command::ResultViewer(crate::workbench::ResultViewer::Nyquist),
     Command::ResultViewer(crate::workbench::ResultViewer::Smith),
@@ -2660,6 +2666,7 @@ mod tests {
             crate::workbench::ResultViewer::Op,
             crate::workbench::ResultViewer::NoiseContrib,
             crate::workbench::ResultViewer::Contribution,
+            crate::workbench::ResultViewer::TransferFunction,
             crate::workbench::ResultViewer::Specs,
             crate::workbench::ResultViewer::Nyquist,
             crate::workbench::ResultViewer::Smith,

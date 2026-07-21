@@ -47,39 +47,6 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn tf_run_config_from_dialog(
-        state: &AppState,
-    ) -> Result<crate::services::simulation_runner::TfRunConfig, String> {
-        use crate::services::simulation_runner::{TfFrequencySweep, TfRunConfig};
-
-        let mut xf_state = state.sim_setup.xf.clone();
-        xf_state.ensure_initialized();
-        let xf_cfg = xf_state
-            .to_config()
-            .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
-
-        let sweep = match xf_cfg.sweep_type {
-            crate::simulation::dialog::xf::XfSweepType::Decade => TfFrequencySweep::Decade,
-            crate::simulation::dialog::xf::XfSweepType::Octave => TfFrequencySweep::Octave,
-            crate::simulation::dialog::xf::XfSweepType::Linear => TfFrequencySweep::Linear,
-        };
-
-        let output_ref = (!xf_cfg.output_ref.trim().is_empty()).then(|| xf_cfg.output_ref.clone());
-
-        Ok(TfRunConfig {
-            start_freq: xf_cfg.start_freq,
-            stop_freq: xf_cfg.stop_freq,
-            points_per_unit: xf_cfg.num_points as usize,
-            sweep,
-            input_source: xf_cfg.input_source,
-            output_node: xf_cfg.output_node,
-            output_ref,
-            group_delay: xf_cfg.group_delay,
-            input_impedance: xf_cfg.input_impedance,
-            output_impedance: xf_cfg.output_impedance,
-        })
-    }
-
     pub(super) fn pnoise_run_config_from_dialog(
         state: &AppState,
     ) -> Result<crate::services::simulation_runner::PnoiseRunConfig, String> {

@@ -385,7 +385,7 @@ impl SimSetupState {
         self.pnoise.initialized = true;
         self.pxf.initialized = true;
         self.pstb.initialized = true;
-        self.xf.initialized = true;
+        self.xf.prepare_after_restore();
         self.corner.initialized = true;
         self.envelope.initialized = true;
         self.fourier.initialized = true;
@@ -539,8 +539,8 @@ impl SimSetupState {
                 self.pstb.probe, self.pstb.max_harmonics
             ),
             17 => format!(
-                "{} <- {} · {} -> {}",
-                self.xf.output_node, self.xf.input_source, self.xf.start_freq, self.xf.stop_freq
+                "{} <- {} - DC operating point",
+                self.xf.output_expression, self.xf.input_source
             ),
             18 => {
                 let corner = &self.corner;

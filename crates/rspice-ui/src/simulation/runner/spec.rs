@@ -68,7 +68,7 @@ pub(super) fn run_spec_request(
             periodic::run_periodic_spec(spec, netlist, source_path, dependencies, abort_flag)
         }
         AnalysisSpec::SParameter { .. }
-        | AnalysisSpec::Tf
+        | AnalysisSpec::Tf { .. }
         | AnalysisSpec::Pac
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pnoise
@@ -182,7 +182,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
         AnalysisSpec::Fourier { .. } => "AnalysisSpec::Fourier",
         AnalysisSpec::Disto { .. } => "AnalysisSpec::Disto",
         AnalysisSpec::SParameter { .. } => "AnalysisSpec::SParameter",
-        AnalysisSpec::Tf => "AnalysisSpec::Tf",
+        AnalysisSpec::Tf { .. } => "AnalysisSpec::Tf",
         AnalysisSpec::Pac => "AnalysisSpec::Pac",
         AnalysisSpec::Pxf => "AnalysisSpec::Pxf",
         AnalysisSpec::Pnoise => "AnalysisSpec::Pnoise",
@@ -515,7 +515,18 @@ R2 out 0 1k\n\
                     save_harmonics: true,
                 },
             ),
-            ("frequency", AnalysisSpec::Tf),
+            (
+                "frequency",
+                AnalysisSpec::Tf {
+                    input_source: "V1".to_owned(),
+                    output_expression: "V(out)".to_owned(),
+                    transfer_gain: true,
+                    input_resistance: true,
+                    output_resistance: true,
+                    normalization: crate::simulation::multi_run::TfNormalization::None,
+                    accuracy: crate::simulation::multi_run::TfAccuracy::Balanced,
+                },
+            ),
         ];
 
         for (family, spec) in cases {

@@ -71,6 +71,18 @@ impl SimulationResult {
                         .keys()
                         .all(|parameter| normalized.contains_key(parameter))
             }
+            SimulationResult::TransferFunction {
+                input_source,
+                output_expression,
+                gain,
+                input_resistance,
+                output_resistance,
+                ..
+            } => {
+                !input_source.trim().is_empty()
+                    && !output_expression.trim().is_empty()
+                    && (gain.is_some() || input_resistance.is_some() || output_resistance.is_some())
+            }
             SimulationResult::MonteCarlo {
                 runs_completed,
                 variables,
@@ -103,6 +115,7 @@ impl SimulationResult {
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",
             SimulationResult::Sensitivity { .. } => "Sensitivity",
+            SimulationResult::TransferFunction { .. } => "Transfer Function",
             SimulationResult::MonteCarlo { .. } => "Monte Carlo",
             SimulationResult::Parametric { .. } => "Parametric",
             SimulationResult::Corner { .. } => "Corner",
@@ -111,5 +124,49 @@ impl SimulationResult {
             SimulationResult::Soa { .. } => "Safety (SOA)",
             SimulationResult::MeasurementsOnly { .. } => "Measurements Only",
         }
+    }
+}
+
+#[cfg(test)]
+mod transfer_function_tests {
+    use super::*;
+    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+
+    fn result(
+        gain: Option<TransferFunctionScalar>,
+        input_resistance: Option<TransferFunctionScalar>,
+        output_resistance: Option<TransferFunctionScalar>,
+    ) -> SimulationResult {
+        SimulationResult::TransferFunction {
+            input_source: "VIN".to_owned(),
+            output_expression: "V(out)".to_owned(),
+            input_quantity: TransferFunctionQuantity::Voltage,
+            output_quantity: TransferFunctionQuantity::Voltage,
+            input_unit: "V".to_owned(),
+            output_unit: "V".to_owned(),
+            gain_unit: "V/V".to_owned(),
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
+            gain,
+            input_resistance,
+            output_resistance,
+            nominal_input: None,
+            nominal_output: None,
+        }
+    }
+
+    #[test]
+    fn scalar_tf_has_data_without_inventing_waveforms() {
+        let tf = result(None, Some(TransferFunctionScalar::PositiveInfinity), None);
+
+        assert!(tf.has_data());
+        assert_eq!(tf.type_name(), "Transfer Function");
+        assert!(tf.waveform_names().is_empty());
+        assert!(tf.get_waveform("gain").is_none());
+    }
+
+    #[test]
+    fn tf_without_any_retained_scalar_has_no_data() {
+        assert!(!result(None, None, None).has_data());
     }
 }

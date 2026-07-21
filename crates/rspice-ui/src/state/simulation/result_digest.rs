@@ -18,6 +18,7 @@ const RESULT_DIGEST_MAGIC: &[u8] = b"RSPICE-RESULT-DATA";
 const RESULT_DIGEST_ENCODING_VERSION_V1: u16 = 1;
 const RESULT_DIGEST_ENCODING_VERSION_V2: u16 = 2;
 const RESULT_DIGEST_ENCODING_VERSION_V3: u16 = 3;
+const RESULT_DIGEST_ENCODING_VERSION_V4: u16 = 4;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -117,7 +118,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
     }
 
     /// Schema-v8 digest retained solely for authenticated migration. New
@@ -133,11 +134,18 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V2)
     }
 
+    /// Schema-v10 digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v3_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
             RESULT_DIGEST_ENCODING_VERSION_V2 => "rspice.analysis-result-data/v2",
             RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.analysis-result-data/v3",
+            RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.analysis-result-data/v4",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -210,7 +218,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -225,11 +233,19 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V2)
     }
 
+    /// Schema-v10 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    #[allow(dead_code)] // Used by the schema-v10 migration once project I/O adopts result v4.
+    pub(crate) fn legacy_v3_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
             RESULT_DIGEST_ENCODING_VERSION_V2 => "rspice.simulation-dataset-data/v2",
             RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.simulation-dataset-data/v3",
+            RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.simulation-dataset-data/v4",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -239,7 +255,8 @@ impl SimulationRun {
             writer.digest(match version {
                 RESULT_DIGEST_ENCODING_VERSION_V1 => analysis.legacy_v1_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V2 => analysis.legacy_v2_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V3 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V3 => analysis.legacy_v3_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V4 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -283,6 +300,36 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
                 writer.string(name);
                 writer.f64(*value);
             }
+        }
+        AnalysisResultPayload::TransferFunction {
+            input_source,
+            output_expression,
+            input_quantity,
+            output_quantity,
+            input_unit,
+            output_unit,
+            normalization,
+            accuracy,
+            gain,
+            input_resistance,
+            output_resistance,
+            nominal_input,
+            nominal_output,
+        } => {
+            writer.u8(5);
+            writer.string(input_source);
+            writer.string(output_expression);
+            writer.u8(transfer_function_quantity_tag(*input_quantity));
+            writer.u8(transfer_function_quantity_tag(*output_quantity));
+            writer.string(input_unit);
+            writer.string(output_unit);
+            writer.u8(transfer_function_normalization_tag(*normalization));
+            writer.u8(transfer_function_accuracy_tag(*accuracy));
+            writer.option(gain.as_ref(), encode_transfer_function_scalar);
+            writer.option(input_resistance.as_ref(), encode_transfer_function_scalar);
+            writer.option(output_resistance.as_ref(), encode_transfer_function_scalar);
+            writer.option(nominal_input.as_ref(), |writer, value| writer.f64(*value));
+            writer.option(nominal_output.as_ref(), |writer, value| writer.f64(*value));
         }
         AnalysisResultPayload::Reliability { devices } => {
             writer.u8(3);
@@ -330,6 +377,46 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
                 writer.u8(soa_violation_severity_tag(violation.severity));
             }
         }
+    }
+}
+
+fn encode_transfer_function_scalar(
+    writer: &mut ResultDigestWriter,
+    scalar: &TransferFunctionScalarEvidence,
+) {
+    match scalar {
+        TransferFunctionScalarEvidence::Finite(value) => {
+            writer.u8(0);
+            writer.f64(*value);
+        }
+        TransferFunctionScalarEvidence::PositiveInfinity => writer.u8(1),
+        TransferFunctionScalarEvidence::NegativeInfinity => writer.u8(2),
+    }
+}
+
+const fn transfer_function_quantity_tag(quantity: TransferFunctionQuantityEvidence) -> u8 {
+    match quantity {
+        TransferFunctionQuantityEvidence::Voltage => 0,
+        TransferFunctionQuantityEvidence::Current => 1,
+    }
+}
+
+const fn transfer_function_normalization_tag(
+    normalization: TransferFunctionNormalizationEvidence,
+) -> u8 {
+    match normalization {
+        TransferFunctionNormalizationEvidence::None => 0,
+        TransferFunctionNormalizationEvidence::RelativeToNominal => 1,
+        TransferFunctionNormalizationEvidence::PerSourceUnit => 2,
+    }
+}
+
+const fn transfer_function_accuracy_tag(accuracy: TransferFunctionAccuracyEvidence) -> u8 {
+    match accuracy {
+        TransferFunctionAccuracyEvidence::Fast => 0,
+        TransferFunctionAccuracyEvidence::Balanced => 1,
+        TransferFunctionAccuracyEvidence::Accurate => 2,
+        TransferFunctionAccuracyEvidence::Robust => 3,
     }
 }
 
@@ -804,7 +891,7 @@ mod tests {
             changed.result_data_digest()
         );
 
-        let scalar = AnalysisResult::new(1, AnalysisType::Tf, "TF").with_result_payload(
+        let scalar = AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_result_payload(
             AnalysisResultPayload::ScalarMeasurements {
                 values: BTreeMap::from([
                     ("gain".to_owned(), 10.0),
@@ -842,7 +929,136 @@ mod tests {
     }
 
     #[test]
-    fn reliability_and_soa_evidence_are_field_sensitive_v3_content_identity() {
+    fn transfer_function_evidence_is_field_sensitive_v4_content_identity() {
+        let source = AnalysisResult::new(1, AnalysisType::Tf, "TF").with_result_payload(
+            AnalysisResultPayload::TransferFunction {
+                input_source: "VIN".to_owned(),
+                output_expression: "V(OUT)".to_owned(),
+                input_quantity: TransferFunctionQuantityEvidence::Voltage,
+                output_quantity: TransferFunctionQuantityEvidence::Voltage,
+                input_unit: "V".to_owned(),
+                output_unit: "V".to_owned(),
+                normalization: TransferFunctionNormalizationEvidence::RelativeToNominal,
+                accuracy: TransferFunctionAccuracyEvidence::Accurate,
+                gain: Some(TransferFunctionScalarEvidence::Finite(0.5)),
+                input_resistance: Some(TransferFunctionScalarEvidence::PositiveInfinity),
+                output_resistance: Some(TransferFunctionScalarEvidence::Finite(50.0)),
+                nominal_input: Some(1.0),
+                nominal_output: Some(0.5),
+            },
+        );
+        assert_eq!(
+            source.result_data_digest(),
+            source.clone().result_data_digest()
+        );
+
+        let mutate = |mutation: fn(&mut AnalysisResultPayload)| {
+            let mut changed = source.clone();
+            mutation(changed.result_payload.as_mut().expect("TF payload"));
+            assert_ne!(source.result_data_digest(), changed.result_data_digest());
+        };
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { input_source, .. } = payload else {
+                unreachable!()
+            };
+            *input_source = "IIN".to_owned();
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction {
+                output_expression, ..
+            } = payload
+            else {
+                unreachable!()
+            };
+            *output_expression = "V(ALT)".to_owned();
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { input_quantity, .. } = payload else {
+                unreachable!()
+            };
+            *input_quantity = TransferFunctionQuantityEvidence::Current;
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction {
+                output_quantity, ..
+            } = payload
+            else {
+                unreachable!()
+            };
+            *output_quantity = TransferFunctionQuantityEvidence::Current;
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { input_unit, .. } = payload else {
+                unreachable!()
+            };
+            *input_unit = "mV".to_owned();
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { output_unit, .. } = payload else {
+                unreachable!()
+            };
+            *output_unit = "mV".to_owned();
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { normalization, .. } = payload else {
+                unreachable!()
+            };
+            *normalization = TransferFunctionNormalizationEvidence::None;
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { accuracy, .. } = payload else {
+                unreachable!()
+            };
+            *accuracy = TransferFunctionAccuracyEvidence::Robust;
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { gain, .. } = payload else {
+                unreachable!()
+            };
+            *gain = Some(TransferFunctionScalarEvidence::Finite(
+                0.500_000_000_000_000_1,
+            ));
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction {
+                input_resistance, ..
+            } = payload
+            else {
+                unreachable!()
+            };
+            *input_resistance = Some(TransferFunctionScalarEvidence::NegativeInfinity);
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction {
+                output_resistance, ..
+            } = payload
+            else {
+                unreachable!()
+            };
+            *output_resistance = None;
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { nominal_input, .. } = payload else {
+                unreachable!()
+            };
+            *nominal_input = Some(2.0);
+        });
+        mutate(|payload| {
+            let AnalysisResultPayload::TransferFunction { nominal_output, .. } = payload else {
+                unreachable!()
+            };
+            *nominal_output = Some(0.25);
+        });
+
+        assert_ne!(
+            source.result_data_digest(),
+            source.legacy_v3_result_data_digest(),
+            "current results must be sealed in the v4 domain"
+        );
+    }
+
+    #[test]
+    fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
         let reliability = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
             .with_result_payload(AnalysisResultPayload::Reliability {
                 devices: vec![ReliabilityDeviceEvidence {

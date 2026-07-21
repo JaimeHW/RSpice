@@ -21,6 +21,20 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::property_row as inspector_property_row;
 
 const SWEEP_KINDS: &[&str] = &["dec", "oct", "lin"];
+const XF_FIELD_LABELS: [&str; 8] = [
+    "Input source",
+    "Output expression",
+    "Solve point",
+    "Transfer gain",
+    "Input resistance",
+    "Output resistance",
+    "Normalize",
+    "Accuracy",
+];
+const XF_SOLVE_POINT: &str = "DC operating point";
+const XF_ENABLED_CHOICES: &[&str] = &["Enabled", "Disabled"];
+const XF_NORMALIZATION_CHOICES: &[&str] = &["Disabled", "Relative to nominal", "Per source unit"];
+const XF_ACCURACY_CHOICES: &[&str] = &["Fast", "Balanced", "Accurate", "Robust"];
 const ENVELOPE_FIELD_LABELS: [&str; 8] = [
     "Carrier tones",
     "Envelope stop",
@@ -130,12 +144,38 @@ fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
     if !uses_two_column_fields(ui) {
         return inspector_input_row(ui, label, value);
     }
-    field_cell(ui, label, Some("engineering notation"), |ui| {
+    field_cell(ui, label, None, |ui| {
         mono_input(ui, value, ui.available_width())
     })
 }
 
 fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool) -> Response {
+    if !uses_two_column_fields(ui) {
+        return ui
+            .add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
+            .inner;
+    }
+    field_cell(ui, label, None, |ui| {
+        ui.add_enabled_ui(enabled, |ui| mono_input(ui, value, ui.available_width()))
+            .inner
+    })
+}
+
+fn engineering_input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
+    if !uses_two_column_fields(ui) {
+        return inspector_input_row(ui, label, value);
+    }
+    field_cell(ui, label, Some("engineering notation"), |ui| {
+        mono_input(ui, value, ui.available_width())
+    })
+}
+
+fn engineering_input_row_enabled(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    enabled: bool,
+) -> Response {
     if !uses_two_column_fields(ui) {
         return ui
             .add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
@@ -155,7 +195,7 @@ fn quantity_input_row(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
 ) -> Response {
-    let response = input_row(ui, label, value);
+    let response = engineering_input_row(ui, label, value);
     if response.lost_focus()
         && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
     {
@@ -178,7 +218,7 @@ fn quantity_input_row_enabled(
     locale: UiNumberLocale,
     enabled: bool,
 ) -> Response {
-    let response = input_row_enabled(ui, label, value, enabled);
+    let response = engineering_input_row_enabled(ui, label, value, enabled);
     if enabled
         && response.lost_focus()
         && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
@@ -213,6 +253,15 @@ fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> 
             false
         }
     })
+}
+
+fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {
+    let mut selected = usize::from(!*enabled);
+    let changed = choice_row(ui, label, XF_ENABLED_CHOICES, &mut selected);
+    if changed {
+        *enabled = selected == 0;
+    }
+    changed
 }
 
 fn mono_input_with_suffix(ui: &mut Ui, value: &mut String, suffix: &'static str) -> Response {
@@ -1007,31 +1056,25 @@ pub(super) fn form(
             "Loop stability around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::TransferFunction(setup) => {
-            quantity_input_row(
+            input_row(ui, XF_FIELD_LABELS[0], &mut setup.input_source);
+            input_row(ui, XF_FIELD_LABELS[1], &mut setup.output_expression);
+            property_row(ui, XF_FIELD_LABELS[2], XF_SOLVE_POINT);
+            enabled_choice_row(ui, XF_FIELD_LABELS[3], &mut setup.transfer_gain);
+            enabled_choice_row(ui, XF_FIELD_LABELS[4], &mut setup.input_resistance);
+            enabled_choice_row(ui, XF_FIELD_LABELS[5], &mut setup.output_resistance);
+            choice_row(
                 ui,
-                "Start",
-                &mut setup.start_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
+                XF_FIELD_LABELS[6],
+                XF_NORMALIZATION_CHOICES,
+                &mut setup.normalization_idx,
             );
-            quantity_input_row(
+            choice_row(
                 ui,
-                "Stop",
-                &mut setup.stop_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
+                XF_FIELD_LABELS[7],
+                XF_ACCURACY_CHOICES,
+                &mut setup.accuracy_idx,
             );
-            input_row(ui, "Points", &mut setup.num_points);
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
-            input_row(ui, "Input src", &mut setup.input_source);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            check_row(ui, "Group delay", &mut setup.group_delay);
-            check_row(ui, "Input impedance", &mut setup.input_impedance);
-            check_row(ui, "Output impedance", &mut setup.output_impedance);
-            "Small-signal transfer function and impedances."
+            "DC-linearized transfer gain plus input and output resistance."
         }
         AnalysisDraft::Corner(setup) => {
             sub_header(ui, "Process");
@@ -1557,5 +1600,32 @@ mod tests {
         assert_eq!(ENVELOPE_DECLARED_SOURCES_CHOICE, "Declared list...");
         assert_eq!(ENVELOPE_HARMONIC_ORDER_HELPER, "positive integer");
         assert_eq!(ENVELOPE_EXTRACTION_PATH, "Preview");
+    }
+
+    #[test]
+    fn transfer_function_form_matches_mockup_owned_contract() {
+        assert_eq!(
+            XF_FIELD_LABELS,
+            [
+                "Input source",
+                "Output expression",
+                "Solve point",
+                "Transfer gain",
+                "Input resistance",
+                "Output resistance",
+                "Normalize",
+                "Accuracy",
+            ]
+        );
+        assert_eq!(XF_SOLVE_POINT, "DC operating point");
+        assert_eq!(XF_ENABLED_CHOICES, ["Enabled", "Disabled"]);
+        assert_eq!(
+            XF_NORMALIZATION_CHOICES,
+            ["Disabled", "Relative to nominal", "Per source unit"]
+        );
+        assert_eq!(
+            XF_ACCURACY_CHOICES,
+            ["Fast", "Balanced", "Accurate", "Robust"]
+        );
     }
 }

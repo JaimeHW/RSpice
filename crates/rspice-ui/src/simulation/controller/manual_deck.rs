@@ -928,10 +928,40 @@ fn command_to_queue_item(
                 spec_options,
             })
         }
-        AnalysisCommand::Tf { .. } => Err(
-            "Manual deck classic .tf is a DC transfer-function analysis; the current XF runner is frequency-sweep based, so .tf decks are rejected until DC .tf execution is wired through without invented sweep defaults"
-                .to_string(),
-        ),
+        AnalysisCommand::Tf {
+            output_node,
+            reference_node,
+            output_is_current,
+            input_source,
+        } => {
+            let output_expression = if *output_is_current {
+                format!("I({output_node})")
+            } else if let Some(reference_node) = reference_node {
+                format!("V({output_node},{reference_node})")
+            } else {
+                format!("V({output_node})")
+            };
+
+            Ok(QueuedAnalysis {
+                config: None,
+                analysis_line: ".tf".to_string(),
+                spec: AnalysisSpec::Tf {
+                    input_source: input_source.clone(),
+                    output_expression,
+                    // Classic SPICE .TF requests all three DC-linearized
+                    // quantities as one indivisible analysis result.
+                    transfer_gain: true,
+                    input_resistance: true,
+                    output_resistance: true,
+                    // The directive has no normalization or solver-profile
+                    // operands. Preserve raw SPICE semantics and use the
+                    // product's standard numerical policy.
+                    normalization: crate::simulation::multi_run::TfNormalization::None,
+                    accuracy: crate::simulation::multi_run::TfAccuracy::Balanced,
+                },
+                spec_options,
+            })
+        }
         AnalysisCommand::Four {
             fundamental,
             outputs,
@@ -1414,18 +1444,67 @@ mod tests {
     }
 
     #[test]
-    fn manual_deck_tf_rejects_invented_ac_sweep_fallback() {
+    fn manual_deck_tf_builds_classic_dc_transfer_spec() {
         let state = AppState::default();
-        let err = build_manual_deck_queue(
+        let queue = build_manual_deck_queue(
             &state,
             "deck\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n.tf V(out) V1\n.end\n",
         )
-        .expect_err("classic .tf must not be mapped to default AC/XF sweep");
+        .expect("classic .tf should produce a runnable typed analysis");
 
-        assert!(
-            err.iter().any(|message| message.contains("classic .tf")),
-            "expected manual .tf diagnostic, got {err:?}"
-        );
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].analysis_line, ".tf");
+        assert!(queue[0].config.is_none());
+        assert!(matches!(
+            &queue[0].spec,
+            AnalysisSpec::Tf {
+                input_source,
+                output_expression,
+                transfer_gain: true,
+                input_resistance: true,
+                output_resistance: true,
+                normalization: crate::simulation::multi_run::TfNormalization::None,
+                accuracy: crate::simulation::multi_run::TfAccuracy::Balanced,
+            } if input_source == "V1" && output_expression == "V(OUT)"
+        ));
+    }
+
+    #[test]
+    fn manual_deck_tf_preserves_differential_voltage_probe() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(
+            &state,
+            "deck\nV1 in 0 DC 1\nR1 in out 1k\nR2 out ref 1k\nR3 ref 0 1k\n.tf V(out,ref) V1\n.end\n",
+        )
+        .expect("differential .tf should produce a runnable typed analysis");
+
+        assert!(matches!(
+            &queue[0].spec,
+            AnalysisSpec::Tf {
+                input_source,
+                output_expression,
+                ..
+            } if input_source == "V1" && output_expression == "V(OUT,REF)"
+        ));
+    }
+
+    #[test]
+    fn manual_deck_tf_preserves_branch_current_probe() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(
+            &state,
+            "deck\nV1 in 0 DC 1\nR1 in mid 1k\nVMEAS mid out DC 0\nR2 out 0 1k\n.tf I(VMEAS) V1\n.end\n",
+        )
+        .expect("branch-current .tf should produce a runnable typed analysis");
+
+        assert!(matches!(
+            &queue[0].spec,
+            AnalysisSpec::Tf {
+                input_source,
+                output_expression,
+                ..
+            } if input_source == "V1" && output_expression == "I(VMEAS)"
+        ));
     }
 
     #[test]

@@ -32,7 +32,6 @@ pub struct SpecExecutionOptions {
     pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
     pub pac: Option<crate::services::simulation_runner::PacRunConfig>,
     pub pxf: Option<crate::services::simulation_runner::PxfRunConfig>,
-    pub tf: Option<crate::services::simulation_runner::TfRunConfig>,
     pub pnoise: Option<crate::services::simulation_runner::PnoiseRunConfig>,
     pub pstb: Option<crate::services::simulation_runner::PstbRunConfig>,
 }
@@ -547,13 +546,7 @@ fn initial_status_for_spec(
                 .map(|tone| tone.frequency * tone.harmonics.max(1) as f64)
                 .fold(1.0, f64::max),
         },
-        AnalysisSpec::Tf => {
-            let tf = options.tf.as_ref().cloned().unwrap_or_default();
-            SimulationStatus::AcAnalysis {
-                freq: tf.start_freq,
-                stop_freq: tf.stop_freq,
-            }
-        }
+        AnalysisSpec::Tf { .. } => SimulationStatus::DcOperatingPoint,
         AnalysisSpec::Sensitivity { .. } => SimulationStatus::Sensitivity,
         AnalysisSpec::PoleZero { .. } => SimulationStatus::PoleZero,
         AnalysisSpec::Pac => {
@@ -1043,22 +1036,20 @@ mod tests {
     #[test]
     fn initial_status_uses_spec_execution_options_for_rf_analyses() {
         let tf = SimulationRequest::Spec {
-            spec: Box::new(AnalysisSpec::Tf),
-            options: Box::new(SpecExecutionOptions {
-                tf: Some(crate::services::simulation_runner::TfRunConfig {
-                    start_freq: 10.0,
-                    stop_freq: 20.0,
-                    ..Default::default()
-                }),
-                ..Default::default()
+            spec: Box::new(AnalysisSpec::Tf {
+                input_source: "V1".to_owned(),
+                output_expression: "V(out)".to_owned(),
+                transfer_gain: true,
+                input_resistance: true,
+                output_resistance: true,
+                normalization: crate::simulation::multi_run::TfNormalization::None,
+                accuracy: crate::simulation::multi_run::TfAccuracy::Balanced,
             }),
+            options: Box::new(SpecExecutionOptions::default()),
         };
         assert_eq!(
             initial_status_for_request(&tf),
-            SimulationStatus::AcAnalysis {
-                freq: 10.0,
-                stop_freq: 20.0
-            }
+            SimulationStatus::DcOperatingPoint
         );
 
         let pnoise = SimulationRequest::Spec {

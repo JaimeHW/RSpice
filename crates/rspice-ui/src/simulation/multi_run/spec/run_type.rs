@@ -14,7 +14,7 @@ impl AnalysisSpec {
             AnalysisSpec::Noise { .. } => AnalysisRunType::Noise,
             AnalysisSpec::Pss { .. } => AnalysisRunType::Pss,
             AnalysisSpec::HarmonicBalance { .. } => AnalysisRunType::HarmonicBalance,
-            AnalysisSpec::Tf => AnalysisRunType::Tf,
+            AnalysisSpec::Tf { .. } => AnalysisRunType::Tf,
             AnalysisSpec::Sensitivity { .. } => AnalysisRunType::Sensitivity,
             AnalysisSpec::PoleZero { .. } => AnalysisRunType::PoleZero,
             AnalysisSpec::Pac => AnalysisRunType::Pac,

@@ -718,10 +718,41 @@ impl SimulationController {
     pub(super) fn build_tf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut xf_state = state.sim_setup.xf.clone();
         xf_state.ensure_initialized();
-        xf_state
+        let config = xf_state
             .to_config()
             .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
-        Ok(AnalysisSpec::Tf)
+        Ok(AnalysisSpec::Tf {
+            input_source: config.input_source,
+            output_expression: config.output_expression,
+            transfer_gain: config.transfer_gain,
+            input_resistance: config.input_resistance,
+            output_resistance: config.output_resistance,
+            normalization: match config.normalization {
+                crate::simulation::dialog::XfNormalization::None => {
+                    crate::simulation::multi_run::TfNormalization::None
+                }
+                crate::simulation::dialog::XfNormalization::RelativeToNominal => {
+                    crate::simulation::multi_run::TfNormalization::RelativeToNominal
+                }
+                crate::simulation::dialog::XfNormalization::PerSourceUnit => {
+                    crate::simulation::multi_run::TfNormalization::PerSourceUnit
+                }
+            },
+            accuracy: match config.accuracy {
+                crate::simulation::dialog::XfAccuracy::Fast => {
+                    crate::simulation::multi_run::TfAccuracy::Fast
+                }
+                crate::simulation::dialog::XfAccuracy::Balanced => {
+                    crate::simulation::multi_run::TfAccuracy::Balanced
+                }
+                crate::simulation::dialog::XfAccuracy::Accurate => {
+                    crate::simulation::multi_run::TfAccuracy::Accurate
+                }
+                crate::simulation::dialog::XfAccuracy::Robust => {
+                    crate::simulation::multi_run::TfAccuracy::Robust
+                }
+            },
+        })
     }
 
     pub(super) fn build_disto_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {

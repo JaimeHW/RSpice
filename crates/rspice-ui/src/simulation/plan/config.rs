@@ -523,7 +523,7 @@ impl AnalysisDraft {
             Self::Pnoise(state) => state.initialized = true,
             Self::Pxf(state) => state.initialized = true,
             Self::Pstb(state) => state.initialized = true,
-            Self::TransferFunction(state) => state.initialized = true,
+            Self::TransferFunction(state) => state.prepare_after_restore(),
             Self::Corner(state) => state.initialized = true,
             Self::Envelope(state) => state.initialized = true,
             Self::Fourier(state) => state.initialized = true,
@@ -604,6 +604,10 @@ impl AnalysisDraft {
             Self::DcMismatch(draft) => Some(format!(
                 "{} · {}σ · top {}",
                 draft.output_expression, draft.sigma_multiplier, draft.contributor_limit
+            )),
+            Self::TransferFunction(draft) => Some(format!(
+                "{} <- {} - DC operating point",
+                draft.output_expression, draft.input_source
             )),
             _ => None,
         }
@@ -1001,6 +1005,15 @@ mod tests {
         };
         assert_eq!(noise.points, "101");
         assert_eq!(disto.sweep.points, "101");
+    }
+
+    #[test]
+    fn transfer_function_summary_uses_only_the_current_dc_contract() {
+        let draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
+        assert_eq!(
+            draft.manifest_summary().as_deref(),
+            Some("V(afe_out) <- VIN_DIFF - DC operating point")
+        );
     }
 
     #[test]

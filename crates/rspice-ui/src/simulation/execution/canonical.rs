@@ -10,7 +10,7 @@ use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::services::simulation_runner::{
     CornerBaseMode, CornerFrequencySweep, CornerProcess, PacFrequencySweep, PnoiseFrequencySweep,
-    PnoiseReference, PxfFrequencySweep, TfFrequencySweep,
+    PnoiseReference, PxfFrequencySweep,
 };
 use crate::simulation::AnalysisConfig;
 use crate::simulation::config::{AcSweepType, PzAnalysisType};
@@ -410,7 +410,6 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
     writer.u8(analysis_kind_tag(spec));
     match spec {
         AnalysisSpec::DcOp
-        | AnalysisSpec::Tf
         | AnalysisSpec::Pac
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Pxf
@@ -418,6 +417,32 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
         | AnalysisSpec::MonteCarlo
         | AnalysisSpec::Parametric
         | AnalysisSpec::Corner => {}
+        AnalysisSpec::Tf {
+            input_source,
+            output_expression,
+            transfer_gain,
+            input_resistance,
+            output_resistance,
+            normalization,
+            accuracy,
+        } => {
+            writer.string(input_source);
+            writer.string(output_expression);
+            writer.bool(*transfer_gain);
+            writer.bool(*input_resistance);
+            writer.bool(*output_resistance);
+            writer.u8(match normalization {
+                crate::simulation::multi_run::TfNormalization::None => 0,
+                crate::simulation::multi_run::TfNormalization::RelativeToNominal => 1,
+                crate::simulation::multi_run::TfNormalization::PerSourceUnit => 2,
+            });
+            writer.u8(match accuracy {
+                crate::simulation::multi_run::TfAccuracy::Fast => 0,
+                crate::simulation::multi_run::TfAccuracy::Balanced => 1,
+                crate::simulation::multi_run::TfAccuracy::Accurate => 2,
+                crate::simulation::multi_run::TfAccuracy::Robust => 3,
+            });
+        }
         AnalysisSpec::DcSweep {
             source_name,
             start,
@@ -1021,18 +1046,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.reltol);
         writer.f64(config.abstol);
     });
-    writer.option(options.tf.as_ref(), |writer, config| {
-        writer.f64(config.start_freq);
-        writer.f64(config.stop_freq);
-        writer.usize(config.points_per_unit);
-        writer.u8(tf_sweep_tag(config.sweep));
-        writer.string(&config.input_source);
-        writer.string(&config.output_node);
-        writer.option(config.output_ref.as_ref(), |w, v| w.string(v));
-        writer.bool(config.group_delay);
-        writer.bool(config.input_impedance);
-        writer.bool(config.output_impedance);
-    });
+    // Preserve the retired TF execution-option slot so unrelated analysis
+    // identities remain byte-for-byte stable. TF authority now lives in the
+    // structured analysis spec encoded above.
+    writer.bool(false);
     writer.option(options.pnoise.as_ref(), |writer, config| {
         writer.f64(config.pss_fundamental_freq);
         writer.usize(config.pss_num_harmonics);
@@ -1162,7 +1179,7 @@ pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
         AnalysisSpec::Noise { .. } => 6,
         AnalysisSpec::Pss { .. } => 7,
         AnalysisSpec::HarmonicBalance { .. } => 8,
-        AnalysisSpec::Tf => 9,
+        AnalysisSpec::Tf { .. } => 9,
         AnalysisSpec::Sensitivity { .. } => 10,
         AnalysisSpec::PoleZero { .. } => 11,
         AnalysisSpec::Pac => 12,
@@ -1217,14 +1234,6 @@ fn pxf_sweep_tag(sweep: PxfFrequencySweep) -> u8 {
     }
 }
 
-fn tf_sweep_tag(sweep: TfFrequencySweep) -> u8 {
-    match sweep {
-        TfFrequencySweep::Decade => 0,
-        TfFrequencySweep::Octave => 1,
-        TfFrequencySweep::Linear => 2,
-    }
-}
-
 fn pnoise_sweep_tag(sweep: PnoiseFrequencySweep) -> u8 {
     match sweep {
         PnoiseFrequencySweep::Decade => 0,
@@ -1274,6 +1283,7 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
 mod tests {
     use super::*;
     use crate::services::drc::{DrcLocation, DrcViolation};
+    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
 
     #[test]
     fn length_prefixes_prevent_concatenation_collisions() {
@@ -1313,6 +1323,82 @@ mod tests {
         let baseline = digest(&spec(true, false));
         assert_ne!(baseline, digest(&spec(false, false)));
         assert_ne!(baseline, digest(&spec(true, true)));
+    }
+
+    #[test]
+    fn every_transfer_function_field_is_bound_into_the_config_digest() {
+        let base = AnalysisSpec::Tf {
+            input_source: "VIN_DIFF".to_owned(),
+            output_expression: "V(afe_out)".to_owned(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
+        };
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(".tf", spec, None, &SpecExecutionOptions::default())
+        };
+        let baseline = digest(&base);
+        let mutations: [fn(&mut AnalysisSpec); 7] = [
+            |spec| {
+                let AnalysisSpec::Tf { input_source, .. } = spec else {
+                    unreachable!()
+                };
+                *input_source = "IIN_CAL".to_owned();
+            },
+            |spec| {
+                let AnalysisSpec::Tf {
+                    output_expression, ..
+                } = spec
+                else {
+                    unreachable!()
+                };
+                *output_expression = "I(VDD)".to_owned();
+            },
+            |spec| {
+                let AnalysisSpec::Tf { transfer_gain, .. } = spec else {
+                    unreachable!()
+                };
+                *transfer_gain = false;
+            },
+            |spec| {
+                let AnalysisSpec::Tf {
+                    input_resistance, ..
+                } = spec
+                else {
+                    unreachable!()
+                };
+                *input_resistance = false;
+            },
+            |spec| {
+                let AnalysisSpec::Tf {
+                    output_resistance, ..
+                } = spec
+                else {
+                    unreachable!()
+                };
+                *output_resistance = false;
+            },
+            |spec| {
+                let AnalysisSpec::Tf { normalization, .. } = spec else {
+                    unreachable!()
+                };
+                *normalization = TfNormalization::RelativeToNominal;
+            },
+            |spec| {
+                let AnalysisSpec::Tf { accuracy, .. } = spec else {
+                    unreachable!()
+                };
+                *accuracy = TfAccuracy::Robust;
+            },
+        ];
+
+        for mutation in mutations {
+            let mut changed = base.clone();
+            mutation(&mut changed);
+            assert_ne!(baseline, digest(&changed));
+        }
     }
 
     #[test]

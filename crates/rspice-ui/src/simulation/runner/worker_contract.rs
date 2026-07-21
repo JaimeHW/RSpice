@@ -2,6 +2,18 @@
 mod tests {
     use super::*;
 
+    fn tf_spec() -> AnalysisSpec {
+        AnalysisSpec::Tf {
+            input_source: "Vstim".to_owned(),
+            output_expression: "V(out)".to_owned(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
+        }
+    }
+
     #[test]
     fn browser_worker_transfer_protocol_matches_rust_transport() {
         let source = include_str!("../../../web/simulation-worker.js");
@@ -23,7 +35,10 @@ mod tests {
         FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
         PssMethod, SpPort,
     };
-    use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
+    use crate::simulation::results::{
+        DcOpResult, SimulationResult, TransferFunctionQuantity, TransferFunctionScalar,
+        WaveformData,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -1014,7 +1029,7 @@ mod tests {
                 ac_mode: false,
                 frequency: None,
             },
-            AnalysisSpec::Tf,
+            tf_spec(),
             AnalysisSpec::Pac,
             AnalysisSpec::Pxf,
             AnalysisSpec::Pnoise,
@@ -1165,7 +1180,6 @@ mod tests {
                 assert!(options.corner.is_none());
                 assert!(options.pac.is_none());
                 assert!(options.pxf.is_none());
-                assert!(options.tf.is_none());
                 assert!(options.pnoise.is_none());
                 assert!(options.pstb.is_none());
             }
@@ -1174,25 +1188,11 @@ mod tests {
     }
 
     #[test]
-    fn worker_spec_request_preserves_tf_execution_options() {
-        let tf = crate::services::simulation_runner::TfRunConfig {
-            start_freq: 10.0,
-            stop_freq: 10e6,
-            points_per_unit: 17,
-            sweep: crate::services::simulation_runner::TfFrequencySweep::Octave,
-            input_source: "Vstim".to_string(),
-            output_node: "out".to_string(),
-            output_ref: Some("ref".to_string()),
-            group_delay: true,
-            input_impedance: true,
-            output_impedance: true,
-        };
+    fn worker_spec_request_preserves_structured_tf_contract() {
+        let tf = tf_spec();
         let request = SimulationRequest::Spec {
-            spec: Box::new(AnalysisSpec::Tf),
-            options: Box::new(SpecExecutionOptions {
-                tf: Some(tf.clone()),
-                ..SpecExecutionOptions::default()
-            }),
+            spec: Box::new(tf.clone()),
+            options: Box::new(SpecExecutionOptions::default()),
         };
         let input = NetlistInput {
             netlist: "Vstim in 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.tf V(out) Vstim\n.end\n"
@@ -1208,18 +1208,13 @@ mod tests {
 
         match round_tripped {
             SimulationRequest::Spec { spec, options } => {
-                assert!(matches!(*spec, AnalysisSpec::Tf));
-                let actual = options.tf.expect("TF options survive worker contract");
-                assert_eq!(actual.start_freq, tf.start_freq);
-                assert_eq!(actual.stop_freq, tf.stop_freq);
-                assert_eq!(actual.points_per_unit, tf.points_per_unit);
-                assert_eq!(actual.sweep, tf.sweep);
-                assert_eq!(actual.input_source, tf.input_source);
-                assert_eq!(actual.output_node, tf.output_node);
-                assert_eq!(actual.output_ref, tf.output_ref);
-                assert_eq!(actual.group_delay, tf.group_delay);
-                assert_eq!(actual.input_impedance, tf.input_impedance);
-                assert_eq!(actual.output_impedance, tf.output_impedance);
+                assert_eq!(*spec, tf);
+                assert!(options.temp.is_none());
+                assert!(options.corner.is_none());
+                assert!(options.pac.is_none());
+                assert!(options.pxf.is_none());
+                assert!(options.pnoise.is_none());
+                assert!(options.pstb.is_none());
             }
             other => panic!("expected spec request, got {other:?}"),
         }
@@ -1912,24 +1907,10 @@ mod tests {
     }
 
     #[test]
-    fn worker_request_runs_tf_spec_with_options() {
+    fn worker_request_runs_structured_tf_spec() {
         let request = SimulationRequest::Spec {
-            spec: Box::new(AnalysisSpec::Tf),
-            options: Box::new(SpecExecutionOptions {
-                tf: Some(crate::services::simulation_runner::TfRunConfig {
-                    start_freq: 10.0,
-                    stop_freq: 100.0,
-                    points_per_unit: 3,
-                    sweep: crate::services::simulation_runner::TfFrequencySweep::Linear,
-                    input_source: "Vstim".to_string(),
-                    output_node: "out".to_string(),
-                    output_ref: None,
-                    group_delay: false,
-                    input_impedance: false,
-                    output_impedance: false,
-                }),
-                ..SpecExecutionOptions::default()
-            }),
+            spec: Box::new(tf_spec()),
+            options: Box::new(SpecExecutionOptions::default()),
         };
         let input = NetlistInput {
             netlist: "* worker tf\nVstim in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
@@ -1939,25 +1920,79 @@ mod tests {
         };
         let worker =
             WorkerRequest::from_runner_parts(13, &request, &input).expect("request converts");
+        let encoded_request = serde_json::to_vec(&worker).expect("TF request serializes");
+        let worker: WorkerRequest =
+            serde_json::from_slice(&encoded_request).expect("TF request deserializes");
+
+        let WorkerSimulationRequest::Spec { spec, options } = &worker.request else {
+            panic!("TF request must remain structured")
+        };
+        assert_eq!(AnalysisSpec::from(spec.as_ref().clone()), tf_spec());
+        assert_eq!(options.as_ref(), &WorkerSpecExecutionOptions::default());
 
         let response = worker_response_from_request(worker);
         assert_eq!(response.id, 13);
 
         let result = response.into_result().expect("worker TF succeeds");
         match result {
-            SimulationResult::Ac {
-                frequencies,
-                waveforms,
+            SimulationResult::TransferFunction {
+                input_source,
+                output_expression,
+                gain,
                 ..
             } => {
-                assert!(!frequencies.is_empty());
-                assert!(
-                    waveforms.contains_key("H(V(out)/Vstim)")
-                        || waveforms.contains_key("H(out/Vstim)")
-                );
+                assert_eq!(input_source, "Vstim");
+                assert!(output_expression.eq_ignore_ascii_case("V(out)"));
+                assert!(gain.is_some());
             }
-            other => panic!("expected AC-like TF result, got {other:?}"),
+            other => panic!("expected scalar TF result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tf_worker_result_round_trip_keeps_infinite_resistance_json_safe() {
+        let result = SimulationResult::TransferFunction {
+            input_source: "VIN".to_owned(),
+            output_expression: "I(VMEAS)".to_owned(),
+            input_quantity: TransferFunctionQuantity::Voltage,
+            output_quantity: TransferFunctionQuantity::Current,
+            input_unit: "V".to_owned(),
+            output_unit: "A".to_owned(),
+            gain_unit: "A/V".to_owned(),
+            normalization: TfNormalization::PerSourceUnit,
+            accuracy: TfAccuracy::Accurate,
+            gain: Some(TransferFunctionScalar::Finite(-2.5e-3)),
+            input_resistance: Some(TransferFunctionScalar::NegativeInfinity),
+            output_resistance: Some(TransferFunctionScalar::PositiveInfinity),
+            nominal_input: None,
+            nominal_output: None,
+        };
+        let expected = WorkerSimulationResult::try_from(result.clone())
+            .expect("TF result converts to worker contract");
+        let response = WorkerResponse::from_result_for_transfer(313, Ok(result));
+        let transport = WorkerResponseTransport::from_response(response);
+        assert!(transport.buffers.is_empty(), "scalar TF must stay inline");
+
+        let encoded = serde_json::to_string(&transport.response).expect("TF response serializes");
+        assert!(encoded.contains("PositiveInfinity"));
+        assert!(encoded.contains("NegativeInfinity"));
+        assert!(!encoded.contains(":Infinity"));
+        assert!(!encoded.contains(":-Infinity"));
+
+        let response: WorkerResponseTransportMetadata =
+            serde_json::from_str(&encoded).expect("TF response deserializes");
+        let restored = WorkerResponseTransport {
+            protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
+            response,
+            buffers: transport.buffers,
+        }
+        .into_response()
+        .expect("TF transport reconstructs")
+        .into_result()
+        .expect("TF result reconstructs");
+        let restored = WorkerSimulationResult::try_from(restored)
+            .expect("restored TF result converts to worker contract");
+        assert_eq!(restored, expected);
     }
 
     fn round_trip_result(result: SimulationResult) -> SimulationResult {
@@ -2201,11 +2236,12 @@ use crate::simulation::config::{
 use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
-    PssMethod, SpPort,
+    PssMethod, SpPort, TfAccuracy, TfNormalization,
 };
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use crate::simulation::results::{
-    DcOpResult, DeviceOpPoint, MonteCarloVariableResult, SimulationResult, WaveformData,
+    DcOpResult, DeviceOpPoint, MonteCarloVariableResult, SimulationResult,
+    TransferFunctionQuantity, TransferFunctionScalar, WaveformData,
 };
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
 use crate::state::{NoiseContributorRow, NoiseSummary};
@@ -2224,7 +2260,7 @@ pub(crate) struct WorkerRequest {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 1;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 2;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -2364,7 +2400,6 @@ pub(crate) struct WorkerSpecExecutionOptions {
     pub corner: Option<WorkerCornerRunConfig>,
     pub pac: Option<WorkerPacRunConfig>,
     pub pxf: Option<WorkerPxfRunConfig>,
-    pub tf: Option<WorkerTfRunConfig>,
     pub pnoise: Option<WorkerPnoiseRunConfig>,
     pub pstb: Option<WorkerPstbRunConfig>,
 }
@@ -2376,7 +2411,6 @@ impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
             corner: value.corner.as_ref().map(WorkerCornerRunConfig::from),
             pac: value.pac.as_ref().map(WorkerPacRunConfig::from),
             pxf: value.pxf.as_ref().map(WorkerPxfRunConfig::from),
-            tf: value.tf.as_ref().map(WorkerTfRunConfig::from),
             pnoise: value.pnoise.as_ref().map(WorkerPnoiseRunConfig::from),
             pstb: value.pstb.as_ref().map(WorkerPstbRunConfig::from),
         }
@@ -2398,9 +2432,6 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
             pxf: value
                 .pxf
                 .map(crate::services::simulation_runner::PxfRunConfig::from),
-            tf: value
-                .tf
-                .map(crate::services::simulation_runner::TfRunConfig::from),
             pnoise: value
                 .pnoise
                 .map(crate::services::simulation_runner::PnoiseRunConfig::from),
@@ -2854,54 +2885,6 @@ impl From<WorkerPstbRunConfig> for crate::services::simulation_runner::PstbRunCo
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerTfRunConfig {
-    pub start_freq: f64,
-    pub stop_freq: f64,
-    pub points_per_unit: usize,
-    pub sweep: WorkerSweepType,
-    pub input_source: String,
-    pub output_node: String,
-    pub output_ref: Option<String>,
-    pub group_delay: bool,
-    pub input_impedance: bool,
-    pub output_impedance: bool,
-}
-
-impl From<&crate::services::simulation_runner::TfRunConfig> for WorkerTfRunConfig {
-    fn from(value: &crate::services::simulation_runner::TfRunConfig) -> Self {
-        Self {
-            start_freq: value.start_freq,
-            stop_freq: value.stop_freq,
-            points_per_unit: value.points_per_unit,
-            sweep: WorkerSweepType::from(value.sweep),
-            input_source: value.input_source.clone(),
-            output_node: value.output_node.clone(),
-            output_ref: value.output_ref.clone(),
-            group_delay: value.group_delay,
-            input_impedance: value.input_impedance,
-            output_impedance: value.output_impedance,
-        }
-    }
-}
-
-impl From<WorkerTfRunConfig> for crate::services::simulation_runner::TfRunConfig {
-    fn from(value: WorkerTfRunConfig) -> Self {
-        Self {
-            start_freq: value.start_freq,
-            stop_freq: value.stop_freq,
-            points_per_unit: value.points_per_unit,
-            sweep: crate::services::simulation_runner::TfFrequencySweep::from(value.sweep),
-            input_source: value.input_source,
-            output_node: value.output_node,
-            output_ref: value.output_ref,
-            group_delay: value.group_delay,
-            input_impedance: value.input_impedance,
-            output_impedance: value.output_impedance,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerAnalysisConfig {
     DcOp,
     DcSweep {
@@ -3154,7 +3137,15 @@ pub(crate) enum WorkerAnalysisSpec {
         transfer_type: String,
         analysis_type: String,
     },
-    Tf,
+    Tf {
+        input_source: String,
+        output_expression: String,
+        transfer_gain: bool,
+        input_resistance: bool,
+        output_resistance: bool,
+        normalization: TfNormalization,
+        accuracy: TfAccuracy,
+    },
     Pac,
     Pxf,
     Pnoise,
@@ -3374,7 +3365,23 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 transfer_type: transfer_type.clone(),
                 analysis_type: analysis_type.clone(),
             }),
-            AnalysisSpec::Tf => Ok(Self::Tf),
+            AnalysisSpec::Tf {
+                input_source,
+                output_expression,
+                transfer_gain,
+                input_resistance,
+                output_resistance,
+                normalization,
+                accuracy,
+            } => Ok(Self::Tf {
+                input_source: input_source.clone(),
+                output_expression: output_expression.clone(),
+                transfer_gain: *transfer_gain,
+                input_resistance: *input_resistance,
+                output_resistance: *output_resistance,
+                normalization: *normalization,
+                accuracy: *accuracy,
+            }),
             AnalysisSpec::Pac => Ok(Self::Pac),
             AnalysisSpec::Pxf => Ok(Self::Pxf),
             AnalysisSpec::Pnoise => Ok(Self::Pnoise),
@@ -3674,7 +3681,23 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 transfer_type,
                 analysis_type,
             },
-            WorkerAnalysisSpec::Tf => Self::Tf,
+            WorkerAnalysisSpec::Tf {
+                input_source,
+                output_expression,
+                transfer_gain,
+                input_resistance,
+                output_resistance,
+                normalization,
+                accuracy,
+            } => Self::Tf {
+                input_source,
+                output_expression,
+                transfer_gain,
+                input_resistance,
+                output_resistance,
+                normalization,
+                accuracy,
+            },
             WorkerAnalysisSpec::Pac => Self::Pac,
             WorkerAnalysisSpec::Pxf => Self::Pxf,
             WorkerAnalysisSpec::Pnoise => Self::Pnoise,
@@ -3902,16 +3925,6 @@ impl From<FrequencySweep> for WorkerSweepType {
     }
 }
 
-impl From<crate::services::simulation_runner::TfFrequencySweep> for WorkerSweepType {
-    fn from(value: crate::services::simulation_runner::TfFrequencySweep) -> Self {
-        match value {
-            crate::services::simulation_runner::TfFrequencySweep::Decade => Self::Decade,
-            crate::services::simulation_runner::TfFrequencySweep::Octave => Self::Octave,
-            crate::services::simulation_runner::TfFrequencySweep::Linear => Self::Linear,
-        }
-    }
-}
-
 impl From<crate::services::simulation_runner::PacFrequencySweep> for WorkerSweepType {
     fn from(value: crate::services::simulation_runner::PacFrequencySweep) -> Self {
         match value {
@@ -3963,16 +3976,6 @@ impl From<WorkerSweepType> for AcSweepType {
 }
 
 impl From<WorkerSweepType> for FrequencySweep {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for crate::services::simulation_runner::TfFrequencySweep {
     fn from(value: WorkerSweepType) -> Self {
         match value {
             WorkerSweepType::Decade => Self::Decade,
@@ -4489,6 +4492,22 @@ pub(crate) enum WorkerSimulationResult {
         sensitivities: HashMap<String, f64>,
         normalized: HashMap<String, f64>,
     },
+    TransferFunction {
+        input_source: String,
+        output_expression: String,
+        input_quantity: WorkerTransferFunctionQuantity,
+        output_quantity: WorkerTransferFunctionQuantity,
+        input_unit: String,
+        output_unit: String,
+        gain_unit: String,
+        normalization: TfNormalization,
+        accuracy: TfAccuracy,
+        gain: Option<WorkerTransferFunctionScalar>,
+        input_resistance: Option<WorkerTransferFunctionScalar>,
+        output_resistance: Option<WorkerTransferFunctionScalar>,
+        nominal_input: Option<f64>,
+        nominal_output: Option<f64>,
+    },
     Parametric {
         target: String,
         sweep_values: Vec<f64>,
@@ -4612,6 +4631,25 @@ impl WorkerSimulationResult {
                 f64_payload_bytes(sensitivities.len()),
                 f64_payload_bytes(normalized.len()),
             ]),
+            WorkerSimulationResult::TransferFunction {
+                gain,
+                input_resistance,
+                output_resistance,
+                nominal_input,
+                nominal_output,
+                ..
+            } => f64_payload_bytes(
+                [
+                    gain.is_some(),
+                    input_resistance.is_some(),
+                    output_resistance.is_some(),
+                ]
+                .into_iter()
+                .filter(|present| *present)
+                .count()
+                    + usize::from(nominal_input.is_some())
+                    + usize::from(nominal_output.is_some()),
+            ),
             WorkerSimulationResult::Parametric {
                 sweep_values,
                 waveforms,
@@ -4672,7 +4710,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 3;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -5238,6 +5276,37 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 sensitivities,
                 normalized,
             }),
+            SimulationResult::TransferFunction {
+                input_source,
+                output_expression,
+                input_quantity,
+                output_quantity,
+                input_unit,
+                output_unit,
+                gain_unit,
+                normalization,
+                accuracy,
+                gain,
+                input_resistance,
+                output_resistance,
+                nominal_input,
+                nominal_output,
+            } => Ok(Self::TransferFunction {
+                input_source,
+                output_expression,
+                input_quantity: WorkerTransferFunctionQuantity::from(input_quantity),
+                output_quantity: WorkerTransferFunctionQuantity::from(output_quantity),
+                input_unit,
+                output_unit,
+                gain_unit,
+                normalization,
+                accuracy,
+                gain: gain.map(WorkerTransferFunctionScalar::from),
+                input_resistance: input_resistance.map(WorkerTransferFunctionScalar::from),
+                output_resistance: output_resistance.map(WorkerTransferFunctionScalar::from),
+                nominal_input,
+                nominal_output,
+            }),
             SimulationResult::Parametric {
                 target,
                 sweep_values,
@@ -5408,6 +5477,37 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 sensitivities,
                 normalized,
             },
+            WorkerSimulationResult::TransferFunction {
+                input_source,
+                output_expression,
+                input_quantity,
+                output_quantity,
+                input_unit,
+                output_unit,
+                gain_unit,
+                normalization,
+                accuracy,
+                gain,
+                input_resistance,
+                output_resistance,
+                nominal_input,
+                nominal_output,
+            } => Self::TransferFunction {
+                input_source,
+                output_expression,
+                input_quantity: TransferFunctionQuantity::from(input_quantity),
+                output_quantity: TransferFunctionQuantity::from(output_quantity),
+                input_unit,
+                output_unit,
+                gain_unit,
+                normalization,
+                accuracy,
+                gain: gain.map(TransferFunctionScalar::from),
+                input_resistance: input_resistance.map(TransferFunctionScalar::from),
+                output_resistance: output_resistance.map(TransferFunctionScalar::from),
+                nominal_input,
+                nominal_output,
+            },
             WorkerSimulationResult::Parametric {
                 target,
                 sweep_values,
@@ -5493,6 +5593,57 @@ impl From<WorkerSimulationResult> for SimulationResult {
             WorkerSimulationResult::MeasurementsOnly { measurements } => {
                 Self::MeasurementsOnly { measurements }
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum WorkerTransferFunctionQuantity {
+    Voltage,
+    Current,
+}
+
+impl From<TransferFunctionQuantity> for WorkerTransferFunctionQuantity {
+    fn from(value: TransferFunctionQuantity) -> Self {
+        match value {
+            TransferFunctionQuantity::Voltage => Self::Voltage,
+            TransferFunctionQuantity::Current => Self::Current,
+        }
+    }
+}
+
+impl From<WorkerTransferFunctionQuantity> for TransferFunctionQuantity {
+    fn from(value: WorkerTransferFunctionQuantity) -> Self {
+        match value {
+            WorkerTransferFunctionQuantity::Voltage => Self::Voltage,
+            WorkerTransferFunctionQuantity::Current => Self::Current,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) enum WorkerTransferFunctionScalar {
+    Finite(f64),
+    PositiveInfinity,
+    NegativeInfinity,
+}
+
+impl From<TransferFunctionScalar> for WorkerTransferFunctionScalar {
+    fn from(value: TransferFunctionScalar) -> Self {
+        match value {
+            TransferFunctionScalar::Finite(value) => Self::Finite(value),
+            TransferFunctionScalar::PositiveInfinity => Self::PositiveInfinity,
+            TransferFunctionScalar::NegativeInfinity => Self::NegativeInfinity,
+        }
+    }
+}
+
+impl From<WorkerTransferFunctionScalar> for TransferFunctionScalar {
+    fn from(value: WorkerTransferFunctionScalar) -> Self {
+        match value {
+            WorkerTransferFunctionScalar::Finite(value) => Self::Finite(value),
+            WorkerTransferFunctionScalar::PositiveInfinity => Self::PositiveInfinity,
+            WorkerTransferFunctionScalar::NegativeInfinity => Self::NegativeInfinity,
         }
     }
 }

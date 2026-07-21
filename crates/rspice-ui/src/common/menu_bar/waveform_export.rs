@@ -126,6 +126,116 @@ fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResu
                 detail: format!("{} exact scalar values", values.len()),
             })
         }
+        AnalysisResultPayload::TransferFunction {
+            input_source,
+            output_expression,
+            input_quantity,
+            output_quantity,
+            input_unit,
+            output_unit,
+            normalization,
+            accuracy,
+            gain,
+            input_resistance,
+            output_resistance,
+            nominal_input,
+            nominal_output,
+        } => {
+            let normalization_label = match normalization {
+                crate::state::TransferFunctionNormalizationEvidence::None => "disabled",
+                crate::state::TransferFunctionNormalizationEvidence::RelativeToNominal => {
+                    "relative_to_nominal"
+                }
+                crate::state::TransferFunctionNormalizationEvidence::PerSourceUnit => {
+                    "per_source_unit"
+                }
+            };
+            let accuracy_label = match accuracy {
+                crate::state::TransferFunctionAccuracyEvidence::Fast => "fast",
+                crate::state::TransferFunctionAccuracyEvidence::Balanced => "balanced",
+                crate::state::TransferFunctionAccuracyEvidence::Accurate => "accurate",
+                crate::state::TransferFunctionAccuracyEvidence::Robust => "robust",
+            };
+            let gain_unit = if matches!(
+                normalization,
+                crate::state::TransferFunctionNormalizationEvidence::RelativeToNominal
+            ) {
+                "1"
+            } else {
+                match (input_quantity, output_quantity) {
+                    (
+                        crate::state::TransferFunctionQuantityEvidence::Voltage,
+                        crate::state::TransferFunctionQuantityEvidence::Voltage,
+                    ) => "V/V",
+                    (
+                        crate::state::TransferFunctionQuantityEvidence::Voltage,
+                        crate::state::TransferFunctionQuantityEvidence::Current,
+                    ) => "A/V",
+                    (
+                        crate::state::TransferFunctionQuantityEvidence::Current,
+                        crate::state::TransferFunctionQuantityEvidence::Voltage,
+                    ) => "V/A",
+                    (
+                        crate::state::TransferFunctionQuantityEvidence::Current,
+                        crate::state::TransferFunctionQuantityEvidence::Current,
+                    ) => "A/A",
+                }
+            };
+            let mut contents = String::from(
+                "quantity,value,unit,input_source,output_expression,normalization,accuracy,solve_point\n",
+            );
+            let mut rows = 0usize;
+            let mut push_scalar = |quantity: &str,
+                                   value: &crate::state::TransferFunctionScalarEvidence,
+                                   unit: &str| {
+                let value = match value {
+                    crate::state::TransferFunctionScalarEvidence::Finite(value) => {
+                        format!("{value:.17e}")
+                    }
+                    crate::state::TransferFunctionScalarEvidence::PositiveInfinity => {
+                        "+infinity".to_owned()
+                    }
+                    crate::state::TransferFunctionScalarEvidence::NegativeInfinity => {
+                        "-infinity".to_owned()
+                    }
+                };
+                contents.push_str(&format!(
+                    "{quantity},{value},{},{},{},{normalization_label},{accuracy_label},dc_operating_point\n",
+                    csv_text(unit),
+                    csv_text(input_source),
+                    csv_text(output_expression),
+                ));
+                rows += 1;
+            };
+            if let Some(gain) = gain {
+                push_scalar("transfer_gain", gain, gain_unit);
+            }
+            if let Some(input_resistance) = input_resistance {
+                push_scalar("input_resistance", input_resistance, "ohm");
+            }
+            if let Some(output_resistance) = output_resistance {
+                push_scalar("output_resistance", output_resistance, "ohm");
+            }
+            if let Some(value) = nominal_input {
+                contents.push_str(&format!(
+                    "nominal_input,{value:.17e},{},{},{},{normalization_label},{accuracy_label},dc_operating_point\n",
+                    csv_text(input_unit), csv_text(input_source), csv_text(output_expression)
+                ));
+                rows += 1;
+            }
+            if let Some(value) = nominal_output {
+                contents.push_str(&format!(
+                    "nominal_output,{value:.17e},{},{},{},{normalization_label},{accuracy_label},dc_operating_point\n",
+                    csv_text(output_unit), csv_text(input_source), csv_text(output_expression)
+                ));
+                rows += 1;
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "transfer-function.csv",
+                contents,
+                detail: format!("{rows} exact transfer-function values"),
+            })
+        }
         AnalysisResultPayload::Reliability { devices } => {
             let mut contents = String::from(
                 "device,lifetime_years,average_gate_stress_v,average_drain_stress_v,average_temperature_k,duration_s,threshold_voltage_shift_v,mobility_shift,drain_source_resistance_shift\n",

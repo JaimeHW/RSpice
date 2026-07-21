@@ -1,113 +1,147 @@
-//! Transfer-function analysis runner.
+//! DC small-signal transfer-function (`.TF`) analysis runner.
+//!
+//! A transfer-function request is evaluated at the converged DC operating
+//! point. It is not an AC sweep: gain, input resistance, and output
+//! resistance are produced by the engine's zero-hertz linearized solves.
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use super::error::ensure_not_aborted;
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, build_voltage_output_expr,
-    generate_freq_points_with_abort, infer_primary_output_node_with_abort,
+    ServiceRunError, ServiceRunResult, build_engine_config, infer_primary_output_node_with_abort,
     infer_primary_source_name_with_abort, parse_runner_netlist_with_abort,
 };
-use crate::output_spec::{ac_output_value, parse_output_spec};
-use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::{AbortSignal, NoAbort};
-use rspice_core::engine::Engine;
-use rspice_core::netlist::{ElementKind, SourceSpec};
+use rspice_core::engine::{DampingStrategy, Engine, SimulationConfig};
+use rspice_core::netlist::ElementKind;
 use std::path::Path;
 
-/// Frequency sweep type for transfer function analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TfFrequencySweep {
-    Decade,
-    Octave,
-    Linear,
+/// Post-solve normalization applied to the signed transfer derivative.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TfNormalization {
+    /// Return the native engineering derivative (for example V/A).
+    #[default]
+    None,
+    /// Return `(dY / dX) * (Xnom / Ynom)`, a signed dimensionless ratio.
+    RelativeToNominal,
+    /// Return the signed response to one engineering unit of source stimulus.
+    PerSourceUnit,
 }
 
-impl TfFrequencySweep {
-    fn keyword(self) -> &'static str {
-        match self {
-            Self::Decade => "dec",
-            Self::Octave => "oct",
-            Self::Linear => "lin",
-        }
-    }
+/// Numerical policy applied after source-authored `.OPTIONS` are resolved.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TfAccuracy {
+    /// Direct Newton, 25 iterations, 1e-5 absolute voltage tolerance.
+    Fast,
+    /// Preserve the resolved project/netlist policy.
+    #[default]
+    Balanced,
+    /// At least 100 iterations with 1e-9/1e-5 absolute/relative tolerances.
+    Accurate,
+    /// At least 200 iterations and every nonlinear continuation aid enabled.
+    Robust,
+}
+
+/// Physical quantity at one side of the transfer derivative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TfQuantity {
+    Voltage,
+    Current,
+}
+
+/// Engineering unit carried by a retained gain value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TfGainUnit {
+    Dimensionless,
+    VoltsPerVolt,
+    AmpsPerVolt,
+    VoltsPerAmpere,
+    AmpsPerAmpere,
+}
+
+/// Mathematical basis of the retained gain value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TfGainBasis {
+    AbsoluteDerivative,
+    NominalRelative,
+    PerSourceUnit,
+}
+
+/// Typed metadata needed to display and export a signed transfer gain safely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TfGainMetadata {
+    pub input_quantity: TfQuantity,
+    pub output_quantity: TfQuantity,
+    pub unit: TfGainUnit,
+    pub basis: TfGainBasis,
 }
 
 /// Explicit configuration for transfer-function execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TfRunConfig {
-    pub start_freq: Value,
-    pub stop_freq: Value,
-    pub points_per_unit: usize,
-    pub sweep: TfFrequencySweep,
     pub input_source: String,
-    pub output_node: String,
-    pub output_ref: Option<String>,
-    pub group_delay: bool,
-    pub input_impedance: bool,
-    pub output_impedance: bool,
+    pub output_expression: String,
+    pub transfer_gain: bool,
+    pub input_resistance: bool,
+    pub output_resistance: bool,
+    pub normalization: TfNormalization,
+    pub accuracy: TfAccuracy,
 }
 
 impl Default for TfRunConfig {
     fn default() -> Self {
         Self {
-            start_freq: 1.0,
-            stop_freq: 1e9,
-            points_per_unit: 10,
-            sweep: TfFrequencySweep::Decade,
-            input_source: "VIN".to_string(),
-            output_node: "VOUT".to_string(),
-            output_ref: None,
-            group_delay: false,
-            input_impedance: false,
-            output_impedance: false,
+            input_source: "VIN_DIFF".to_string(),
+            output_expression: "V(afe_out)".to_string(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
         }
     }
 }
 
 impl TfRunConfig {
     fn validate(&self) -> Result<(), String> {
-        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
-            return Err("TF start frequency must be positive".to_string());
-        }
-        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
-            return Err("TF stop frequency must be >= start frequency".to_string());
-        }
-        if self.points_per_unit == 0 {
-            return Err("TF points per unit must be greater than zero".to_string());
-        }
-        if self.input_source.trim().is_empty() {
+        let input_source = self.input_source.trim();
+        if input_source.is_empty() {
             return Err("TF input source must be specified".to_string());
         }
-        if self.output_node.trim().is_empty() {
-            return Err("TF output node must be specified".to_string());
+        if self.input_source != input_source || input_source.chars().any(char::is_whitespace) {
+            return Err(
+                "TF input source must be one canonical independent-source name".to_string(),
+            );
+        }
+        let output_expression = self.output_expression.trim();
+        if output_expression.is_empty() {
+            return Err("TF output expression must be specified".to_string());
+        }
+        if self.output_expression != output_expression {
+            return Err("TF output expression must not contain surrounding whitespace".to_string());
+        }
+        if !self.transfer_gain && !self.input_resistance && !self.output_resistance {
+            return Err(
+                "TF must retain transfer gain, input resistance, or output resistance".to_string(),
+            );
         }
         Ok(())
     }
 }
 
 /// Transfer-function analysis data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TfData {
-    /// Frequency points (Hz).
-    pub frequencies: Vec<Value>,
-    /// Complex transfer function H(jw).
-    pub transfer: Vec<Complex64>,
-    /// Magnitude response in dB.
-    pub magnitude_db: Vec<Value>,
-    /// Phase response in degrees.
-    pub phase_deg: Vec<Value>,
-    /// Group delay curve: (frequency_hz, delay_s).
-    pub group_delay: Option<Vec<(Value, Value)>>,
-    /// Input impedance vs frequency (Ohms), if requested.
-    pub input_impedance: Option<Vec<Complex64>>,
-    /// Output impedance vs frequency (Ohms), if requested.
-    pub output_impedance: Option<Vec<Complex64>>,
-    /// Output trace label (for display).
-    pub output_label: String,
-    /// Input source name (for display).
     pub input_source: String,
-    /// Low-frequency gain magnitude (linear).
-    pub dc_gain: Option<Value>,
+    pub output_label: String,
+    pub gain: Option<Value>,
+    pub input_resistance: Option<Value>,
+    pub output_resistance: Option<Value>,
+    pub normalization: TfNormalization,
+    pub gain_metadata: TfGainMetadata,
+    /// Nominal source value used by relative normalization, otherwise absent.
+    pub nominal_input: Option<Value>,
+    /// Nominal output value used by relative normalization, otherwise absent.
+    pub nominal_output: Option<Value>,
 }
 
 /// Run transfer-function analysis with explicit configuration.
@@ -158,181 +192,93 @@ pub fn run_tf_analysis_with_config_and_source_path_and_abort(
     ensure_not_aborted(abort)?;
 
     let parsed_netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-
-    // Build a baseline netlist with all AC source magnitudes forced to zero.
-    // We then explicitly excite only the requested input source to keep the
-    // transfer denominator deterministic and independent of unrelated sources.
-    let mut tf_netlist = parsed_netlist.clone();
-    zero_all_source_ac(&mut tf_netlist, abort)?;
-    set_source_ac_excitation(&mut tf_netlist, &config.input_source, 1.0, 0.0, abort)?;
-
-    let engine = Engine::new(build_engine_config(&tf_netlist, None));
-    let dc_result = engine
-        .run_dc_op_with_abort(&tf_netlist, abort)
-        .map_err(|error| ServiceRunError::from_core("DC OP error (required for TF)", error))?;
+    let probe = TfOutputProbe::parse(&config.output_expression)?;
     ensure_not_aborted(abort)?;
-    let circuit = engine.build_circuit(&tf_netlist).map_err(|error| {
-        ServiceRunError::Failure(format!("Circuit build error (required for TF): {error}"))
+
+    let input_quantity = input_quantity(&parsed_netlist, config.input_source.trim())?;
+    let output_quantity = probe.quantity();
+    let engine_config =
+        apply_accuracy_policy(build_engine_config(&parsed_netlist, None), config.accuracy);
+    let engine = Engine::try_new(engine_config).map_err(|error| {
+        ServiceRunError::Failure(format!("Invalid TF numerical policy: {error}"))
     })?;
+    let result = engine
+        .run_transfer_function_with_abort(
+            &parsed_netlist,
+            probe.engine_target(),
+            probe.reference_node(),
+            probe.is_current(),
+            config.input_source.trim(),
+            abort,
+        )
+        .map_err(|error| {
+            ServiceRunError::from_core("DC transfer-function analysis error", error)
+        })?;
     ensure_not_aborted(abort)?;
 
-    let output_expr =
-        build_voltage_output_expr(config.output_node.trim(), config.output_ref.as_deref());
-    let output_spec =
-        parse_output_spec(&output_expr, &dc_result.node_names, &circuit).ok_or_else(|| {
-            ServiceRunError::Failure(format!("TF output '{output_expr}' could not be resolved"))
-        })?;
-
-    let frequencies = generate_freq_points_with_abort(
-        config.start_freq,
-        config.stop_freq,
-        config.points_per_unit,
-        config.sweep.keyword(),
-        abort,
-    )?;
-
-    let ac_results = engine
-        .run_ac_with_abort(&tf_netlist, &frequencies, abort)
-        .map_err(|error| ServiceRunError::from_core("TF AC analysis error", error))?;
-    if ac_results.len() != frequencies.len() {
+    if !result.gain.is_finite() {
         return Err(ServiceRunError::Failure(format!(
-            "TF AC analysis returned {} points for {} requested frequencies",
-            ac_results.len(),
-            frequencies.len()
+            "TF gain from {} to {} is non-finite",
+            result.input, result.output
         )));
     }
 
-    let mut transfer = Vec::with_capacity(ac_results.len());
-    let mut magnitude_db = Vec::with_capacity(ac_results.len());
-    let mut phase_deg = Vec::with_capacity(ac_results.len());
-    for (index, point) in ac_results.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        let value = ac_output_value(point, &output_spec).map_err(|error| {
-            ServiceRunError::Failure(format!("TF output extraction error: {error}"))
-        })?;
-        magnitude_db.push(20.0 * value.norm().max(1e-30).log10());
-        phase_deg.push(value.arg().to_degrees());
-        transfer.push(value);
-    }
-
-    let input_impedance = if config.input_impedance {
-        let branch_ordinal = circuit
-            .get_branch_by_name(config.input_source.trim())
-            .ok_or_else(|| {
-                ServiceRunError::Failure(format!(
-                    "TF input source '{}' does not expose an AC branch current; cannot compute Zin",
-                    config.input_source
-                ))
-            })? as usize;
-        let branch_idx = branch_ordinal.saturating_sub(1);
-        let mut impedance = Vec::with_capacity(ac_results.len());
-        for (index, point) in ac_results.iter().enumerate() {
-            poll_periodically(abort, index)?;
-            let iin = point.currents.get(branch_idx).copied().ok_or_else(|| {
-                ServiceRunError::Failure(format!(
-                    "TF input source '{}' branch index {} is unavailable in AC result",
-                    config.input_source, branch_idx
-                ))
-            })?;
-            impedance.push(if iin.norm() <= 1e-30 {
-                Complex64::new(f64::INFINITY, 0.0)
-            } else {
-                Complex64::new(1.0, 0.0) / iin
-            });
-        }
-        Some(impedance)
-    } else {
-        None
-    };
-
-    let output_impedance = if config.output_impedance {
-        let mut zout_netlist = parsed_netlist.clone();
-        zero_all_source_ac(&mut zout_netlist, abort)?;
-        inject_tf_output_test_source(
-            &mut zout_netlist,
-            config.output_node.trim(),
-            config.output_ref.as_deref(),
+    let (gain, nominal_input, nominal_output) = if config.transfer_gain {
+        normalize_gain(
+            &engine,
+            &parsed_netlist,
+            &probe,
+            config.input_source.trim(),
+            result.gain,
+            config.normalization,
             abort,
-        )?;
-
-        let zout_engine = Engine::new(build_engine_config(&zout_netlist, None));
-        let zout_dc = zout_engine
-            .run_dc_op_with_abort(&zout_netlist, abort)
-            .map_err(|error| {
-                ServiceRunError::from_core("DC OP error (required for TF Zout)", error)
-            })?;
-        ensure_not_aborted(abort)?;
-        let zout_circuit = zout_engine.build_circuit(&zout_netlist).map_err(|error| {
-            ServiceRunError::Failure(format!(
-                "Circuit build error (required for TF Zout): {error}"
-            ))
-        })?;
-        ensure_not_aborted(abort)?;
-        let zout_spec = parse_output_spec(&output_expr, &zout_dc.node_names, &zout_circuit)
-            .ok_or_else(|| {
-                ServiceRunError::Failure(format!(
-                    "TF output '{output_expr}' could not be resolved for Zout"
-                ))
-            })?;
-
-        let zout_points = zout_engine
-            .run_ac_with_abort(&zout_netlist, &frequencies, abort)
-            .map_err(|error| {
-                ServiceRunError::from_core("TF output-impedance AC analysis error", error)
-            })?;
-        let mut impedance = Vec::with_capacity(zout_points.len());
-        for (index, point) in zout_points.iter().enumerate() {
-            poll_periodically(abort, index)?;
-            impedance.push(ac_output_value(point, &zout_spec).map_err(|error| {
-                ServiceRunError::Failure(format!("TF output-impedance extraction error: {error}"))
-            })?);
-        }
-        Some(impedance)
+        )?
     } else {
-        None
+        (None, None, None)
     };
+    let input_resistance = retain_resistance(
+        config.input_resistance,
+        result.input_impedance,
+        "input resistance",
+    )?;
+    let output_resistance = retain_resistance(
+        config.output_resistance,
+        result.output_impedance,
+        "output resistance",
+    )?;
 
-    let group_delay = if config.group_delay && frequencies.len() >= 2 {
-        use std::f64::consts::PI;
-        let mut points = Vec::with_capacity(frequencies.len().saturating_sub(1));
-        let mut prev_phase = transfer[0].arg();
-        for idx in 1..frequencies.len() {
-            poll_periodically(abort, idx)?;
-            let df = frequencies[idx] - frequencies[idx - 1];
-            if df <= 0.0 {
-                prev_phase = transfer[idx].arg();
-                continue;
-            }
-            let mut phase = transfer[idx].arg();
-            while phase - prev_phase > PI {
-                phase -= 2.0 * PI;
-            }
-            while phase - prev_phase < -PI {
-                phase += 2.0 * PI;
-            }
-            let delay = -(phase - prev_phase) / (2.0 * PI * df);
-            let mid = (frequencies[idx - 1] + frequencies[idx]) * 0.5;
-            points.push((mid, delay));
-            prev_phase = phase;
-        }
-        Some(points)
-    } else {
-        None
-    };
-
-    ensure_not_aborted(abort)?;
     Ok(TfData {
-        dc_gain: transfer.first().map(|h| h.norm()),
-        frequencies,
-        transfer,
-        magnitude_db,
-        phase_deg,
-        group_delay,
-        input_impedance,
-        output_impedance,
-        output_label: output_expr,
-        input_source: config.input_source.clone(),
+        input_source: result.input,
+        output_label: result.output,
+        gain,
+        input_resistance,
+        output_resistance,
+        normalization: config.normalization,
+        gain_metadata: TfGainMetadata {
+            input_quantity,
+            output_quantity,
+            unit: gain_unit(input_quantity, output_quantity, config.normalization),
+            basis: gain_basis(config.normalization),
+        },
+        nominal_input,
+        nominal_output,
     })
+}
+
+fn retain_resistance(
+    enabled: bool,
+    value: Value,
+    quantity: &'static str,
+) -> ServiceRunResult<Option<Value>> {
+    if !enabled {
+        return Ok(None);
+    }
+    if value.is_nan() {
+        return Err(ServiceRunError::Failure(format!(
+            "TF {quantity} is not a number"
+        )));
+    }
+    Ok(Some(value))
 }
 
 /// Run transfer-function analysis using inferred/default settings.
@@ -396,206 +342,618 @@ fn infer_tf_run_config(
         })?;
     Ok(TfRunConfig {
         input_source,
-        output_node,
+        output_expression: format!("V({output_node})"),
         ..TfRunConfig::default()
     })
 }
 
-fn source_with_ac_excitation(spec: &SourceSpec, magnitude: Value, phase_deg: Value) -> SourceSpec {
-    // Preserve DC, transient, RF-port, and distortion annotations. SourceSpec
-    // stores AC phase in radians while the UI contract is degrees.
-    spec.clone().with_ac(magnitude, phase_deg.to_radians())
-}
-
-fn source_without_ac(spec: &SourceSpec) -> SourceSpec {
-    source_with_ac_excitation(spec, 0.0, 0.0)
-}
-
-fn zero_all_source_ac(
-    netlist: &mut rspice_core::Netlist,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<()> {
-    for (index, element) in netlist.elements.iter_mut().enumerate() {
-        poll_periodically(abort, index)?;
-        match &mut element.kind {
-            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                *spec = source_without_ac(spec);
-            }
-            _ => {}
+fn apply_accuracy_policy(mut config: SimulationConfig, accuracy: TfAccuracy) -> SimulationConfig {
+    match accuracy {
+        TfAccuracy::Fast => {
+            config.tolerance = 1.0e-5;
+            config.max_iterations = 25;
+            config.convergence_config.gmin_stepping = false;
+            config.convergence_config.source_stepping = false;
+            config.convergence_config.pseudo_transient = false;
+            config.convergence_config.arc_length = false;
+            config.convergence_config.damping_strategy = DampingStrategy::None;
+            config.convergence_config.voltage_reltol = 1.0e-3;
+            config.convergence_config.voltage_abstol = 1.0e-5;
+            config.convergence_config.current_abstol = 1.0e-10;
+            config.convergence_config.residual_reltol = 1.0e-3;
+        }
+        TfAccuracy::Balanced => {}
+        TfAccuracy::Accurate => {
+            config.tolerance = config.tolerance.min(1.0e-9);
+            config.max_iterations = config.max_iterations.max(100);
+            config.convergence_config.voltage_reltol =
+                config.convergence_config.voltage_reltol.min(1.0e-5);
+            config.convergence_config.voltage_abstol =
+                positive_minimum(config.convergence_config.voltage_abstol, 1.0e-9);
+            config.convergence_config.current_abstol =
+                positive_minimum(config.convergence_config.current_abstol, 1.0e-14);
+            config.convergence_config.residual_reltol =
+                config.convergence_config.residual_reltol.min(1.0e-5);
+        }
+        TfAccuracy::Robust => {
+            config.max_iterations = config.max_iterations.max(200);
+            config.convergence_config.gmin_stepping = true;
+            config.convergence_config.source_stepping = true;
+            config.convergence_config.pseudo_transient = true;
+            config.convergence_config.arc_length = true;
+            config.convergence_config.damping_strategy = DampingStrategy::Combined;
         }
     }
-    ensure_not_aborted(abort)
+    config
 }
 
-fn set_source_ac_excitation(
-    netlist: &mut rspice_core::Netlist,
-    source_name: &str,
-    magnitude: Value,
-    phase_deg: Value,
+fn positive_minimum(current: Value, ceiling: Value) -> Value {
+    if current > 0.0 {
+        current.min(ceiling)
+    } else {
+        ceiling
+    }
+}
+
+fn input_quantity(
+    netlist: &rspice_core::Netlist,
+    input_source: &str,
+) -> ServiceRunResult<TfQuantity> {
+    let element = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case(input_source))
+        .ok_or_else(|| {
+            ServiceRunError::Failure(format!(
+                "TF input source '{input_source}' does not exist in the resolved netlist"
+            ))
+        })?;
+    match &element.kind {
+        ElementKind::VoltageSource(_) => Ok(TfQuantity::Voltage),
+        ElementKind::CurrentSource(_) => Ok(TfQuantity::Current),
+        _ => Err(ServiceRunError::Failure(format!(
+            "TF input '{input_source}' is not an independent voltage or current source"
+        ))),
+    }
+}
+
+fn gain_basis(normalization: TfNormalization) -> TfGainBasis {
+    match normalization {
+        TfNormalization::None => TfGainBasis::AbsoluteDerivative,
+        TfNormalization::RelativeToNominal => TfGainBasis::NominalRelative,
+        TfNormalization::PerSourceUnit => TfGainBasis::PerSourceUnit,
+    }
+}
+
+fn gain_unit(input: TfQuantity, output: TfQuantity, normalization: TfNormalization) -> TfGainUnit {
+    if normalization == TfNormalization::RelativeToNominal {
+        return TfGainUnit::Dimensionless;
+    }
+    match (input, output) {
+        (TfQuantity::Voltage, TfQuantity::Voltage) => TfGainUnit::VoltsPerVolt,
+        (TfQuantity::Voltage, TfQuantity::Current) => TfGainUnit::AmpsPerVolt,
+        (TfQuantity::Current, TfQuantity::Voltage) => TfGainUnit::VoltsPerAmpere,
+        (TfQuantity::Current, TfQuantity::Current) => TfGainUnit::AmpsPerAmpere,
+    }
+}
+
+fn normalize_gain(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    probe: &TfOutputProbe,
+    input_source: &str,
+    absolute_gain: Value,
+    normalization: TfNormalization,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<()> {
+) -> ServiceRunResult<(Option<Value>, Option<Value>, Option<Value>)> {
+    if normalization != TfNormalization::RelativeToNominal {
+        return Ok((Some(absolute_gain), None, None));
+    }
+
     ensure_not_aborted(abort)?;
-    let source_name = source_name.trim();
-    if source_name.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "source name cannot be empty".to_string(),
-        ));
-    }
+    let operating_point = engine
+        .run_dc_op_with_abort(netlist, abort)
+        .map_err(|error| ServiceRunError::from_core("TF nominal operating-point error", error))?;
+    let nominal_output = probe.nominal_value(&operating_point)?;
+    let nominal_input = nominal_source_value(engine, netlist, input_source, abort)?;
 
-    let mut matched = false;
-    for (index, element) in netlist.elements.iter_mut().enumerate() {
-        poll_periodically(abort, index)?;
-        if !element.name.eq_ignore_ascii_case(source_name) {
-            continue;
-        }
-        match &mut element.kind {
-            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                *spec = source_with_ac_excitation(spec, magnitude, phase_deg);
-                matched = true;
-            }
-            _ => {
-                return Err(ServiceRunError::Failure(format!(
-                    "Element '{}' exists but is not an independent source",
-                    source_name
-                )));
-            }
-        }
-    }
-
-    if !matched {
+    validate_nonzero_finite_nominal(nominal_input, "input source", input_source)?;
+    validate_nonzero_finite_nominal(nominal_output, "output", &probe.canonical_expression())?;
+    let normalized = absolute_gain * nominal_input / nominal_output;
+    if !normalized.is_finite() {
         return Err(ServiceRunError::Failure(format!(
-            "Independent source '{}' was not found in the netlist",
-            source_name
+            "TF relative gain from {input_source} to {} is non-finite",
+            probe.canonical_expression()
         )));
     }
+    Ok((Some(normalized), Some(nominal_input), Some(nominal_output)))
+}
 
+fn validate_nonzero_finite_nominal(value: Value, role: &str, label: &str) -> ServiceRunResult<()> {
+    if !value.is_finite() {
+        return Err(ServiceRunError::Failure(format!(
+            "TF relative normalization requires a finite nominal {role} '{label}', got {value}"
+        )));
+    }
+    if value == 0.0 {
+        return Err(ServiceRunError::Failure(format!(
+            "TF relative normalization is undefined because nominal {role} '{label}' is zero"
+        )));
+    }
     Ok(())
 }
 
-fn unique_element_name(
+/// Evaluate the authored DC value through rspice-core itself. Converting the
+/// selected source to an isolated voltage source makes every supported source
+/// form (including file-backed PWL and PAT) observable without duplicating the
+/// core's waveform-at-t=0 rules in this service.
+fn nominal_source_value(
+    engine: &Engine,
     netlist: &rspice_core::Netlist,
-    prefix: &str,
+    input_source: &str,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<String> {
-    let is_available = |candidate: &str| -> ServiceRunResult<bool> {
-        for (index, element) in netlist.elements.iter().enumerate() {
-            poll_periodically(abort, index)?;
-            if element.name.eq_ignore_ascii_case(candidate) {
-                return Ok(false);
+) -> ServiceRunResult<Value> {
+    const NOMINAL_NODE: &str = "TF_NOMINAL_SOURCE_INTERNAL";
+    let mut source = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case(input_source))
+        .cloned()
+        .ok_or_else(|| {
+            ServiceRunError::Failure(format!(
+                "TF input source '{input_source}' does not exist in the resolved netlist"
+            ))
+        })?;
+    source.kind = match source.kind {
+        ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+            ElementKind::VoltageSource(spec)
+        }
+        _ => {
+            return Err(ServiceRunError::Failure(format!(
+                "TF input '{input_source}' is not an independent voltage or current source"
+            )));
+        }
+    };
+    source.nodes = vec![NOMINAL_NODE.to_string(), "0".to_string()];
+
+    let mut source_deck = netlist.clone();
+    source_deck.elements.clear();
+    source_deck.elements.push(source);
+    source_deck.analyses.clear();
+    source_deck.fft_analyses.clear();
+    let result = engine
+        .run_dc_op_with_abort(&source_deck, abort)
+        .map_err(|error| {
+            ServiceRunError::from_core("TF nominal input-source evaluation error", error)
+        })?;
+    result.try_voltage_named(NOMINAL_NODE).ok_or_else(|| {
+        ServiceRunError::Failure(
+            "TF nominal input-source evaluation did not retain its internal probe".to_string(),
+        )
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TfOutputProbe {
+    Voltage {
+        positive: String,
+        reference: Option<String>,
+    },
+    Current {
+        element: String,
+    },
+}
+
+impl TfOutputProbe {
+    fn parse(output: &str) -> ServiceRunResult<Self> {
+        let output = output.trim();
+        if output.is_empty() {
+            return Err(ServiceRunError::Failure(
+                "TF output expression must be specified".to_string(),
+            ));
+        }
+        let Some(open) = output.find('(') else {
+            return Err(ServiceRunError::Failure(format!(
+                "Invalid TF output expression '{output}'; expected V(node), V(node,ref), or I(element)"
+            )));
+        };
+        if !output.ends_with(')') || output[open + 1..output.len() - 1].contains(['(', ')']) {
+            return Err(ServiceRunError::Failure(format!(
+                "Invalid TF output expression '{output}'; expected V(node), V(node,ref), or I(element)"
+            )));
+        }
+        let function = output[..open].trim();
+        let arguments = output[open + 1..output.len() - 1]
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        if arguments.iter().any(|argument| argument.is_empty()) {
+            return Err(ServiceRunError::Failure(format!(
+                "Invalid TF output expression '{output}'; probe arguments must not be empty"
+            )));
+        }
+
+        if function.eq_ignore_ascii_case("V") {
+            let (positive, embedded_reference) = match arguments.as_slice() {
+                [positive] => (*positive, None),
+                [positive, reference] => (*positive, Some(*reference)),
+                _ => {
+                    return Err(ServiceRunError::Failure(format!(
+                        "Invalid TF voltage output '{output}'; expected V(node) or V(node,ref)"
+                    )));
+                }
+            };
+            return Ok(Self::Voltage {
+                positive: positive.to_string(),
+                reference: embedded_reference.map(str::to_string),
+            });
+        }
+
+        if function.eq_ignore_ascii_case("I") {
+            let [element] = arguments.as_slice() else {
+                return Err(ServiceRunError::Failure(format!(
+                    "Invalid TF current output '{output}'; expected I(element)"
+                )));
+            };
+            return Ok(Self::Current {
+                element: (*element).to_string(),
+            });
+        }
+
+        Err(ServiceRunError::Failure(format!(
+            "Unsupported TF output expression '{output}'; expected V(node), V(node,ref), or I(element)"
+        )))
+    }
+
+    fn engine_target(&self) -> &str {
+        match self {
+            Self::Voltage { positive, .. } => positive,
+            Self::Current { element } => element,
+        }
+    }
+
+    fn reference_node(&self) -> Option<&str> {
+        match self {
+            Self::Voltage { reference, .. } => reference.as_deref(),
+            Self::Current { .. } => None,
+        }
+    }
+
+    fn is_current(&self) -> bool {
+        matches!(self, Self::Current { .. })
+    }
+
+    fn quantity(&self) -> TfQuantity {
+        if self.is_current() {
+            TfQuantity::Current
+        } else {
+            TfQuantity::Voltage
+        }
+    }
+
+    fn canonical_expression(&self) -> String {
+        match self {
+            Self::Voltage {
+                positive,
+                reference: Some(reference),
+            } => format!("V({positive},{reference})"),
+            Self::Voltage {
+                positive,
+                reference: None,
+            } => format!("V({positive})"),
+            Self::Current { element } => format!("I({element})"),
+        }
+    }
+
+    fn nominal_value(
+        &self,
+        operating_point: &rspice_core::SimulationResult,
+    ) -> ServiceRunResult<Value> {
+        match self {
+            Self::Voltage {
+                positive,
+                reference,
+            } => {
+                let positive_voltage =
+                    operating_point.try_voltage_named(positive).ok_or_else(|| {
+                        ServiceRunError::Failure(format!(
+                            "TF output node '{positive}' is absent from the nominal operating point"
+                        ))
+                    })?;
+                let reference_voltage = match reference {
+                    Some(reference) => {
+                        operating_point
+                            .try_voltage_named(reference)
+                            .ok_or_else(|| {
+                                ServiceRunError::Failure(format!(
+                                    "TF output reference node '{reference}' is absent from the nominal operating point"
+                                ))
+                            })?
+                    }
+                    None => 0.0,
+                };
+                Ok(positive_voltage - reference_voltage)
+            }
+            Self::Current { element } => {
+                operating_point
+                    .branch_current_named(element)
+                    .ok_or_else(|| {
+                        ServiceRunError::Failure(format!(
+                            "TF output element '{element}' has no nominal branch current"
+                        ))
+                    })
             }
         }
-        Ok(true)
-    };
-    if is_available(prefix)? {
-        return Ok(prefix.to_string());
     }
-
-    for idx in 1.. {
-        ensure_not_aborted(abort)?;
-        let candidate = format!("{}{}", prefix, idx);
-        if is_available(&candidate)? {
-            return Ok(candidate);
-        }
-    }
-
-    unreachable!("monotonic suffix search should always find a free element name")
-}
-
-fn inject_tf_output_test_source(
-    netlist: &mut rspice_core::Netlist,
-    output_node: &str,
-    output_ref: Option<&str>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<()> {
-    ensure_not_aborted(abort)?;
-    let output_node = output_node.trim();
-    if output_node.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "TF output node must be non-empty".to_string(),
-        ));
-    }
-    let output_ref = output_ref
-        .map(str::trim)
-        .filter(|node| !node.is_empty())
-        .unwrap_or("0");
-    let test_name = unique_element_name(netlist, "__TF_ZOUT_TEST", abort)?;
-    netlist.elements.push(rspice_core::netlist::Element {
-        name: test_name,
-        kind: ElementKind::CurrentSource(SourceSpec::Ac {
-            magnitude: 1.0,
-            phase: 0.0,
-        }),
-        nodes: vec![output_node.to_string(), output_ref.to_string()],
-        provenance: rspice_core::netlist::ElementProvenance::Authored,
-    });
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
-    use rspice_core::netlist::SourceRfPort;
+
+    const DIVIDER: &str = "\
+DC transfer divider
+VIN in 0 1
+R1 in out 1k
+R2 out 0 2k
+.end
+";
+
+    fn config(output: &str, input: &str) -> TfRunConfig {
+        TfRunConfig {
+            output_expression: output.to_string(),
+            input_source: input.to_string(),
+            ..TfRunConfig::default()
+        }
+    }
+
+    fn assert_close(actual: Value, expected: Value, label: &str) {
+        let tolerance = 1.0e-9 * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{label}: expected {expected:.16e}, got {actual:.16e} (tolerance {tolerance:.3e})"
+        );
+    }
 
     #[test]
     fn tf_service_preserves_typed_entry_abort() {
-        let mut config = TfRunConfig::default();
-        config.start_freq = 0.0;
+        let result = run_tf_analysis_with_config_and_abort(
+            "not a netlist",
+            &config("V(out)", "VIN"),
+            &ImmediateAbort,
+        );
 
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn tf_service_honors_abort_after_entry() {
+        let abort = CountingAbort::new(4);
         let result =
-            run_tf_analysis_with_config_and_abort("not a netlist", &config, &ImmediateAbort);
-
+            run_tf_analysis_with_config_and_abort(DIVIDER, &config("V(out)", "VIN"), &abort);
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(abort.count() > 4);
     }
 
     #[test]
-    fn tf_source_preparation_honors_in_loop_abort() {
-        let mut deck = String::from("many independent sources\n");
-        for index in 0..130 {
-            deck.push_str(&format!("V{index} n{index} 0 0 AC 1\n"));
-        }
-        deck.push_str(".end\n");
-        let mut netlist = rspice_core::Netlist::parse(&deck).expect("test deck should parse");
-        let abort = CountingAbort::new(1);
+    fn tf_service_returns_exact_dc_gain_and_resistances() {
+        let cfg = config("V(out)", "VIN");
+        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("TF succeeds");
 
-        let result = zero_all_source_ac(&mut netlist, &abort);
-
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
-        assert!(abort.count() > 1);
+        assert_close(data.gain.expect("gain"), 2.0 / 3.0, "gain");
+        assert_close(data.input_resistance.expect("Rin"), 3000.0, "Rin");
+        assert_close(data.output_resistance.expect("Rout"), 2000.0 / 3.0, "Rout");
+        assert_eq!(data.gain_metadata.input_quantity, TfQuantity::Voltage);
+        assert_eq!(data.gain_metadata.output_quantity, TfQuantity::Voltage);
+        assert_eq!(data.gain_metadata.unit, TfGainUnit::VoltsPerVolt);
+        assert_eq!(data.gain_metadata.basis, TfGainBasis::AbsoluteDerivative);
+        assert_eq!(data.nominal_input, None);
+        assert_eq!(data.nominal_output, None);
     }
 
     #[test]
-    fn rf_port_sources_preserve_annotations_and_convert_phase_to_radians() {
-        let spec = SourceSpec::RfPort {
-            inner: Box::new(SourceSpec::DcAc {
-                dc_value: 2.5,
-                ac_magnitude: 1.0,
-                ac_phase: 0.0,
-            }),
-            port: SourceRfPort {
-                portnum: 1,
-                z0: 50.0,
-                power: None,
-                frequency: None,
-                phase: None,
-            },
-        };
+    fn tf_service_retention_flags_gate_each_scalar() {
+        let mut cfg = config("V(out)", "VIN");
+        cfg.transfer_gain = false;
+        cfg.output_resistance = false;
 
-        let excited = source_with_ac_excitation(&spec, 3.0, 90.0);
-        let SourceSpec::RfPort { inner, port } = excited else {
-            panic!("RF-port wrapper must be preserved");
-        };
-        assert_eq!(port.portnum, 1);
-        let SourceSpec::DcAc {
-            dc_value,
-            ac_magnitude,
-            ac_phase,
-        } = *inner
-        else {
-            panic!("inner DC+AC source must be preserved");
-        };
-        assert_eq!(dc_value, 2.5);
-        assert_eq!(ac_magnitude, 3.0);
-        assert!((ac_phase - std::f64::consts::FRAC_PI_2).abs() < 1e-15);
+        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("TF succeeds");
+
+        assert_eq!(data.gain, None);
+        assert!(data.input_resistance.is_some());
+        assert_eq!(data.output_resistance, None);
+        assert_eq!(data.nominal_input, None);
+        assert_eq!(data.nominal_output, None);
+    }
+
+    #[test]
+    fn resistance_retention_accepts_infinity_but_rejects_nan() {
+        assert_eq!(
+            retain_resistance(true, Value::INFINITY, "input resistance").unwrap(),
+            Some(Value::INFINITY)
+        );
+        assert!(retain_resistance(true, Value::NAN, "input resistance").is_err());
+        assert_eq!(
+            retain_resistance(false, Value::NAN, "input resistance").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn tf_service_rejects_a_request_that_retains_nothing() {
+        let mut cfg = config("V(out)", "VIN");
+        cfg.transfer_gain = false;
+        cfg.input_resistance = false;
+        cfg.output_resistance = false;
+
+        let error = run_tf_analysis_with_config(DIVIDER, &cfg).expect_err("empty result rejected");
+        assert!(error.contains("must retain"));
+    }
+
+    #[test]
+    fn tf_service_supports_current_input_and_differential_voltage_output() {
+        let deck = "\
+current input and differential output
+IIN 0 in 0
+R1 in out 1k
+R2 out 0 2k
+.end
+";
+        let data = run_tf_analysis_with_config(deck, &config("V(in,out)", "IIN"))
+            .expect("differential TF succeeds");
+
+        assert_close(data.gain.expect("gain"), 1000.0, "gain");
+        assert_close(data.input_resistance.expect("Rin"), 3000.0, "Rin");
+        assert_close(data.output_resistance.expect("Rout"), 1000.0, "Rout");
+        assert_eq!(data.output_label, "V(in,out)");
+        assert_eq!(data.gain_metadata.input_quantity, TfQuantity::Current);
+        assert_eq!(data.gain_metadata.unit, TfGainUnit::VoltsPerAmpere);
+    }
+
+    #[test]
+    fn tf_service_supports_authenticated_branch_current_output() {
+        let deck = "\
+branch current output
+VIN in 0 1
+R1 in mid 1k
+VMEAS mid out 0
+R2 out 0 2k
+.end
+";
+        let data = run_tf_analysis_with_config(deck, &config("I(VMEAS)", "VIN"))
+            .expect("branch-current TF succeeds");
+
+        assert_close(data.gain.expect("gain"), 1.0 / 3000.0, "gain");
+        assert_close(data.input_resistance.expect("Rin"), 3000.0, "Rin");
+        assert_eq!(data.output_resistance, Some(1.0e20));
+        assert_eq!(data.output_label, "I(VMEAS)");
+        assert_eq!(data.gain_metadata.output_quantity, TfQuantity::Current);
+        assert_eq!(data.gain_metadata.unit, TfGainUnit::AmpsPerVolt);
+    }
+
+    #[test]
+    fn tf_output_expression_parser_rejects_ambiguous_or_invented_semantics() {
+        assert!(TfOutputProbe::parse("V(out,in,other)").is_err());
+        assert!(TfOutputProbe::parse("I(V1,V2)").is_err());
+        assert!(TfOutputProbe::parse("P(R1)").is_err());
+        let mut padded = config("V(out)", " VIN");
+        assert!(run_tf_analysis_with_config(DIVIDER, &padded).is_err());
+        padded.input_source = "VIN".to_owned();
+        padded.output_expression = " V(out)".to_owned();
+        assert!(run_tf_analysis_with_config(DIVIDER, &padded).is_err());
+    }
+
+    #[test]
+    fn relative_normalization_retains_the_exact_nominal_values_used() {
+        let mut cfg = config("V(out)", "VIN");
+        cfg.normalization = TfNormalization::RelativeToNominal;
+
+        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("relative TF succeeds");
+
+        assert_close(data.gain.expect("gain"), 1.0, "relative gain");
+        assert_eq!(data.nominal_input, Some(1.0));
+        assert_close(
+            data.nominal_output.expect("Ynom"),
+            2.0 / 3.0,
+            "nominal output",
+        );
+        assert_eq!(data.gain_metadata.unit, TfGainUnit::Dimensionless);
+        assert_eq!(data.gain_metadata.basis, TfGainBasis::NominalRelative);
+    }
+
+    #[test]
+    fn relative_normalization_rejects_a_zero_nominal_source() {
+        let deck = "\
+zero nominal source
+VIN in 0 0
+R1 in out 1k
+R2 out 0 2k
+.end
+";
+        let mut cfg = config("V(out)", "VIN");
+        cfg.normalization = TfNormalization::RelativeToNominal;
+
+        let error = run_tf_analysis_with_config(deck, &cfg).expect_err("zero Xnom rejected");
+        assert!(error.contains("nominal input source 'VIN' is zero"));
+    }
+
+    #[test]
+    fn relative_normalization_uses_the_authored_current_source_nominal() {
+        let deck = "\
+current source normalization
+IIN 0 in 1m
+R1 in 0 1k
+.end
+";
+        let mut cfg = config("V(in)", "IIN");
+        cfg.normalization = TfNormalization::RelativeToNominal;
+
+        let data = run_tf_analysis_with_config(deck, &cfg).expect("relative TF succeeds");
+
+        assert_close(data.gain.expect("gain"), 1.0, "relative gain");
+        assert!((data.nominal_input.expect("Xnom") - 1.0e-3).abs() < 1e-15);
+        assert_close(data.nominal_output.expect("Ynom"), 1.0, "nominal output");
+        assert_eq!(data.gain_metadata.input_quantity, TfQuantity::Current);
+    }
+
+    #[test]
+    fn relative_normalization_rejects_a_zero_nominal_output() {
+        let deck = "\
+zero nominal output
+VIN in 0 1
+R1 in 0 1k
+VZERO out 0 0
+.end
+";
+        let mut cfg = config("V(out)", "VIN");
+        cfg.normalization = TfNormalization::RelativeToNominal;
+
+        let error = run_tf_analysis_with_config(deck, &cfg).expect_err("zero Ynom rejected");
+        assert!(error.contains("nominal output 'V(out)' is zero"));
+    }
+
+    #[test]
+    fn per_source_unit_retains_the_signed_derivative_with_explicit_basis() {
+        let mut cfg = config("V(0,out)", "VIN");
+        cfg.normalization = TfNormalization::PerSourceUnit;
+
+        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("per-unit TF succeeds");
+
+        assert_close(data.gain.expect("gain"), -2.0 / 3.0, "per-unit gain");
+        assert_eq!(data.gain_metadata.unit, TfGainUnit::VoltsPerVolt);
+        assert_eq!(data.gain_metadata.basis, TfGainBasis::PerSourceUnit);
+    }
+
+    #[test]
+    fn accuracy_policies_have_stable_documented_solver_contracts() {
+        let mut base = SimulationConfig::default();
+        base.max_iterations = 63;
+
+        let fast = apply_accuracy_policy(base.clone(), TfAccuracy::Fast);
+        assert_eq!(fast.max_iterations, 25);
+        assert_eq!(fast.tolerance, 1.0e-5);
+        assert!(!fast.convergence_config.gmin_stepping);
+        assert_eq!(
+            fast.convergence_config.damping_strategy,
+            DampingStrategy::None
+        );
+
+        let balanced = apply_accuracy_policy(base.clone(), TfAccuracy::Balanced);
+        assert_eq!(balanced.max_iterations, 63);
+        assert_eq!(balanced.tolerance, base.tolerance);
+
+        let accurate = apply_accuracy_policy(base.clone(), TfAccuracy::Accurate);
+        assert_eq!(accurate.max_iterations, 100);
+        assert!(accurate.tolerance <= 1.0e-9);
+        assert!(accurate.convergence_config.voltage_reltol <= 1.0e-5);
+
+        let robust = apply_accuracy_policy(base, TfAccuracy::Robust);
+        assert_eq!(robust.max_iterations, 200);
+        assert!(robust.convergence_config.arc_length);
+        assert_eq!(
+            robust.convergence_config.damping_strategy,
+            DampingStrategy::Combined
+        );
     }
 }

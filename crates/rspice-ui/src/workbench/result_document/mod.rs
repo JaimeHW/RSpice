@@ -18,6 +18,7 @@ mod pz;
 mod sensitivity;
 mod smith;
 mod specs;
+mod transfer_function;
 
 pub(crate) fn open_specification_editor(state: &mut AppState) {
     specs::open_editor(state);
@@ -70,6 +71,8 @@ pub enum ResultViewer {
     NoiseContrib,
     /// Ranked signed parameter-sensitivity contributions.
     Contribution,
+    /// Scalar DC transfer gain and input/output resistances.
+    TransferFunction,
     /// Measurements × runs matrix against spec bounds.
     Specs,
     /// Legacy Nyquist surface (pre-redesign chrome).
@@ -92,6 +95,7 @@ impl ResultViewer {
             ResultViewer::Op => "OP",
             ResultViewer::NoiseContrib => "NOISE",
             ResultViewer::Contribution => "SENS",
+            ResultViewer::TransferFunction => "XF",
             ResultViewer::Specs => "SPECS",
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
@@ -110,6 +114,7 @@ impl ResultViewer {
             ResultViewer::Op => "op info",
             ResultViewer::NoiseContrib => "noise contributors",
             ResultViewer::Contribution => "sensitivity contributions",
+            ResultViewer::TransferFunction => "transfer function",
             ResultViewer::Specs => "specs matrix",
             ResultViewer::Nyquist => "nyquist",
             ResultViewer::Smith => "smith",
@@ -117,7 +122,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 9] = [
+    const PRIMARY: [ResultViewer; 10] = [
         ResultViewer::Waves,
         ResultViewer::Bode,
         ResultViewer::Fft,
@@ -126,6 +131,7 @@ impl ResultViewer {
         ResultViewer::Op,
         ResultViewer::NoiseContrib,
         ResultViewer::Contribution,
+        ResultViewer::TransferFunction,
         ResultViewer::Specs,
     ];
     const LEGACY: [ResultViewer; 3] = [
@@ -860,6 +866,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
         ResultViewer::Op => op_inspector::show(ui, &mut app.state),
         ResultViewer::NoiseContrib => noise_contrib::show(ui, &mut app.state),
         ResultViewer::Contribution => sensitivity::show(ui, &mut app.state),
+        ResultViewer::TransferFunction => transfer_function::show(ui, &mut app.state),
         ResultViewer::Specs => specs::show(ui, &mut app.state),
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
@@ -1415,6 +1422,17 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 )
             }
         }
+        ResultViewer::TransferFunction => {
+            if transfer_function::active_payload_is_valid(state) {
+                ViewerAvailability::available(
+                    "Retained transfer-function evidence is available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires the active analysis to contain a valid retained transfer-function payload",
+                )
+            }
+        }
         ResultViewer::Specs => {
             let has_measurements = state.simulation.runs.iter().any(|run| {
                 run.analyses
@@ -1595,6 +1613,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Op => op_inspector::right_panel(ui, state),
         ResultViewer::NoiseContrib => noise_contrib::right_panel(ui, state),
         ResultViewer::Contribution => sensitivity::right_panel(ui, state),
+        ResultViewer::TransferFunction => transfer_function::right_panel(ui, state),
         ResultViewer::Specs => specs::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),

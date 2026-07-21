@@ -3130,6 +3130,10 @@ fn resolved_viewer_availability_for_binding(
         }
         ResultViewer::PoleZero => retained_pole_zero_payload(analysis).is_some(),
         ResultViewer::Contribution => retained_sensitivity_payload(analysis).is_some(),
+        ResultViewer::TransferFunction => analysis.result_payload.as_ref().is_some_and(|payload| {
+            matches!(payload, AnalysisResultPayload::TransferFunction { .. })
+                && payload.validate_for(analysis.analysis_type).is_ok()
+        }),
         ResultViewer::Hist
         | ResultViewer::Smith
         | ResultViewer::Op
@@ -3161,6 +3165,7 @@ fn renderer_for_viewer_document(id: &str) -> Option<ResultViewer> {
         "eye-viewer" => Some(ResultViewer::Eye),
         "viewer-pz" => Some(ResultViewer::PoleZero),
         "viewer-contribution" => Some(ResultViewer::Contribution),
+        "viewer-transfer-function" => Some(ResultViewer::TransferFunction),
         _ => None,
     }
 }
@@ -3176,6 +3181,7 @@ fn viewer_document_id(viewer: ResultViewer) -> &'static str {
         ResultViewer::Smith => "viewer-smith",
         ResultViewer::PoleZero => "viewer-pz",
         ResultViewer::Contribution => "viewer-contribution",
+        ResultViewer::TransferFunction => "viewer-transfer-function",
     }
 }
 
@@ -3807,6 +3813,7 @@ fn retained_pole_zero_payload(
             Some((poles.as_slice(), zeros.as_slice(), *gain))
         }
         AnalysisResultPayload::Sensitivity { .. }
+        | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. } => None,
@@ -3830,6 +3837,7 @@ fn retained_sensitivity_payload(
             rows,
         } => Some((output.as_str(), *result_mode, rows.as_slice())),
         AnalysisResultPayload::PoleZero { .. }
+        | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. } => None,

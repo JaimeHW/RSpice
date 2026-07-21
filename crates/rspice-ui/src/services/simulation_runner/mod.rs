@@ -167,9 +167,9 @@ pub(crate) use sweeps::{
     expand_step_sweep_values,
 };
 pub use tf::{
-    TfData, TfFrequencySweep, TfRunConfig, run_tf_analysis, run_tf_analysis_with_abort,
-    run_tf_analysis_with_config, run_tf_analysis_with_config_and_abort,
-    run_tf_analysis_with_config_and_source_path,
+    TfAccuracy, TfData, TfGainBasis, TfGainMetadata, TfGainUnit, TfNormalization, TfQuantity,
+    TfRunConfig, run_tf_analysis, run_tf_analysis_with_abort, run_tf_analysis_with_config,
+    run_tf_analysis_with_config_and_abort, run_tf_analysis_with_config_and_source_path,
     run_tf_analysis_with_config_and_source_path_and_abort, run_tf_analysis_with_source_path,
     run_tf_analysis_with_source_path_and_abort,
 };

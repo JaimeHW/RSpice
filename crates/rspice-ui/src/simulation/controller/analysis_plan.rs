@@ -255,7 +255,7 @@ impl SimulationController {
     pub(super) fn executes_via_spec(spec: &AnalysisSpec) -> bool {
         matches!(
             spec,
-            AnalysisSpec::Tf
+            AnalysisSpec::Tf { .. }
                 | AnalysisSpec::Disto { .. }
                 | AnalysisSpec::Pnoise
                 | AnalysisSpec::Pxf
@@ -303,7 +303,6 @@ impl SimulationController {
                     corner: None,
                     pac: None,
                     pxf: None,
-                    tf: None,
                     pnoise: None,
                     pstb: None,
                 })
@@ -323,7 +322,6 @@ impl SimulationController {
                     )?),
                     pac: None,
                     pxf: None,
-                    tf: None,
                     pnoise: None,
                     pstb: None,
                 })
@@ -333,7 +331,6 @@ impl SimulationController {
                 corner: None,
                 pac: Some(Self::pac_run_config_from_dialog(state)?),
                 pxf: None,
-                tf: None,
                 pnoise: None,
                 pstb: None,
             }),
@@ -342,25 +339,15 @@ impl SimulationController {
                 corner: None,
                 pac: None,
                 pxf: Some(Self::pxf_run_config_from_dialog(state)?),
-                tf: None,
                 pnoise: None,
                 pstb: None,
             }),
-            AnalysisSpec::Tf => Ok(SpecExecutionOptions {
-                temp: None,
-                corner: None,
-                pac: None,
-                pxf: None,
-                tf: Some(Self::tf_run_config_from_dialog(state)?),
-                pnoise: None,
-                pstb: None,
-            }),
+            AnalysisSpec::Tf { .. } => Ok(SpecExecutionOptions::default()),
             AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
                 temp: None,
                 corner: None,
                 pac: None,
                 pxf: None,
-                tf: None,
                 pnoise: Some(Self::pnoise_run_config_from_dialog(state)?),
                 pstb: None,
             }),
@@ -369,7 +356,6 @@ impl SimulationController {
                 corner: None,
                 pac: None,
                 pxf: None,
-                tf: None,
                 pnoise: None,
                 pstb: Some(Self::pstb_run_config_from_dialog(state)?),
             }),
@@ -378,7 +364,6 @@ impl SimulationController {
                 corner: None,
                 pac: None,
                 pxf: None,
-                tf: None,
                 pnoise: None,
                 pstb: None,
             }),

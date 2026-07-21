@@ -58,6 +58,31 @@ impl SimulationResult {
                 .get(key)
                 .copied()
                 .or_else(|| normalized.get(key).copied()),
+            SimulationResult::TransferFunction {
+                gain,
+                input_resistance,
+                output_resistance,
+                ..
+            } => {
+                if key.eq_ignore_ascii_case("gain")
+                    || key.eq_ignore_ascii_case("transfer_gain")
+                    || key.eq_ignore_ascii_case("tf.gain")
+                {
+                    gain.as_ref().and_then(tf_scalar_finite)
+                } else if key.eq_ignore_ascii_case("input_resistance")
+                    || key.eq_ignore_ascii_case("rin")
+                    || key.eq_ignore_ascii_case("tf.input_resistance")
+                {
+                    input_resistance.as_ref().and_then(tf_scalar_finite)
+                } else if key.eq_ignore_ascii_case("output_resistance")
+                    || key.eq_ignore_ascii_case("rout")
+                    || key.eq_ignore_ascii_case("tf.output_resistance")
+                {
+                    output_resistance.as_ref().and_then(tf_scalar_finite)
+                } else {
+                    None
+                }
+            }
             SimulationResult::MonteCarlo { variables, .. } => {
                 if let Some(var) = variables.iter().find(|var| var.name == key) {
                     return Some(var.mean);
@@ -144,12 +169,40 @@ impl SimulationResult {
                 }
                 out
             }
+            SimulationResult::TransferFunction {
+                gain,
+                input_resistance,
+                output_resistance,
+                ..
+            } => {
+                let mut out = HashMap::new();
+                if let Some(value) = gain.as_ref().and_then(tf_scalar_finite) {
+                    out.insert("gain".to_owned(), value);
+                    out.insert("tf.gain".to_owned(), value);
+                }
+                if let Some(value) = input_resistance.as_ref().and_then(tf_scalar_finite) {
+                    out.insert("input_resistance".to_owned(), value);
+                    out.insert("tf.input_resistance".to_owned(), value);
+                }
+                if let Some(value) = output_resistance.as_ref().and_then(tf_scalar_finite) {
+                    out.insert("output_resistance".to_owned(), value);
+                    out.insert("tf.output_resistance".to_owned(), value);
+                }
+                out
+            }
             SimulationResult::MonteCarlo { variables, .. } => variables
                 .iter()
                 .map(|var| (var.name.clone(), var.mean))
                 .collect(),
             SimulationResult::MeasurementsOnly { measurements } => measurements.clone(),
         }
+    }
+}
+
+fn tf_scalar_finite(value: &TransferFunctionScalar) -> Option<f64> {
+    match value {
+        TransferFunctionScalar::Finite(value) => Some(*value),
+        TransferFunctionScalar::PositiveInfinity | TransferFunctionScalar::NegativeInfinity => None,
     }
 }
 
@@ -218,4 +271,78 @@ fn waveform_last_value_by_name(
     waveforms
         .get(&current_key)
         .and_then(|wf| wf.y_values.last().copied())
+}
+
+#[cfg(test)]
+mod transfer_function_tests {
+    use super::*;
+    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+
+    fn result(
+        gain: Option<TransferFunctionScalar>,
+        input_resistance: Option<TransferFunctionScalar>,
+        output_resistance: Option<TransferFunctionScalar>,
+    ) -> SimulationResult {
+        SimulationResult::TransferFunction {
+            input_source: "VIN".to_owned(),
+            output_expression: "V(out)".to_owned(),
+            input_quantity: TransferFunctionQuantity::Voltage,
+            output_quantity: TransferFunctionQuantity::Voltage,
+            input_unit: "V".to_owned(),
+            output_unit: "V".to_owned(),
+            gain_unit: "V/V".to_owned(),
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
+            gain,
+            input_resistance,
+            output_resistance,
+            nominal_input: None,
+            nominal_output: None,
+        }
+    }
+
+    #[test]
+    fn tf_measurement_aliases_resolve_exact_finite_scalars() {
+        let tf = result(
+            Some(TransferFunctionScalar::Finite(-0.25)),
+            Some(TransferFunctionScalar::Finite(3_000.0)),
+            Some(TransferFunctionScalar::Finite(750.0)),
+        );
+
+        for alias in ["gain", "transfer_gain", "tf.gain", "TF.GAIN"] {
+            assert_eq!(tf.measurement(alias), Some(-0.25), "alias {alias}");
+        }
+        for alias in ["input_resistance", "rin", "tf.input_resistance"] {
+            assert_eq!(tf.measurement(alias), Some(3_000.0), "alias {alias}");
+        }
+        for alias in ["output_resistance", "rout", "tf.output_resistance"] {
+            assert_eq!(tf.measurement(alias), Some(750.0), "alias {alias}");
+        }
+        assert_eq!(tf.measurement("unknown"), None);
+
+        let measurements = tf.measurements();
+        assert_eq!(measurements["gain"], -0.25);
+        assert_eq!(measurements["tf.gain"], -0.25);
+        assert_eq!(measurements["input_resistance"], 3_000.0);
+        assert_eq!(measurements["tf.input_resistance"], 3_000.0);
+        assert_eq!(measurements["output_resistance"], 750.0);
+        assert_eq!(measurements["tf.output_resistance"], 750.0);
+    }
+
+    #[test]
+    fn infinite_tf_resistance_never_leaks_into_finite_measurement_apis() {
+        let tf = result(
+            Some(TransferFunctionScalar::Finite(1.0)),
+            Some(TransferFunctionScalar::NegativeInfinity),
+            Some(TransferFunctionScalar::PositiveInfinity),
+        );
+
+        assert_eq!(tf.measurement("gain"), Some(1.0));
+        assert_eq!(tf.measurement("rin"), None);
+        assert_eq!(tf.measurement("rout"), None);
+        let measurements = tf.measurements();
+        assert_eq!(measurements["gain"], 1.0);
+        assert!(!measurements.contains_key("input_resistance"));
+        assert!(!measurements.contains_key("output_resistance"));
+    }
 }

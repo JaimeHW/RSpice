@@ -204,6 +204,42 @@ impl SimulationController {
                 }
             }
 
+            SimulationResult::TransferFunction {
+                input_source,
+                output_expression,
+                gain,
+                input_resistance,
+                output_resistance,
+                ..
+            } => {
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
+                    "Transfer function: {} -> {}",
+                    input_source, output_expression
+                )));
+                for (label, value) in [
+                    ("gain", gain.as_ref()),
+                    ("input resistance", input_resistance.as_ref()),
+                    ("output resistance", output_resistance.as_ref()),
+                ] {
+                    if let Some(value) = value {
+                        let rendered = match value {
+                            crate::simulation::results::TransferFunctionScalar::Finite(value) => {
+                                format!("{value:.6e}")
+                            }
+                            crate::simulation::results::TransferFunctionScalar::PositiveInfinity => {
+                                "+infinity".to_owned()
+                            }
+                            crate::simulation::results::TransferFunctionScalar::NegativeInfinity => {
+                                "-infinity".to_owned()
+                            }
+                        };
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
+                            "  {label} = {rendered}"
+                        )));
+                    }
+                }
+            }
+
             SimulationResult::MonteCarlo {
                 seed,
                 runs_requested,

@@ -230,8 +230,16 @@ pub enum AnalysisSpec {
         source_stepping: bool,
         verbose: bool,
     },
-    /// Transfer function
-    Tf,
+    /// DC-linearized transfer function.
+    Tf {
+        input_source: String,
+        output_expression: String,
+        transfer_gain: bool,
+        input_resistance: bool,
+        output_resistance: bool,
+        normalization: TfNormalization,
+        accuracy: TfAccuracy,
+    },
     /// Sensitivity
     Sensitivity {
         output_var: String,
@@ -456,4 +464,25 @@ pub enum AnalysisSpec {
         include_mismatch: bool,
         normalized_contributions: bool,
     },
+}
+
+/// Retained transfer-gain normalization policy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TfNormalization {
+    #[default]
+    None,
+    RelativeToNominal,
+    PerSourceUnit,
+}
+
+/// Numerical policy for the DC operating point and zero-hertz solves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TfAccuracy {
+    Fast,
+    #[default]
+    Balanced,
+    Accurate,
+    Robust,
 }

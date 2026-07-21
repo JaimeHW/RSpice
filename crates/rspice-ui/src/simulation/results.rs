@@ -16,6 +16,36 @@ mod waveform;
 pub use monte_carlo::MonteCarloVariableResult;
 pub use operating_point::{DcOpResult, DeviceOpPoint};
 pub use waveform::WaveformData;
+
+/// Electrical quantity represented by a transfer-function input or output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferFunctionQuantity {
+    Voltage,
+    Current,
+}
+
+/// JSON-safe scalar result. Transfer-function resistance can be infinite for
+/// an open circuit, so infinity is represented explicitly rather than placed
+/// in a floating-point field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransferFunctionScalar {
+    Finite(f64),
+    PositiveInfinity,
+    NegativeInfinity,
+}
+
+impl TransferFunctionScalar {
+    #[must_use]
+    pub fn from_f64(value: f64) -> Self {
+        if value == f64::INFINITY {
+            Self::PositiveInfinity
+        } else if value == f64::NEG_INFINITY {
+            Self::NegativeInfinity
+        } else {
+            Self::Finite(value)
+        }
+    }
+}
 //=============================================================================
 // Simulation Result Container
 //=============================================================================
@@ -95,6 +125,25 @@ pub enum SimulationResult {
         sensitivities: HashMap<String, f64>,
         /// Normalized sensitivities (% change in output / % change in param)
         normalized: HashMap<String, f64>,
+    },
+
+    /// Scalar DC small-signal transfer function around the converged
+    /// operating point.
+    TransferFunction {
+        input_source: String,
+        output_expression: String,
+        input_quantity: TransferFunctionQuantity,
+        output_quantity: TransferFunctionQuantity,
+        input_unit: String,
+        output_unit: String,
+        gain_unit: String,
+        normalization: crate::simulation::multi_run::TfNormalization,
+        accuracy: crate::simulation::multi_run::TfAccuracy,
+        gain: Option<TransferFunctionScalar>,
+        input_resistance: Option<TransferFunctionScalar>,
+        output_resistance: Option<TransferFunctionScalar>,
+        nominal_input: Option<f64>,
+        nominal_output: Option<f64>,
     },
 
     /// Monte Carlo statistical analysis results.

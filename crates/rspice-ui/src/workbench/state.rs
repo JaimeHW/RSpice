@@ -2335,6 +2335,7 @@ const fn result_viewer_document_id(viewer: super::ResultViewer) -> &'static str 
         super::ResultViewer::Bode | super::ResultViewer::Nyquist => "viewer-bode",
         super::ResultViewer::Fft | super::ResultViewer::NoiseContrib => "viewer-spectrum",
         super::ResultViewer::Contribution => "viewer-contribution",
+        super::ResultViewer::TransferFunction => "viewer-transfer-function",
         super::ResultViewer::Eye => "eye-viewer",
         super::ResultViewer::Hist => "viewer-histogram",
         super::ResultViewer::Op | super::ResultViewer::Specs => "viewer-table",

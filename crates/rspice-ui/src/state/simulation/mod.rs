@@ -33,6 +33,8 @@ pub use analysis_result::{
     ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
     SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence,
     SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;

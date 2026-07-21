@@ -70,7 +70,9 @@ pub use simulation::{
     SavedOutputReceipt, SensitivityResultMode, SensitivityResultRow, SharedWaveformValues,
     SimulationExecutionIdentity, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
     SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
+    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence, WaveformData,
     ac_bode_summary_for_run, ac_bode_summary_for_selection, ac_bode_summary_for_source_instance,
 };
 pub use symbol::{

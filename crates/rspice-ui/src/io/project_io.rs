@@ -1007,7 +1007,8 @@ const EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION: u32 = 6;
 const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
 const CONTENT_DIGEST_RESULTS_SCHEMA_VERSION: u32 = 8;
 const TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION: u32 = 9;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 10;
+const RELIABILITY_SOA_RESULTS_SCHEMA_VERSION: u32 = 10;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 11;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
@@ -1268,8 +1269,9 @@ impl ProjectSimulationResults {
     /// analysis evidence are reconstructed. Schema v8 digests are verified
     /// with their original encoding before payload absence is migrated. Schema
     /// v9 digests are likewise authenticated before Reliability/SOA evidence
-    /// absence is preserved and the result is resealed with the current
-    /// encoding.
+    /// absence is preserved. Schema-v10 digests are authenticated before TF
+    /// evidence absence is preserved. Each migrated result is then resealed
+    /// with the current encoding.
     pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
@@ -1282,6 +1284,14 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema == RELIABILITY_SOA_RESULTS_SCHEMA_VERSION {
+            for run in &mut self.runs {
+                validate_v10_result_digests(run)?;
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema == TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v9_result_digests(run)?;
@@ -1294,6 +1304,17 @@ impl ProjectSimulationResults {
                 }) {
                     return Err(format!(
                         "schema-v9 analysis {} contains Reliability/SOA evidence introduced by schema v10",
+                        analysis.id
+                    ));
+                }
+                if let Some(analysis) = run.analyses.iter().find(|analysis| {
+                    matches!(
+                        analysis.result_payload.as_ref(),
+                        Some(AnalysisResultPayload::TransferFunction { .. })
+                    )
+                }) {
+                    return Err(format!(
+                        "schema-v9 analysis {} contains transfer-function evidence introduced by schema v11",
                         analysis.id
                     ));
                 }
@@ -1878,6 +1899,15 @@ fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> 
                 analysis.id
             ));
         }
+        if matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::TransferFunction { .. })
+        ) {
+            return Err(format!(
+                "schema-v9 analysis {} contains transfer-function evidence introduced by schema v11",
+                analysis.id
+            ));
+        }
         let retained = analysis
             .result_data_digest
             .as_ref()
@@ -1914,6 +1944,62 @@ fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> 
     if retained != computed {
         return Err(format!(
             "schema-v9 simulation run {} dataset content digest does not match retained content",
+            run.id
+        ));
+    }
+    Ok(())
+}
+
+/// Authenticate a schema-v10 run with the exact Reliability/SOA-capable
+/// digest encoding that wrote it. Typed TF evidence is a schema-v11 field and
+/// must be rejected before the authenticated v10 document is resealed.
+fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    for analysis in &run.analyses {
+        if matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::TransferFunction { .. })
+        ) {
+            return Err(format!(
+                "schema-v10 analysis {} contains transfer-function evidence introduced by schema v11",
+                analysis.id
+            ));
+        }
+        let retained = analysis
+            .result_data_digest
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "schema-v10 analysis {} is missing its result data digest",
+                    analysis.id
+                )
+            })?;
+        let computed = analysis
+            .clone()
+            .into_analysis()?
+            .legacy_v3_result_data_digest();
+        if retained != computed {
+            return Err(format!(
+                "schema-v10 analysis {} result data digest does not match retained content",
+                analysis.id
+            ));
+        }
+    }
+
+    let retained = run
+        .dataset_content_digest
+        .as_ref()
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "schema-v10 simulation run {} is missing its dataset content digest",
+                run.id
+            )
+        })?;
+    let computed = run.clone().into_run()?.legacy_v3_dataset_content_digest();
+    if retained != computed {
+        return Err(format!(
+            "schema-v10 simulation run {} dataset content digest does not match retained content",
             run.id
         ));
     }
@@ -2424,7 +2510,7 @@ impl ProjectSimulationRun {
             receipt.validate_result_prefix(&analyses)?;
         }
         let retained_digest = self.dataset_content_digest.as_ref().copied().ok_or_else(|| {
-            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v10")
+            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v11")
         })?;
         let computed_digest = self
             .clone()
@@ -2812,7 +2898,7 @@ impl ProjectAnalysisResult {
                 .map_err(|error| format!("{prefix}.provenance is invalid: {error}"))?;
         }
         let retained_digest = self.result_data_digest.as_ref().copied().ok_or_else(|| {
-            format!("{prefix}.result_data_digest is required by simulation results schema v10")
+            format!("{prefix}.result_data_digest is required by simulation results schema v11")
         })?;
         let analysis = self
             .clone()
@@ -4758,8 +4844,24 @@ mod tests {
         );
         run.add_analysis(
             AnalysisResult::new(3, AnalysisType::Tf, "TF").with_result_payload(
-                AnalysisResultPayload::ScalarMeasurements {
-                    values: std::collections::BTreeMap::from([("gain".to_owned(), 10.0)]),
+                AnalysisResultPayload::TransferFunction {
+                    input_source: "VIN".to_owned(),
+                    output_expression: "V(OUT)".to_owned(),
+                    input_quantity: crate::state::TransferFunctionQuantityEvidence::Voltage,
+                    output_quantity: crate::state::TransferFunctionQuantityEvidence::Voltage,
+                    input_unit: "V".to_owned(),
+                    output_unit: "V".to_owned(),
+                    normalization: crate::state::TransferFunctionNormalizationEvidence::None,
+                    accuracy: crate::state::TransferFunctionAccuracyEvidence::Balanced,
+                    gain: Some(crate::state::TransferFunctionScalarEvidence::Finite(10.0)),
+                    input_resistance: Some(
+                        crate::state::TransferFunctionScalarEvidence::PositiveInfinity,
+                    ),
+                    output_resistance: Some(crate::state::TransferFunctionScalarEvidence::Finite(
+                        50.0,
+                    )),
+                    nominal_input: None,
+                    nominal_output: None,
                 },
             ),
         );
@@ -4851,6 +4953,15 @@ mod tests {
             restored.runs[0].analyses[2].result_payload,
             simulation.runs[0].analyses[2].result_payload
         );
+        assert!(matches!(
+            restored.runs[0].analyses[2].result_payload.as_ref(),
+            Some(AnalysisResultPayload::TransferFunction {
+                input_resistance: Some(
+                    crate::state::TransferFunctionScalarEvidence::PositiveInfinity
+                ),
+                ..
+            })
+        ));
         assert_eq!(
             restored.runs[0].analyses[3].result_payload,
             simulation.runs[0].analyses[3].result_payload
@@ -4883,6 +4994,18 @@ mod tests {
             reliability_tampered
                 .validate()
                 .expect_err("reliability field tampering invalidates the result digest")
+                .contains("result_data_digest does not match retained analysis content")
+        );
+
+        let mut tf_tampered: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
+        tf_tampered["runs"][0]["analyses"][2]["result_payload"]["gain"]["value"] =
+            serde_json::json!(10.000_000_000_000_002_f64);
+        let tf_tampered: ProjectSimulationResults = serde_json::from_value(tf_tampered)
+            .expect("tampered transfer-function payload remains structural");
+        assert!(
+            tf_tampered
+                .validate()
+                .expect_err("transfer-function field tampering invalidates the result digest")
                 .contains("result_data_digest does not match retained analysis content")
         );
 
@@ -4986,13 +5109,13 @@ mod tests {
     }
 
     #[test]
-    fn schema_v9_digests_are_authenticated_before_v10_resealing() {
+    fn schema_v9_digests_are_authenticated_before_current_resealing() {
         let mut run = SimulationRun::new(33);
         run.mark_running().expect("fixture run starts");
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .expect("fixture run completes");
         run.add_analysis(
-            AnalysisResult::new(1, AnalysisType::Tf, "TF").with_result_payload(
+            AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_result_payload(
                 AnalysisResultPayload::ScalarMeasurements {
                     values: std::collections::BTreeMap::from([("gain".to_owned(), 10.0)]),
                 },
@@ -5036,14 +5159,16 @@ mod tests {
             migrated.schema_version,
             PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
         );
-        migrated.validate().expect("resealed v10 results validate");
+        migrated
+            .validate()
+            .expect("resealed current results validate");
         assert!(
             migrated.runs[0].analyses[1].result_payload.is_missing(),
             "migration preserves the absence of v10 reliability evidence"
         );
         assert_ne!(
             migrated.runs[0].dataset_content_digest, v9.runs[0].dataset_content_digest,
-            "v10 uses the v3 canonical digest domain"
+            "current results use the v4 canonical digest domain"
         );
 
         let mut tampered = v9.clone();
@@ -5079,6 +5204,121 @@ mod tests {
                 .migrate_to_current(ProjectId::new())
                 .expect_err("schema-v9 cannot inject v10 evidence")
                 .contains("Reliability/SOA evidence introduced by schema v10")
+        );
+    }
+
+    #[test]
+    fn schema_v10_digests_are_authenticated_before_v11_tf_resealing() {
+        let mut run = SimulationRun::new(34);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+                .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
+                    years: vec![10.0],
+                })
+                .with_result_payload(AnalysisResultPayload::Reliability {
+                    devices: vec![crate::state::ReliabilityDeviceEvidence {
+                        device_id: "M1".to_owned(),
+                        stress: crate::state::ReliabilityStressEvidence {
+                            average_gate_stress_v: 1.2,
+                            average_drain_stress_v: 1.8,
+                            average_temperature_k: 358.15,
+                            duration_s: 3_600.0,
+                        },
+                        checkpoints: vec![crate::state::ReliabilityCheckpointEvidence {
+                            years: 10.0,
+                            shift: crate::state::ReliabilityShiftEvidence {
+                                threshold_voltage_shift_v: 0.03,
+                                mobility_shift: -0.004,
+                                drain_source_resistance_shift: 0.0015,
+                            },
+                        }],
+                    }],
+                }),
+        );
+        run.add_analysis(AnalysisResult::new(2, AnalysisType::Tf, "TF"));
+        seal_legacy_unattributed(&mut run);
+
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 34;
+        let mut v10 = ProjectSimulationResults::from_state(&simulation);
+        v10.schema_version = RELIABILITY_SOA_RESULTS_SCHEMA_VERSION;
+        for analysis in &mut v10.runs[0].analyses {
+            analysis.result_data_digest = PersistedField::Value(
+                analysis
+                    .clone()
+                    .into_analysis()
+                    .expect("v10 analysis fixture")
+                    .legacy_v3_result_data_digest(),
+            );
+        }
+        v10.runs[0].dataset_content_digest = PersistedField::Value(
+            v10.runs[0]
+                .clone()
+                .into_run()
+                .expect("v10 run fixture")
+                .legacy_v3_dataset_content_digest(),
+        );
+
+        let mut migrated = v10.clone();
+        migrated
+            .migrate_to_current(ProjectId::new())
+            .expect("authentic v10 results migrate");
+        assert_eq!(
+            migrated.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        migrated.validate().expect("resealed v11 results validate");
+        assert!(
+            migrated.runs[0].analyses[1].result_payload.is_missing(),
+            "migration preserves the absence of v11 transfer-function evidence"
+        );
+        assert_ne!(
+            migrated.runs[0].dataset_content_digest, v10.runs[0].dataset_content_digest,
+            "v11 uses the v4 canonical digest domain"
+        );
+
+        let mut tampered = v10.clone();
+        let Some(AnalysisResultPayload::Reliability { devices }) =
+            tampered.runs[0].analyses[0].result_payload.as_mut()
+        else {
+            panic!("schema-v10 reliability payload")
+        };
+        devices[0].stress.duration_s = 3_600.000_000_000_000_5;
+        assert!(
+            tampered
+                .migrate_to_current(ProjectId::new())
+                .expect_err("v10 tampering is rejected before resealing")
+                .contains("schema-v10 analysis 1 result data digest")
+        );
+
+        let mut injected = v10;
+        injected.runs[0].analyses[1].result_payload =
+            PersistedField::Value(AnalysisResultPayload::TransferFunction {
+                input_source: "VIN".to_owned(),
+                output_expression: "V(OUT)".to_owned(),
+                input_quantity: crate::state::TransferFunctionQuantityEvidence::Voltage,
+                output_quantity: crate::state::TransferFunctionQuantityEvidence::Voltage,
+                input_unit: "V".to_owned(),
+                output_unit: "V".to_owned(),
+                normalization: crate::state::TransferFunctionNormalizationEvidence::None,
+                accuracy: crate::state::TransferFunctionAccuracyEvidence::Balanced,
+                gain: Some(crate::state::TransferFunctionScalarEvidence::Finite(0.5)),
+                input_resistance: Some(
+                    crate::state::TransferFunctionScalarEvidence::PositiveInfinity,
+                ),
+                output_resistance: Some(crate::state::TransferFunctionScalarEvidence::Finite(50.0)),
+                nominal_input: None,
+                nominal_output: None,
+            });
+        assert!(
+            injected
+                .migrate_to_current(ProjectId::new())
+                .expect_err("schema-v10 cannot inject v11 transfer-function evidence")
+                .contains("transfer-function evidence introduced by schema v11")
         );
     }
 

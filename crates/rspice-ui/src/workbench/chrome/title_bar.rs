@@ -1396,6 +1396,10 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
             "Sensitivity contributions",
         ),
         (
+            crate::workbench::ResultViewer::TransferFunction,
+            "Transfer function",
+        ),
+        (
             crate::workbench::ResultViewer::Specs,
             "Measurements & specifications",
         ),

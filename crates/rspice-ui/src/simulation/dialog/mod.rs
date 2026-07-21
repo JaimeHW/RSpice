@@ -80,7 +80,7 @@ pub use sp::{SpConfig, SpDialogState, SpPortConfig, SpSweepType};
 
 // Re-exports - Transfer Function
 pub use pz::{PzAnalysisType, PzConfig, PzDialogState, PzTransferType};
-pub use xf::{XfConfig, XfDialogState, XfSweepType};
+pub use xf::{XfAccuracy, XfConfig, XfDialogState, XfNormalization};
 
 // Re-exports - Stability/Sensitivity
 pub use sens::{SensConfig, SensDialogState, SensType};

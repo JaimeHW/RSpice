@@ -17,8 +17,8 @@ function executableAsset(name) {
 let initPromise = null;
 let runWorkerRequest = null;
 let runVerilogACompileRequest = null;
-const WORKER_PROTOCOL_VERSION = 3;
-const WORKER_REQUEST_PROTOCOL_VERSION = 1;
+const WORKER_PROTOCOL_VERSION = 4;
+const WORKER_REQUEST_PROTOCOL_VERSION = 2;
 
 function asErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);

@@ -1,4 +1,8 @@
 use super::*;
+use crate::state::{
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -173,6 +177,82 @@ impl SimulationController {
                     output,
                     result_mode,
                     rows,
+                };
+                self.analysis_result_with_validated_payload(analysis_type, label, payload)
+            }
+
+            SimulationResult::TransferFunction {
+                input_source,
+                output_expression,
+                input_quantity,
+                output_quantity,
+                input_unit,
+                output_unit,
+                gain_unit: _,
+                normalization,
+                accuracy,
+                gain,
+                input_resistance,
+                output_resistance,
+                nominal_input,
+                nominal_output,
+            } => {
+                let quantity = |value| match value {
+                    crate::simulation::results::TransferFunctionQuantity::Voltage => {
+                        TransferFunctionQuantityEvidence::Voltage
+                    }
+                    crate::simulation::results::TransferFunctionQuantity::Current => {
+                        TransferFunctionQuantityEvidence::Current
+                    }
+                };
+                let scalar = |value| match value {
+                    crate::simulation::results::TransferFunctionScalar::Finite(value) => {
+                        TransferFunctionScalarEvidence::Finite(value)
+                    }
+                    crate::simulation::results::TransferFunctionScalar::PositiveInfinity => {
+                        TransferFunctionScalarEvidence::PositiveInfinity
+                    }
+                    crate::simulation::results::TransferFunctionScalar::NegativeInfinity => {
+                        TransferFunctionScalarEvidence::NegativeInfinity
+                    }
+                };
+                let payload = AnalysisResultPayload::TransferFunction {
+                    input_source,
+                    output_expression,
+                    input_quantity: quantity(input_quantity),
+                    output_quantity: quantity(output_quantity),
+                    input_unit,
+                    output_unit,
+                    normalization: match normalization {
+                        crate::simulation::multi_run::TfNormalization::None => {
+                            TransferFunctionNormalizationEvidence::None
+                        }
+                        crate::simulation::multi_run::TfNormalization::RelativeToNominal => {
+                            TransferFunctionNormalizationEvidence::RelativeToNominal
+                        }
+                        crate::simulation::multi_run::TfNormalization::PerSourceUnit => {
+                            TransferFunctionNormalizationEvidence::PerSourceUnit
+                        }
+                    },
+                    accuracy: match accuracy {
+                        crate::simulation::multi_run::TfAccuracy::Fast => {
+                            TransferFunctionAccuracyEvidence::Fast
+                        }
+                        crate::simulation::multi_run::TfAccuracy::Balanced => {
+                            TransferFunctionAccuracyEvidence::Balanced
+                        }
+                        crate::simulation::multi_run::TfAccuracy::Accurate => {
+                            TransferFunctionAccuracyEvidence::Accurate
+                        }
+                        crate::simulation::multi_run::TfAccuracy::Robust => {
+                            TransferFunctionAccuracyEvidence::Robust
+                        }
+                    },
+                    gain: gain.map(scalar),
+                    input_resistance: input_resistance.map(scalar),
+                    output_resistance: output_resistance.map(scalar),
+                    nominal_input,
+                    nominal_output,
                 };
                 self.analysis_result_with_validated_payload(analysis_type, label, payload)
             }
