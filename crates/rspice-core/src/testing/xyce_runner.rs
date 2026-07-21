@@ -49161,7 +49161,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         netlist, element,
                     ) => {}
                 ElementKind::Bjt { .. }
-                    if max_frequency <= 10_000.0 + 1.0e-9
+                    if max_frequency <= 20_000.0 + 1.0e-9
                         && Self::netlist_element_is_native_static_ac_exact_bf_is_npn(
                             netlist, element,
                         ) => {}
@@ -49169,7 +49169,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 10 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -56000,6 +56000,81 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    fn xyce_ac_sweep_frequencies(
+        variation: crate::netlist::FreqVariation,
+        points: usize,
+        fstart: Value,
+        fstop: Value,
+    ) -> Vec<Value> {
+        if points == 0
+            || points > i32::MAX as usize
+            || !fstart.is_finite()
+            || !fstop.is_finite()
+            || fstart > fstop
+        {
+            return Vec::new();
+        }
+        match variation {
+            crate::netlist::FreqVariation::Dec | crate::netlist::FreqVariation::Oct
+                if fstart <= 0.0 =>
+            {
+                return Vec::new();
+            }
+            crate::netlist::FreqVariation::Lin if fstart < 0.0 => return Vec::new(),
+            _ => {}
+        }
+
+        let count = match variation {
+            crate::netlist::FreqVariation::Lin => points,
+            crate::netlist::FreqVariation::Dec => {
+                let span = (fstart.log10() - fstop.log10()).abs();
+                let count = (span * points as Value + 1.0).floor();
+                if !count.is_finite() || count <= 0.0 || count > i32::MAX as Value {
+                    return Vec::new();
+                }
+                count as usize
+            }
+            crate::netlist::FreqVariation::Oct => {
+                let span = (fstart.ln() - fstop.ln()).abs() / std::f64::consts::LN_2;
+                let count = (span * points as Value + 1.0).floor();
+                if !count.is_finite() || count <= 0.0 || count > i32::MAX as Value {
+                    return Vec::new();
+                }
+                count as usize
+            }
+        };
+
+        let step = match variation {
+            crate::netlist::FreqVariation::Lin => {
+                if count <= 1 {
+                    0.0
+                } else {
+                    (fstop - fstart) / (count - 1) as Value
+                }
+            }
+            crate::netlist::FreqVariation::Dec => {
+                (1.0 / points as Value * std::f64::consts::LN_10).exp()
+            }
+            crate::netlist::FreqVariation::Oct => {
+                (1.0 / points as Value * std::f64::consts::LN_2).exp()
+            }
+        };
+
+        let frequencies = (0..count)
+            .map(|index| match variation {
+                crate::netlist::FreqVariation::Lin => fstart + index as Value * step,
+                crate::netlist::FreqVariation::Dec | crate::netlist::FreqVariation::Oct => {
+                    fstart * step.powf(index as Value)
+                }
+            })
+            .collect::<Vec<_>>();
+        frequencies
+            .iter()
+            .all(|frequency| frequency.is_finite())
+            .then_some(frequencies)
+            .unwrap_or_default()
+    }
+
     fn single_ac_analysis(netlist: &Netlist) -> Result<XyceAcAnalysis, String> {
         let mut analyses = Vec::new();
         for analysis in &netlist.analyses {
@@ -56010,7 +56085,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     start_freq,
                     stop_freq,
                 } => analyses.push(XyceAcAnalysis {
-                    frequencies: ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
+                    frequencies: Self::xyce_ac_sweep_frequencies(
+                        *variation,
+                        *points,
+                        *start_freq,
+                        *stop_freq,
+                    ),
                     data_points: None,
                 }),
                 AnalysisCommand::AcData { table_name } => {
@@ -82720,14 +82800,56 @@ Q1 c b 0 QN
         );
         validate(
             &source("IS=8e-16 BF=250", "IS=8e-16")
-                .replace(".AC DEC 10 100 100k", ".AC DEC 10 100 10k")
+                .replace(".AC DEC 10 100 100k", ".AC DEC 10 100 20k")
                 .replace("PNP", "NPN"),
         )
-        .expect("exact NPN BF/IS hierarchy is supported through the validated 10 kHz envelope");
+        .expect("exact NPN BF/IS hierarchy is supported through the validated 20 kHz envelope");
         assert!(
             validate(&source("IS=8e-16 BF=250", "IS=8e-16").replace("PNP", "NPN")).is_err(),
-            "NPN BF/IS hierarchy above the validated 10 kHz envelope remains unsupported"
+            "NPN BF/IS hierarchy above the validated 20 kHz envelope remains unsupported"
         );
+    }
+
+    #[test]
+    fn xyce_ac_sweep_uses_upstream_logarithmic_grid_without_endpoint_warping() {
+        let sandler8 = XyceTestRunner::xyce_ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            51,
+            1.0e3,
+            20.0e3,
+        );
+        assert_eq!(sandler8.len(), 67);
+        assert_eq!(sandler8[0], 1.0e3);
+        assert!((sandler8[1] - 1.0461834443918254e3).abs() < 1.0e-9);
+        assert!((sandler8[sandler8.len() - 1] - 1.9684194472866122e4).abs() < 1.0e-9);
+        assert!(sandler8.last().is_some_and(|frequency| *frequency < 20.0e3));
+
+        let fractional_decade = XyceTestRunner::xyce_ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            10,
+            1.0,
+            3.0e5,
+        );
+        assert_eq!(fractional_decade.len(), 55);
+        assert!((fractional_decade.last().copied().unwrap() - 251_188.643150958).abs() < 1.0e-6);
+
+        let octave = XyceTestRunner::xyce_ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Oct,
+            2,
+            10.0,
+            50.0,
+        );
+        assert_eq!(octave.len(), 5);
+        assert!((octave[1] - 14.142135623730951).abs() < 1.0e-12);
+        assert!((octave[4] - 40.0).abs() < 1.0e-12);
+
+        let linear = XyceTestRunner::xyce_ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Lin,
+            2,
+            1.0e3,
+            2.0e3,
+        );
+        assert_eq!(linear, vec![1.0e3, 2.0e3]);
     }
 
     #[test]
