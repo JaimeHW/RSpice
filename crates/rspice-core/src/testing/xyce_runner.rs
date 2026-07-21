@@ -49538,6 +49538,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_npn(netlist, element)
             });
+        let has_qualified_level1_mos = purpose.validates_absolute_device_contract()
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_native_transient_level1_mosfet(netlist, element)
+            });
         let has_qualified_diode = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_exact_is_diode(netlist, element)
@@ -49546,7 +49550,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
             });
-        if (has_qualified_bjt || has_qualified_diode || has_qualified_level9_bsim3)
+        if (has_qualified_bjt
+            || has_qualified_level1_mos
+            || has_qualified_diode
+            || has_qualified_level9_bsim3)
             && !Self::native_transient_uses_standard_startup(netlist)
         {
             return Err(
@@ -49709,6 +49716,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             netlist, element,
                         ) => {}
                 ElementKind::Mosfet { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_native_transient_level1_mosfet(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Mosfet { .. }
                     if purpose.admits_default_level9_bsim3()
                         && Self::netlist_element_is_native_absolute_transient_level9_bsim3(
                             netlist, element,
@@ -49747,7 +49759,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and exact IS-only diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and classic MOSFET models, exact IS-only diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -54464,6 +54476,73 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             "MJE" | "MJC" => (0.0..1.0).contains(&value),
             _ => false,
         }
+    }
+
+    fn netlist_element_is_native_transient_level1_mosfet(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        if element.nodes.len() != 4
+            || *compact_syntax
+            || !deferred_params.is_empty()
+            || !Self::native_transient_level1_mos_instance_params_are_valid(instance_params)
+        {
+            return false;
+        }
+        Self::find_unique_model_in(&netlist.models, model)
+            .is_some_and(Self::model_is_native_transient_level1_mosfet)
+    }
+
+    fn model_is_native_transient_level1_mosfet(model: &crate::netlist::ModelDef) -> bool {
+        Self::model_is_native_dc_analysis_expression_mos1(model)
+            && Self::numeric_param_value(&model.params, "LEVEL")
+                .is_some_and(|level| level.to_bits() == 1.0f64.to_bits())
+    }
+
+    fn native_transient_level1_mos_instance_params_are_valid(params: &[(String, Value)]) -> bool {
+        let mut names = BTreeSet::new();
+        let mut has_length = false;
+        let mut has_width = false;
+        for (name, value) in params {
+            if !value.is_finite() || !names.insert(name.to_ascii_uppercase()) {
+                return false;
+            }
+            match name.to_ascii_uppercase().as_str() {
+                "L" => {
+                    has_length = *value > 0.0;
+                }
+                "W" => {
+                    has_width = *value > 0.0;
+                }
+                "M" => {
+                    if *value <= 0.0 {
+                        return false;
+                    }
+                }
+                "AD" | "AS" | "PD" | "PS" | "NRD" | "NRS" => {
+                    if *value < 0.0 {
+                        return false;
+                    }
+                }
+                "TEMP" | "DTEMP" => {
+                    if *value <= -273.15 {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        has_length && has_width
     }
 
     fn netlist_device_is_native_legacy_bjt(netlist: &Netlist, instance_name: &str) -> bool {
@@ -82040,6 +82119,79 @@ Q1 c b 0 s QN
         assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
             &vector
         ));
+    }
+
+    #[test]
+    fn absolute_classic_level1_mos_transient_contract_is_explicit_and_bounded() {
+        let source = "\
+validated classic MOS Level-1 transient subset
+VDD d 0 5
+VIN g 0 PULSE(0 5 1n 1n 1n 10n 20n)
+R1 d 0 10k
+C1 d 0 0.1p
+MN1 d g 0 0 NM L=5u W=10u
+MP1 d g VDD VDD PM L=5u W=10u
+.MODEL NM NMOS (LEVEL=1 KP=2m VTO=1 TOX=60n)
+.MODEL PM PMOS (LEVEL=1 KP=2m VTO=-1 TOX=60n)
+.TRAN 1n 20n
+.PRINT TRAN V(d)
+.END
+";
+        let netlist = Netlist::parse(source).expect("classic MOS Level-1 fixture parses");
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("exact classic MOS Level-1 fixture is eligible");
+        assert!(
+            XyceTestRunner::model_is_native_transient_level1_mosfet(
+                netlist
+                    .models
+                    .iter()
+                    .find(|model| model.name.eq_ignore_ascii_case("NM"))
+                    .expect("NM model exists")
+            ),
+            "NMOS Level-1 model remains on the native classic route"
+        );
+        assert!(
+            XyceTestRunner::model_is_native_transient_level1_mosfet(
+                netlist
+                    .models
+                    .iter()
+                    .find(|model| model.name.eq_ignore_ascii_case("PM"))
+                    .expect("PM model exists")
+            ),
+            "PMOS Level-1 model remains on the native classic route"
+        );
+
+        let mut unknown_parameter = netlist.clone();
+        unknown_parameter
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("NM"))
+            .expect("NM model exists")
+            .params
+            .push(("UNQUALIFIED".to_string(), 1.0));
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&unknown_parameter).is_err(),
+            "unknown classic MOS model parameters remain fail-closed"
+        );
+
+        let mut missing_geometry = netlist;
+        let mos = missing_geometry
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+            .expect("MN1 exists");
+        if let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut mos.kind
+        {
+            instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case("W"));
+        } else {
+            panic!("MN1 remains a MOSFET");
+        }
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&missing_geometry).is_err(),
+            "classic MOS transient admission requires explicit positive L/W geometry"
+        );
     }
 
     #[test]
