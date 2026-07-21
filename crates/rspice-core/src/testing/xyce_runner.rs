@@ -32,7 +32,7 @@ use crate::netlist::{
     validate_output_symbols,
 };
 use crate::{Complex64, Engine, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19737,6 +19737,33 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 });
             }
         }
+        // EKV26's canonical transient implementation is adaptive while the
+        // Xyce PRN oracle records accepted breakpoints.  A reference-grid
+        // pointwise comparison would therefore compare different row counts;
+        // use Xyce's integrated-RMS verifier for the strictly validated
+        // complementary pair envelope instead.
+        if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
+            && !requires_wrapper
+            && plan.contract == XyceStaticTranContract::PlainStatic
+            && !plan.output_override
+            && !plan.timeint_conststep
+            && plan.steps.is_empty()
+            && plan.wrapper_tolerance.is_none()
+            && plan.reference_path.is_file()
+            && !Self::source_has_comp_directive(&plan.source)
+            && Self::native_transient_uses_standard_startup(netlist)
+            && netlist.diagnostics.is_empty()
+            && Self::netlist_is_native_transient_ekv26_pair(netlist)
+            && Self::validate_native_transient_contract_for_purpose(
+                netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+            )
+            .is_ok()
+        {
+            return Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            });
+        }
         if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
             || requires_wrapper
             || plan.contract != XyceStaticTranContract::PlainStatic
@@ -26486,7 +26513,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             };
 
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
-        let engine = self.create_xyce_static_tran_engine(None, initial_step);
+        // The reference-backed EKV26 envelope is qualified at the Xyce
+        // accepted-breakpoint grid.  Its explicit four-terminal pair and
+        // canonical constructor guard make this deterministic grid an
+        // execution contract, while other integrated-RMS decks retain their
+        // independent adaptive candidate grid.
+        let locked_time_grid = if Self::netlist_is_native_transient_ekv26_pair(&netlist)
+            && plan.comparison_mode.uses_integrated_rms_verifier()
+        {
+            Some(reference_time_grid.clone())
+        } else {
+            None
+        };
+        let engine = self.create_xyce_static_tran_engine(locked_time_grid, initial_step);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mut best_mismatches = None;
         let mut simulation_error = None;
@@ -47208,11 +47247,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         match plan.comparison_mode {
             XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
             | XyceStaticTranComparisonMode::Release710IntegratedRmsComp { .. } => {
+                let solver_max_step = if Self::netlist_is_native_transient_ekv26_pair(netlist) {
+                    // The native EKV26 evaluator is reference-qualified on a
+                    // fine oracle step envelope.  Keep the integrated verifier
+                    // independent of the candidate output row count while
+                    // retaining enough accepted states for the device's
+                    // steep complementary transition.
+                    Self::transient_oracle_solver_max_step(tran)
+                } else {
+                    Self::xyce_transient_solver_max_step(tran)
+                };
                 Self::transient_max_step_with_solver_ceiling(
                     netlist,
                     tran,
                     None,
-                    Self::xyce_transient_solver_max_step(tran),
+                    solver_max_step,
                     false,
                 )
             }
@@ -49547,6 +49596,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_mosfet(netlist, element)
             });
+        let has_qualified_ekv26 = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_transient_ekv26_pair(netlist);
         let has_qualified_diode = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_exact_is_diode(netlist, element)
@@ -49557,6 +49608,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             });
         if (has_qualified_bjt
             || has_qualified_level1_mos
+            || has_qualified_ekv26
             || has_qualified_diode
             || has_qualified_level9_bsim3)
             && !Self::native_transient_uses_standard_startup(netlist)
@@ -49722,6 +49774,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         ) => {}
                 ElementKind::Mosfet { .. }
                     if purpose.validates_absolute_device_contract()
+                        && Self::netlist_is_native_transient_ekv26_pair(netlist)
+                        && Self::netlist_element_is_native_transient_ekv26(netlist, element) => {}
+                ElementKind::Mosfet { .. }
+                    if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_transient_level1_mosfet(
                             netlist, element,
                         ) => {}
@@ -49764,7 +49820,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and classic MOSFET models, exact IS-only diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, and classic MOSFET models, exact IS-only diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -54590,6 +54646,233 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     }
                 }
                 _ => return false,
+            }
+        }
+        has_length && has_width
+    }
+
+    /// Return true only for an element that is validated by the native EKV
+    /// 2.6 evaluator used by the engine's LEVEL=260 route.
+    ///
+    /// The runner deliberately asks the canonical native constructor to
+    /// validate the numeric model/instance domains instead of maintaining a
+    /// second copy of EKV26's parameter equations here.  The surrounding
+    /// structural checks keep generated Verilog-A model names, deferred
+    /// expressions, compact syntax, and ambiguous geometry out of this
+    /// absolute Xyce oracle contract.
+    fn netlist_element_is_native_transient_ekv26(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        if element.nodes.len() != 4
+            || *compact_syntax
+            || !deferred_params.is_empty()
+            || !Self::native_transient_ekv26_instance_params_are_valid(instance_params)
+        {
+            return false;
+        }
+        let Some(model) = Self::find_unique_model_in(&netlist.models, model) else {
+            return false;
+        };
+        let Some((mos_type, model_params)) = Self::native_transient_ekv26_model_params(model)
+        else {
+            return false;
+        };
+        crate::device::EkvMosfet::from_params(
+            "__xyce_ekv26_contract__".to_string(),
+            0,
+            0,
+            0,
+            0,
+            mos_type,
+            &model_params,
+            instance_params,
+            300.15,
+        )
+        .is_ok()
+    }
+
+    /// The validated absolute EKV26 transient envelope is the complementary
+    /// two-device inverter topology reference-backed by Xyce 7.10.  Larger
+    /// chains and arbitrary same-polarity networks need their own transient
+    /// propagation oracle and remain fail-closed.
+    fn netlist_is_native_transient_ekv26_pair(netlist: &Netlist) -> bool {
+        if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            let Ok(flattened) = flatten_netlist_with_models(netlist) else {
+                return false;
+            };
+            let mut flat_netlist = netlist.clone();
+            flat_netlist.elements = flattened.elements;
+            flat_netlist.models.extend(flattened.scoped_models);
+            flat_netlist.subcircuits.clear();
+            return Self::netlist_is_native_transient_ekv26_pair(&flat_netlist);
+        }
+
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.len() != 2
+            || mosfets
+                .iter()
+                .any(|element| !Self::netlist_element_is_native_transient_ekv26(netlist, element))
+        {
+            return false;
+        }
+
+        let mut model_types = BTreeSet::new();
+        for element in mosfets {
+            let ElementKind::Mosfet { model, .. } = &element.kind else {
+                return false;
+            };
+            let Some(model) = Self::find_unique_model_in(&netlist.models, model) else {
+                return false;
+            };
+            if !Self::model_is_native_transient_ekv26(model) {
+                return false;
+            }
+            model_types.insert(model.model_type.to_ascii_uppercase());
+        }
+        model_types.len() == 2 && model_types.contains("NMOS") && model_types.contains("PMOS")
+    }
+
+    fn model_is_native_transient_ekv26(model: &crate::netlist::ModelDef) -> bool {
+        let Some((mos_type, model_params)) = Self::native_transient_ekv26_model_params(model)
+        else {
+            return false;
+        };
+        crate::device::EkvMosfet::from_params(
+            "__xyce_ekv26_contract__".to_string(),
+            0,
+            0,
+            0,
+            0,
+            mos_type,
+            &model_params,
+            &[],
+            300.15,
+        )
+        .is_ok()
+    }
+
+    fn native_transient_ekv26_model_params(
+        model: &crate::netlist::ModelDef,
+    ) -> Option<(crate::device::MosType, HashMap<String, Value>)> {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return None;
+        }
+
+        let mut names = BTreeSet::new();
+        let mut model_params = HashMap::with_capacity(model.params.len());
+        for (name, value) in &model.params {
+            let normalized = name.to_ascii_uppercase();
+            if !names.insert(normalized.clone()) || !value.is_finite() {
+                return None;
+            }
+            model_params.insert(normalized, *value);
+        }
+        if !Self::numeric_param_value(&model.params, "LEVEL")
+            .is_some_and(|level| level.to_bits() == 260.0f64.to_bits())
+        {
+            return None;
+        }
+
+        let mos_type = if model.model_type.eq_ignore_ascii_case("NMOS") {
+            crate::device::MosType::Nmos
+        } else {
+            crate::device::MosType::Pmos
+        };
+        Some((mos_type, model_params))
+    }
+
+    fn native_transient_ekv26_instance_params_are_valid(params: &[(String, Value)]) -> bool {
+        let mut names = BTreeSet::new();
+        let mut has_length = false;
+        let mut has_width = false;
+        for (name, value) in params {
+            if !value.is_finite() {
+                return false;
+            }
+            let normalized = match name.to_ascii_uppercase().as_str() {
+                "L" | "LENGTH" => {
+                    has_length = *value > 0.0;
+                    "L"
+                }
+                "W" | "WIDTH" => {
+                    has_width = *value > 0.0;
+                    "W"
+                }
+                "M" | "MULT" => {
+                    if *value <= 0.0 {
+                        return false;
+                    }
+                    "M"
+                }
+                "NS" => {
+                    if *value <= 0.0 {
+                        return false;
+                    }
+                    "NS"
+                }
+                "AS" => {
+                    if *value < 0.0 {
+                        return false;
+                    }
+                    "AS"
+                }
+                "AD" => {
+                    if *value < 0.0 {
+                        return false;
+                    }
+                    "AD"
+                }
+                "PS" => {
+                    if *value < 0.0 {
+                        return false;
+                    }
+                    "PS"
+                }
+                "PD" => {
+                    if *value < 0.0 {
+                        return false;
+                    }
+                    "PD"
+                }
+                "TEMP" => {
+                    if *value <= -273.15 {
+                        return false;
+                    }
+                    "TEMP"
+                }
+                "DTEMP" => "DTEMP",
+                _ => return false,
+            };
+            if !names.insert(normalized) {
+                return false;
             }
         }
         has_length && has_width
@@ -82336,6 +82619,173 @@ MP1 d g VDD VDD PM L=5u W=10u
             XyceTestRunner::validate_native_transient_contract(&extra_pair_device).is_err(),
             "unvalidated multi-device Level-1 MOS propagation remains fail-closed"
         );
+    }
+
+    #[test]
+    fn absolute_ekv26_transient_contract_uses_native_pair_envelope() {
+        let source = "\
+validated EKV26 complementary transient subset
+VDD supply 0 3
+VSIG vi 0 DC .5 SIN(0 2.5 1MEG)
+MP1 out vi supply supply PM W=1u L=1u AD=1e-12 AS=1e-12 PS=2e-6 PD=2e-6
+MN1 out vi 0 0 NM W=1u L=1u AD=1e-12 AS=1e-12 PS=2e-6 PD=2e-6
+R1 out 0 1MEG
+.MODEL NM NMOS LEVEL=260 TNOM=27
+.MODEL PM PMOS LEVEL=260 TNOM=27
+.TRAN 10n 5u
+.PRINT TRAN V(vi) V(out)
+.END
+";
+        let netlist = Netlist::parse(source).expect("EKV26 transient fixture parses");
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("native EKV26 complementary pair is eligible");
+        assert!(
+            XyceTestRunner::netlist_is_native_transient_ekv26_pair(&netlist),
+            "fixture must satisfy the reference-backed complementary EKV26 pair envelope"
+        );
+        assert!(
+            netlist
+                .models
+                .iter()
+                .all(XyceTestRunner::model_is_native_transient_ekv26),
+            "both fixture models must use the canonical native EKV26 constructor"
+        );
+
+        let mut unknown_parameter = netlist.clone();
+        unknown_parameter
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("NM"))
+            .expect("NM model exists")
+            .params
+            .push(("UNQUALIFIED".to_string(), 1.0));
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&unknown_parameter).is_err(),
+            "unknown EKV26 model parameters remain fail-closed"
+        );
+
+        let mut generated_model = netlist.clone();
+        generated_model
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("NM"))
+            .expect("NM model exists")
+            .model_type = "EKV_VA".to_string();
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&generated_model).is_err(),
+            "generated Verilog-A EKV model names remain outside the native transient contract"
+        );
+
+        let mut non_ekv_level = netlist.clone();
+        non_ekv_level
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("NM"))
+            .expect("NM model exists")
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .expect("NM LEVEL exists")
+            .1 = 1.0;
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&non_ekv_level).is_err(),
+            "non-EKV MOS levels remain outside the native EKV26 transient contract"
+        );
+
+        let mut unsupported_instance = netlist.clone();
+        let mos = unsupported_instance
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+            .expect("MN1 exists");
+        if let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut mos.kind
+        {
+            instance_params.push(("CGSO".to_string(), 0.0));
+        } else {
+            panic!("MN1 remains a MOSFET");
+        }
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&unsupported_instance).is_err(),
+            "unsupported EKV26 instance parameters remain fail-closed"
+        );
+
+        let mut deferred_instance = netlist.clone();
+        let mos = deferred_instance
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+            .expect("MN1 exists");
+        if let ElementKind::Mosfet {
+            deferred_params, ..
+        } = &mut mos.kind
+        {
+            deferred_params.push(("W".to_string(), "WVAL".to_string()));
+        } else {
+            panic!("MN1 remains a MOSFET");
+        }
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&deferred_instance).is_err(),
+            "deferred EKV26 instance parameters remain fail-closed"
+        );
+
+        let mut compact_instance = netlist.clone();
+        let mos = compact_instance
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+            .expect("MN1 exists");
+        if let ElementKind::Mosfet { compact_syntax, .. } = &mut mos.kind {
+            *compact_syntax = true;
+        } else {
+            panic!("MN1 remains a MOSFET");
+        }
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&compact_instance).is_err(),
+            "compact EKV26 syntax remains fail-closed"
+        );
+
+        let mut wrong_topology = netlist.clone();
+        let mos = wrong_topology
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+            .expect("MN1 exists");
+        mos.nodes.pop();
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&wrong_topology).is_err(),
+            "non-four-terminal EKV26 topology remains fail-closed"
+        );
+
+        let mut extra_pair_device = netlist;
+        let mut extra = extra_pair_device
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+            .expect("MN1 exists")
+            .clone();
+        extra.name = "MN_EXTRA".to_string();
+        extra_pair_device.elements.push(extra);
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&extra_pair_device).is_err(),
+            "larger EKV26 propagation networks remain fail-closed pending a dedicated oracle"
+        );
+
+        for startup_source in [
+            source.replace(".TRAN 10n 5u", ".TRAN 10n 5u UIC"),
+            source.replace(
+                ".MODEL NM NMOS LEVEL=260 TNOM=27",
+                ".MODEL NM NMOS LEVEL=260 TNOM=27\n.OPTIONS TEMP=25",
+            ),
+        ] {
+            let startup_netlist =
+                Netlist::parse(&startup_source).expect("EKV26 startup-boundary fixture parses");
+            assert!(
+                XyceTestRunner::validate_native_transient_contract(&startup_netlist).is_err(),
+                "EKV26 absolute transient admission requires ordinary 27 C DC startup"
+            );
+        }
     }
 
     #[test]
