@@ -54482,6 +54482,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         element: &crate::netlist::Element,
     ) -> bool {
+        // The absolute transient oracle currently validates one complementary
+        // Level-1 pair.  Hierarchical chains need a separate topology and
+        // propagation envelope; fail closed until that envelope is qualified.
+        if netlist
+            .elements
+            .iter()
+            .filter(|candidate| matches!(candidate.kind, ElementKind::Mosfet { .. }))
+            .count()
+            > 2
+        {
+            return false;
+        }
         let ElementKind::Mosfet {
             model,
             compact_syntax,
@@ -82191,6 +82203,20 @@ MP1 d g VDD VDD PM L=5u W=10u
         assert!(
             XyceTestRunner::validate_native_transient_contract(&missing_geometry).is_err(),
             "classic MOS transient admission requires explicit positive L/W geometry"
+        );
+
+        let mut extra_pair_device = missing_geometry.clone();
+        let mut extra = extra_pair_device
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+            .expect("MN1 exists")
+            .clone();
+        extra.name = "MN_EXTRA".to_string();
+        extra_pair_device.elements.push(extra);
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&extra_pair_device).is_err(),
+            "unvalidated multi-device Level-1 MOS propagation remains fail-closed"
         );
     }
 
