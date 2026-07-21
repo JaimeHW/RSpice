@@ -1118,7 +1118,10 @@ impl NoiseSourceType {
 pub struct IntegratedContribution {
     /// Device instance name.
     pub device_name: String,
-    /// Noise mechanism.
+    /// Canonical device-model mechanism name, falling back to the broad
+    /// source type only when the model did not declare a mechanism identity.
+    pub mechanism: String,
+    /// Broad physical noise class.
     pub noise_type: NoiseSourceType,
     /// Output-referred noise power integrated over the band (V²).
     pub integrated_power: Value,
@@ -1254,7 +1257,14 @@ impl IntegratedNoise {
     pub fn contribution_summary(&self) -> Vec<IntegratedContribution> {
         use std::collections::HashMap;
 
-        let mut totals: HashMap<(String, &'static str), (NoiseSourceType, Value)> = HashMap::new();
+        fn contribution_mechanism(contribution: &NoiseContribution) -> &str {
+            contribution
+                .identity
+                .mechanism
+                .as_deref()
+                .unwrap_or_else(|| contribution.noise_type.label())
+        }
+        let mut totals: HashMap<(String, String), (NoiseSourceType, Value)> = HashMap::new();
 
         for window in self.results.windows(2) {
             let (a, b) = (&window[0], &window[1]);
@@ -1264,13 +1274,13 @@ impl IntegratedNoise {
             }
 
             // Index the right edge once so each pair match is O(1).
-            let mut right: HashMap<(&str, &'static str), Value> =
+            let mut right: HashMap<(&str, &str), Value> =
                 HashMap::with_capacity(b.contributions.len());
             for contribution in &b.contributions {
                 right.insert(
                     (
                         contribution.identity.device.as_str(),
-                        contribution.noise_type.label(),
+                        contribution_mechanism(contribution),
                     ),
                     contribution.output_contribution,
                 );
@@ -1279,7 +1289,7 @@ impl IntegratedNoise {
             for contribution in &a.contributions {
                 let key = (
                     contribution.identity.device.as_str(),
-                    contribution.noise_type.label(),
+                    contribution_mechanism(contribution),
                 );
                 let s_right = right
                     .get(&key)
@@ -1289,7 +1299,7 @@ impl IntegratedNoise {
                 let entry = totals
                     .entry((
                         contribution.identity.device.clone(),
-                        contribution.noise_type.label(),
+                        contribution_mechanism(contribution).to_string(),
                     ))
                     .or_insert((contribution.noise_type, 0.0));
                 entry.1 += power;
@@ -1300,22 +1310,36 @@ impl IntegratedNoise {
         let mut summary: Vec<IntegratedContribution> = totals
             .into_iter()
             .map(
-                |((device_name, _), (noise_type, integrated_power))| IntegratedContribution {
-                    device_name,
-                    noise_type,
-                    integrated_power,
-                    percentage: if total > 0.0 {
-                        100.0 * integrated_power / total
-                    } else {
-                        0.0
-                    },
+                |((device_name, mechanism), (noise_type, integrated_power))| {
+                    IntegratedContribution {
+                        device_name,
+                        mechanism,
+                        noise_type,
+                        integrated_power,
+                        percentage: if total > 0.0 {
+                            100.0 * integrated_power / total
+                        } else {
+                            0.0
+                        },
+                    }
                 },
             )
             .collect();
         summary.sort_by(|x, y| {
             y.integrated_power
-                .partial_cmp(&x.integrated_power)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .total_cmp(&x.integrated_power)
+                .then_with(|| {
+                    x.device_name
+                        .to_ascii_lowercase()
+                        .cmp(&y.device_name.to_ascii_lowercase())
+                })
+                .then_with(|| {
+                    x.mechanism
+                        .to_ascii_lowercase()
+                        .cmp(&y.mechanism.to_ascii_lowercase())
+                })
+                .then_with(|| x.device_name.cmp(&y.device_name))
+                .then_with(|| x.mechanism.cmp(&y.mechanism))
         });
         summary
     }
@@ -1460,6 +1484,50 @@ mod summary_tests {
         // Band total agrees with the per-contributor sum.
         let total_v = integrated.total_output_noise();
         assert!(((total_v * total_v) - 5e-16).abs() < 1e-27);
+    }
+
+    #[test]
+    fn contribution_summary_preserves_distinct_same_type_mechanisms() {
+        let make_result = |frequency| NoiseResult {
+            frequency,
+            node_names: Vec::new(),
+            branch_names: Vec::new(),
+            voltages: Vec::new(),
+            currents: Vec::new(),
+            output_noise_density: 4.0,
+            input_referred_density: 4.0,
+            input_gain_squared: 1.0,
+            contribution_catalog: vec![
+                NoiseSourceIdentity::mechanism("M1", "rd"),
+                NoiseSourceIdentity::mechanism("M1", "rs"),
+            ],
+            contributions: vec![
+                NoiseContribution {
+                    identity: NoiseSourceIdentity::mechanism("M1", "rd"),
+                    noise_type: NoiseSourceType::Thermal,
+                    output_contribution: 3.0,
+                    input_contribution: 3.0,
+                    percentage: 0.0,
+                },
+                NoiseContribution {
+                    identity: NoiseSourceIdentity::mechanism("M1", "rs"),
+                    noise_type: NoiseSourceType::Thermal,
+                    output_contribution: 1.0,
+                    input_contribution: 1.0,
+                    percentage: 0.0,
+                },
+            ],
+        };
+        let summary = IntegratedNoise::new(vec![make_result(100.0), make_result(200.0)])
+            .contribution_summary();
+
+        assert_eq!(summary.len(), 2);
+        assert_eq!(summary[0].device_name, "M1");
+        assert_eq!(summary[0].mechanism, "rd");
+        assert_eq!(summary[1].device_name, "M1");
+        assert_eq!(summary[1].mechanism, "rs");
+        assert!((summary[0].percentage - 75.0).abs() < 1.0e-12);
+        assert!((summary[1].percentage - 25.0).abs() < 1.0e-12);
     }
 
     #[test]
