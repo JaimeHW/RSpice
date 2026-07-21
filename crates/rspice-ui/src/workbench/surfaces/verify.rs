@@ -459,22 +459,43 @@ fn cockpit(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32) {
         verification_table_row_height(viewport_width),
     );
     if layout.split {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 1.0;
-            ui.allocate_ui(
-                egui::vec2(layout.left_width, layout.first_row_height),
-                |ui| yield_chart(ui, app, layout.first_row_height),
-            );
-            ui.allocate_ui(
-                egui::vec2(layout.right_width, layout.first_row_height),
-                |ui| run_margin_matrix(ui, app, run_index, &evidence),
-            );
-        });
-        let divider_x = ui.min_rect().left() + layout.left_width;
-        let row_bottom = ui.cursor().top();
+        // `Ui::horizontal` vertically centers children with different
+        // intrinsic heights. That made the margin table drift toward the
+        // middle of a tall, empty chart. Both panes own the same explicit
+        // top-aligned row instead.
+        let (row_rect, _) = ui.allocate_exact_size(
+            egui::vec2(width, layout.first_row_height),
+            egui::Sense::hover(),
+        );
+        let (left_rect, right_rect) = verification_split_rects(row_rect, layout.left_width);
+        let mut left = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(left_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        left.set_clip_rect(left.clip_rect().intersect(left_rect));
+        left.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        yield_chart(&mut left, app, layout.first_row_height);
+        let mut right = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(right_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        right.set_clip_rect(right.clip_rect().intersect(right_rect));
+        right.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        egui::ScrollArea::vertical()
+            .id_salt("verify.cockpit.margin_matrix.vertical")
+            .max_height(right_rect.height())
+            .auto_shrink([false, false])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .show(&mut right, |ui| {
+                ui.set_min_width(right_rect.width());
+                run_margin_matrix(ui, app, run_index, &evidence);
+            });
+        let divider_x = left_rect.right();
         ui.painter().vline(
             divider_x,
-            egui::Rangef::new(row_bottom - layout.first_row_height, row_bottom),
+            row_rect.y_range(),
             egui::Stroke::new(1.0, t.color.border),
         );
     } else {
@@ -499,6 +520,16 @@ fn cockpit(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32) {
     );
     ui.add_space(1.0);
     specification_matrix(ui, app, &evidence);
+}
+
+fn verification_split_rects(row_rect: egui::Rect, left_width: f32) -> (egui::Rect, egui::Rect) {
+    let left_rect =
+        egui::Rect::from_min_size(row_rect.min, egui::vec2(left_width, row_rect.height()));
+    let right_rect = egui::Rect::from_min_max(
+        egui::pos2(left_rect.right() + 1.0, row_rect.top()),
+        row_rect.right_bottom(),
+    );
+    (left_rect, right_rect)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1772,8 +1803,10 @@ fn request_analysis_run(
     kinds: &[crate::simulation::plan::AnalysisKind],
 ) -> Result<(), String> {
     let mut selected = None;
+    let mut plan_changed = false;
+    let mut setup = app.state.sim_setup.clone();
     {
-        let plan = app.state.sim_setup.stable_analysis_plan_mut()?;
+        let plan = setup.stable_analysis_plan_mut()?;
         for kind in kinds {
             let existing = plan
                 .instances()
@@ -1784,24 +1817,29 @@ fn request_analysis_run(
                 if !enabled {
                     plan.set_enabled(id, true)
                         .map_err(|error| error.to_string())?;
+                    plan_changed = true;
                 }
                 id
             } else {
+                plan_changed = true;
                 plan.insert(*kind).map_err(|error| error.to_string())?.0
             };
             selected = Some((*kind, id));
         }
     }
-    app.state.sim_setup.refresh_legacy_analysis_projections();
+    setup.refresh_legacy_analysis_projections();
+    if plan_changed {
+        app.state.sim_setup = setup;
+        invalidate_plan_bound_preflight(app);
+    }
     if let Some((kind, id)) = selected {
         app.state.workbench.active_analysis = kind.legacy_index();
         app.state.workbench.active_analysis_instance = Some(id);
     }
-    if !app.state.can_run_simulation() {
-        return Err(
-            "Execution was not started because the project or analysis plan did not pass its run contract. Review preflight evidence before retrying."
-                .to_owned(),
-        );
+    if let Some(reason) = app.state.simulation_run_preflight_block_reason() {
+        return Err(format!(
+            "Execution was not started: {reason}. Open the selected analysis in Simulation Studio to use its prerequisite repair action."
+        ));
     }
     app.state.request_run_set_simulation();
     Ok(())
@@ -1811,25 +1849,40 @@ fn open_analysis_configuration(
     app: &mut RSpiceApp,
     kind: crate::simulation::plan::AnalysisKind,
 ) -> Result<(), String> {
-    let id = {
-        let plan = app.state.sim_setup.stable_analysis_plan_mut()?;
+    let mut setup = app.state.sim_setup.clone();
+    let (id, plan_changed) = {
+        let plan = setup.stable_analysis_plan_mut()?;
         if let Some(instance) = plan
             .instances()
             .iter()
             .find(|instance| instance.kind() == kind)
         {
-            instance.id()
+            (instance.id(), false)
         } else {
-            plan.insert(kind).map_err(|error| error.to_string())?.0
+            (
+                plan.insert(kind).map_err(|error| error.to_string())?.0,
+                true,
+            )
         }
     };
-    app.state.sim_setup.refresh_legacy_analysis_projections();
+    setup.refresh_legacy_analysis_projections();
+    if plan_changed {
+        app.state.sim_setup = setup;
+        invalidate_plan_bound_preflight(app);
+    }
     app.state.workbench.active_analysis = kind.legacy_index();
     app.state.workbench.active_analysis_instance = Some(id);
     app.state
         .workbench
         .activate(super::super::state::Workspace::Simulate);
     Ok(())
+}
+
+/// Invalidate both visible preflight evidence and the controller's retained
+/// one-use permit at the same boundary as an authoritative plan mutation.
+/// Historical results remain immutable and are intentionally unaffected.
+pub(super) fn invalidate_plan_bound_preflight(app: &mut RSpiceApp) {
+    app.invalidate_simulation_preflight();
 }
 
 fn record_verification_action(app: &mut RSpiceApp, result: Result<(), String>, success: &str) {
@@ -3098,6 +3151,7 @@ fn commit_regression_baseline(
         .map_err(|error| error.to_string())?;
     app.state.workspace = workspace;
     app.state.sim_setup = setup;
+    invalidate_plan_bound_preflight(app);
     app.state.workbench.verification.regression_baseline_run = Some(run_id);
     app.state.workbench.verification.regression_comparison = None;
     app.state.workbench.verification.regression_selected_target = None;
@@ -3404,6 +3458,7 @@ fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<(), String>
         .map_err(|error| error.to_string())?;
     app.state.workspace = workspace;
     app.state.sim_setup = setup;
+    invalidate_plan_bound_preflight(app);
     for draft in &mut app.state.workbench.verification.regression_tolerance_drafts {
         draft.dirty = false;
         draft.validation_error = None;
@@ -3445,6 +3500,7 @@ fn remove_orphaned_regression_rules(
         .map_err(|error| error.to_string())?;
     app.state.workspace = workspace;
     app.state.sim_setup = setup;
+    invalidate_plan_bound_preflight(app);
     let verification = &mut app.state.workbench.verification;
     verification.regression_comparison = None;
     verification.regression_selected_target = None;
@@ -5194,6 +5250,18 @@ mod tests {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
 
+    #[test]
+    fn verification_split_panes_share_one_top_aligned_row() {
+        let row = egui::Rect::from_min_size(egui::pos2(7.0, 11.0), egui::vec2(1_420.0, 336.0));
+        let (left, right) = verification_split_rects(row, 645.0);
+        assert_eq!(left.top(), row.top());
+        assert_eq!(right.top(), row.top());
+        assert_eq!(left.bottom(), row.bottom());
+        assert_eq!(right.bottom(), row.bottom());
+        assert_eq!(right.left() - left.right(), 1.0);
+        assert_eq!(right.right(), row.right());
+    }
+
     fn attributed(analysis: AnalysisResult) -> AnalysisResult {
         attributed_with_id(analysis, AnalysisInstanceId::new())
     }
@@ -5273,6 +5341,62 @@ mod tests {
             .add_design_variable(plan_id, variable)
             .expect("variable enters active plan payload");
         id
+    }
+
+    fn retain_preflight_report(app: &mut RSpiceApp) {
+        let (plan_id, plan_revision) = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .map(|plan| (plan.id(), plan.revision()))
+            .expect("default plan");
+        let (topology_root, topology_revision, topology_closure) =
+            crate::workbench::preflight::configured_topology_revision(&app.state);
+        app.state.workbench.preflight = crate::workbench::state::PreflightDialogState {
+            open: true,
+            report: Some(crate::workbench::state::PreflightReport {
+                project_revision: app.state.workspace.project.revision().get(),
+                topology_root,
+                topology_revision,
+                topology_closure,
+                simulation_plan_id: Some(plan_id),
+                simulation_plan_revision: Some(plan_revision),
+                blockers: Vec::new(),
+                advisories: Vec::new(),
+                prepared: None,
+            }),
+            pending_toast: Some(crate::workbench::state::PreflightToast {
+                message: "retained preflight".to_owned(),
+                warning: false,
+            }),
+        };
+    }
+
+    #[test]
+    fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
+        let mut app = RSpiceApp::test_instance();
+        retain_preflight_report(&mut app);
+        let source_revision = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default plan")
+            .revision();
+
+        open_analysis_configuration(&mut app, crate::simulation::plan::AnalysisKind::Noise)
+            .expect("missing analysis inserts and opens");
+
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("plan remains available")
+                .revision(),
+            source_revision.next().expect("revision advances")
+        );
+        assert!(!app.state.workbench.preflight.open);
+        assert!(app.state.workbench.preflight.report.is_none());
+        assert!(app.state.workbench.preflight.pending_toast.is_none());
     }
 
     #[test]

@@ -430,6 +430,16 @@ impl SimulationController {
             fundamental_freq: pss_cfg.fund_freq,
             num_harmonics: pss_cfg.num_harmonics as usize,
             tolerance: pss_cfg.stab_tol,
+            max_iterations: pss_cfg.max_iter as usize,
+            method: match pss_cfg.method {
+                crate::simulation::dialog::PssSolverMethod::Shooting => PssMethod::Shooting,
+                crate::simulation::dialog::PssSolverMethod::HarmonicBalance => {
+                    PssMethod::HarmonicBalance
+                }
+            },
+            oscillator_mode: pss_cfg.osc_mode,
+            oscillator_node: pss_cfg.osc_mode.then(|| pss_cfg.osc_node.trim().to_owned()),
+            save_harmonics: pss_cfg.save_harmonics,
         })
     }
 
@@ -898,5 +908,34 @@ mod manifest_tests {
             ));
             assert!(spec.validate().is_ok());
         }
+    }
+
+    #[test]
+    fn pss_draft_projects_every_owned_execution_field() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.pss.ensure_initialized();
+        state.sim_setup.pss.fund_freq = "2.5Meg".to_owned();
+        state.sim_setup.pss.num_harmonics = "17".to_owned();
+        state.sim_setup.pss.max_iter = "83".to_owned();
+        state.sim_setup.pss.method_idx = 1;
+        state.sim_setup.pss.osc_mode = false;
+        state.sim_setup.pss.osc_node.clear();
+        state.sim_setup.pss.save_harmonics = false;
+
+        let spec = controller.build_pss_spec(&state).expect("PSS spec builds");
+        assert_eq!(
+            spec,
+            AnalysisSpec::Pss {
+                fundamental_freq: 2.5e6,
+                num_harmonics: 17,
+                tolerance: 1.0e-3,
+                max_iterations: 83,
+                method: PssMethod::HarmonicBalance,
+                oscillator_mode: false,
+                oscillator_node: None,
+                save_harmonics: false,
+            }
+        );
     }
 }

@@ -139,7 +139,7 @@ pub fn start_automation_workflow(app: &mut RSpiceApp) {
     // Automation owns a one-shot prepared permit for precisely this dispatch.
     // Clear any unrelated retained preflight first, then seal the complete
     // current execution contract immediately before publishing the request.
-    app.simulation_controller.clear_prepared_run();
+    app.invalidate_simulation_preflight();
     let prepared = match app
         .simulation_controller
         .prepare_run_set_for_preflight(&app.state)

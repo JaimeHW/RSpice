@@ -19,5 +19,6 @@ pub use plan::AnalysisPlan;
 pub use run_state::{AnalysisRun, RunQueue, RunStatus};
 pub use run_type::{AnalysisRunType, FrequencySweep};
 pub use spec::{
-    AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, SpPort,
+    AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
+    PssMethod, SpPort,
 };

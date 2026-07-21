@@ -35,6 +35,78 @@ impl AnalysisDependency {
     }
 }
 
+/// Exact outcome of one atomic prerequisite-repair command.
+///
+/// Existing identities are reused whenever possible. Fresh identities are
+/// reported only for prerequisite kinds that were absent from the plan, and
+/// every list follows the final dependency order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisDependencyRepair {
+    dependent: AnalysisInstanceId,
+    inserted: Vec<AnalysisInstanceId>,
+    enabled: Vec<AnalysisInstanceId>,
+    moved: Vec<AnalysisInstanceId>,
+    bound: Vec<AnalysisDependency>,
+}
+
+impl AnalysisDependencyRepair {
+    fn new(dependent: AnalysisInstanceId) -> Self {
+        Self {
+            dependent,
+            inserted: Vec::new(),
+            enabled: Vec::new(),
+            moved: Vec::new(),
+            bound: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn dependent(&self) -> AnalysisInstanceId {
+        self.dependent
+    }
+
+    #[must_use]
+    pub fn inserted(&self) -> &[AnalysisInstanceId] {
+        &self.inserted
+    }
+
+    #[must_use]
+    pub fn enabled(&self) -> &[AnalysisInstanceId] {
+        &self.enabled
+    }
+
+    #[must_use]
+    pub fn moved(&self) -> &[AnalysisInstanceId] {
+        &self.moved
+    }
+
+    #[must_use]
+    pub fn bound(&self) -> &[AnalysisDependency] {
+        &self.bound
+    }
+
+    #[must_use]
+    pub fn changed(&self) -> bool {
+        !self.inserted.is_empty()
+            || !self.enabled.is_empty()
+            || !self.moved.is_empty()
+            || !self.bound.is_empty()
+    }
+
+    fn sort_in_final_order(&mut self, instances: &[AnalysisInstance]) {
+        let positions = instances
+            .iter()
+            .enumerate()
+            .map(|(position, instance)| (instance.id, position))
+            .collect::<HashMap<_, _>>();
+        self.inserted.sort_by_key(|id| positions.get(id).copied());
+        self.enabled.sort_by_key(|id| positions.get(id).copied());
+        self.moved.sort_by_key(|id| positions.get(id).copied());
+        self.bound
+            .sort_by_key(|dependency| positions.get(&dependency.target).copied());
+    }
+}
+
 /// Editable-plan lifecycle of one analysis instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -91,6 +163,7 @@ pub enum AnalysisLifecycleCommand {
     Insert,
     Edit,
     Clone,
+    Enable,
     Disable,
     Reorder,
     Dependency,
@@ -106,6 +179,7 @@ impl fmt::Display for AnalysisLifecycleCommand {
             Self::Insert => "insert",
             Self::Edit => "edit",
             Self::Clone => "clone",
+            Self::Enable => "enable",
             Self::Disable => "disable",
             Self::Reorder => "reorder",
             Self::Dependency => "dependency",
@@ -1253,17 +1327,19 @@ impl SimulationPlan {
                         actual: target.kind,
                     });
                 }
-                if !target.enabled {
-                    issues.push(AnalysisPlanIssue::DisabledDependency {
-                        dependent: instance.id,
-                        target: target.id,
-                    });
-                }
-                if positions.get(&target.id) >= positions.get(&instance.id) {
-                    issues.push(AnalysisPlanIssue::DependencyNotEarlier {
-                        dependent: instance.id,
-                        target: target.id,
-                    });
+                if instance.enabled {
+                    if !target.enabled {
+                        issues.push(AnalysisPlanIssue::DisabledDependency {
+                            dependent: instance.id,
+                            target: target.id,
+                        });
+                    }
+                    if positions.get(&target.id) >= positions.get(&instance.id) {
+                        issues.push(AnalysisPlanIssue::DependencyNotEarlier {
+                            dependent: instance.id,
+                            target: target.id,
+                        });
+                    }
                 }
             }
             if instance.enabled {
@@ -1538,6 +1614,20 @@ impl SimulationPlan {
             .collect()
     }
 
+    fn enabled_dependents_of(&self, target: AnalysisInstanceId) -> Vec<AnalysisInstanceId> {
+        self.instances
+            .iter()
+            .filter(|instance| {
+                instance.enabled
+                    && instance
+                        .dependencies
+                        .iter()
+                        .any(|dependency| dependency.target == target)
+            })
+            .map(|instance| instance.id)
+            .collect()
+    }
+
     fn transact<T>(
         &mut self,
         command: AnalysisLifecycleCommand,
@@ -1747,7 +1837,7 @@ impl SimulationPlan {
     }
 
     /// Enable or disable an instance without removing its ordered position.
-    /// A referenced target cannot be disabled.
+    /// A target referenced by an enabled dependent cannot be disabled.
     pub fn set_enabled(
         &mut self,
         id: AnalysisInstanceId,
@@ -1759,7 +1849,11 @@ impl SimulationPlan {
             .ok_or(AnalysisPlanError::InstanceNotFound(id))?;
         let disposition = if enabled { "enabled" } else { "disabled" };
         let ((), receipt) = self.transact(
-            AnalysisLifecycleCommand::Disable,
+            if enabled {
+                AnalysisLifecycleCommand::Enable
+            } else {
+                AnalysisLifecycleCommand::Disable
+            },
             id,
             None,
             if enabled {
@@ -1772,7 +1866,7 @@ impl SimulationPlan {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
                 if !enabled {
-                    let dependents = candidate.dependents_of(id);
+                    let dependents = candidate.enabled_dependents_of(id);
                     if !dependents.is_empty() {
                         return Err(AnalysisPlanError::ReferencedBy {
                             target: id,
@@ -1780,6 +1874,27 @@ impl SimulationPlan {
                         });
                     }
                 }
+                let retained_dependencies = enabled.then(|| {
+                    candidate.instances[index]
+                        .kind
+                        .prerequisites()
+                        .iter()
+                        .filter_map(|prerequisite| {
+                            candidate.instances[index]
+                                .dependencies
+                                .iter()
+                                .find(|dependency| dependency.prerequisite == *prerequisite)
+                                .copied()
+                                .filter(|dependency| {
+                                    candidate.instances[..index].iter().any(|target| {
+                                        target.id == dependency.target
+                                            && target.enabled
+                                            && target.kind == *prerequisite
+                                    })
+                                })
+                        })
+                        .collect::<Vec<_>>()
+                });
                 let instance = &mut candidate.instances[index];
                 instance.enabled = enabled;
                 instance.lifecycle = if enabled {
@@ -1788,6 +1903,9 @@ impl SimulationPlan {
                     AnalysisLifecycleState::Disabled
                 };
                 instance.modified_revision = revision;
+                if let Some(dependencies) = retained_dependencies {
+                    instance.dependencies = dependencies;
+                }
                 Ok(())
             },
         )?;
@@ -1974,6 +2092,223 @@ impl SimulationPlan {
         Ok(receipt)
     }
 
+    /// Atomically make every prerequisite in one instance's transitive closure
+    /// executable. Existing matching identities are preferred over insertion;
+    /// disabled matches are enabled, later matches and their dependency closure
+    /// are moved before their consumer, absent kinds are inserted immediately
+    /// before their consumer, and every exact role is rebound.
+    ///
+    /// The complete repair commits as one revision and one lifecycle receipt.
+    /// Any identity, lifecycle, revision, or graph failure leaves the original
+    /// plan unchanged.
+    pub fn repair_dependencies(
+        &mut self,
+        dependent: AnalysisInstanceId,
+    ) -> Result<(AnalysisDependencyRepair, AnalysisLifecycleReceipt), AnalysisPlanError> {
+        let dependent_instance = self
+            .instance(dependent)
+            .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
+        let kind = dependent_instance.kind();
+        let outcome = if dependent_instance.enabled() {
+            AnalysisLifecycleState::Draft
+        } else {
+            AnalysisLifecycleState::Disabled
+        };
+        self.transact(
+            AnalysisLifecycleCommand::Dependency,
+            dependent,
+            None,
+            outcome,
+            format!(
+                "The complete prerequisite closure for {} analysis {dependent} was repaired atomically.",
+                kind.label()
+            ),
+            move |candidate, revision| {
+                let dependent_index = candidate.index_of(dependent)?;
+                candidate.ensure_editable(dependent_index)?;
+                let mut repair = AnalysisDependencyRepair::new(dependent);
+                let mut visiting = Vec::new();
+                candidate.repair_dependency_closure(
+                    dependent,
+                    revision,
+                    &mut repair,
+                    &mut visiting,
+                )?;
+                repair.sort_in_final_order(&candidate.instances);
+                Ok(repair)
+            },
+        )
+    }
+
+    fn repair_dependency_closure(
+        &mut self,
+        dependent: AnalysisInstanceId,
+        revision: ObjectRevision,
+        repair: &mut AnalysisDependencyRepair,
+        visiting: &mut Vec<AnalysisInstanceId>,
+    ) -> Result<(), AnalysisPlanError> {
+        if let Some(cycle_start) = visiting.iter().position(|id| *id == dependent) {
+            let mut members = visiting[cycle_start..].to_vec();
+            members.push(dependent);
+            return Err(AnalysisPlanError::InvalidPlan(vec![
+                AnalysisPlanIssue::DependencyCycle { members },
+            ]));
+        }
+        let dependent_index = self.index_of(dependent)?;
+        self.ensure_editable(dependent_index)?;
+        visiting.push(dependent);
+        let prerequisites = self.instances[dependent_index]
+            .kind
+            .prerequisites()
+            .to_vec();
+
+        for prerequisite in prerequisites {
+            let target = self.repair_target(dependent, prerequisite, revision, repair)?;
+            self.repair_dependency_closure(target, revision, repair, visiting)?;
+            self.move_dependency_closure_before(target, dependent, revision, repair)?;
+
+            let dependent_index = self.index_of(dependent)?;
+            let role_bindings = self.instances[dependent_index]
+                .dependencies
+                .iter()
+                .filter(|dependency| dependency.prerequisite == prerequisite)
+                .collect::<Vec<_>>();
+            let exactly_bound = role_bindings.len() == 1 && role_bindings[0].target == target;
+            if !exactly_bound {
+                let instance = &mut self.instances[dependent_index];
+                instance
+                    .dependencies
+                    .retain(|dependency| dependency.prerequisite != prerequisite);
+                let dependency = AnalysisDependency::new(prerequisite, target);
+                instance.dependencies.push(dependency);
+                instance
+                    .dependencies
+                    .sort_by_key(|dependency| dependency.prerequisite.legacy_index());
+                instance.modified_revision = revision;
+                instance.lifecycle = if instance.enabled {
+                    AnalysisLifecycleState::Draft
+                } else {
+                    AnalysisLifecycleState::Disabled
+                };
+                repair.bound.push(dependency);
+            }
+        }
+        visiting.pop();
+        Ok(())
+    }
+
+    fn repair_target(
+        &mut self,
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+        revision: ObjectRevision,
+        repair: &mut AnalysisDependencyRepair,
+    ) -> Result<AnalysisInstanceId, AnalysisPlanError> {
+        let dependent_index = self.index_of(dependent)?;
+        let explicit_target = self.instances[dependent_index]
+            .dependencies
+            .iter()
+            .find(|dependency| dependency.prerequisite == prerequisite)
+            .and_then(|dependency| {
+                self.instances
+                    .iter()
+                    .find(|candidate| {
+                        candidate.id == dependency.target
+                            && candidate.id != dependent
+                            && candidate.kind == prerequisite
+                    })
+                    .map(|candidate| candidate.id)
+            });
+        let target = explicit_target.or_else(|| {
+            self.instances[..dependent_index]
+                .iter()
+                .rev()
+                .find(|candidate| candidate.enabled && candidate.kind == prerequisite)
+                .or_else(|| {
+                    self.instances[..dependent_index]
+                        .iter()
+                        .rev()
+                        .find(|candidate| candidate.kind == prerequisite)
+                })
+                .or_else(|| {
+                    self.instances[dependent_index + 1..]
+                        .iter()
+                        .find(|candidate| candidate.enabled && candidate.kind == prerequisite)
+                })
+                .or_else(|| {
+                    self.instances[dependent_index + 1..]
+                        .iter()
+                        .find(|candidate| candidate.kind == prerequisite)
+                })
+                .map(|candidate| candidate.id)
+        });
+
+        let target = match target {
+            Some(target) => target,
+            None => {
+                let target = self.fresh_identity();
+                self.instances.insert(
+                    dependent_index,
+                    AnalysisInstance::fresh(
+                        target,
+                        AnalysisDraft::for_kind(prerequisite),
+                        true,
+                        Vec::new(),
+                        revision,
+                    ),
+                );
+                repair.inserted.push(target);
+                target
+            }
+        };
+
+        let target_index = self.index_of(target)?;
+        if !self.instances[target_index].enabled {
+            self.ensure_editable(target_index)?;
+            let instance = &mut self.instances[target_index];
+            instance.enabled = true;
+            instance.lifecycle = AnalysisLifecycleState::Draft;
+            instance.modified_revision = revision;
+            if !repair.enabled.contains(&target) {
+                repair.enabled.push(target);
+            }
+        }
+        Ok(target)
+    }
+
+    fn move_dependency_closure_before(
+        &mut self,
+        target: AnalysisInstanceId,
+        dependent: AnalysisInstanceId,
+        revision: ObjectRevision,
+        repair: &mut AnalysisDependencyRepair,
+    ) -> Result<(), AnalysisPlanError> {
+        let dependencies = self
+            .instance(target)
+            .ok_or(AnalysisPlanError::InstanceNotFound(target))?
+            .dependencies
+            .iter()
+            .map(|dependency| dependency.target)
+            .collect::<Vec<_>>();
+        for prerequisite in dependencies {
+            self.move_dependency_closure_before(prerequisite, dependent, revision, repair)?;
+        }
+
+        let target_index = self.index_of(target)?;
+        let dependent_index = self.index_of(dependent)?;
+        if target_index > dependent_index {
+            self.ensure_editable(target_index)?;
+            let mut instance = self.instances.remove(target_index);
+            let dependent_index = self.index_of(dependent)?;
+            instance.modified_revision = revision;
+            self.instances.insert(dependent_index, instance);
+            if !repair.moved.contains(&target) {
+                repair.moved.push(target);
+            }
+        }
+        Ok(())
+    }
+
     /// Remove an unreferenced instance and retain its identity, revisions, and
     /// prior result RunIds in a permanent tombstone.
     pub fn remove(
@@ -2095,6 +2430,7 @@ mod tests {
             (AnalysisLifecycleCommand::Insert, "insert"),
             (AnalysisLifecycleCommand::Edit, "edit"),
             (AnalysisLifecycleCommand::Clone, "clone"),
+            (AnalysisLifecycleCommand::Enable, "enable"),
             (AnalysisLifecycleCommand::Disable, "disable"),
             (AnalysisLifecycleCommand::Reorder, "reorder"),
             (AnalysisLifecycleCommand::Dependency, "dependency"),
@@ -2365,6 +2701,165 @@ mod tests {
     }
 
     #[test]
+    fn dependency_repair_inserts_a_missing_prerequisite_before_its_consumer() {
+        let mut plan = SimulationPlan::empty();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+
+        let (repair, receipt) = plan
+            .repair_dependencies(ac)
+            .expect("missing OP repairs atomically");
+
+        assert_eq!(repair.dependent(), ac);
+        assert_eq!(repair.inserted().len(), 1);
+        assert!(repair.enabled().is_empty());
+        assert!(repair.moved().is_empty());
+        assert_eq!(repair.bound().len(), 1);
+        let op = repair.inserted()[0];
+        assert_eq!(plan.instances()[0].id(), op);
+        assert_eq!(plan.instances()[1].id(), ac);
+        assert_eq!(
+            plan.instance(ac).unwrap().dependencies(),
+            &[AnalysisDependency::new(AnalysisKind::OperatingPoint, op)]
+        );
+        assert_eq!(receipt.command(), AnalysisLifecycleCommand::Dependency);
+        assert_eq!(receipt.instance_id(), ac);
+        assert!(plan.freeze().is_ok());
+    }
+
+    #[test]
+    fn dependency_repair_reuses_and_enables_a_disabled_prerequisite_identity() {
+        let mut plan = SimulationPlan::empty();
+        let op = AnalysisInstanceId::new();
+        plan.insert_draft_with_id(
+            op,
+            AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+            false,
+            0,
+        )
+        .expect("disabled OP inserts");
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+
+        let (repair, _) = plan
+            .repair_dependencies(ac)
+            .expect("disabled OP is enabled and bound");
+
+        assert!(repair.inserted().is_empty());
+        assert_eq!(repair.enabled(), &[op]);
+        assert!(repair.moved().is_empty());
+        assert!(plan.instance(op).unwrap().enabled());
+        assert_eq!(plan.instance(ac).unwrap().dependencies()[0].target(), op);
+        assert!(plan.freeze().is_ok());
+    }
+
+    #[test]
+    fn dependency_repair_moves_a_later_prerequisite_without_replacing_its_identity() {
+        let mut plan = SimulationPlan::empty();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("later OP inserts");
+
+        let (repair, _) = plan
+            .repair_dependencies(ac)
+            .expect("later OP is moved and bound");
+
+        assert!(repair.inserted().is_empty());
+        assert!(repair.enabled().is_empty());
+        assert_eq!(repair.moved(), &[op]);
+        assert_eq!(plan.instances()[0].id(), op);
+        assert_eq!(plan.instances()[1].id(), ac);
+        assert_eq!(plan.instance(ac).unwrap().dependencies()[0].target(), op);
+        assert!(plan.freeze().is_ok());
+    }
+
+    #[test]
+    fn dependency_repair_builds_the_complete_multi_level_prerequisite_closure() {
+        let mut plan = SimulationPlan::empty();
+        let (qpac, _) = plan.insert(AnalysisKind::Qpac).expect("QPAC inserts");
+
+        let (repair, receipt) = plan
+            .repair_dependencies(qpac)
+            .expect("QPAC closure repairs");
+
+        assert_eq!(repair.inserted().len(), 2);
+        assert_eq!(repair.bound().len(), 2);
+        assert_eq!(receipt.committed_revision(), plan.revision());
+        assert_eq!(
+            plan.instances()
+                .iter()
+                .map(AnalysisInstance::kind)
+                .collect::<Vec<_>>(),
+            vec![
+                AnalysisKind::OperatingPoint,
+                AnalysisKind::Qpss,
+                AnalysisKind::Qpac,
+            ]
+        );
+        let op = plan.instances()[0].id();
+        let qpss = plan.instances()[1].id();
+        assert_eq!(
+            plan.instance(qpss).unwrap().dependencies(),
+            &[AnalysisDependency::new(AnalysisKind::OperatingPoint, op)]
+        );
+        assert_eq!(
+            plan.instance(qpac).unwrap().dependencies(),
+            &[AnalysisDependency::new(AnalysisKind::Qpss, qpss)]
+        );
+        assert!(plan.freeze().is_ok());
+    }
+
+    #[test]
+    fn dependency_repair_preserves_an_existing_valid_binding() {
+        let mut plan = SimulationPlan::empty();
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
+            .expect("AC binds OP");
+        let identities = plan
+            .instances()
+            .iter()
+            .map(AnalysisInstance::id)
+            .collect::<Vec<_>>();
+        let dependencies = plan.instance(ac).unwrap().dependencies().to_vec();
+
+        let (repair, receipt) = plan
+            .repair_dependencies(ac)
+            .expect("valid binding remains valid");
+
+        assert!(!repair.changed());
+        assert_eq!(
+            plan.instances()
+                .iter()
+                .map(AnalysisInstance::id)
+                .collect::<Vec<_>>(),
+            identities
+        );
+        assert_eq!(plan.instance(ac).unwrap().dependencies(), dependencies);
+        assert_eq!(receipt.instance_id(), ac);
+        assert!(plan.freeze().is_ok());
+    }
+
+    #[test]
+    fn dependency_repair_rolls_back_when_a_reused_target_is_executing() {
+        let mut plan = SimulationPlan::empty();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("later OP inserts");
+        let op_index = plan.index_of(op).unwrap();
+        plan.instances[op_index].lifecycle = AnalysisLifecycleState::Running;
+        let before = snapshot(&plan);
+
+        assert_eq!(
+            plan.repair_dependencies(ac),
+            Err(AnalysisPlanError::InstanceExecuting(op))
+        );
+        assert_eq!(snapshot(&plan), before);
+    }
+
+    #[test]
     fn deep_clone_is_inserted_after_source_and_edits_do_not_alias() {
         let mut plan = SimulationPlan::new();
         let source = plan.instances()[0].id();
@@ -2426,6 +2921,94 @@ mod tests {
             assert!(result.is_err());
             assert_eq!(snapshot(&plan), before);
         }
+    }
+
+    #[test]
+    fn disabled_consumers_release_prerequisites_and_reenable_for_explicit_repair() {
+        let mut plan = SimulationPlan::new();
+        let (op, _) = plan
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("OP inserts");
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
+            .expect("AC binds OP");
+
+        plan.set_enabled(ac, false).expect("AC disables");
+        plan.set_enabled(op, false)
+            .expect("disabled AC no longer forces OP enabled");
+        assert!(plan.validation_issues().iter().all(|issue| {
+            !matches!(
+                issue,
+                AnalysisPlanIssue::DisabledDependency { dependent, .. } if *dependent == ac
+            )
+        }));
+
+        let enable_receipt = plan.set_enabled(ac, true).expect("AC reenables as a draft");
+        assert_eq!(enable_receipt.command(), AnalysisLifecycleCommand::Enable);
+        assert!(
+            plan.validation_issues()
+                .contains(&AnalysisPlanIssue::MissingPrerequisite {
+                    dependent: ac,
+                    prerequisite: AnalysisKind::OperatingPoint,
+                })
+        );
+        plan.validate_structure()
+            .expect("a reenabled analysis may await explicit prerequisite repair");
+
+        let (repair, _) = plan
+            .repair_dependencies(ac)
+            .expect("repair reuses and enables the retained OP identity");
+        assert_eq!(repair.enabled(), &[op]);
+        assert!(plan.validation_issues().is_empty());
+    }
+
+    #[test]
+    fn reenable_preserves_a_valid_exact_prerequisite_binding() {
+        let mut plan = SimulationPlan::empty();
+        let (first_op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("first OP inserts");
+        let (_second_op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("second OP inserts");
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, first_op)
+            .expect("AC binds the first exact OP identity");
+
+        plan.set_enabled(ac, false).expect("AC disables");
+        plan.set_enabled(ac, true).expect("AC reenables");
+
+        assert_eq!(
+            plan.instance(ac).unwrap().dependencies(),
+            &[AnalysisDependency::new(
+                AnalysisKind::OperatingPoint,
+                first_op
+            )]
+        );
+    }
+
+    #[test]
+    fn disabled_instances_still_fail_closed_on_structural_dependency_corruption() {
+        let mut plan = SimulationPlan::empty();
+        let ac = AnalysisInstanceId::new();
+        plan.insert_draft_with_id(ac, AnalysisDraft::for_kind(AnalysisKind::Ac), false, 0)
+            .expect("disabled AC inserts");
+        let missing = AnalysisInstanceId::new();
+        plan.instances[0].dependencies.push(AnalysisDependency::new(
+            AnalysisKind::OperatingPoint,
+            missing,
+        ));
+
+        let error = plan
+            .validate_structure()
+            .expect_err("disabled drafts cannot hide dangling identities");
+        let AnalysisPlanError::InvalidPlan(issues) = error else {
+            panic!("expected structural validation failure");
+        };
+        assert!(issues.contains(&AnalysisPlanIssue::DanglingDependency {
+            dependent: ac,
+            target: missing,
+        }));
     }
 
     #[test]

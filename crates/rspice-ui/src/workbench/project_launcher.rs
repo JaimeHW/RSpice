@@ -136,6 +136,9 @@ const LAUNCHER_SORT_WIDTH: f32 = 145.0;
 const LAUNCHER_ROW_MIN_HEIGHT: f32 = 47.0;
 const LAUNCHER_GROUP_HEIGHT: f32 = 27.0;
 const LAUNCHER_SEGMENT_MIN_WIDTH: f32 = 54.0;
+const LAUNCHER_HEADER_COPY_GAP: f32 = 2.0;
+const SAFE_MODE_OPTION_HEIGHT: f32 = 54.0;
+const SAFE_MODE_OPTION_HORIZONTAL_INSET: f32 = 16.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct LauncherLayout {
@@ -747,8 +750,26 @@ fn launcher_header(ui: &mut Ui, height: f32, large_targets: bool, edge_to_edge: 
                 let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(27.0), Sense::hover());
                 paint_brand_logo(ui.painter(), icon_rect);
                 ui.add_space(11.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
+                let eyebrow_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+                let title_font = theme::sans(20.0, FontWeight::SemiBold);
+                let eyebrow_size = ui
+                    .painter()
+                    .layout_no_wrap(
+                        "RSPICE COMMERCIAL WORKBENCH".to_owned(),
+                        eyebrow_font,
+                        t.color.text_faint,
+                    )
+                    .size();
+                let title_size = ui
+                    .painter()
+                    .layout_no_wrap("Start RSpice".to_owned(), title_font, t.color.text)
+                    .size();
+                let copy_size = vec2(
+                    eyebrow_size.x.max(title_size.x) + 1.0,
+                    eyebrow_size.y + LAUNCHER_HEADER_COPY_GAP + title_size.y,
+                );
+                ui.allocate_ui_with_layout(copy_size, egui::Layout::top_down(Align::Min), |ui| {
+                    ui.spacing_mut().item_spacing.y = LAUNCHER_HEADER_COPY_GAP;
                     ui.label(
                         egui::RichText::new("RSPICE COMMERCIAL WORKBENCH")
                             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
@@ -1647,69 +1668,65 @@ fn safe_mode_page(
                             });
                     }
 
-                    Frame::new()
-                        .inner_margin(Margin::symmetric(16, 0))
-                        .show(ui, |ui| {
-                            ui.add_enabled_ui(!active, |ui| {
-                                safe_mode_option(
-                                    ui,
-                                    &mut app
-                                        .state
-                                        .workbench
-                                        .safe_mode
-                                        .draft
-                                        .disable_third_party_extensions,
-                                    "Disable third-party extensions",
-                                    "Built-in signed components remain available.",
-                                    None,
-                                );
-                                safe_mode_option(
-                                    ui,
-                                    &mut app
-                                        .state
-                                        .workbench
-                                        .safe_mode
-                                        .draft
-                                        .disable_gpu_acceleration,
-                                    "Disable GPU acceleration",
-                                    "Use software rendering and conservative canvas limits.",
-                                    (!software_rendering_supported()).then_some(
-                                        "This renderer was selected before the launcher opened and cannot switch to a verified software adapter in this build.",
-                                    ),
-                                );
-                                safe_mode_option(
-                                    ui,
-                                    &mut app
-                                        .state
-                                        .workbench
-                                        .safe_mode
-                                        .draft
-                                        .isolate_prior_documents,
-                                    "Do not reopen prior documents",
-                                    "Start in the empty workbench with project files closed.",
-                                    None,
-                                );
-                                safe_mode_option(
-                                    ui,
-                                    &mut app.state.workbench.safe_mode.draft.reset_layout,
-                                    "Reset dock and monitor geometry",
-                                    "Recover panels and windows to the primary display.",
-                                    None,
-                                );
-                                safe_mode_option(
-                                    ui,
-                                    &mut app
-                                        .state
-                                        .workbench
-                                        .safe_mode
-                                        .draft
-                                        .open_project_read_only,
-                                    "Open project read-only",
-                                    "Prevent working-document writes while diagnosing content.",
-                                    None,
-                                );
-                            });
-                        });
+                    ui.add_enabled_ui(!active, |ui| {
+                        safe_mode_option(
+                            ui,
+                            &mut app
+                                .state
+                                .workbench
+                                .safe_mode
+                                .draft
+                                .disable_third_party_extensions,
+                            "Disable third-party extensions",
+                            "Built-in signed components remain available.",
+                            None,
+                        );
+                        safe_mode_option(
+                            ui,
+                            &mut app
+                                .state
+                                .workbench
+                                .safe_mode
+                                .draft
+                                .disable_gpu_acceleration,
+                            "Disable GPU acceleration",
+                            "Use software rendering and conservative canvas limits.",
+                            (!software_rendering_supported()).then_some(
+                                "This renderer was selected before the launcher opened and cannot switch to a verified software adapter in this build.",
+                            ),
+                        );
+                        safe_mode_option(
+                            ui,
+                            &mut app
+                                .state
+                                .workbench
+                                .safe_mode
+                                .draft
+                                .isolate_prior_documents,
+                            "Do not reopen prior documents",
+                            "Start in the empty workbench with project files closed.",
+                            None,
+                        );
+                        safe_mode_option(
+                            ui,
+                            &mut app.state.workbench.safe_mode.draft.reset_layout,
+                            "Reset dock and monitor geometry",
+                            "Recover panels and windows to the primary display.",
+                            None,
+                        );
+                        safe_mode_option(
+                            ui,
+                            &mut app
+                                .state
+                                .workbench
+                                .safe_mode
+                                .draft
+                                .open_project_read_only,
+                            "Open project read-only",
+                            "Prevent working-document writes while diagnosing content.",
+                            None,
+                        );
+                    });
 
         });
 
@@ -1759,61 +1776,63 @@ fn safe_mode_option(
     } else {
         t.color.text_faint
     };
-    let response = Frame::new()
-        .inner_margin(Margin::ZERO)
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.set_height(54.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 11.0;
-                let (check_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-                let box_rect = Rect::from_center_size(check_rect.center(), Vec2::splat(13.0));
-                ui.painter().rect(
-                    box_rect,
-                    t.radius.min(2.0),
-                    if *checked {
-                        t.color.accent
-                    } else {
-                        t.color.bg_inset
-                    },
-                    Stroke::new(
-                        1.0,
-                        if *checked {
-                            t.color.accent
-                        } else {
-                            t.color.border_strong
-                        },
-                    ),
-                    egui::StrokeKind::Inside,
-                );
-                if *checked {
-                    Icon::Check.paint(ui.painter(), box_rect.shrink(2.0), t.color.accent_ink);
-                }
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(
-                        egui::RichText::new(title)
-                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                            .color(text_color),
-                    );
-                    ui.label(
-                        egui::RichText::new(detail)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(if enabled {
-                                t.color.text_dim
-                            } else {
-                                t.color.text_faint
-                            }),
-                    );
-                });
-            });
-        })
-        .response
-        .interact(if enabled {
+    let (row_rect, response) = ui.allocate_exact_size(
+        vec2(ui.available_width().max(1.0), SAFE_MODE_OPTION_HEIGHT),
+        if enabled {
             Sense::click()
         } else {
             Sense::hover()
+        },
+    );
+    let content_rect = safe_mode_option_content_rect(row_rect);
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content_rect)
+            .layout(egui::Layout::left_to_right(Align::Center)),
+    );
+    row.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 11.0;
+        let (check_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+        let box_rect = Rect::from_center_size(check_rect.center(), Vec2::splat(13.0));
+        ui.painter().rect(
+            box_rect,
+            t.radius.min(2.0),
+            if *checked {
+                t.color.accent
+            } else {
+                t.color.bg_inset
+            },
+            Stroke::new(
+                1.0,
+                if *checked {
+                    t.color.accent
+                } else {
+                    t.color.border_strong
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
+        if *checked {
+            Icon::Check.paint(ui.painter(), box_rect.shrink(2.0), t.color.accent_ink);
+        }
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.label(
+                egui::RichText::new(title)
+                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+                    .color(text_color),
+            );
+            ui.label(
+                egui::RichText::new(detail)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(if enabled {
+                        t.color.text_dim
+                    } else {
+                        t.color.text_faint
+                    }),
+            );
         });
+    });
     response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, *checked, title));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_description(detail);
@@ -1828,10 +1847,14 @@ fn safe_mode_option(
         *checked = !*checked;
     }
     ui.painter().hline(
-        ui.max_rect().x_range(),
-        ui.cursor().top(),
+        row_rect.x_range(),
+        row_rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
+}
+
+fn safe_mode_option_content_rect(row: Rect) -> Rect {
+    row.shrink2(vec2(SAFE_MODE_OPTION_HORIZONTAL_INSET, 0.0))
 }
 
 fn launcher_page_heading(
@@ -2700,6 +2723,24 @@ mod tests {
             regions.header.height() + regions.status.height() + regions.body.height(),
             surface.height()
         );
+    }
+
+    #[test]
+    fn safe_mode_rows_keep_full_width_separators_and_inset_only_the_controls() {
+        let row = Rect::from_min_size(egui::pos2(9.0, 17.0), vec2(410.0, 54.0));
+        let content = safe_mode_option_content_rect(row);
+
+        assert_eq!(row.height(), SAFE_MODE_OPTION_HEIGHT);
+        assert_eq!(
+            content.left() - row.left(),
+            SAFE_MODE_OPTION_HORIZONTAL_INSET
+        );
+        assert_eq!(
+            row.right() - content.right(),
+            SAFE_MODE_OPTION_HORIZONTAL_INSET
+        );
+        assert_eq!(content.y_range(), row.y_range());
+        assert_eq!(row.x_range(), 9.0..=419.0);
     }
 
     #[test]

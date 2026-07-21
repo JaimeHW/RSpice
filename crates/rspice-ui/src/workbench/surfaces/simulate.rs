@@ -2,6 +2,8 @@
 
 mod analysis_form;
 
+use std::collections::HashSet;
+
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::common::RSpiceApp;
@@ -30,6 +32,7 @@ use super::super::design_system::{
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
+const ANALYSIS_GROUP_HEADER_HEIGHT: f32 = 26.0;
 const ANALYSIS_INDEX_DIAMETER: f32 = 22.0;
 const ANALYSIS_ROW_LEFT_PADDING: f32 = 9.0;
 const ANALYSIS_INDEX_LABEL_GAP: f32 = 8.0;
@@ -68,10 +71,18 @@ struct SelectedAnalysis {
     kind: AnalysisKind,
     draft: AnalysisDraft,
     dependencies: Vec<AnalysisDependency>,
+    prerequisite_candidates: Vec<(AnalysisKind, Vec<DependencyCandidate>)>,
     lifecycle: AnalysisLifecycleState,
     position: usize,
     plan_length: usize,
     issues: Vec<AnalysisPlanIssue>,
+    repair_label: Option<String>,
+}
+
+#[derive(Clone)]
+struct DependencyCandidate {
+    id: AnalysisInstanceId,
+    label: String,
 }
 
 #[derive(Clone)]
@@ -97,9 +108,20 @@ enum AnalysisAction {
     Earlier(usize),
     Later(usize),
     BindDependencies,
+    BindDependency {
+        prerequisite: AnalysisKind,
+        target: AnalysisInstanceId,
+    },
+    RepairDependencies,
     Validate,
     Remove,
     SetEnabled(bool),
+}
+
+impl AnalysisAction {
+    const fn structurally_changes_stack(self) -> bool {
+        matches!(self, Self::Clone | Self::RepairDependencies | Self::Remove)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,8 +145,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
-        ScrollArea::vertical()
+        let output = ScrollArea::vertical()
             .id_salt("workbench.simulate.surface")
+            .vertical_scroll_offset(app.state.workbench.simulation_surface_scroll_y)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 // Resolve the content width after the scroll area has reserved
@@ -136,6 +159,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
                 analysis_workspace(ui, app, surface_width);
             });
+        let pending_delta = std::mem::take(
+            &mut app
+                .state
+                .workbench
+                .simulation_surface_pending_scroll_delta_y,
+        );
+        app.state.workbench.simulation_surface_scroll_y =
+            adjusted_scroll_for_stack_delta(output.state.offset.y, 0.0, pending_delta);
+        if pending_delta != 0.0 {
+            ui.ctx().request_repaint();
+        }
     });
     simulation_workflow_dialog(ui.ctx(), app);
 }
@@ -159,7 +193,7 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             ui.allocate_ui_with_layout(
                 vec2(right_width, column_min_height),
                 Layout::top_down(Align::Min),
-                |ui| analysis_editor(ui, app, responsive_width),
+                |ui| analysis_editor(ui, app, responsive_width, false),
             );
         });
         ui.painter().set(
@@ -173,7 +207,7 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     } else {
         ordered_instance_stack(ui, app);
         ui.add_space(STACKED_WORKSPACE_GAP);
-        analysis_editor(ui, app, responsive_width);
+        analysis_editor(ui, app, responsive_width, true);
     }
 }
 
@@ -319,7 +353,10 @@ fn flat_notice(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
 
 fn analysis_group_header(ui: &mut Ui, label: &str, count: usize) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), ANALYSIS_GROUP_HEADER_HEIGHT),
+        Sense::hover(),
+    );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().hline(
         rect.x_range(),
@@ -574,16 +611,23 @@ fn analysis_stack_rows(app: &RSpiceApp) -> Result<Vec<AnalysisStackRow>, String>
     Ok(plan
         .instances()
         .iter()
-        .map(|instance| AnalysisStackRow {
-            id: instance.id(),
-            kind: instance.kind(),
-            enabled: instance.enabled(),
-            lifecycle: instance.lifecycle(),
-            summary: setup.analysis_draft_summary(instance.draft()),
-            issue_count: issues
-                .iter()
-                .filter(|issue| issue_applies_to(issue, instance.id()))
-                .count(),
+        .map(|instance| {
+            let closure_ids = dependency_closure_ids(plan, instance.id());
+            AnalysisStackRow {
+                id: instance.id(),
+                kind: instance.kind(),
+                enabled: instance.enabled(),
+                lifecycle: instance.lifecycle(),
+                summary: setup.analysis_draft_summary(instance.draft()),
+                issue_count: issues
+                    .iter()
+                    .filter(|issue| {
+                        closure_ids
+                            .iter()
+                            .any(|closure_id| issue_applies_to(issue, *closure_id))
+                    })
+                    .count(),
+            }
         })
         .collect())
 }
@@ -1726,7 +1770,7 @@ fn commit_clone_plan(app: &mut RSpiceApp, draft: &ClonePlanDraft) -> Result<Stri
     app.state.sim_setup = setup;
     app.state.workspace = workspace;
     app.state.workbench.active_analysis_instance = first_instance;
-    app.state.workbench.preflight = Default::default();
+    app.invalidate_simulation_preflight();
     app.state.workbench.analysis_lifecycle_status = format!(
         "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
         outcome.cloned_plan_id,
@@ -1851,7 +1895,7 @@ fn commit_design_variable(
         .map_err(|error| error.to_string())?;
     app.state.sim_setup = setup;
     app.state.workspace = workspace;
-    app.state.workbench.preflight = Default::default();
+    app.invalidate_simulation_preflight();
     app.state.workbench.analysis_lifecycle_status = format!(
         "Configuration receipt #{} · revision {} to {} · {}",
         receipt.sequence(),
@@ -1949,7 +1993,7 @@ fn commit_saved_output(app: &mut RSpiceApp, draft: &SavedOutputDraft) -> Result<
         .map_err(|error| error.to_string())?;
     app.state.sim_setup = setup;
     app.state.workspace = workspace;
-    app.state.workbench.preflight = Default::default();
+    app.invalidate_simulation_preflight();
     app.state.workbench.analysis_lifecycle_status = format!(
         "Configuration receipt #{} · revision {} to {} · {}",
         receipt.sequence(),
@@ -2337,10 +2381,11 @@ fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
     }
 }
 
-fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
+fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32, stacked: bool) {
     let selected = match selected_analysis(app) {
         Ok(Some(selected)) => selected,
         Ok(None) => {
+            app.state.workbench.simulation_surface_editor_anchor_y = None;
             flat_notice(ui, |ui| {
                 status_dot(
                     ui,
@@ -2355,6 +2400,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
             return;
         }
         Err(error) => {
+            app.state.workbench.simulation_surface_editor_anchor_y = None;
             record_failure(app, "Analysis editor", &error);
             flat_notice(ui, |ui| {
                 status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
@@ -2376,25 +2422,47 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
     let mut action = None;
 
     let t = Tokens::get(ui.ctx());
-    let editor_response = egui::Frame::new()
-        .fill(t.color.bg_app)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            analysis_form_header(ui, &selected);
-            if availability_label(selected.kind) != "Production" {
-                capability_banner(ui, selected.kind);
-            }
-            lifecycle_toolbar(ui, &selected, &mut action);
-            analysis_contract(ui, &selected, &prior_datasets, viewport_width <= 760.0);
-            let note = analysis_form_body(ui, app, &mut draft);
-            form_status(ui, app, &draft, note);
-        })
-        .response;
+    let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        analysis_form_header(ui, &selected);
+        if availability_label(selected.kind) != "Production" {
+            capability_banner(ui, selected.kind);
+        }
+        lifecycle_toolbar(ui, &selected, &mut action);
+        analysis_contract(
+            ui,
+            &selected,
+            &prior_datasets,
+            viewport_width <= 760.0,
+            &mut action,
+        );
+        let (note, form_anchor_y) = analysis_form_body(ui, app, &mut draft);
+        form_status(ui, app, &draft, note);
+        form_anchor_y
+    });
+    let form_anchor_y = editor_response.inner;
+    let editor_response = editor_response.response;
     ui.painter().hline(
         editor_response.rect.x_range(),
         editor_response.rect.top(),
         Stroke::new(1.0, t.color.border_strong),
     );
+
+    if stacked {
+        if let Some(anchor_y) = app
+            .state
+            .workbench
+            .simulation_surface_editor_anchor_y
+            .take()
+        {
+            app.state
+                .workbench
+                .simulation_surface_pending_scroll_delta_y +=
+                editor_anchor_scroll_delta(anchor_y, form_anchor_y);
+        }
+    } else {
+        app.state.workbench.simulation_surface_editor_anchor_y = None;
+    }
 
     let draft_changed = match (serialized_before, serde_json::to_vec(&draft)) {
         (Ok(before), Ok(after)) => before != after,
@@ -2413,11 +2481,23 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32) {
         commit_draft(app, selected.id, draft);
     }
     if let Some(action) = action {
+        if stacked && action.structurally_changes_stack() {
+            app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_y);
+            ui.ctx().request_repaint();
+        }
         apply_analysis_action(app, selected.id, action);
     }
     lifecycle_receipt_strip(ui, app);
     preflight_strip(ui, app);
     setup_tables(ui, app);
+}
+
+fn editor_anchor_scroll_delta(anchor_y: f32, current_y: f32) -> f32 {
+    current_y - anchor_y
+}
+
+fn adjusted_scroll_for_stack_delta(scroll_y: f32, before: f32, after: f32) -> f32 {
+    (scroll_y + after - before).max(0.0)
 }
 
 fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis) {
@@ -2606,6 +2686,7 @@ fn analysis_contract(
     selected: &SelectedAnalysis,
     prior_datasets: &str,
     stacked: bool,
+    action: &mut Option<AnalysisAction>,
 ) {
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
@@ -2616,18 +2697,19 @@ fn analysis_contract(
             ui.set_width(content_width);
             ui.spacing_mut().item_spacing.x = 10.0;
             ui.spacing_mut().item_spacing.y = 0.0;
-            let properties = |ui: &mut Ui| {
+            let mut property_action = None;
+            let mut properties = |ui: &mut Ui| {
                 property_row(ui, "Stable instance identity", &selected.id.to_string());
                 property_row(
                     ui,
                     "Ordered position",
                     &format!("{} / {}", selected.position + 1, selected.plan_length),
                 );
-                prerequisite_rows(ui, selected);
+                property_action = prerequisite_rows(ui, selected);
                 property_row(ui, "Availability", availability_label(selected.kind));
                 property_row(ui, "Prior datasets", prior_datasets);
             };
-            let evidence = |ui: &mut Ui| {
+            let mut evidence = |ui: &mut Ui| {
                 let (color, title, detail) = if let Some(issue) = selected.issues.first() {
                     (
                         t.color.err,
@@ -2648,6 +2730,19 @@ fn analysis_contract(
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
                 );
+                if let Some(repair_label) = selected.repair_label.as_deref() {
+                    ui.add_space(7.0);
+                    if Button::new(repair_label)
+                        .icon(Icon::Add)
+                        .show(ui)
+                        .on_hover_text(
+                            "Atomically reuse, enable, move, or add the complete prerequisite chain before this analysis.",
+                        )
+                        .clicked()
+                    {
+                        *action = Some(AnalysisAction::RepairDependencies);
+                    }
+                }
             };
             if stacked {
                 properties(ui);
@@ -2659,6 +2754,9 @@ fn analysis_contract(
                     evidence(&mut columns[1]);
                 });
             }
+            if property_action.is_some() {
+                *action = property_action;
+            }
         })
         .response;
     ui.painter().hline(
@@ -2668,10 +2766,14 @@ fn analysis_contract(
     );
 }
 
-fn analysis_form_body(ui: &mut Ui, app: &RSpiceApp, draft: &mut AnalysisDraft) -> &'static str {
+fn analysis_form_body(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    draft: &mut AnalysisDraft,
+) -> (&'static str, f32) {
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
-    egui::Frame::new()
+    let output = egui::Frame::new()
         .fill(t.color.bg_app)
         .inner_margin(egui::Margin {
             left: 8,
@@ -2682,29 +2784,22 @@ fn analysis_form_body(ui: &mut Ui, app: &RSpiceApp, draft: &mut AnalysisDraft) -
         .show(ui, |ui| {
             ui.set_width(content_width);
             ui.spacing_mut().item_spacing.y = 0.0;
-            let note = analysis_form::form(
+            analysis_form::form(
                 ui,
                 draft,
                 app.state.ui.preferences.quantity_presentation_policy(),
                 app.state.ui.number_locale,
-            );
-            if let Some(error) = app.state.sim_setup.analysis_draft_validation_error(draft) {
-                ui.add_space(6.0);
-                ui.label(egui::RichText::new(error).color(t.color.err));
-            }
-            note
-        })
-        .inner
+            )
+        });
+    (output.inner, output.response.rect.top())
 }
 
 fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) {
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
-    let valid = app
-        .state
-        .sim_setup
-        .analysis_draft_validation_error(draft)
-        .is_none();
+    let validation_error = app.state.sim_setup.analysis_draft_validation_error(draft);
+    let valid = validation_error.is_none();
+    let detail = validation_error.as_deref().unwrap_or(note);
     let response = egui::Frame::new()
         .fill(t.color.bg_app)
         .inner_margin(egui::Margin::symmetric(8, 6))
@@ -2720,9 +2815,11 @@ fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) 
             let status_galley =
                 ui.painter()
                     .layout_no_wrap(status.to_owned(), status_font, t.color.text_dim);
-            let detail_galley =
-                ui.painter()
-                    .layout_no_wrap(note.to_owned(), detail_font.clone(), t.color.text_dim);
+            let detail_galley = ui.painter().layout_no_wrap(
+                detail.to_owned(),
+                detail_font.clone(),
+                t.color.text_dim,
+            );
             let status_text_width = status_galley.size().x;
             let detail_width = detail_galley.size().x;
             let status_gap = ui.spacing().item_spacing.x;
@@ -2765,9 +2862,9 @@ fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) 
                         |ui| {
                             ui.add(
                                 egui::Label::new(
-                                    egui::RichText::new(note)
+                                    egui::RichText::new(detail)
                                         .font(detail_font.clone())
-                                        .color(t.color.text_dim),
+                                        .color(if valid { t.color.text_dim } else { t.color.err }),
                                 )
                                 .truncate(),
                             );
@@ -2779,9 +2876,9 @@ fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) 
                 status_dot(ui, if valid { t.color.ok } else { t.color.err }, status);
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(note)
+                        egui::RichText::new(detail)
                             .font(detail_font)
-                            .color(t.color.text_dim),
+                            .color(if valid { t.color.text_dim } else { t.color.err }),
                     )
                     .wrap(),
                 );
@@ -2795,26 +2892,81 @@ fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) 
     );
 }
 
-fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) {
+fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<AnalysisAction> {
     if selected.kind.prerequisites().is_empty() {
         property_row(ui, "Prerequisites", "none declared");
-        return;
+        return None;
     }
+    let mut requested = None;
     for prerequisite in selected.kind.prerequisites() {
-        let target = selected
+        let bound = selected
             .dependencies
             .iter()
-            .find(|dependency| dependency.prerequisite() == *prerequisite)
-            .map_or_else(
-                || "unbound · preflight blocked".to_owned(),
-                |dependency| dependency.target().to_string(),
-            );
-        property_row(
-            ui,
-            &format!("{} prerequisite", prerequisite.stable_id().to_uppercase()),
-            &target,
+            .find(|dependency| dependency.prerequisite() == *prerequisite);
+        let target = bound.map_or_else(
+            || "unbound · preflight blocked".to_owned(),
+            |dependency| dependency.target().to_string(),
         );
+        let label = format!("{} prerequisite", prerequisite.stable_id().to_uppercase());
+        let candidates = selected
+            .prerequisite_candidates
+            .iter()
+            .find_map(|(kind, candidates)| (*kind == *prerequisite).then_some(candidates));
+        let Some(candidates) = candidates.filter(|candidates| !candidates.is_empty()) else {
+            property_row(ui, &label, &target);
+            continue;
+        };
+        let options = candidates
+            .iter()
+            .map(|candidate| candidate.label.clone())
+            .collect::<Vec<_>>();
+        let current = bound
+            .and_then(|dependency| {
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.id == dependency.target())
+            })
+            .map_or("Select compatible instance", |candidate| {
+                candidate.label.as_str()
+            });
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let width = ui.available_width().max(1.0);
+            let label_width = ((width - 8.0) * 0.4).max(1.0);
+            ui.allocate_ui_with_layout(
+                vec2(label_width, ui.spacing().interact_size.y),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.label(
+                        egui::RichText::new(&label)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(Tokens::get(ui.ctx()).color.text_dim),
+                    );
+                },
+            );
+            let select_width = ui.available_width().max(1.0);
+            let salt = format!(
+                "analysis.{}.prerequisite.{}",
+                selected.id,
+                prerequisite.stable_id()
+            );
+            if let Some(index) = select(
+                ui,
+                &salt,
+                &format!("Select {label}"),
+                current,
+                &options,
+                select_width,
+            ) && let Some(candidate) = candidates.get(index)
+            {
+                requested = Some(AnalysisAction::BindDependency {
+                    prerequisite: *prerequisite,
+                    target: candidate.id,
+                });
+            }
+        });
     }
+    requested
 }
 
 fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) {
@@ -2887,7 +3039,22 @@ fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) {
 }
 
 fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
-    let topology_ok = !app.state.schematic.components.is_empty();
+    let configured_root = app.state.workspace.simulation_root_reference();
+    let configured_schematic = app
+        .state
+        .workspace
+        .simulation_root_schematic(&app.state.workspace.active_view, &app.state.schematic);
+    let topology_ok =
+        configured_schematic.is_some_and(|schematic| !schematic.components.is_empty());
+    let project_revision = app.state.workspace.project.revision().get();
+    let (topology_root, topology_revision, topology_closure) =
+        super::super::preflight::configured_topology_revision(&app.state);
+    let current_plan = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(|plan| (plan.id(), plan.revision()));
     let retained_report = app
         .state
         .workbench
@@ -2895,8 +3062,13 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
         .report
         .as_ref()
         .filter(|report| {
-            report.project_revision == app.state.workspace.project.revision().get()
-                && report.topology_revision == app.state.schematic.topology_version()
+            report.is_current_for(
+                project_revision,
+                &topology_root,
+                topology_revision,
+                &topology_closure,
+                current_plan,
+            )
         });
     let netlist_state = retained_report.map(|report| {
         topology_ok
@@ -2938,8 +3110,13 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
         (
             netlist_state,
             "Netlist",
-            if !topology_ok {
-                "design is empty".to_owned()
+            if configured_schematic.is_none() {
+                format!(
+                    "configured root {} is unresolved",
+                    configured_root.display_path()
+                )
+            } else if !topology_ok {
+                "configured design is empty".to_owned()
             } else if retained_report.is_none() {
                 if app.state.workbench.preflight.report.is_some() {
                     "preflight receipt expired".to_owned()
@@ -2949,10 +3126,7 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
             } else if netlist_state == Some(false) {
                 "preflight has design blockers".to_owned()
             } else {
-                format!(
-                    "revision {} current",
-                    app.state.schematic.topology_version()
-                )
+                format!("revision {topology_revision} current")
             },
         ),
         (
@@ -2976,7 +3150,15 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
             },
         ),
         (
-            retained_report.map(super::super::state::PreflightReport::is_runnable),
+            retained_report.map(|report| {
+                report.is_runnable_for(
+                    project_revision,
+                    &topology_root,
+                    topology_revision,
+                    &topology_closure,
+                    current_plan,
+                )
+            }),
             "Execution graph",
             if enabled_count == 0 {
                 "enable an analysis instance".to_owned()
@@ -2990,7 +3172,15 @@ fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
                 } else {
                     "run preflight to authorize dispatch".to_owned()
                 }
-            } else if retained_report.is_some_and(|report| !report.is_runnable()) {
+            } else if retained_report.is_some_and(|report| {
+                !report.is_runnable_for(
+                    project_revision,
+                    &topology_root,
+                    topology_revision,
+                    &topology_closure,
+                    current_plan,
+                )
+            }) {
                 "resolve retained preflight blockers".to_owned()
             } else {
                 let task_count = retained_report
@@ -3591,20 +3781,55 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
             "selected analysis instance {id} is not present in the stable plan"
         ));
     };
+    let closure_ids = dependency_closure_ids(plan, id);
     let issues = plan
         .validation_issues()
         .into_iter()
-        .filter(|issue| issue_applies_to(issue, id))
+        .filter(|issue| {
+            closure_ids
+                .iter()
+                .any(|closure_id| issue_applies_to(issue, *closure_id))
+        })
+        .collect::<Vec<_>>();
+    let dependency_closure: Vec<AnalysisDependency> = closure_ids
+        .iter()
+        .filter_map(|closure_id| plan.instance(*closure_id))
+        .flat_map(|instance| instance.dependencies().iter().copied())
         .collect();
+    let prerequisite_candidates = instance
+        .kind()
+        .prerequisites()
+        .iter()
+        .map(|prerequisite| {
+            let candidates = plan.instances()[..position]
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| candidate.enabled() && candidate.kind() == *prerequisite)
+                .map(|(candidate_position, candidate)| DependencyCandidate {
+                    id: candidate.id(),
+                    label: format!(
+                        "{:02} · {} · {}",
+                        candidate_position + 1,
+                        candidate.kind().stable_id().to_uppercase(),
+                        candidate.id()
+                    ),
+                })
+                .collect();
+            (*prerequisite, candidates)
+        })
+        .collect();
+    let repair_label = dependency_repair_cta(plan, &issues, &dependency_closure);
     Ok(Some(SelectedAnalysis {
         id,
         kind: instance.kind(),
         draft: instance.draft().clone(),
         dependencies: instance.dependencies().to_vec(),
+        prerequisite_candidates,
         lifecycle: instance.lifecycle(),
         position,
         plan_length: plan.instances().len(),
         issues,
+        repair_label,
     }))
 }
 
@@ -3617,6 +3842,7 @@ fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: AnalysisDraf
     };
     match result {
         Ok(((), receipt)) => {
+            refresh_analysis_projections(app);
             record_receipt(app, &receipt);
         }
         Err(error) => record_failure(app, "Edit", &error),
@@ -3656,6 +3882,7 @@ fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) {
     };
     match result {
         Ok((id, insert_receipt, bind_receipt)) => {
+            refresh_analysis_projections(app);
             app.state.workbench.active_analysis_instance = Some(id);
             match bind_receipt {
                 None => record_receipt(app, &insert_receipt),
@@ -3705,6 +3932,7 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
             };
             match result {
                 Ok((clone_id, receipt)) => {
+                    refresh_analysis_projections(app);
                     app.state.workbench.active_analysis_instance = Some(clone_id);
                     record_receipt(app, &receipt);
                 }
@@ -3719,7 +3947,10 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
                 Err(error) => Err(error),
             };
             match result {
-                Ok(receipt) => record_receipt(app, &receipt),
+                Ok(receipt) => {
+                    refresh_analysis_projections(app);
+                    record_receipt(app, &receipt);
+                }
                 Err(error) => record_failure(app, "Reorder", &error),
             }
         }
@@ -3731,8 +3962,51 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
                 Err(error) => Err(error),
             };
             match result {
-                Ok(receipt) => record_receipt(app, &receipt),
+                Ok(receipt) => {
+                    refresh_analysis_projections(app);
+                    record_receipt(app, &receipt);
+                }
                 Err(error) => record_failure(app, "Bind dependencies", &error),
+            }
+        }
+        AnalysisAction::BindDependency {
+            prerequisite,
+            target,
+        } => {
+            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+                Ok(plan) => plan
+                    .bind_dependency(id, prerequisite, target)
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(receipt) => {
+                    refresh_analysis_projections(app);
+                    record_receipt(app, &receipt);
+                }
+                Err(error) => record_failure(app, "Bind prerequisite", &error),
+            }
+        }
+        AnalysisAction::RepairDependencies => {
+            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+                Ok(plan) => plan
+                    .repair_dependencies(id)
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok((repair, receipt)) => {
+                    refresh_analysis_projections(app);
+                    app.state.workbench.analysis_lifecycle_status = format!(
+                        "Receipt #{} committed for instance {id}. Prerequisite repair completed atomically: {} added, {} enabled, {} moved earlier, and {} exact bindings updated. Prior datasets remain immutable.",
+                        receipt.sequence(),
+                        repair.inserted().len(),
+                        repair.enabled().len(),
+                        repair.moved().len(),
+                        repair.bound().len(),
+                    );
+                }
+                Err(error) => record_failure(app, "Repair prerequisites", &error),
             }
         }
         AnalysisAction::Validate => validate_analysis_instance(app, id),
@@ -3745,7 +4019,10 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
                 Err(error) => Err(error),
             };
             match result {
-                Ok(receipt) => record_receipt(app, &receipt),
+                Ok(receipt) => {
+                    refresh_analysis_projections(app);
+                    record_receipt(app, &receipt);
+                }
                 Err(error) => record_failure(app, "Enable state", &error),
             }
         }
@@ -3758,19 +4035,30 @@ fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
         let instance = plan
             .instance(id)
             .ok_or_else(|| format!("analysis instance {id} no longer exists"))?;
-        if let Some(issue) = plan
-            .validation_issues()
-            .iter()
-            .find(|issue| issue_applies_to(issue, id))
-        {
+        let closure_ids = dependency_closure_ids(plan, id);
+        if let Some(issue) = plan.validation_issues().iter().find(|issue| {
+            closure_ids
+                .iter()
+                .any(|closure_id| issue_applies_to(issue, *closure_id))
+        }) {
             return Err(format_plan_issue(issue));
         }
-        if let Some(error) = app
-            .state
-            .sim_setup
-            .analysis_draft_validation_error(instance.draft())
+        for closure_instance in plan
+            .instances()
+            .iter()
+            .filter(|candidate| closure_ids.contains(&candidate.id()))
         {
-            return Err(error);
+            if let Some(error) = app
+                .state
+                .sim_setup
+                .analysis_draft_validation_error(closure_instance.draft())
+            {
+                return Err(format!(
+                    "{} instance {}: {error}",
+                    closure_instance.kind().label(),
+                    closure_instance.id()
+                ));
+            }
         }
         Ok(instance.kind())
     })();
@@ -3814,6 +4102,7 @@ fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
     };
     match result {
         Ok(receipt) => {
+            refresh_analysis_projections(app);
             let next = app
                 .state
                 .sim_setup
@@ -3830,6 +4119,11 @@ fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
         }
         Err(error) => record_failure(app, "Remove", &error),
     }
+}
+
+fn refresh_analysis_projections(app: &mut RSpiceApp) {
+    app.state.sim_setup.refresh_legacy_analysis_projections();
+    app.invalidate_simulation_preflight();
 }
 
 fn record_receipt(app: &mut RSpiceApp, receipt: &AnalysisLifecycleReceipt) {
@@ -3859,7 +4153,8 @@ const fn lifecycle_command_label(command: AnalysisLifecycleCommand) -> &'static 
         AnalysisLifecycleCommand::Insert => "Insert",
         AnalysisLifecycleCommand::Edit => "Edit",
         AnalysisLifecycleCommand::Clone => "Clone",
-        AnalysisLifecycleCommand::Disable => "Enable or disable",
+        AnalysisLifecycleCommand::Enable => "Enable",
+        AnalysisLifecycleCommand::Disable => "Disable",
         AnalysisLifecycleCommand::Reorder => "Reorder",
         AnalysisLifecycleCommand::Dependency => "Bind dependencies",
         AnalysisLifecycleCommand::Validate => "Validate",
@@ -3955,6 +4250,133 @@ fn issue_applies_to(issue: &AnalysisPlanIssue, id: AnalysisInstanceId) -> bool {
         | AnalysisPlanIssue::EmptyReceiptDetail { .. }
         | AnalysisPlanIssue::InvalidNextReceiptSequence { .. } => false,
     }
+}
+
+const fn dependency_issue_is_repairable(issue: &AnalysisPlanIssue) -> bool {
+    matches!(
+        issue,
+        AnalysisPlanIssue::MissingPrerequisite { .. }
+            | AnalysisPlanIssue::DuplicateDependencyRole { .. }
+            | AnalysisPlanIssue::DanglingDependency { .. }
+            | AnalysisPlanIssue::WrongDependencyKind { .. }
+            | AnalysisPlanIssue::DisabledDependency { .. }
+            | AnalysisPlanIssue::DependencyNotEarlier { .. }
+    )
+}
+
+fn dependency_repair_cta(
+    plan: &crate::simulation::plan::SimulationPlan,
+    issues: &[AnalysisPlanIssue],
+    dependencies: &[AnalysisDependency],
+) -> Option<String> {
+    let issue = issues
+        .iter()
+        .find(|issue| dependency_issue_is_repairable(issue))?;
+    let prerequisite_for_target = |target| {
+        dependencies
+            .iter()
+            .find(|dependency| dependency.target() == target)
+            .map(|dependency| dependency.prerequisite())
+    };
+    Some(match issue {
+        AnalysisPlanIssue::MissingPrerequisite {
+            dependent,
+            prerequisite,
+        } => {
+            let dependent_position = plan
+                .instances()
+                .iter()
+                .position(|instance| instance.id() == *dependent);
+            dependent_position.map_or_else(
+                || "Repair prerequisites".to_owned(),
+                |position| {
+                    let before = &plan.instances()[..position];
+                    let after = &plan.instances()[position + 1..];
+                    if before
+                        .iter()
+                        .rev()
+                        .any(|candidate| candidate.enabled() && candidate.kind() == *prerequisite)
+                    {
+                        format!("Bind {}", prerequisite.label())
+                    } else if before
+                        .iter()
+                        .rev()
+                        .any(|candidate| candidate.kind() == *prerequisite)
+                    {
+                        format!("Enable {}", prerequisite.label())
+                    } else if after
+                        .iter()
+                        .any(|candidate| candidate.enabled() && candidate.kind() == *prerequisite)
+                    {
+                        format!("Move {} earlier", prerequisite.label())
+                    } else if after
+                        .iter()
+                        .any(|candidate| candidate.kind() == *prerequisite)
+                    {
+                        format!("Enable and move {} earlier", prerequisite.label())
+                    } else {
+                        format!("Add {}", prerequisite.label())
+                    }
+                },
+            )
+        }
+        AnalysisPlanIssue::DisabledDependency { dependent, target } => {
+            let also_needs_move = issues.iter().any(|candidate| {
+                matches!(
+                    candidate,
+                    AnalysisPlanIssue::DependencyNotEarlier {
+                        dependent: candidate_dependent,
+                        target: candidate_target,
+                    } if candidate_dependent == dependent && candidate_target == target
+                )
+            });
+            prerequisite_for_target(*target).map_or_else(
+                || "Repair prerequisites".to_owned(),
+                |prerequisite| {
+                    if also_needs_move {
+                        format!("Enable and move {} earlier", prerequisite.label())
+                    } else {
+                        format!("Enable {}", prerequisite.label())
+                    }
+                },
+            )
+        }
+        AnalysisPlanIssue::DependencyNotEarlier { target, .. } => prerequisite_for_target(*target)
+            .map_or_else(
+                || "Repair prerequisites".to_owned(),
+                |prerequisite| format!("Move {} earlier", prerequisite.label()),
+            ),
+        _ => "Repair prerequisites".to_owned(),
+    })
+}
+
+fn dependency_closure_ids(
+    plan: &crate::simulation::plan::SimulationPlan,
+    root: AnalysisInstanceId,
+) -> HashSet<AnalysisInstanceId> {
+    let mut closure = HashSet::new();
+    if plan
+        .instance(root)
+        .is_some_and(|instance| !instance.enabled())
+    {
+        closure.insert(root);
+        return closure;
+    }
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        if !closure.insert(id) {
+            continue;
+        }
+        if let Some(instance) = plan.instance(id) {
+            pending.extend(
+                instance
+                    .dependencies()
+                    .iter()
+                    .map(|dependency| dependency.target()),
+            );
+        }
+    }
+    closure
 }
 
 fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
@@ -4131,6 +4553,218 @@ mod tests {
         assert_eq!(background.min, row_rect.min);
         assert_eq!(background.width(), 340.0);
         assert_eq!(background.height(), row_rect.height());
+    }
+
+    #[test]
+    fn dependency_repair_cta_describes_the_first_repairable_issue() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (dependent, _) = plan
+            .insert(AnalysisKind::Ac)
+            .expect("dependent analysis inserts");
+        let target = AnalysisInstanceId::new();
+        let dependency = AnalysisDependency::new(AnalysisKind::OperatingPoint, target);
+
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[
+                    AnalysisPlanIssue::NoEnabledInstances,
+                    AnalysisPlanIssue::MissingPrerequisite {
+                        dependent,
+                        prerequisite: AnalysisKind::OperatingPoint,
+                    },
+                ],
+                &[],
+            )
+            .as_deref(),
+            Some("Add Operating point")
+        );
+        let (op, _) = plan
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("candidate OP inserts");
+        plan.set_enabled(op, false).expect("candidate OP disables");
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::MissingPrerequisite {
+                    dependent,
+                    prerequisite: AnalysisKind::OperatingPoint,
+                }],
+                &[],
+            )
+            .as_deref(),
+            Some("Enable Operating point")
+        );
+        plan.set_enabled(op, true).expect("candidate OP enables");
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::MissingPrerequisite {
+                    dependent,
+                    prerequisite: AnalysisKind::OperatingPoint,
+                }],
+                &[],
+            )
+            .as_deref(),
+            Some("Bind Operating point")
+        );
+        plan.reorder(op, 1).expect("unbound OP can move later");
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::MissingPrerequisite {
+                    dependent,
+                    prerequisite: AnalysisKind::OperatingPoint,
+                }],
+                &[],
+            )
+            .as_deref(),
+            Some("Move Operating point earlier")
+        );
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::DisabledDependency { dependent, target }],
+                &[dependency],
+            )
+            .as_deref(),
+            Some("Enable Operating point")
+        );
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[
+                    AnalysisPlanIssue::DisabledDependency { dependent, target },
+                    AnalysisPlanIssue::DependencyNotEarlier { dependent, target },
+                ],
+                &[dependency],
+            )
+            .as_deref(),
+            Some("Enable and move Operating point earlier")
+        );
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::DependencyNotEarlier { dependent, target }],
+                &[dependency],
+            )
+            .as_deref(),
+            Some("Move Operating point earlier")
+        );
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::WrongDependencyKind {
+                    dependent,
+                    prerequisite: AnalysisKind::OperatingPoint,
+                    target,
+                    actual: AnalysisKind::Transient,
+                }],
+                &[dependency],
+            )
+            .as_deref(),
+            Some("Repair prerequisites")
+        );
+    }
+
+    #[test]
+    fn dependent_surfaces_include_transitive_prerequisite_failures() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.bind_dependency(pac, AnalysisKind::Pss, pss)
+            .expect("PAC binds the exact PSS");
+
+        let closure = dependency_closure_ids(&plan, pac);
+        assert!(closure.contains(&pac));
+        assert!(closure.contains(&pss));
+        let issues = plan
+            .validation_issues()
+            .into_iter()
+            .filter(|issue| {
+                closure
+                    .iter()
+                    .any(|instance| issue_applies_to(issue, *instance))
+            })
+            .collect::<Vec<_>>();
+        assert!(issues.contains(&AnalysisPlanIssue::MissingPrerequisite {
+            dependent: pss,
+            prerequisite: AnalysisKind::OperatingPoint,
+        }));
+        assert_eq!(
+            dependency_repair_cta(&plan, &issues, plan.instance(pac).unwrap().dependencies())
+                .as_deref(),
+            Some("Add Operating point")
+        );
+    }
+
+    #[test]
+    fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
+            .expect("PSS binds OP");
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(pss) = draft else {
+                panic!("expected PSS draft");
+            };
+            pss.fund_freq = "unfinished-expression(".to_owned();
+        })
+        .expect("invalid editable PSS draft is retained");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.bind_dependency(pac, AnalysisKind::Pss, pss)
+            .expect("PAC binds PSS");
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.sim_setup.analysis_plan = Some(plan);
+        validate_analysis_instance(&mut app, pac);
+
+        assert!(
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .contains(&pss.to_string())
+        );
+        assert!(
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .starts_with("Validate rejected fail-closed")
+        );
+    }
+
+    #[test]
+    fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (first_op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("first OP inserts");
+        let (second_op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("second OP inserts");
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, first_op)
+            .expect("exact first OP binding succeeds");
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.sim_setup.analysis_plan = Some(plan);
+        app.state.workbench.active_analysis_instance = Some(ac);
+        let selected = selected_analysis(&app)
+            .expect("selection resolves")
+            .expect("analysis is selected");
+        let candidates = selected
+            .prerequisite_candidates
+            .iter()
+            .find_map(|(kind, candidates)| {
+                (*kind == AnalysisKind::OperatingPoint).then_some(candidates)
+            })
+            .expect("OP candidates are available");
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].id, first_op);
+        assert_eq!(candidates[1].id, second_op);
     }
 
     #[test]
@@ -4668,5 +5302,19 @@ mod tests {
         simulation.runs.push(run);
 
         assert!(selected_output_dataset(&simulation).is_none());
+    }
+
+    #[test]
+    fn stacked_dependency_repair_preserves_the_selected_editor_viewport_anchor() {
+        let anchor_y = 135.0;
+        let displaced_y = anchor_y + 2.0 * ANALYSIS_ROW_HEIGHT + ANALYSIS_GROUP_HEADER_HEIGHT;
+        let measured_delta = editor_anchor_scroll_delta(anchor_y, displaced_y);
+
+        assert_eq!(
+            adjusted_scroll_for_stack_delta(420.0, 0.0, measured_delta),
+            420.0 + 2.0 * ANALYSIS_ROW_HEIGHT + ANALYSIS_GROUP_HEADER_HEIGHT
+        );
+        assert_eq!(editor_anchor_scroll_delta(280.0, 180.0), -100.0);
+        assert_eq!(adjusted_scroll_for_stack_delta(20.0, 0.0, -100.0), 0.0);
     }
 }

@@ -28,7 +28,7 @@ use crate::simulation::config::{
 use crate::simulation::execution::TouchstoneExportPolicy;
 use crate::simulation::multi_run::{
     AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
-    OptimizationGoal, OptimizationVariable, SpPort,
+    OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
 };
 use crate::simulation::output_contract::{PreparedSavedOutput, materialize_saved_outputs};
 use crate::simulation::runner::SimulationError;

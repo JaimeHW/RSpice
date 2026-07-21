@@ -31,6 +31,25 @@ pub struct LibraryCellInstance {
     /// (for example: Verilog-A module or subcircuit name).
     #[serde(default)]
     pub module_name: Option<String>,
+    /// Constrained instance-line template owned by a model-bound symbol.
+    /// Supported placeholders are validated before publication and again at
+    /// netlist generation; legacy bindings leave this unset and use the
+    /// standard X-instance form.
+    #[serde(default)]
+    pub netlist_template: Option<String>,
+    /// Optional named `.lib` section required to expose this model from its
+    /// authoritative source file.
+    #[serde(default)]
+    pub model_section: Option<String>,
+    /// Preferred reference-designator prefix for newly placed instances.
+    /// This does not rewrite existing instances when a library definition is
+    /// revised.
+    #[serde(default)]
+    pub reference_prefix: Option<String>,
+    /// Ordered, case-insensitive parameter allowlist for model-bound
+    /// instances. Empty preserves legacy source-backed cell behavior.
+    #[serde(default)]
+    pub parameter_order: Vec<String>,
     /// Terminal order used for schematic connectivity and netlist emission.
     #[serde(default)]
     pub terminal_order: Vec<String>,
@@ -46,6 +65,49 @@ pub struct LibraryCellInstance {
     pub interface_bound: bool,
 }
 
+/// Validate the deliberately small instance-template language used by
+/// model-bound symbols. Keeping the grammar here prevents authoring,
+/// placement, and netlist generation from accepting different contracts.
+pub fn validate_library_netlist_template(template: &str) -> Result<(), String> {
+    let template = template.trim();
+    if template.is_empty() {
+        return Err("template is empty".to_owned());
+    }
+    if template.len() > 512 {
+        return Err("template exceeds the 512-byte limit".to_owned());
+    }
+    if template.chars().any(char::is_control) {
+        return Err("template contains a line break or control character".to_owned());
+    }
+    let tokens = template.split_ascii_whitespace().collect::<Vec<_>>();
+    let Some(reference) = tokens.first().copied() else {
+        return Err("template is empty".to_owned());
+    };
+    let reference_is_bound = reference == "{ref}"
+        || reference.strip_suffix("{name}").is_some_and(|prefix| {
+            !prefix.is_empty()
+                && prefix
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+        });
+    if !reference_is_bound {
+        return Err(
+            "template must start with {ref} or an ASCII device prefix followed by {name}"
+                .to_owned(),
+        );
+    }
+    if !matches!(
+        tokens.as_slice(),
+        [_, "{nodes}", "{model}"] | [_, "{nodes}", "{model}", "{params}"]
+    ) {
+        return Err(
+            "template must be <reference> {nodes} {model} with optional trailing {params}"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
 impl LibraryCellInstance {
     /// Create a new library/cell/view binding.
     pub fn new(
@@ -59,6 +121,10 @@ impl LibraryCellInstance {
             view: view.into(),
             source_path: None,
             module_name: None,
+            netlist_template: None,
+            model_section: None,
+            reference_prefix: None,
+            parameter_order: Vec::new(),
             terminal_order: Vec::new(),
             terminal_dirs: Vec::new(),
             interface_bound: false,
@@ -71,6 +137,19 @@ impl LibraryCellInstance {
         self.terminal_order = ports.iter().map(|port| port.name.clone()).collect();
         self.terminal_dirs = ports.iter().map(|port| port.direction).collect();
         self.interface_bound = true;
+    }
+
+    pub fn effective_reference_prefix(&self) -> Option<&str> {
+        self.reference_prefix
+            .as_deref()
+            .map(str::trim)
+            .filter(|prefix| {
+                !prefix.is_empty()
+                    && prefix.len() <= 8
+                    && prefix
+                        .chars()
+                        .all(|character| character.is_ascii_alphabetic())
+            })
     }
 
     /// The bound interface as port specs, when directions are available
@@ -499,6 +578,43 @@ impl Component {
             self.name.clone()
         }
     }
+
+    /// Validate against the effective emitted device prefix. Model-bound
+    /// library cells own their declared primitive prefix rather than the
+    /// generic `X` prefix of ordinary hierarchical instances.
+    pub fn validate_reference_designator(&self, value: &str) -> Result<(), String> {
+        let prefix = self
+            .library_cell
+            .as_ref()
+            .filter(|binding| binding.netlist_template.is_some())
+            .and_then(LibraryCellInstance::effective_reference_prefix)
+            .unwrap_or_else(|| self.kind.spice_prefix());
+        if prefix.is_empty() {
+            return Err(
+                "This component type does not own a SPICE reference designator.".to_owned(),
+            );
+        }
+        if !value
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        {
+            return Err(format!(
+                "{} designators must begin with `{prefix}`.",
+                self.kind.display_name()
+            ));
+        }
+        let suffix = &value[prefix.len()..];
+        if suffix.is_empty()
+            || !suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(format!(
+                "Enter `{prefix}` followed by one or more ASCII letters, digits, or underscores."
+            ));
+        }
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -597,5 +713,37 @@ mod tests {
         let terminals = component.terminal_positions_resolved(Some(&resolved));
 
         assert_eq!(terminals, vec![("OUT".to_owned(), Point::new(150, 80))]);
+    }
+
+    #[test]
+    fn model_bound_template_grammar_is_single_line_and_positional() {
+        assert!(validate_library_netlist_template("M{name} {nodes} {model} {params}").is_ok());
+        assert!(validate_library_netlist_template("{ref} {nodes} {model}").is_ok());
+        for invalid in [
+            ".include {nodes} {model}",
+            "M{name} {model} {nodes}",
+            "M{name} {nodes} {model}\n.end",
+            "M{name} {nodes} {model} fixed=1",
+            "M{name} {nodes} {model} {params} {params}",
+        ] {
+            assert!(
+                validate_library_netlist_template(invalid).is_err(),
+                "unexpectedly accepted {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_bound_instance_uses_its_primitive_reference_prefix() {
+        let mut binding = LibraryCellInstance::new("models", "nmos_18", "spice");
+        binding.netlist_template = Some("M{name} {nodes} {model} {params}".to_owned());
+        binding.reference_prefix = Some("M".to_owned());
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(binding)
+            .with_name_value("M17", "nmos_18");
+
+        assert!(component.validate_reference_designator("M17").is_ok());
+        assert!(component.validate_reference_designator("X17").is_err());
+        assert!(component.validate_reference_designator("M").is_err());
     }
 }

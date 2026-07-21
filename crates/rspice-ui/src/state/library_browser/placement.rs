@@ -10,7 +10,10 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use super::{LibraryManager, ViewType};
-use crate::state::{CellViewRef, LibraryCellInstance, PortDirection, PortSpec, ProjectWorkspace};
+use crate::state::{
+    CellViewRef, LibraryCellInstance, PortDirection, PortSpec, ProjectWorkspace,
+    validate_library_netlist_template,
+};
 
 #[derive(Debug, Clone)]
 pub struct LibraryCellPlacementCandidate {
@@ -73,7 +76,7 @@ pub fn library_cell_placement_candidates(
             for view in views {
                 let mut binding = LibraryCellInstance::new(&library.name, &cell.name, &view.name);
                 let is_current = library.name == active.library && cell.name == active.cell;
-                let (ready, unavailable_reason) = match view.view_type {
+                let (mut ready, mut unavailable_reason) = match view.view_type {
                     ViewType::Schematic => {
                         let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
                         if let Some(master) = workspace.schematic_buffers.get(&reference.key()) {
@@ -106,16 +109,44 @@ pub fn library_cell_placement_candidates(
                         binding.module_name = view
                             .metadata
                             .get("veriloga.module")
+                            .or_else(|| view.metadata.get("netlist.model"))
+                            .or_else(|| view.metadata.get("netlist.master"))
+                            .or_else(|| view.metadata.get("netlist.module"))
                             .or_else(|| cell.metadata.get("veriloga.module"))
+                            .or_else(|| cell.metadata.get("netlist.model"))
+                            .or_else(|| cell.metadata.get("netlist.master"))
+                            .or_else(|| cell.metadata.get("netlist.module"))
+                            .or_else(|| cell.metadata.get("model.family"))
                             .cloned();
-                        let ready =
-                            binding.source_path.is_some() && !binding.terminal_order.is_empty();
+                        binding.netlist_template = metadata_owned(
+                            [&view.metadata, &cell.metadata],
+                            &["netlist.template", "netlist_template"],
+                        );
+                        binding.model_section = metadata_owned(
+                            [&view.metadata, &cell.metadata],
+                            &["netlist.section", "model.section"],
+                        );
+                        binding.reference_prefix = metadata_owned(
+                            [&view.metadata, &cell.metadata],
+                            &["reference.prefix", "reference_prefix"],
+                        );
+                        let template_error = binding
+                            .netlist_template
+                            .as_deref()
+                            .map(validate_library_netlist_template)
+                            .transpose()
+                            .err();
+                        let ready = binding.source_path.is_some()
+                            && !binding.terminal_order.is_empty()
+                            && template_error.is_none();
                         (
                             ready,
-                            if ready {
-                                String::new()
-                            } else {
-                                "missing source or ports".to_owned()
+                            match template_error {
+                                Some(error) => {
+                                    format!("invalid model-bound netlist template: {error}")
+                                }
+                                None if ready => String::new(),
+                                None => "missing source or ports".to_owned(),
                             },
                         )
                     }
@@ -129,6 +160,18 @@ pub fn library_cell_placement_candidates(
                     Ok(names) => (names, None),
                     Err(error) => (Vec::new(), Some(error)),
                 };
+                if binding.netlist_template.is_some()
+                    && let Some(error) = parameter_contract_error.as_deref()
+                {
+                    ready = false;
+                    unavailable_reason = format!("invalid typed parameter contract: {error}");
+                }
+                if binding.netlist_template.is_some() {
+                    binding.parameter_order = parameters
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect();
+                }
                 candidates.push(LibraryCellPlacementCandidate {
                     library: library.name.clone(),
                     cell: cell.name.clone(),
@@ -143,6 +186,20 @@ pub fn library_cell_placement_candidates(
         }
     }
     candidates
+}
+
+fn metadata_owned<const N: usize>(
+    maps: [&HashMap<String, String>; N],
+    keys: &[&str],
+) -> Option<String> {
+    maps.into_iter()
+        .find_map(|metadata| {
+            keys.iter()
+                .find_map(|key| metadata.get(*key))
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+        })
+        .map(str::to_owned)
 }
 
 const fn view_preference(view_type: ViewType) -> u8 {
@@ -389,5 +446,81 @@ mod tests {
             ["accurate", "fast"]
         );
         assert!(candidates.iter().all(|candidate| candidate.ready));
+    }
+
+    #[test]
+    fn catalog_projects_model_bound_execution_contract_and_rejects_bad_templates() {
+        let mut spice =
+            View::new("spice", ViewType::Spice).with_path(PathBuf::from("C:/models/foundry.lib"));
+        spice
+            .metadata
+            .insert("netlist.ports".to_owned(), "d,g,s,b".to_owned());
+        spice.metadata.insert(
+            "netlist.template".to_owned(),
+            "M{name} {nodes} {model} {params}".to_owned(),
+        );
+        spice
+            .metadata
+            .insert("netlist.model".to_owned(), "nmos_18".to_owned());
+        spice
+            .metadata
+            .insert("netlist.section".to_owned(), "TT".to_owned());
+        spice
+            .metadata
+            .insert("reference.prefix".to_owned(), "M".to_owned());
+        let mut cell = Cell::new("nmos_18");
+        cell.add_view(spice);
+        let mut library = Library::new("models");
+        library.add_cell(cell);
+        let mut libraries = LibraryManager::new();
+        libraries.add_library(library);
+
+        let candidate = library_cell_placement_candidates(&libraries, &ProjectWorkspace::default())
+            .pop()
+            .expect("model candidate");
+        assert!(candidate.ready, "{}", candidate.unavailable_reason);
+        assert_eq!(candidate.binding.module_name.as_deref(), Some("nmos_18"));
+        assert_eq!(candidate.binding.model_section.as_deref(), Some("TT"));
+        assert_eq!(candidate.binding.reference_prefix.as_deref(), Some("M"));
+
+        libraries
+            .get_library_mut("models")
+            .and_then(|library| library.get_cell_mut("nmos_18"))
+            .and_then(|cell| cell.get_view_mut("spice"))
+            .expect("model implementation")
+            .metadata
+            .insert(
+                "netlist.template".to_owned(),
+                ".include {nodes} {model}".to_owned(),
+            );
+        let invalid = library_cell_placement_candidates(&libraries, &ProjectWorkspace::default())
+            .pop()
+            .expect("invalid model candidate is retained for diagnosis");
+        assert!(!invalid.ready);
+        assert!(invalid.unavailable_reason.contains("invalid model-bound"));
+
+        let implementation = libraries
+            .get_library_mut("models")
+            .and_then(|library| library.get_cell_mut("nmos_18"))
+            .and_then(|cell| cell.get_view_mut("spice"))
+            .expect("model implementation");
+        implementation.metadata.insert(
+            "netlist.template".to_owned(),
+            "M{name} {nodes} {model} {params}".to_owned(),
+        );
+        implementation.metadata.insert(
+            "cdf.parameter_contract".to_owned(),
+            r#"[{"name":"bad-name"}]"#.to_owned(),
+        );
+        let invalid_form =
+            library_cell_placement_candidates(&libraries, &ProjectWorkspace::default())
+                .pop()
+                .expect("invalid parameter form remains diagnosable");
+        assert!(!invalid_form.ready);
+        assert!(
+            invalid_form
+                .unavailable_reason
+                .contains("invalid typed parameter contract")
+        );
     }
 }

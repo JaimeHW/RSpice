@@ -270,29 +270,83 @@ impl SimSetupState {
         frozen: &crate::simulation::plan::FrozenSimulationPlan,
         instance: &crate::simulation::plan::FrozenAnalysisInstance,
     ) -> Result<Self, String> {
-        let mut projection = self.clone();
-        for dependency in instance.dependencies() {
+        fn apply_dependency_closure(
+            projection: &mut SimSetupState,
+            frozen: &crate::simulation::plan::FrozenSimulationPlan,
+            consumer: &crate::simulation::plan::FrozenAnalysisInstance,
+            expected_kind: AnalysisKind,
+            target_id: AnalysisInstanceId,
+            applied: &mut HashSet<AnalysisInstanceId>,
+            visiting: &mut Vec<AnalysisInstanceId>,
+        ) -> Result<(), String> {
             let target = frozen
                 .instances()
                 .iter()
-                .find(|candidate| candidate.id() == dependency.target())
+                .find(|candidate| candidate.id() == target_id)
                 .ok_or_else(|| {
                     format!(
                         "frozen analysis {} references missing prerequisite {}",
-                        instance.id(),
-                        dependency.target()
+                        consumer.id(),
+                        target_id
                     )
                 })?;
-            if target.kind() != dependency.prerequisite() {
+            if target.kind() != expected_kind {
                 return Err(format!(
                     "frozen analysis {} prerequisite {} targets {}, not {}",
-                    instance.id(),
-                    dependency.prerequisite(),
+                    consumer.id(),
+                    expected_kind,
                     target.kind(),
-                    dependency.prerequisite()
+                    expected_kind
                 ));
             }
+            if target.order() >= consumer.order() {
+                return Err(format!(
+                    "frozen analysis {} prerequisite {} does not appear earlier",
+                    consumer.id(),
+                    target.id()
+                ));
+            }
+            if applied.contains(&target.id()) {
+                return Ok(());
+            }
+            if visiting.contains(&target.id()) {
+                return Err(format!(
+                    "frozen analysis {} has a cyclic prerequisite closure through {}",
+                    consumer.id(),
+                    target.id()
+                ));
+            }
+            visiting.push(target.id());
+            for dependency in target.dependencies() {
+                apply_dependency_closure(
+                    projection,
+                    frozen,
+                    target,
+                    dependency.prerequisite(),
+                    dependency.target(),
+                    applied,
+                    visiting,
+                )?;
+            }
+            visiting.pop();
             projection.apply_analysis_draft_projection(target.draft());
+            applied.insert(target.id());
+            Ok(())
+        }
+
+        let mut projection = self.clone();
+        let mut applied = HashSet::new();
+        let mut visiting = vec![instance.id()];
+        for dependency in instance.dependencies() {
+            apply_dependency_closure(
+                &mut projection,
+                frozen,
+                instance,
+                dependency.prerequisite(),
+                dependency.target(),
+                &mut applied,
+                &mut visiting,
+            )?;
         }
         projection.apply_analysis_draft_projection(instance.draft());
         if instance.kind() == AnalysisKind::OperatingPoint {
@@ -454,6 +508,52 @@ mod tests {
         };
         assert_eq!(captured.sweep.points, "31");
         assert_eq!(captured.f2_over_f1, "1.1");
+    }
+
+    #[test]
+    fn frozen_projection_applies_the_exact_transitive_prerequisite_closure() {
+        let mut setup = SimSetupState::new();
+        let plan = setup.analysis_plan.as_mut().expect("stable plan exists");
+        let (op, _) = plan
+            .insert_at(AnalysisKind::OperatingPoint, 0)
+            .expect("OP inserts");
+        plan.edit(op, |draft| {
+            let AnalysisDraft::OperatingPoint(draft) = draft else {
+                panic!("expected OP draft");
+            };
+            draft.temperature = "88".to_owned();
+        })
+        .expect("OP edits");
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(draft) = draft else {
+                panic!("expected PSS draft");
+            };
+            draft.fund_freq = "7Meg".to_owned();
+        })
+        .expect("PSS edits");
+        plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
+            .expect("PSS binds OP");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.bind_dependency(pac, AnalysisKind::Pss, pss)
+            .expect("PAC binds PSS");
+        let frozen = plan.freeze().expect("plan freezes");
+        let frozen_pac = frozen
+            .instances()
+            .iter()
+            .find(|instance| instance.id() == pac)
+            .expect("PAC freezes");
+
+        let projection = setup
+            .frozen_instance_projection(&frozen, frozen_pac)
+            .expect("transitive closure projects");
+
+        assert_eq!(projection.op.temperature, "88");
+        assert_eq!(projection.pss.fund_freq, "7Meg");
+        assert_eq!(
+            projection.analysis_order,
+            vec![AnalysisKind::Pac.legacy_index()]
+        );
     }
 
     #[test]

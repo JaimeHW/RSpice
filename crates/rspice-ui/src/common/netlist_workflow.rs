@@ -47,7 +47,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 &mut app.state,
                 &metadata.sealed_source_dependencies,
             ) {
-                app.simulation_controller.clear_prepared_run();
+                app.invalidate_simulation_preflight();
                 app.state.ui.netlist.validation = None;
                 app.state.ui.netlist.validation_error = Some(error.clone());
                 app.state.push_user_message(ConsoleMessage::error(format!(
@@ -56,7 +56,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 return false;
             }
             if let Err(error) = acknowledge_canonical_validation(&mut app.state) {
-                app.simulation_controller.clear_prepared_run();
+                app.invalidate_simulation_preflight();
                 app.state.ui.netlist.validation = None;
                 app.state.ui.netlist.validation_error = Some(error.clone());
                 app.state.push_user_message(ConsoleMessage::error(format!(

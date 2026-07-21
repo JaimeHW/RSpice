@@ -905,7 +905,18 @@ pub struct PreflightIssue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreflightReport {
     pub project_revision: u64,
+    /// Exact configured library/cell/view root whose topology was inspected.
+    pub topology_root: String,
     pub topology_revision: u64,
+    /// Canonical configured hierarchy closure, keyed by LCV identity. This
+    /// catches edits to referenced child schematics without coupling evidence
+    /// to whichever unrelated document happens to be active in the editor.
+    pub topology_closure: Vec<(String, u64)>,
+    /// Stable identity and exact revision of the active simulation plan that
+    /// was inspected. `None` is retained only for a blocked report produced
+    /// while a legacy or otherwise unavailable plan is being diagnosed.
+    pub simulation_plan_id: Option<crate::product::SimulationPlanId>,
+    pub simulation_plan_revision: Option<crate::product::ObjectRevision>,
     pub blockers: Vec<PreflightIssue>,
     pub advisories: Vec<String>,
     /// Present only when the controller retained a real authorized immutable
@@ -914,8 +925,61 @@ pub struct PreflightReport {
 }
 
 impl PreflightReport {
+    /// Whether the immutable report contains a complete authorization. Call
+    /// `is_runnable_for` at every live UI or dispatch boundary so currentness
+    /// is evaluated as well.
     pub fn is_runnable(&self) -> bool {
         self.blockers.is_empty() && self.prepared.is_some()
+    }
+
+    pub fn is_current_for(
+        &self,
+        project_revision: u64,
+        topology_root: &str,
+        topology_revision: u64,
+        topology_closure: &[(String, u64)],
+        simulation_plan: Option<(
+            crate::product::SimulationPlanId,
+            crate::product::ObjectRevision,
+        )>,
+    ) -> bool {
+        let plan_is_current = match (
+            self.simulation_plan_id,
+            self.simulation_plan_revision,
+            simulation_plan,
+        ) {
+            (Some(report_id), Some(report_revision), Some((live_id, live_revision))) => {
+                report_id == live_id && report_revision == live_revision
+            }
+            (None, None, None) => true,
+            _ => false,
+        };
+        self.project_revision == project_revision
+            && self.topology_root.eq_ignore_ascii_case(topology_root)
+            && self.topology_revision == topology_revision
+            && self.topology_closure == topology_closure
+            && plan_is_current
+    }
+
+    pub fn is_runnable_for(
+        &self,
+        project_revision: u64,
+        topology_root: &str,
+        topology_revision: u64,
+        topology_closure: &[(String, u64)],
+        simulation_plan: Option<(
+            crate::product::SimulationPlanId,
+            crate::product::ObjectRevision,
+        )>,
+    ) -> bool {
+        self.is_runnable()
+            && self.is_current_for(
+                project_revision,
+                topology_root,
+                topology_revision,
+                topology_closure,
+                simulation_plan,
+            )
     }
 }
 
@@ -948,6 +1012,17 @@ pub struct PreflightDialogState {
     pub open: bool,
     pub report: Option<PreflightReport>,
     pub pending_toast: Option<PreflightToast>,
+}
+
+impl PreflightDialogState {
+    /// Drop every presentation artifact backed by a no-longer-current
+    /// execution contract. The controller's one-shot permit is invalidated by
+    /// the owning `RSpiceApp` at the same mutation boundary.
+    pub fn invalidate(&mut self) {
+        self.open = false;
+        self.report = None;
+        self.pending_toast = None;
+    }
 }
 
 /// Local presentation state for the canonical Jobs manager. Selection uses
@@ -1448,6 +1523,21 @@ pub struct WorkbenchState {
     /// Stable analysis instance whose configuration is shown in the plan.
     #[serde(default)]
     pub active_analysis_instance: Option<crate::product::AnalysisInstanceId>,
+    /// Device-local Simulation Studio viewport. Keeping this outside egui's
+    /// transient widget memory prevents a committed form edit from snapping
+    /// the editor back to the top when the selected instance is rebuilt.
+    #[serde(skip)]
+    pub simulation_surface_scroll_y: f32,
+    /// One-frame correction for structural edits above the stacked analysis
+    /// editor. It is consumed after egui reports the current ScrollArea offset.
+    #[serde(skip)]
+    pub simulation_surface_pending_scroll_delta_y: f32,
+    /// Screen-space top edge of the selected analysis form immediately before
+    /// a stacked structural edit. The next frame measures the actual displaced
+    /// position so scroll compensation follows egui's rendered geometry and
+    /// status-message height changes cannot move the editable controls.
+    #[serde(skip)]
+    pub simulation_surface_editor_anchor_y: Option<f32>,
     /// Last analysis lifecycle outcome announced by the transaction owner.
     #[serde(skip)]
     pub analysis_lifecycle_status: String,
@@ -1579,6 +1669,9 @@ impl Default for WorkbenchState {
             models_page: ModelsPage::Models,
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,
+            simulation_surface_scroll_y: 0.0,
+            simulation_surface_pending_scroll_delta_y: 0.0,
+            simulation_surface_editor_anchor_y: None,
             analysis_lifecycle_status: "No lifecycle command has been committed this session."
                 .to_owned(),
             simulation_workflow: None,
@@ -2673,6 +2766,34 @@ mod tests {
 
         state.dismiss_inspector();
         assert!(!state.inspector_visible);
+    }
+
+    #[test]
+    fn invalidating_preflight_drops_every_revision_bound_presentation_artifact() {
+        let mut preflight = PreflightDialogState {
+            open: true,
+            report: Some(PreflightReport {
+                project_revision: 4,
+                topology_root: "user/top/schematic".to_owned(),
+                topology_revision: 9,
+                topology_closure: vec![("user/top/schematic".to_owned(), 9)],
+                simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
+                simulation_plan_revision: Some(crate::product::ObjectRevision::INITIAL),
+                blockers: Vec::new(),
+                advisories: Vec::new(),
+                prepared: None,
+            }),
+            pending_toast: Some(PreflightToast {
+                message: "stale success".to_owned(),
+                warning: false,
+            }),
+        };
+
+        preflight.invalidate();
+
+        assert!(!preflight.open);
+        assert!(preflight.report.is_none());
+        assert!(preflight.pending_toast.is_none());
     }
 
     #[test]

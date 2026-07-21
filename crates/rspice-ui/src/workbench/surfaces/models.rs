@@ -7,16 +7,23 @@ use std::path::{Path, PathBuf};
 use egui::{Align, Align2, Color32, Key, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::common::RSpiceApp;
+use crate::common::app::{
+    open_create_model_bound_symbol_dialog, open_symbol_import_dialog,
+    open_symbol_parameter_form_dialog,
+};
 use crate::state::model_library::{DeviceModel, ModelLibrary};
-use crate::state::{CellViewRef, SymbolDocument, ViewType};
+use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 
-use super::super::design_system::{property_card, property_row, workspace_title_row};
+use super::super::design_system::{
+    property_card, property_row, property_row_toned, workspace_title_row,
+};
 use super::super::state::{ModelsPage, Workspace};
 
 const TABLE_HEAD_H: f32 = 27.0;
+const TABLE_CARD_HEAD_H: f32 = 37.0;
 const MODEL_TABLE_MIN_W: f32 = 780.0;
 const MODEL_PHONE_TABLE_MIN_W: f32 = 690.0;
 const GENERAL_TABLE_MIN_W: f32 = 760.0;
@@ -42,21 +49,29 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .layout(Layout::top_down(Align::Min)),
     );
     surface.spacing_mut().item_spacing = Vec2::ZERO;
-    model_tabs(&mut surface, app);
-    match app.state.workbench.models_page {
+    // Keep the tab strip, filter reservation, and body on one page snapshot
+    // for the entire frame. Applying a click only after the current body is
+    // rendered avoids a one-frame hybrid (new body with old tab geometry).
+    let current_page = app.state.workbench.models_page;
+    let requested_page = model_tabs(&mut surface, app, current_page);
+    match current_page {
         ModelsPage::Models => models_catalog(&mut surface, app),
         ModelsPage::Symbols => symbols(&mut surface, app),
         ModelsPage::Corners => corners(&mut surface, app),
         ModelsPage::Include => include_graph(&mut surface, app),
         ModelsPage::Qualification => metadata_audit(&mut surface, app),
     }
+    if let Some(page) = requested_page {
+        app.state.workbench.models_page = page;
+        ui.ctx().request_repaint();
+    }
 }
 
-fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
+fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp, current_page: ModelsPage) -> Option<ModelsPage> {
     let t = Tokens::get(ui.ctx());
     let touch = t.metrics.ctl_h >= 44.0;
     let tab_h = if touch { 44.0 } else { 37.0 };
-    let filter_visible = app.state.workbench.models_page == ModelsPage::Models;
+    let filter_visible = current_page == ModelsPage::Models;
     let strip_h = model_tab_strip_height(touch, filter_visible);
     let surface_w = ui.available_width().max(1.0);
     let filter_outer_w = if filter_visible {
@@ -89,6 +104,7 @@ fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
         ),
     );
     let mut selected = None;
+    let mut rendered_tabs = Vec::new();
     let mut tabs = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(tabs_rect)
@@ -111,47 +127,51 @@ fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                     let width = (galley.size().x + 24.0).max(if touch { 44.0 } else { 0.0 });
                     let (rect, response) =
                         ui.allocate_exact_size(egui::vec2(width, tab_h), Sense::click());
-                    let active = app.state.workbench.models_page == page;
-                    response.widget_info(|| {
-                        egui::WidgetInfo::selected(
-                            egui::WidgetType::Button,
-                            ui.is_enabled(),
-                            active,
-                            label,
-                        )
-                    });
                     if response.hovered() {
                         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-                    }
-                    ui.painter().galley(
-                        egui::pos2(
-                            rect.center().x - galley.size().x * 0.5,
-                            rect.center().y - galley.size().y * 0.5,
-                        ),
-                        galley,
-                        if active {
-                            t.color.text
-                        } else {
-                            t.color.text_dim
-                        },
-                    );
-                    if active {
-                        ui.painter().rect_filled(
-                            Rect::from_min_max(
-                                egui::pos2(rect.left() + 9.0, rect.bottom() - 2.0),
-                                egui::pos2(rect.right() - 9.0, rect.bottom()),
-                            ),
-                            0.0,
-                            t.color.accent,
-                        );
                     }
                     theme::paint_focus_ring(ui, &response, rect);
                     if response.clicked() {
                         selected = Some(page);
                     }
+                    rendered_tabs.push((page, rect, galley, ui.painter().clone(), response));
                 }
             });
         });
+
+    for (page, rect, galley, painter, response) in rendered_tabs {
+        let active = current_page == page;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                active,
+                page.label(),
+            )
+        });
+        painter.galley(
+            egui::pos2(
+                rect.center().x - galley.size().x * 0.5,
+                rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            if active {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+        if active {
+            painter.rect_filled(
+                Rect::from_min_max(
+                    egui::pos2(rect.left() + 9.0, rect.bottom() - 2.0),
+                    egui::pos2(rect.right() - 9.0, rect.bottom()),
+                ),
+                0.0,
+                t.color.accent,
+            );
+        }
+    }
 
     if filter_visible {
         let margin_x = if surface_w <= 560.0 { 4.0 } else { 7.0 };
@@ -197,10 +217,8 @@ fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     }
 
-    if let Some(page) = selected {
-        app.state.workbench.models_page = page;
-    }
     ui.add_space(1.0);
+    selected.filter(|page| *page != current_page)
 }
 
 fn models_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -279,11 +297,14 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         "Symbols, pins & device forms",
         "Symbol and component-definition manager",
-        "Bind graphical symbols and explicit terminal contracts without hiding netlist semantics.",
+        "Bind graphical symbols, terminals, parameter forms and model families without hiding netlist semantics.",
         true,
         |ui| {
             if Button::new("Create symbol").accent().show(ui).clicked() {
-                open_create_symbol_dialog(app);
+                open_create_model_bound_symbol_dialog(&mut app.state);
+            }
+            if Button::new("Import symbol").show(ui).clicked() {
+                open_symbol_import_dialog(&mut app.state);
             }
         },
     );
@@ -299,69 +320,115 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
                 .into_iter()
                 .filter(|view| view.view_type == ViewType::Symbol)
             {
-                stats.symbols += 1;
                 let key = view_key(&library.name, &cell.name, &view.name);
                 targets.insert(
                     key.clone(),
                     CellViewRef::new(&library.name, &cell.name, &view.name),
                 );
-                let model_family = symbol_model_family(app, cell);
-                let parameter_form = metadata_value(
-                    [&cell.metadata, &view.metadata],
-                    &["parameter.form", "parameter_form", "cdf", "cdf.form"],
-                )
-                .unwrap_or_else(|| "not defined".to_owned());
-                if parameter_form != "not defined" {
-                    stats.parameter_forms += 1;
-                }
-                let netlist_template = metadata_value(
-                    [&cell.metadata, &view.metadata],
-                    &["netlist.template", "netlist_template"],
-                )
-                .or_else(|| {
-                    cell.views_sorted()
-                        .into_iter()
-                        .find(|candidate| candidate.view_type == ViewType::Spice)
-                        .map(|candidate| candidate.name.clone())
-                })
-                .unwrap_or_else(|| "not defined".to_owned());
-
-                let (pins, status, tone) = match SymbolDocument::load_from_view(view) {
-                    Ok(document) if document.pins.is_empty() => {
-                        stats.missing_contracts += 1;
-                        (
-                            "not defined".to_owned(),
-                            "pin contract missing",
-                            t.color.warn,
+                let typed_definition = ModelBoundSymbolDefinition::load_from_view(view);
+                let model_family = typed_definition
+                    .as_ref()
+                    .ok()
+                    .and_then(Option::as_ref)
+                    .and_then(|definition| definition.netlist.model.as_ref())
+                    .map(|model| model.model.clone())
+                    .unwrap_or_else(|| symbol_model_family(app, cell));
+                let parameter_form = typed_definition
+                    .as_ref()
+                    .ok()
+                    .and_then(Option::as_ref)
+                    .map(symbol_parameter_form_label)
+                    .unwrap_or_else(|| {
+                        metadata_value(
+                            [&cell.metadata, &view.metadata],
+                            &["parameter.form", "parameter_form", "cdf", "cdf.form"],
                         )
-                    }
-                    Ok(document) => {
-                        stats.pins += document.pins.len();
-                        let unplaced = document
-                            .pins
-                            .iter()
-                            .filter(|pin| pin.position.is_none())
-                            .count();
-                        stats.unplaced_pins += unplaced;
-                        let names = document
-                            .pins
-                            .iter()
-                            .map(|pin| pin.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        if unplaced > 0 {
-                            (names, "unplaced pins", t.color.warn)
-                        } else if model_family == "unbound" {
-                            (names, "model unbound", t.color.warn)
-                        } else {
-                            (names, "bound", t.color.ok)
-                        }
-                    }
+                        .unwrap_or_else(|| "not defined".to_owned())
+                    });
+                let netlist_template = typed_definition
+                    .as_ref()
+                    .ok()
+                    .and_then(Option::as_ref)
+                    .map(|definition| definition.netlist.template.trim())
+                    .filter(|template| !template.is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        metadata_value(
+                            [&cell.metadata, &view.metadata],
+                            &["netlist.template", "netlist_template"],
+                        )
+                    })
+                    .or_else(|| {
+                        cell.views_sorted()
+                            .into_iter()
+                            .find(|candidate| candidate.view_type == ViewType::Spice)
+                            .map(|candidate| candidate.name.clone())
+                    })
+                    .unwrap_or_else(|| "not defined".to_owned());
+
+                let (pins, status, tone) = match typed_definition.as_ref() {
                     Err(_) => {
                         stats.invalid_documents += 1;
                         ("invalid metadata".to_owned(), "invalid", t.color.err)
                     }
+                    Ok(None) => match SymbolDocument::load_from_view(view) {
+                        Ok(document) => {
+                            stats.missing_contracts += 1;
+                            let pins = if document.pins.is_empty() {
+                                "not defined".to_owned()
+                            } else {
+                                document
+                                    .pins
+                                    .iter()
+                                    .map(|pin| pin.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            };
+                            (pins, "legacy review", t.color.warn)
+                        }
+                        Err(_) => {
+                            stats.invalid_documents += 1;
+                            ("invalid metadata".to_owned(), "invalid", t.color.err)
+                        }
+                    },
+                    Ok(Some(_)) => match SymbolDocument::load_from_view(view) {
+                        Ok(document) if document.pins.is_empty() => {
+                            stats.missing_contracts += 1;
+                            (
+                                "not defined".to_owned(),
+                                "pin contract missing",
+                                t.color.warn,
+                            )
+                        }
+                        Ok(document) => {
+                            let unplaced = document
+                                .pins
+                                .iter()
+                                .filter(|pin| pin.position.is_none())
+                                .count();
+                            let names = document
+                                .pins
+                                .iter()
+                                .map(|pin| pin.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if unplaced > 0 {
+                                (names, "unplaced pins", t.color.warn)
+                            } else if model_family == "unbound" {
+                                (names, "model unbound", t.color.warn)
+                            } else {
+                                (names, "bound", t.color.ok)
+                            }
+                        }
+                        Err(_) => {
+                            stats.invalid_documents += 1;
+                            ("invalid metadata".to_owned(), "invalid", t.color.err)
+                        }
+                    },
                 };
+                if status == "bound" {
+                    stats.resolved += 1;
+                }
                 let selected = app.state.library_manager.selected_library.as_deref()
                     == Some(&library.name)
                     && app.state.library_manager.selected_cell.as_deref() == Some(&cell.name)
@@ -398,17 +465,19 @@ fn symbols(ui: &mut Ui, app: &mut RSpiceApp) {
         available,
         layout,
         |ui, table_h| {
+            symbol_registry_header(ui, stats.resolved);
             let event = data_table(
                 ui,
                 "models.symbols",
                 GENERAL_TABLE_MIN_W,
                 &columns,
                 &rows,
-                egui::vec2(ui.available_width(), table_h),
+                egui::vec2(ui.available_width(), (table_h - TABLE_CARD_HEAD_H).max(1.0)),
                 "No symbol views are present in the loaded design libraries.",
             );
             symbol_summary(
                 ui,
+                app,
                 stats,
                 layout.narrow,
                 layout.summary_height,
@@ -1318,46 +1387,159 @@ fn elide(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct SymbolStats {
-    symbols: usize,
-    pins: usize,
-    unplaced_pins: usize,
+    resolved: usize,
     missing_contracts: usize,
     invalid_documents: usize,
-    parameter_forms: usize,
+}
+
+fn symbol_registry_header(ui: &mut Ui, resolved: usize) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, TABLE_CARD_HEAD_H), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 11.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        "Symbol registry",
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+    ui.painter().text(
+        egui::pos2(rect.right() - 11.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        format!("{resolved} resolved"),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.ok,
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            format!("Symbol registry, {resolved} resolved"),
+        )
+    });
 }
 
 fn symbol_summary(
     ui: &mut Ui,
+    app: &mut RSpiceApp,
     stats: SymbolStats,
     narrow: bool,
     summary_height: f32,
     parent_owns_scroll: bool,
 ) {
-    summary_cards(
-        ui,
-        narrow,
-        summary_height,
-        parent_owns_scroll,
-        SummaryCardSpec::new(
-            "Pin contract",
-            &[
-                ("Symbol views", stats.symbols.to_string()),
-                ("Explicit pins", stats.pins.to_string()),
-                ("Unplaced pins", stats.unplaced_pins.to_string()),
-            ],
-        ),
-        SummaryCardSpec::new(
-            "Parameter form",
-            &[
-                ("Defined forms", stats.parameter_forms.to_string()),
-                ("Missing pin contracts", stats.missing_contracts.to_string()),
-                (
-                    "Invalid symbol metadata",
-                    stats.invalid_documents.to_string(),
-                ),
-            ],
-        ),
-    );
+    let width = ui.available_width().max(1.0);
+    let mut open_form_designer = false;
+    if parent_owns_scroll {
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            ui.set_min_width(width);
+            let start = ui.cursor().top();
+            symbol_summary_content(ui, width, narrow, stats, &mut open_form_designer);
+            let consumed = ui.cursor().top() - start;
+            if consumed < summary_height {
+                ui.add_space(summary_height - consumed);
+            }
+        });
+    } else {
+        let viewport_size = egui::vec2(width, summary_height.max(1.0));
+        let (viewport, _) = ui.allocate_exact_size(viewport_size, Sense::hover());
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(viewport)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        child.spacing_mut().item_spacing = Vec2::ZERO;
+        ScrollArea::vertical()
+            .id_salt("models.symbols.summary")
+            .auto_shrink([false, false])
+            .show(&mut child, |ui| {
+                ui.set_min_width(viewport.width());
+                symbol_summary_content(
+                    ui,
+                    viewport.width(),
+                    narrow,
+                    stats,
+                    &mut open_form_designer,
+                );
+            });
+    }
+    if open_form_designer {
+        open_symbol_parameter_form_dialog(&mut app.state);
+    }
+}
+
+fn symbol_summary_content(
+    ui: &mut Ui,
+    width: f32,
+    narrow: bool,
+    stats: SymbolStats,
+    open_form_designer: &mut bool,
+) {
+    let render_pin_contract = |ui: &mut Ui| {
+        property_card(ui, "Pin contract", |ui| {
+            let t = Tokens::get(ui.ctx());
+            if stats.invalid_documents == 0 && stats.missing_contracts == 0 {
+                property_row_toned(ui, "Electrical types", "validated", t.color.ok);
+            } else {
+                property_row_toned(ui, "Electrical types", "review required", t.color.err);
+            }
+            property_row(ui, "Hidden power pins", "forbidden");
+            property_row_toned(ui, "Pin-order mismatch", "block netlist", t.color.err);
+        });
+    };
+    let mut render_parameter_form = |ui: &mut Ui| {
+        property_card(ui, "Parameter form", |ui| {
+            let t = Tokens::get(ui.ctx());
+            egui::Frame::new()
+                .inner_margin(egui::Margin::same(11))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new("Typed engineering values, defaults, constraints, model inheritance and device-specific help are versioned with each symbol.")
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        )
+                        .wrap(),
+                    );
+                    if Button::new("Open form designer").show(ui).clicked() {
+                        *open_form_designer = true;
+                    }
+                });
+        });
+    };
+
+    if narrow {
+        render_pin_contract(ui);
+        render_parameter_form(ui);
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 1.0;
+            let column_w = ((width - 1.0) * 0.5).max(1.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_w, 0.0),
+                Layout::top_down(Align::Min),
+                render_pin_contract,
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_w, 0.0),
+                Layout::top_down(Align::Min),
+                render_parameter_form,
+            );
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1895,38 +2077,6 @@ fn metadata_audit_footer(ui: &mut Ui, blocking: usize, undocumented: usize) {
     }
 }
 
-fn open_create_symbol_dialog(app: &mut RSpiceApp) {
-    let selected = app
-        .state
-        .library_manager
-        .selected_library
-        .as_ref()
-        .and_then(|name| {
-            app.state
-                .library_manager
-                .get_library(name)
-                .filter(|library| !library.read_only)
-                .map(|library| library.name.clone())
-        });
-    let target = selected.or_else(|| {
-        app.state
-            .library_manager
-            .libraries_sorted()
-            .into_iter()
-            .find(|library| !library.read_only)
-            .map(|library| library.name.clone())
-    });
-    let dialogs = &mut app.state.dialogs;
-    dialogs.new_cell_library = target.unwrap_or_default();
-    dialogs.new_cell_name.clear();
-    dialogs.new_cell_description.clear();
-    dialogs.new_cell_create_schematic = false;
-    dialogs.new_cell_create_symbol = true;
-    dialogs.new_cell_create_testbench = false;
-    dialogs.new_cell_error = None;
-    dialogs.new_cell_dialog = true;
-}
-
 fn symbol_model_family(app: &RSpiceApp, cell: &crate::state::Cell) -> String {
     if let Some(value) = metadata_value(
         [&cell.metadata],
@@ -1942,6 +2092,19 @@ fn symbol_model_family(app: &RSpiceApp, cell: &crate::state::Cell) -> String {
         .find(|model| model.name.eq_ignore_ascii_case(&cell.name))
         .map(|model| model.name.clone())
         .unwrap_or_else(|| "unbound".to_owned())
+}
+
+fn symbol_parameter_form_label(definition: &ModelBoundSymbolDefinition) -> String {
+    let sections = &definition.parameter_form.sections;
+    let field_count = sections
+        .iter()
+        .map(|section| section.fields.len())
+        .sum::<usize>();
+    match sections.as_slice() {
+        [] => "not defined".to_owned(),
+        [section] if !section.label.trim().is_empty() => section.label.trim().to_owned(),
+        _ => format!("{} sections · {field_count} fields", sections.len()),
+    }
 }
 
 fn metadata_value<const N: usize>(
@@ -2143,7 +2306,7 @@ mod tests {
             (
                 ModelsPage::Symbols,
                 "Create symbol",
-                "Bind graphical symbols and explicit terminal contracts without hiding netlist semantics.",
+                "Bind graphical symbols, terminals, parameter forms and model families without hiding netlist semantics.",
                 "No symbol views are present in the loaded design libraries.",
             ),
             (

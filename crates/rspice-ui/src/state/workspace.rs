@@ -4200,6 +4200,23 @@ fn materialize_authoritative_source_binding(
                 .or_else(|| cell.metadata.get("netlist.module"))
                 .cloned()
         });
+    materialized.netlist_template = metadata_value(
+        [&view.metadata, &cell.metadata],
+        &["netlist.template", "netlist_template"],
+    );
+    materialized.model_section = metadata_value(
+        [&view.metadata, &cell.metadata],
+        &["netlist.section", "model.section"],
+    );
+    materialized.reference_prefix = metadata_value(
+        [&view.metadata, &cell.metadata],
+        &["reference.prefix", "reference_prefix"],
+    );
+    materialized.parameter_order = metadata_terminal_names_for_keys(
+        [&view.metadata, &cell.metadata],
+        &["netlist.parameter_order"],
+    )
+    .unwrap_or_default();
     let ports = terminal_order
         .into_iter()
         .map(|name| crate::state::PortSpec {
@@ -4300,6 +4317,39 @@ fn metadata_terminal_names(metadata: &HashMap<String, String>) -> Option<Vec<Str
     (!names.is_empty()).then_some(names)
 }
 
+fn metadata_value<const N: usize>(
+    maps: [&HashMap<String, String>; N],
+    keys: &[&str],
+) -> Option<String> {
+    maps.into_iter()
+        .find_map(|metadata| {
+            keys.iter()
+                .find_map(|key| metadata.get(*key))
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+        })
+        .map(str::to_owned)
+}
+
+fn metadata_terminal_names_for_keys<const N: usize>(
+    maps: [&HashMap<String, String>; N],
+    keys: &[&str],
+) -> Option<Vec<String>> {
+    let encoded = maps
+        .into_iter()
+        .find_map(|metadata| keys.iter().find_map(|key| metadata.get(*key)))?;
+    let values = serde_json::from_str::<Vec<String>>(encoded).unwrap_or_else(|_| {
+        encoded
+            .split([',', ' ', '\t', '\n'])
+            .filter_map(|value| {
+                let value = value.trim();
+                (!value.is_empty()).then(|| value.to_owned())
+            })
+            .collect()
+    });
+    (!values.is_empty()).then_some(values)
+}
+
 fn same_terminal_contract(placed: &[String], authoritative: &[&str]) -> bool {
     placed.len() == authoritative.len()
         && placed
@@ -4374,15 +4424,31 @@ fn validate_source_file(
     view_type: ViewType,
     binding: &LibraryCellInstance,
 ) -> Result<(), String> {
-    let source = std::fs::read_to_string(source_path).map_err(|error| {
-        format!(
-            "source-backed binding {}/{}/{} cannot read {}: {error}",
-            binding.library,
-            binding.cell,
-            binding.view,
-            source_path.display()
-        )
-    })?;
+    let source = if let Some(section) = binding.model_section.as_deref() {
+        let mut processor = rspice_core::netlist::IncludeProcessor::new(source_path);
+        processor
+            .process_lib(&source_path.to_string_lossy(), Some(section))
+            .map_err(|error| {
+                format!(
+                    "source-backed binding {}/{}/{} cannot resolve model section '{}' from {}: {error}",
+                    binding.library,
+                    binding.cell,
+                    binding.view,
+                    section,
+                    source_path.display()
+                )
+            })?
+    } else {
+        std::fs::read_to_string(source_path).map_err(|error| {
+            format!(
+                "source-backed binding {}/{}/{} cannot read {}: {error}",
+                binding.library,
+                binding.cell,
+                binding.view,
+                source_path.display()
+            )
+        })?
+    };
     let master = binding
         .module_name
         .as_deref()
@@ -4399,12 +4465,15 @@ fn validate_source_file(
         }),
         ViewType::Spice | ViewType::Extracted => source.lines().any(|line| {
             let mut tokens = line.split_ascii_whitespace();
-            tokens
-                .next()
+            let directive = tokens.next();
+            let declared_name = tokens.next();
+            let subcircuit_matches = directive
                 .is_some_and(|token| token.eq_ignore_ascii_case(".subckt"))
-                && tokens
-                    .next()
-                    .is_some_and(|token| token.eq_ignore_ascii_case(master))
+                && declared_name.is_some_and(|token| token.eq_ignore_ascii_case(master));
+            let model_matches = binding.netlist_template.is_some()
+                && directive.is_some_and(|token| token.eq_ignore_ascii_case(".model"))
+                && declared_name.is_some_and(|token| token.eq_ignore_ascii_case(master));
+            subcircuit_matches || model_matches
         }),
         _ => false,
     };
@@ -5507,6 +5576,31 @@ mod tests {
 
     fn symbol_reference(cell: &str) -> CellViewRef {
         CellViewRef::new("work", cell, "symbol")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn model_bound_source_validation_resolves_the_selected_lib_section() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-model-bound-section-{}.lib",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            ".lib TT\n.model nmos_18 nmos level=1\n.endl TT\n.lib FF\n.model nmos_18_fast nmos level=1\n.endl FF\n",
+        )
+        .expect("write sectioned model fixture");
+        let mut binding = LibraryCellInstance::new("models", "nmos_18", "spice");
+        binding.module_name = Some("nmos_18".to_owned());
+        binding.netlist_template = Some("M{name} {nodes} {model} {params}".to_owned());
+        binding.model_section = Some("TT".to_owned());
+
+        validate_source_file(&path, ViewType::Spice, &binding)
+            .expect("selected section declares the executable model");
+        binding.model_section = Some("FF".to_owned());
+        assert!(validate_source_file(&path, ViewType::Spice, &binding).is_err());
+
+        std::fs::remove_file(path).expect("remove sectioned model fixture");
     }
 
     #[test]

@@ -227,7 +227,7 @@ impl RSpiceApp {
                 committed_revision,
             });
         self.state.design_execution_epoch = self.state.design_execution_epoch.wrapping_add(1);
-        self.simulation_controller.clear_prepared_run();
+        self.invalidate_simulation_preflight();
         self.state.ui.netlist.current_generation_input_digest = None;
         self.state.push_user_message(ConsoleMessage::info(format!(
             "Design Management revision {} was published as project revision {:?}.",

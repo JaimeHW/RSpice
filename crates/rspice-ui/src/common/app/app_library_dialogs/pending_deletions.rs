@@ -19,7 +19,7 @@ impl RSpiceApp {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
                     if apply_design_management_removal(&mut self.state, ownership_removal) {
-                        self.simulation_controller.clear_prepared_run();
+                        self.invalidate_simulation_preflight();
                     }
                     remove_project_sources_for_deleted_scope(
                         &mut self.state,
@@ -68,7 +68,7 @@ impl RSpiceApp {
                 deleted = cell.remove_view(&view_name);
                 if deleted {
                     if apply_design_management_removal(&mut self.state, ownership_removal) {
-                        self.simulation_controller.clear_prepared_run();
+                        self.invalidate_simulation_preflight();
                     }
                     remove_project_sources_for_deleted_scope(
                         &mut self.state,

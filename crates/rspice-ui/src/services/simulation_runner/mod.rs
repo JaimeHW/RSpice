@@ -106,7 +106,8 @@ pub use pole_zero::{
     run_pole_zero_analysis_with_source_path, run_pole_zero_analysis_with_source_path_and_abort,
 };
 pub use pss::{
-    PssData, run_pss_analysis, run_pss_analysis_with_abort, run_pss_analysis_with_source_path,
+    PssData, PssRunConfig, run_pss_analysis, run_pss_analysis_with_abort,
+    run_pss_analysis_with_config_and_source_path_and_abort, run_pss_analysis_with_source_path,
     run_pss_analysis_with_source_path_and_abort,
 };
 pub use pstb::{

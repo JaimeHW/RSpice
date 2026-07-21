@@ -519,10 +519,21 @@ fn initial_status_for_spec(
             stop_freq: *stop_freq,
         },
         AnalysisSpec::Pss {
-            fundamental_freq, ..
-        } => SimulationStatus::Transient {
-            time: 0.0,
-            stop_time: positive_period(*fundamental_freq),
+            fundamental_freq,
+            method,
+            num_harmonics,
+            ..
+        } => match method {
+            crate::simulation::multi_run::PssMethod::Shooting => SimulationStatus::Transient {
+                time: 0.0,
+                stop_time: positive_period(*fundamental_freq),
+            },
+            crate::simulation::multi_run::PssMethod::HarmonicBalance => {
+                SimulationStatus::AcAnalysis {
+                    freq: *fundamental_freq,
+                    stop_freq: *fundamental_freq * (*num_harmonics).max(1) as f64,
+                }
+            }
         },
         AnalysisSpec::HarmonicBalance { tones, .. } => SimulationStatus::AcAnalysis {
             freq: tones.first().map(|tone| tone.frequency).unwrap_or(1.0),

@@ -497,10 +497,23 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             fundamental_freq,
             num_harmonics,
             tolerance,
+            max_iterations,
+            method,
+            oscillator_mode,
+            oscillator_node,
+            save_harmonics,
         } => {
             writer.f64(*fundamental_freq);
             writer.usize(*num_harmonics);
             writer.f64(*tolerance);
+            writer.u8(match method {
+                crate::simulation::multi_run::PssMethod::Shooting => 0,
+                crate::simulation::multi_run::PssMethod::HarmonicBalance => 1,
+            });
+            writer.usize(*max_iterations);
+            writer.bool(*oscillator_mode);
+            writer.option(oscillator_node.as_ref(), |w, value| w.string(value));
+            writer.bool(*save_harmonics);
         }
         AnalysisSpec::HarmonicBalance {
             tones,

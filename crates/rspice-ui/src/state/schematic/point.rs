@@ -20,6 +20,7 @@ use std::ops::{Add, Sub};
 /// - Y increases downward (screen coordinates)
 /// - Grid size is typically 10 pixels per unit
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Point {
     pub x: i32,
     pub y: i32,

@@ -4,7 +4,7 @@ use std::path::Path;
 use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
-use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep};
+use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, PssMethod};
 use crate::simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 
@@ -20,14 +20,45 @@ pub(super) fn run_periodic_spec(
             fundamental_freq,
             num_harmonics,
             tolerance,
-        } => run_pss(
-            netlist,
-            fundamental_freq,
-            num_harmonics,
-            tolerance,
-            source_path,
-            abort,
-        ),
+            max_iterations,
+            method,
+            oscillator_mode,
+            oscillator_node,
+            save_harmonics,
+        } => match method {
+            PssMethod::Shooting => run_pss(
+                netlist,
+                svc_runner::PssRunConfig {
+                    fundamental_freq,
+                    num_harmonics,
+                    tolerance,
+                    max_iterations,
+                    oscillator_mode,
+                    oscillator_node,
+                    save_harmonics,
+                },
+                source_path,
+                abort,
+            ),
+            PssMethod::HarmonicBalance => {
+                if oscillator_mode {
+                    return Err(SimulationError::InvalidConfig(
+                        "autonomous PSS requires the shooting solver; harmonic balance needs a driven fundamental"
+                            .to_string(),
+                    ));
+                }
+                let hb_cfg = svc_runner::HbRunConfig {
+                    tones: vec![svc_runner::HbToneRunConfig::new(
+                        fundamental_freq,
+                        num_harmonics,
+                    )],
+                    reltol: tolerance,
+                    max_iterations,
+                    ..svc_runner::HbRunConfig::default()
+                };
+                run_harmonic_balance(netlist, &hb_cfg, save_harmonics, source_path, abort)
+            }
+        },
         AnalysisSpec::HarmonicBalance {
             tones,
             reltol,
@@ -66,7 +97,7 @@ pub(super) fn run_periodic_spec(
                 source_stepping,
                 verbose,
             };
-            run_harmonic_balance(netlist, &hb_cfg, source_path, abort)
+            run_harmonic_balance(netlist, &hb_cfg, true, source_path, abort)
         }
         AnalysisSpec::Envelope {
             fundamental_freq,
@@ -126,18 +157,14 @@ pub(super) fn run_periodic_spec(
 
 fn run_pss(
     netlist: &str,
-    fundamental_freq: f64,
-    num_harmonics: usize,
-    tolerance: f64,
+    config: svc_runner::PssRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pss_analysis_with_source_path_and_abort(
+        svc_runner::run_pss_analysis_with_config_and_source_path_and_abort(
             netlist,
-            fundamental_freq,
-            num_harmonics,
-            tolerance,
+            &config,
             source_path,
             abort,
         )
@@ -164,6 +191,7 @@ fn run_pss(
 fn run_harmonic_balance(
     netlist: &str,
     hb_cfg: &svc_runner::HbRunConfig,
+    retain_harmonics: bool,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
@@ -171,7 +199,19 @@ fn run_harmonic_balance(
         svc_runner::run_hb_analysis_with_source_path_and_abort(netlist, hb_cfg, source_path, abort)
     })?;
 
-    let waveforms = spectra_to_complex_waveforms(data.spectra, abort)?;
+    let waveforms = if retain_harmonics {
+        spectra_to_complex_waveforms(data.spectra, abort)?
+    } else {
+        let mut waveforms = HashMap::with_capacity(data.dc_voltages.len());
+        for (index, (name, voltage)) in data.dc_voltages.into_iter().enumerate() {
+            poll_periodically(abort, index)?;
+            waveforms.insert(
+                name.clone(),
+                WaveformData::new_complex(name, vec![0.0], vec![voltage], vec![0.0]),
+            );
+        }
+        waveforms
+    };
     super::ensure_not_aborted(abort)?;
     let frequencies = waveforms
         .values()

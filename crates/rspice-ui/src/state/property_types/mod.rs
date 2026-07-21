@@ -192,6 +192,9 @@ pub struct PropertyDefinition {
     /// Maximum value for numeric properties
     pub max_value: Option<f64>,
 
+    /// Maximum Unicode scalar count for string or expression properties.
+    pub max_length: Option<usize>,
+
     /// Whether this property is required
     pub required: bool,
 
@@ -231,6 +234,7 @@ impl Default for PropertyDefinition {
             unit: None,
             min_value: None,
             max_value: None,
+            max_length: None,
             required: false,
             read_only: false,
             display_order: 0,
@@ -289,6 +293,12 @@ impl PropertyDefinition {
     pub fn with_range(mut self, min: f64, max: f64) -> Self {
         self.min_value = Some(min);
         self.max_value = Some(max);
+        self
+    }
+
+    /// Set the maximum length for string or expression values.
+    pub fn with_max_length(mut self, max_length: usize) -> Self {
+        self.max_length = Some(max_length);
         self
     }
 
@@ -417,6 +427,23 @@ impl PropertyDefinition {
             ));
         }
 
+        if let Some(max_length) = self.max_length {
+            let observed = match value {
+                PropertyValue::String(value) | PropertyValue::Expression(value) => {
+                    Some(value.chars().count())
+                }
+                _ => None,
+            };
+            if let Some(observed) = observed
+                && observed > max_length
+            {
+                return Err(format!(
+                    "{} must contain at most {max_length} characters",
+                    self.display_name
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -522,6 +549,10 @@ mod registry;
 #[derive(Debug, Clone)]
 pub struct PropertyRegistry {
     sheets: HashMap<ComponentType, PropertySheet>,
+    /// Transaction-scoped schema for the one model-bound cell instance being
+    /// edited. Generic cell instances deliberately have no global fallback:
+    /// their legal parameters come from their exact library master.
+    cell_instance_sheet: Option<PropertySheet>,
 }
 
 impl Default for PropertyRegistry {

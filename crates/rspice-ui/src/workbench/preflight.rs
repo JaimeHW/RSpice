@@ -150,7 +150,16 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     if report.prepared.is_none() {
         app.simulation_controller.clear_prepared_run();
     }
-    let blocked = !report.is_runnable();
+    let current_plan = active_plan_revision(&app.state);
+    let (topology_root, topology_revision, topology_closure) =
+        configured_topology_revision(&app.state);
+    let blocked = !report.is_runnable_for(
+        app.state.workspace.project.revision().get(),
+        &topology_root,
+        topology_revision,
+        &topology_closure,
+        current_plan,
+    );
     let message = if blocked {
         format!(
             "Preflight blocked · {} blocking issue{} · revision {} was not queued",
@@ -366,19 +375,115 @@ fn collect_report(state: &AppState) -> PreflightReport {
         });
     }
 
+    let simulation_plan = active_plan_revision(state);
+    let (topology_root, topology_revision, topology_closure) = configured_topology_revision(state);
     PreflightReport {
         project_revision: state.workspace.project.revision().get(),
-        topology_revision: execution_projection
-            .as_ref()
-            .ok()
-            .and_then(|projection| projection.root_schematic())
-            .map_or(state.schematic.topology_version(), |schematic| {
-                schematic.topology_version()
-            }),
+        topology_root,
+        topology_revision,
+        topology_closure,
+        simulation_plan_id: simulation_plan.map(|(id, _)| id),
+        simulation_plan_revision: simulation_plan.map(|(_, revision)| revision),
         blockers,
         advisories,
         prepared: None,
     }
+}
+
+fn active_plan_revision(
+    state: &AppState,
+) -> Option<(
+    crate::product::SimulationPlanId,
+    crate::product::ObjectRevision,
+)> {
+    state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(|plan| (plan.id(), plan.revision()))
+}
+
+/// Stable identity and revision of the configured execution root. The active
+/// editor tab is used only when it is that exact root; another open schematic
+/// can never expire or validate preflight evidence for the configured design.
+pub(crate) fn configured_topology_revision(state: &AppState) -> (String, u64, Vec<(String, u64)>) {
+    let root = state.workspace.simulation_root_reference();
+    let projection = state.workspace.configuration_execution_projection(
+        &state.library_manager,
+        &state.workspace.active_view,
+        &state.schematic,
+    );
+    let mut closure = std::collections::BTreeMap::new();
+    if let Ok(projection) = &projection {
+        let mut references = std::collections::BTreeSet::new();
+        if let Some(plan) = projection.plan() {
+            references.insert(root.key().to_ascii_lowercase());
+            references.extend(
+                plan.bindings()
+                    .map(|binding| binding.resolved_reference().key().to_ascii_lowercase()),
+            );
+        } else {
+            let mut pending = vec![root.key().to_ascii_lowercase()];
+            while let Some(reference) = pending.pop() {
+                if !references.insert(reference.clone()) {
+                    continue;
+                }
+                let Some((_, schematic)) = projection
+                    .schematic_buffers()
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(&reference))
+                else {
+                    continue;
+                };
+                pending.extend(schematic.components.iter().filter_map(|component| {
+                    (component.kind == crate::state::ComponentType::CellInstance)
+                        .then_some(component.library_cell.as_ref())
+                        .flatten()
+                        .filter(|binding| binding.source_path.is_none())
+                        .map(|binding| {
+                            format!(
+                                "{}/{}/schematic",
+                                binding.library.to_ascii_lowercase(),
+                                binding.cell.to_ascii_lowercase()
+                            )
+                        })
+                }));
+            }
+        }
+        for reference in references {
+            if let Some((_, schematic)) = projection
+                .schematic_buffers()
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(&reference))
+            {
+                closure.insert(reference, schematic.topology_version());
+            }
+        }
+    } else {
+        closure.extend(
+            state
+                .workspace
+                .schematic_buffers
+                .iter()
+                .map(|(key, schematic)| (key.to_ascii_lowercase(), schematic.topology_version())),
+        );
+        closure.insert(
+            state.workspace.active_view.key().to_ascii_lowercase(),
+            state.schematic.topology_version(),
+        );
+    }
+    let root_key = root.key();
+    let revision = closure
+        .get(&root_key.to_ascii_lowercase())
+        .copied()
+        .or_else(|| {
+            state
+                .workspace
+                .simulation_root_schematic(&state.workspace.active_view, &state.schematic)
+                .map(crate::state::SchematicState::topology_version)
+        })
+        .unwrap_or(0);
+    (root_key, revision, closure.into_iter().collect())
 }
 
 fn preparation_check_label(stage: crate::simulation::execution::PreparationStage) -> &'static str {
@@ -445,20 +550,36 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         return;
     };
 
-    // A report is valid only for the exact source revision it inspected.
-    if report.project_revision != app.state.workspace.project.revision().get()
-        || report.topology_revision != app.state.schematic.topology_version()
-    {
-        app.state.workbench.preflight.open = false;
+    // A report is valid only for the exact project, topology, and active-plan
+    // revision it inspected. Drop the controller permit with the report so no
+    // hidden stale authorization survives an out-of-band plan mutation.
+    let project_revision = app.state.workspace.project.revision().get();
+    let (topology_root, topology_revision, topology_closure) =
+        configured_topology_revision(&app.state);
+    let current_plan = active_plan_revision(&app.state);
+    if !report.is_current_for(
+        project_revision,
+        &topology_root,
+        topology_revision,
+        &topology_closure,
+        current_plan,
+    ) {
+        app.invalidate_simulation_preflight();
         app.state.ui.toasts.warn_with_title(
             ctx,
             "Preflight report expired",
-            "Preflight report expired because the design revision changed",
+            "Preflight report expired because the design or simulation-plan revision changed",
         );
         return;
     }
 
-    let runnable = report.is_runnable();
+    let runnable = report.is_runnable_for(
+        project_revision,
+        &topology_root,
+        topology_revision,
+        &topology_closure,
+        current_plan,
+    );
     let primary = if runnable {
         "Queue validated run"
     } else {
@@ -508,7 +629,8 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
 fn report_summary(ui: &mut Ui, report: &PreflightReport) {
     let t = Tokens::get(ui.ctx());
-    let runnable = report.is_runnable();
+    // `show` rejects stale reports before rendering this immutable snapshot.
+    let runnable = report.blockers.is_empty() && report.prepared.is_some();
     let heading = summary_heading(report);
     let tone = if runnable { t.color.ok } else { t.color.err };
     let width = ui.available_width().max(1.0);
@@ -1029,8 +1151,8 @@ fn context_panel(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> Rect {
     let t = Tokens::get(ui.ctx());
     Frame::new()
         .fill(t.color.bg_app)
-        .inner_margin(Margin::same(10))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             let (header, response) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 29.0), Sense::hover());
             response.widget_info(|| {
@@ -1044,7 +1166,7 @@ fn context_panel(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> Rect {
                 theme::mono(tokens::FS_0, FontWeight::SemiBold),
                 t.color.text_dim,
             );
-            body(ui);
+            Frame::new().inner_margin(Margin::same(10)).show(ui, body);
         })
         .response
         .rect
@@ -1162,7 +1284,11 @@ mod tests {
     fn blocker_report(observed: &str) -> PreflightReport {
         PreflightReport {
             project_revision: 7,
+            topology_root: "user/top/schematic".to_owned(),
             topology_revision: 11,
+            topology_closure: vec![("user/top/schematic".to_owned(), 11)],
+            simulation_plan_id: None,
+            simulation_plan_revision: None,
             blockers: vec![PreflightIssue {
                 check: "Source and netlist currentness".to_owned(),
                 observed: observed.to_owned(),
@@ -1253,6 +1379,46 @@ mod tests {
     }
 
     #[test]
+    fn advisories_header_is_full_bleed_while_only_its_body_is_inset() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 160.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ctx, |ui| {
+                        context_panel(ui, "Advisories", |ui| {
+                            ui.label("Body content");
+                        });
+                    });
+            },
+        );
+        let header = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility update")
+            .nodes
+            .iter()
+            .find_map(|(_, node)| {
+                (node.role() == egui::accesskit::Role::Label && node.label() == Some("Advisories"))
+                    .then(|| node.bounds())
+                    .flatten()
+            })
+            .expect("advisories header bounds");
+
+        assert!(header.x0 <= 0.5, "header left edge was inset: {header:?}");
+        assert!(
+            header.x1 >= 399.5,
+            "header right edge was inset: {header:?}"
+        );
+    }
+
+    #[test]
     fn issue_table_regions_are_contiguous_and_non_overlapping_at_the_boundary() {
         let geometry = IssueTableGeometry::resolve(680.0, 104.0);
         assert_eq!(geometry.column_edges[0], 0.0);
@@ -1299,8 +1465,16 @@ mod tests {
         crate::common::menu_bar::run_design_rule_check(&mut state);
 
         let report = collect_report(&state);
+        let (topology_root, topology_revision, topology_closure) =
+            configured_topology_revision(&state);
 
-        assert!(!report.is_runnable());
+        assert!(!report.is_runnable_for(
+            state.workspace.project.revision().get(),
+            &topology_root,
+            topology_revision,
+            &topology_closure,
+            active_plan_revision(&state),
+        ));
         assert!(
             report
                 .blockers
@@ -1315,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn report_is_bound_to_the_exact_project_and_topology_revision() {
+    fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
         let mut state = AppState::default();
         crate::common::menu_bar::run_design_rule_check(&mut state);
 
@@ -1325,7 +1499,135 @@ mod tests {
             report.project_revision,
             state.workspace.project.revision().get()
         );
-        assert_eq!(report.topology_revision, state.schematic.topology_version());
+        let (plan_id, plan_revision) = active_plan_revision(&state).expect("active plan");
+        let (topology_root, topology_revision, topology_closure) =
+            configured_topology_revision(&state);
+        assert_eq!(report.topology_root, topology_root);
+        assert_eq!(report.topology_revision, topology_revision);
+        assert_eq!(report.topology_closure, topology_closure);
+        assert_eq!(report.simulation_plan_id, Some(plan_id));
+        assert_eq!(report.simulation_plan_revision, Some(plan_revision));
+        assert!(report.is_current_for(
+            state.workspace.project.revision().get(),
+            &topology_root,
+            topology_revision,
+            &topology_closure,
+            Some((plan_id, plan_revision)),
+        ));
+
+        let transient_id = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .instances()[0]
+            .id();
+        state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("stable plan")
+            .edit(transient_id, |_| ())
+            .expect("analysis edit advances the plan revision");
+        assert!(!report.is_current_for(
+            state.workspace.project.revision().get(),
+            &topology_root,
+            topology_revision,
+            &topology_closure,
+            active_plan_revision(&state),
+        ));
+    }
+
+    #[test]
+    fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor() {
+        let mut state = AppState::default();
+        let configured_root = state.workspace.simulation_root_reference();
+        let configured_root_key = configured_root.key();
+        let configured_schematic = state
+            .workspace
+            .schematic_buffers
+            .get_mut(&configured_root_key)
+            .expect("default configured root buffer");
+        configured_schematic.add_component(
+            crate::state::ComponentType::Ground,
+            crate::state::Point::new(40, 40),
+        );
+        let configured_revision = configured_schematic.topology_version();
+
+        state.workspace.active_view =
+            crate::state::CellViewRef::new("user", "unrelated_editor", "schematic");
+        state.schematic = crate::state::SchematicState::default();
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(80, 80),
+        );
+
+        let report = collect_report(&state);
+        assert_eq!(report.topology_root, configured_root_key);
+        assert_eq!(report.topology_revision, configured_revision);
+
+        state.schematic.add_component(
+            crate::state::ComponentType::Capacitor,
+            crate::state::Point::new(120, 80),
+        );
+        let (live_root, live_revision, live_closure) = configured_topology_revision(&state);
+        assert!(report.is_current_for(
+            state.workspace.project.revision().get(),
+            &live_root,
+            live_revision,
+            &live_closure,
+            active_plan_revision(&state),
+        ));
+    }
+
+    #[test]
+    fn report_currentness_expires_when_a_referenced_child_topology_changes() {
+        let mut state = AppState::default();
+        let child = crate::state::CellViewRef::new("user", "child", "schematic");
+        state.schematic.add_library_cell_component(
+            crate::state::Point::new(40, 40),
+            crate::state::LibraryCellInstance::new("user", "child", "schematic"),
+        );
+        let mut child_schematic = crate::state::SchematicState::default();
+        child_schematic.add_component(
+            crate::state::ComponentType::Ground,
+            crate::state::Point::new(20, 20),
+        );
+        state
+            .workspace
+            .schematic_buffers
+            .insert(child.key(), child_schematic.clone());
+
+        let report = collect_report(&state);
+        let root_revision = report.topology_revision;
+        assert!(
+            report
+                .topology_closure
+                .iter()
+                .any(|(key, _)| key.eq_ignore_ascii_case(&child.key()))
+        );
+
+        // A real editor transition persists the departing active schematic
+        // before activating the child view. Mirror that contract explicitly;
+        // otherwise this synthetic state would replace the edited root with
+        // the stale default buffer and test a transition the UI cannot make.
+        state.workspace.schematic_buffers.insert(
+            crate::state::CellViewRef::default_top().key(),
+            state.schematic.clone(),
+        );
+        state.workspace.active_view = child;
+        state.schematic = child_schematic;
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(80, 20),
+        );
+        let (live_root, live_revision, live_closure) = configured_topology_revision(&state);
+        assert_eq!(live_revision, root_revision);
+        assert!(!report.is_current_for(
+            state.workspace.project.revision().get(),
+            &live_root,
+            live_revision,
+            &live_closure,
+            active_plan_revision(&state),
+        ));
     }
 
     #[test]
@@ -1398,7 +1700,11 @@ mod tests {
     fn summary_copy_and_blocker_action_mapping_match_the_mockup_contract() {
         let runnable = PreflightReport {
             project_revision: 7,
+            topology_root: "user/top/schematic".to_owned(),
             topology_revision: 11,
+            topology_closure: vec![("user/top/schematic".to_owned(), 11)],
+            simulation_plan_id: None,
+            simulation_plan_revision: None,
             blockers: Vec::new(),
             advisories: Vec::new(),
             prepared: Some(prepared_contract()),

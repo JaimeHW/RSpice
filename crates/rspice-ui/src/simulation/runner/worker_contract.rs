@@ -16,7 +16,7 @@ mod tests {
     };
     use crate::simulation::multi_run::{
         AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
-        OptimizationVariable, SpPort,
+        OptimizationVariable, PssMethod, SpPort,
     };
     use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
     use std::collections::HashMap;
@@ -880,6 +880,11 @@ mod tests {
                 fundamental_freq: 1e6,
                 num_harmonics: 5,
                 tolerance: 1e-6,
+                max_iterations: 75,
+                method: PssMethod::HarmonicBalance,
+                oscillator_mode: false,
+                oscillator_node: None,
+                save_harmonics: true,
             },
             AnalysisSpec::HarmonicBalance {
                 tones: vec![HbToneSpec::new(1e6, 3).with_source("VIN")],
@@ -2007,7 +2012,7 @@ use crate::simulation::config::{
 };
 use crate::simulation::multi_run::{
     AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
-    OptimizationVariable, SpPort,
+    OptimizationVariable, PssMethod, SpPort,
 };
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use crate::simulation::results::{
@@ -2833,6 +2838,14 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
     }
 }
 
+const fn worker_default_pss_max_iterations() -> usize {
+    50
+}
+
+const fn worker_default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerAnalysisSpec {
     DcOp,
@@ -2949,6 +2962,16 @@ pub(crate) enum WorkerAnalysisSpec {
         fundamental_freq: f64,
         num_harmonics: usize,
         tolerance: f64,
+        #[serde(default = "worker_default_pss_max_iterations")]
+        max_iterations: usize,
+        #[serde(default)]
+        method: PssMethod,
+        #[serde(default)]
+        oscillator_mode: bool,
+        #[serde(default)]
+        oscillator_node: Option<String>,
+        #[serde(default = "worker_default_true")]
+        save_harmonics: bool,
     },
     HarmonicBalance {
         tones: Vec<HbToneSpec>,
@@ -3192,10 +3215,20 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 fundamental_freq,
                 num_harmonics,
                 tolerance,
+                max_iterations,
+                method,
+                oscillator_mode,
+                oscillator_node,
+                save_harmonics,
             } => Ok(Self::Pss {
                 fundamental_freq: *fundamental_freq,
                 num_harmonics: *num_harmonics,
                 tolerance: *tolerance,
+                max_iterations: *max_iterations,
+                method: *method,
+                oscillator_mode: *oscillator_mode,
+                oscillator_node: oscillator_node.clone(),
+                save_harmonics: *save_harmonics,
             }),
             AnalysisSpec::HarmonicBalance {
                 tones,
@@ -3468,10 +3501,20 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 fundamental_freq,
                 num_harmonics,
                 tolerance,
+                max_iterations,
+                method,
+                oscillator_mode,
+                oscillator_node,
+                save_harmonics,
             } => Self::Pss {
                 fundamental_freq,
                 num_harmonics,
                 tolerance,
+                max_iterations,
+                method,
+                oscillator_mode,
+                oscillator_node,
+                save_harmonics,
             },
             WorkerAnalysisSpec::HarmonicBalance {
                 tones,

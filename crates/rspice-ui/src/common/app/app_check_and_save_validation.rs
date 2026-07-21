@@ -594,10 +594,7 @@ fn validate_component_contracts(
     for component in &schematic.components {
         let component_identity = format!("{document_key}:{}", component.id);
         if !component.kind.spice_prefix().is_empty() {
-            if let Err(error) = component
-                .kind
-                .validate_reference_designator(component.name.trim())
-            {
+            if let Err(error) = component.validate_reference_designator(component.name.trim()) {
                 insert_finding(
                     findings,
                     CheckAndSaveFindingLevel::Blocker,

@@ -55,7 +55,7 @@ pub use bus::{
 };
 pub use canvas_cache::CanvasCache;
 pub use clipboard::ClipboardData;
-pub use component::{Component, LibraryCellInstance};
+pub use component::{Component, LibraryCellInstance, validate_library_netlist_template};
 pub use component_type::ComponentType;
 pub use design_note::{
     DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, DesignNotePlacementAuthority,
@@ -86,6 +86,7 @@ pub use port::{
     PendingPortPlacement, PortContract, PortDirection, PortDirectionType, PortDiscipline,
     PortPlacementAuthority, PortPlacementError, PortSignalType, PortSpec,
 };
+pub(crate) use replacement::parse_replacement_parameters_strict;
 pub use replacement::{
     SchematicReplacementAuthority, SchematicReplacementCompatibility, SchematicReplacementError,
     SchematicReplacementImpact, SchematicReplacementMappingStatus, SchematicReplacementParameter,

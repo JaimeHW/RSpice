@@ -21,7 +21,12 @@ impl<'a> NetlistGenerator<'a> {
 
     pub(super) fn instance_name(&self, component: &Component) -> String {
         let base = component.spice_instance_name();
-        let prefix = component.kind.spice_prefix();
+        let prefix = component
+            .library_cell
+            .as_ref()
+            .filter(|binding| binding.netlist_template.is_some())
+            .and_then(crate::state::LibraryCellInstance::effective_reference_prefix)
+            .unwrap_or_else(|| component.kind.spice_prefix());
 
         if prefix.is_empty() || base.is_empty() {
             return base;

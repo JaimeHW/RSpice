@@ -102,6 +102,10 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         }
     }
 
+    if !state.tabbed_property_dialog.open {
+        state.property_registry.clear_cell_instance_sheet();
+    }
+
     result
 }
 

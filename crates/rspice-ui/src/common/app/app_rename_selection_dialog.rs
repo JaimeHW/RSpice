@@ -444,7 +444,7 @@ fn validate_draft(
             if candidate == expected.name {
                 return RenameValidation::Unchanged;
             }
-            if let Err(error) = expected.kind.validate_reference_designator(candidate) {
+            if let Err(error) = expected.validate_reference_designator(candidate) {
                 return RenameValidation::Invalid(error);
             }
             if schematic.components.iter().any(|component| {

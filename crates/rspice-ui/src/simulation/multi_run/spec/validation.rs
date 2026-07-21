@@ -182,15 +182,29 @@ impl AnalysisSpec {
                 fundamental_freq,
                 num_harmonics,
                 tolerance,
+                max_iterations,
+                oscillator_mode,
+                oscillator_node,
+                ..
             } => {
-                if *fundamental_freq <= 0.0 {
-                    return Err("PSS fundamental_freq must be > 0".to_string());
+                if !fundamental_freq.is_finite() || *fundamental_freq <= 0.0 {
+                    return Err("PSS fundamental_freq must be finite and > 0".to_string());
                 }
                 if *num_harmonics == 0 {
                     return Err("PSS num_harmonics must be > 0".to_string());
                 }
-                if *tolerance <= 0.0 {
-                    return Err("PSS tolerance must be > 0".to_string());
+                if !tolerance.is_finite() || *tolerance <= 0.0 {
+                    return Err("PSS tolerance must be finite and > 0".to_string());
+                }
+                if *max_iterations == 0 {
+                    return Err("PSS max_iterations must be > 0".to_string());
+                }
+                if *oscillator_mode
+                    && oscillator_node
+                        .as_deref()
+                        .is_none_or(|node| node.trim().is_empty())
+                {
+                    return Err("PSS oscillator_node must be set in oscillator mode".to_string());
                 }
                 Ok(())
             }
@@ -821,7 +835,45 @@ fn validate_periodic_network(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::multi_run::HbToneSpec;
+    use crate::simulation::multi_run::{HbToneSpec, PssMethod};
+
+    #[test]
+    fn legacy_pss_specs_receive_compatible_execution_defaults() {
+        let spec: AnalysisSpec = serde_json::from_str(
+            r#"{"Pss":{"fundamental_freq":1000000.0,"num_harmonics":9,"tolerance":0.000001}}"#,
+        )
+        .expect("legacy PSS spec deserializes");
+
+        assert_eq!(
+            spec,
+            AnalysisSpec::Pss {
+                fundamental_freq: 1.0e6,
+                num_harmonics: 9,
+                tolerance: 1.0e-6,
+                max_iterations: 50,
+                method: PssMethod::Shooting,
+                oscillator_mode: false,
+                oscillator_node: None,
+                save_harmonics: true,
+            }
+        );
+    }
+
+    #[test]
+    fn pss_validation_requires_an_explicit_autonomous_probe() {
+        let spec = AnalysisSpec::Pss {
+            fundamental_freq: 1.0e6,
+            num_harmonics: 9,
+            tolerance: 1.0e-6,
+            max_iterations: 50,
+            method: PssMethod::Shooting,
+            oscillator_mode: true,
+            oscillator_node: None,
+            save_harmonics: true,
+        };
+
+        assert!(spec.validate().is_err());
+    }
 
     fn hb_spec(collocation_points: Option<usize>) -> AnalysisSpec {
         AnalysisSpec::HarmonicBalance {

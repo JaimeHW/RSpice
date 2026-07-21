@@ -61,6 +61,11 @@ pub(crate) use app_design_management_dialog::{
     DesignManagementDialogState, open_design_management_dialog,
 };
 
+mod app_create_model_bound_symbol_dialog;
+pub(crate) use app_create_model_bound_symbol_dialog::{
+    CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
+};
+
 mod app_dialog_state;
 pub(crate) use app_dialog_state::{
     ArraySelectionDialogState, ArraySelectionPreviewCache, BusObjectPropertiesDraft,
@@ -113,7 +118,10 @@ pub(crate) use app_property_edit::{
 
 mod app_modal_workflows;
 mod app_project_design_history;
-pub(crate) use app_project_design_history::DesignManagementHistoryEntry;
+pub(crate) use app_project_design_history::{
+    DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta,
+    publish_symbol_definition_candidate, publish_symbol_definition_candidate_with_fixture,
+};
 
 mod app_bus_tap_dialog;
 mod app_design_note_dialog;
@@ -126,6 +134,13 @@ mod app_stretch_selection_dialog;
 pub(crate) use app_stretch_selection_dialog::{
     armed_stretch_selection_authority, cancel_armed_stretch_selection,
     open_stretch_selection_dialog, stretch_delta_for_policy,
+};
+mod app_symbol_definition_dialog;
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) use app_symbol_definition_dialog::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
+pub(crate) use app_symbol_definition_dialog::{
+    SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,
+    open_symbol_parameter_form_dialog,
 };
 mod app_array_selection_dialog;
 pub(crate) use app_array_selection_dialog::{
@@ -401,8 +416,21 @@ impl AppState {
         if enabled.is_empty() {
             return Some("Enable at least one analysis instance in the simulation plan".to_owned());
         }
-        if self.schematic.components.is_empty() {
-            return Some("Add a component before running a schematic simulation".to_string());
+        let configured_root = self.workspace.simulation_root_reference();
+        let Some(configured_schematic) = self
+            .workspace
+            .simulation_root_schematic(&self.workspace.active_view, &self.schematic)
+        else {
+            return Some(format!(
+                "Resolve the configured simulation root '{}' before running",
+                configured_root.display_path()
+            ));
+        };
+        if configured_schematic.components.is_empty() {
+            return Some(format!(
+                "Add a component to the configured simulation root '{}' before running",
+                configured_root.display_path()
+            ));
         }
         if let Some(issue) = plan.validation_issues().first() {
             return Some(format!("Correct simulation plan: {issue}"));
@@ -424,7 +452,14 @@ impl AppState {
         {
             return Some(error);
         }
-        if let Some(result) = self.current_blocking_drc_result() {
+        // The retained editor DRC result describes only the active schematic.
+        // Hierarchy-wide configured-root checks are owned by the execution
+        // preflight/controller pipeline, so an unrelated editor tab must not
+        // block (or clear) the configured design's run eligibility.
+        let configured_root_is_active = configured_root
+            .key()
+            .eq_ignore_ascii_case(&self.workspace.active_view.key());
+        if configured_root_is_active && let Some(result) = self.current_blocking_drc_result() {
             let summary = result.summary();
             return Some(format!(
                 "Fix current DRC errors before simulation ({} critical, {} error{})",
@@ -661,6 +696,14 @@ fn configure_platform_input_contract(ctx: &Context) {
 }
 
 impl RSpiceApp {
+    /// Drop every authorization and presentation artifact derived from a
+    /// mutable simulation input. Call this at the same commit boundary as
+    /// plan, PVT, solver-option, model, variable, output, or topology edits.
+    pub(crate) fn invalidate_simulation_preflight(&mut self) {
+        self.state.workbench.preflight.invalidate();
+        self.simulation_controller.clear_prepared_run();
+    }
+
     pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
         if let Some(reason) = self.state.manual_deck_run_block_reason() {
             return Some(reason);
@@ -900,6 +943,8 @@ impl RSpiceApp {
         self.render_create_hierarchy_dialog(ctx);
         self.render_check_and_save_dialog(ctx);
         self.render_design_management_dialog(ctx);
+        self.render_create_model_bound_symbol_dialog(ctx);
+        self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
@@ -1361,7 +1406,11 @@ mod tests {
     use crate::services::drc::{
         DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
     };
-    use crate::state::{ComponentType, Point};
+    use crate::state::{
+        CellViewRef, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
+        ConfigurationSetCatalog, ConfigurationSetDefinition, Point, SchematicState,
+        UnresolvedBindingPolicy,
+    };
 
     fn runnable_state() -> AppState {
         let mut state = AppState::default();
@@ -1395,6 +1444,36 @@ mod tests {
         result.add_violation(violation);
         result.completed = true;
         result
+    }
+
+    fn configure_alternate_simulation_root(
+        state: &mut AppState,
+        root: CellViewRef,
+        schematic: SchematicState,
+    ) {
+        state
+            .workspace
+            .schematic_buffers
+            .insert(root.key(), schematic);
+        let mut catalog = ConfigurationSetCatalog::default();
+        catalog
+            .create(ConfigurationSetDefinition {
+                name: "Configured run root".to_owned(),
+                root,
+                dut_path: "/top".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Local project".to_owned(),
+            })
+            .expect("valid alternate configuration");
+        state
+            .workspace
+            .replace_configuration_sets(catalog)
+            .expect("materialized alternate root publishes");
     }
 
     #[test]
@@ -1441,6 +1520,35 @@ mod tests {
             state.can_run_simulation(),
             "warning-only DRC results should not block simulation"
         );
+    }
+
+    #[test]
+    fn run_readiness_uses_the_configured_root_not_the_active_editor() {
+        let mut state = runnable_state();
+        let root = CellViewRef::new("user", "configured", "schematic");
+        let mut configured = SchematicState::default();
+        configured.add_component(ComponentType::Resistor, Point::new(40, 20));
+        configure_alternate_simulation_root(&mut state, root, configured);
+        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+
+        assert!(
+            state.can_run_simulation(),
+            "an unrelated active-editor DRC receipt must not block the configured root"
+        );
+    }
+
+    #[test]
+    fn run_readiness_rejects_an_empty_configured_root_even_when_the_editor_is_populated() {
+        let mut state = runnable_state();
+        let root = CellViewRef::new("user", "configured", "schematic");
+        configure_alternate_simulation_root(&mut state, root, SchematicState::default());
+
+        let reason = state
+            .simulation_run_preflight_block_reason()
+            .expect("empty configured root must block");
+        assert!(reason.contains("configured simulation root"));
+        assert!(reason.contains("user/configured/schematic"));
     }
 
     #[test]

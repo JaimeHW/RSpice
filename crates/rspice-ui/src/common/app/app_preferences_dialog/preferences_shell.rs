@@ -366,12 +366,27 @@ fn render_header(surface: &mut Ui, rect: Rect, large_targets: bool) -> egui::Res
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    let mut ui = surface.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(15.0, 0.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    let eyebrow_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let heading_font = theme::sans(tokens::FS_3, FontWeight::SemiBold);
+    let eyebrow_size = surface
+        .painter()
+        .layout_no_wrap("WORKSPACE".to_owned(), eyebrow_font, t.color.text_faint)
+        .size();
+    let heading_size = surface
+        .painter()
+        .layout_no_wrap("Preferences".to_owned(), heading_font, t.color.text)
+        .size();
+    let copy_size = vec2(
+        eyebrow_size.x.max(heading_size.x) + 1.0,
+        eyebrow_size.y + HEADER_COPY_GAP + heading_size.y,
     );
-    let heading_response = ui
+    let copy_rect = centered_header_copy_rect(rect, copy_size, 15.0);
+    let mut copy_ui = surface.new_child(
+        egui::UiBuilder::new()
+            .max_rect(copy_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    let heading_response = copy_ui
         .vertical(|ui| {
             ui.spacing_mut().item_spacing.y = HEADER_COPY_GAP;
             ui.label(
@@ -394,16 +409,32 @@ fn render_header(surface: &mut Ui, rect: Rect, large_targets: bool) -> egui::Res
             node.set_label("Preferences");
             node.set_level(2);
         });
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.push_id("neutral-close-preferences-1af3c6ff0446", |ui| {
-            IconButton::new(Icon::Close)
-                .side(if large_targets { TOUCH_TARGET } else { 28.0 })
-                .tooltip("Close preferences")
-                .show(ui)
+    let mut close_ui = surface.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(vec2(15.0, 0.0)))
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    close_ui
+        .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.push_id("neutral-close-preferences-1af3c6ff0446", |ui| {
+                IconButton::new(Icon::Close)
+                    .side(if large_targets { TOUCH_TARGET } else { 28.0 })
+                    .tooltip("Close preferences")
+                    .show(ui)
+            })
+            .inner
         })
         .inner
-    })
-    .inner
+}
+
+fn centered_header_copy_rect(header: Rect, copy_size: egui::Vec2, left_inset: f32) -> Rect {
+    Rect::from_min_size(
+        egui::pos2(
+            header.left() + left_inset,
+            header.center().y - copy_size.y * 0.5,
+        ),
+        copy_size,
+    )
 }
 
 fn begin_focus_session(ctx: &Context, state_id: Id) -> bool {
@@ -1308,6 +1339,17 @@ mod tests {
         assert_eq!(SETTING_ROW_COLUMN_GAP, 24.0);
         assert_eq!(SETTING_ROW_PHONE_VALUE_GAP, 10.0);
         assert_eq!(SETTING_ROW_DESKTOP_CONTENT_HEIGHT + 9.0 * 2.0, 70.0);
+    }
+
+    #[test]
+    fn header_copy_is_vertically_centered_and_clear_of_the_perimeter() {
+        let header = Rect::from_min_size(egui::pos2(11.0, 11.0), vec2(998.0, HEADER_HEIGHT));
+        let copy = centered_header_copy_rect(header, vec2(112.0, 31.0), 15.0);
+
+        assert_eq!(copy.left() - header.left(), 15.0);
+        assert_eq!(copy.center().y, header.center().y);
+        assert!(copy.top() > header.top());
+        assert!(copy.bottom() < header.bottom());
     }
 
     #[test]

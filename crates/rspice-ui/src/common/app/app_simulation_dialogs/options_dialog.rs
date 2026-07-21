@@ -63,6 +63,41 @@ fn commit_validated_options(setup: &mut SimSetupState, options: &SimulationOptio
     setup.options_errors.clear();
 }
 
+fn commit_options_transaction(
+    app: &mut RSpiceApp,
+    options: &SimulationOptions,
+    close_dialog: bool,
+) -> Result<bool, String> {
+    let current_bytes = serde_json::to_vec(&app.state.sim_setup.options)
+        .map_err(|error| format!("Could not compare the current solver options: {error}"))?;
+    let requested_bytes = serde_json::to_vec(options)
+        .map_err(|error| format!("Could not compare the requested solver options: {error}"))?;
+    if current_bytes == requested_bytes {
+        if close_dialog {
+            app.state.sim_setup.options_open = false;
+        }
+        return Ok(false);
+    }
+    let mut candidate = app.state.sim_setup.clone();
+    commit_validated_options(&mut candidate, options);
+    let receipt = candidate
+        .commit_active_plan_configuration_change("Updated simulation solver options.")
+        .map_err(|error| error.to_string())?;
+    if close_dialog {
+        candidate.options_open = false;
+    }
+    app.state.sim_setup = candidate;
+    app.invalidate_simulation_preflight();
+    app.state.workbench.analysis_lifecycle_status = format!(
+        "Configuration receipt #{} · revision {} to {} · {}",
+        receipt.sequence(),
+        receipt.source_revision().get(),
+        receipt.committed_revision().get(),
+        receipt.detail()
+    );
+    Ok(true)
+}
+
 /// Preset chips — each replaces the whole draft.
 fn presets_row(ui: &mut Ui, setup: &mut SimSetupState) {
     ui.horizontal(|ui| {
@@ -308,19 +343,28 @@ impl RSpiceApp {
                 })
         };
 
-        let setup = &mut self.state.sim_setup;
         match choice {
             DialogChoice::Primary | DialogChoice::Secondary => {
-                if let Some(options) = parse_and_validate_options(setup) {
-                    commit_validated_options(setup, &options);
-                    if choice == DialogChoice::Primary {
-                        setup.options_open = false;
+                if let Some(options) = parse_and_validate_options(&mut self.state.sim_setup) {
+                    match commit_options_transaction(
+                        self,
+                        &options,
+                        choice == DialogChoice::Primary,
+                    ) {
+                        Ok(true) => self
+                            .state
+                            .push_user_message(ConsoleMessage::info("Simulation options updated")),
+                        Ok(false) => {}
+                        Err(error) => self
+                            .state
+                            .sim_setup
+                            .options_errors
+                            .push(format!("Options were not committed: {error}")),
                     }
-                    self.state
-                        .push_user_message(ConsoleMessage::info("Simulation options updated"));
                 }
             }
             DialogChoice::Ghost => {
+                let setup = &mut self.state.sim_setup;
                 let current = setup.options.clone();
                 let active_tab = setup.options_draft.active_tab;
                 setup.options_draft = OptionsDialogState::from_options(&current);
@@ -328,9 +372,79 @@ impl RSpiceApp {
                 setup.options_errors.clear();
             }
             DialogChoice::Cancelled => {
-                setup.options_open = false;
+                self.state.sim_setup.options_open = false;
             }
             DialogChoice::None => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn solver_options_commit_advances_the_plan_and_invalidates_preflight() {
+        let mut app = RSpiceApp::test_instance();
+        let (plan_id, source_revision) = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .map(|plan| (plan.id(), plan.revision()))
+            .expect("default plan");
+        let topology_root = app.state.workspace.simulation_root_reference().key();
+        let topology_revision = app.state.schematic.topology_version();
+        let topology_closure = vec![(topology_root.to_ascii_lowercase(), topology_revision)];
+        app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
+            project_revision: app.state.workspace.project.revision().get(),
+            topology_root,
+            topology_revision,
+            topology_closure,
+            simulation_plan_id: Some(plan_id),
+            simulation_plan_revision: Some(source_revision),
+            blockers: Vec::new(),
+            advisories: Vec::new(),
+            prepared: None,
+        });
+        let mut options = app.state.sim_setup.options.clone();
+        options.reltol *= 2.0;
+
+        assert!(
+            commit_options_transaction(&mut app, &options, false)
+                .expect("validated options commit atomically")
+        );
+
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("plan remains available")
+                .revision(),
+            source_revision.next().expect("revision advances")
+        );
+        assert_eq!(app.state.sim_setup.options.reltol, options.reltol);
+        assert!(app.state.workbench.preflight.report.is_none());
+    }
+
+    #[test]
+    fn unchanged_solver_options_do_not_fabricate_a_plan_revision() {
+        let mut app = RSpiceApp::test_instance();
+        let revision = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("default plan")
+            .revision();
+        let options = app.state.sim_setup.options.clone();
+
+        assert!(!commit_options_transaction(&mut app, &options, false).expect("no-op succeeds"));
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("plan remains available")
+                .revision(),
+            revision
+        );
     }
 }

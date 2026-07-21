@@ -529,7 +529,7 @@ impl RSpiceApp {
             .workspace
             .replace_configuration_sets(candidate)
             .map_err(|error| error.to_string())?;
-        self.simulation_controller.clear_prepared_run();
+        self.invalidate_simulation_preflight();
         self.state.ui.netlist.current_generation_input_digest = None;
         self.state.push_user_message(ConsoleMessage::info(message));
         let dialog = &mut self.state.dialogs.configuration_sets;

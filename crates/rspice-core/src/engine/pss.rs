@@ -594,7 +594,24 @@ impl Engine {
             );
         }
 
-        let values = &waveform.voltages[0];
+        let waveform_index = if let Some(requested_node) = config.oscillator_node.as_deref() {
+            waveform
+                .node_names
+                .iter()
+                .position(|node| node.eq_ignore_ascii_case(requested_node.trim()))
+                .ok_or_else(|| {
+                    PssError::PeriodDetectionFailed(format!(
+                        "oscillator node '{requested_node}' is not present in the solved circuit"
+                    ))
+                })?
+        } else {
+            0
+        };
+        let values = waveform.voltages.get(waveform_index).ok_or_else(|| {
+            PssError::PeriodDetectionFailed(format!(
+                "oscillator node waveform index {waveform_index} is unavailable"
+            ))
+        })?;
         let max_val = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let min_val = values.iter().cloned().fold(f64::INFINITY, f64::min);
 

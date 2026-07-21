@@ -44,6 +44,7 @@ impl SymbolPin {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum SymbolShape {
     Polyline {
         points: Vec<Point>,

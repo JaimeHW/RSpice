@@ -43,7 +43,8 @@ impl<'a> NetlistGenerator<'a> {
                     hierarchy.execution_binding(&self.child_hierarchy_path(component))
                 })
                 .and_then(|binding| binding.model_section())
-                .map(str::to_owned);
+                .map(str::to_owned)
+                .or_else(|| binding.model_section.clone());
             if binding.view.eq_ignore_ascii_case("veriloga") {
                 let model = binding
                     .module_name
@@ -220,6 +221,35 @@ fn remove_empty_library_include_sections(lines: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_bound_library_section_uses_lib_directive() {
+        let mut schematic = crate::state::SchematicState::default();
+        let mut binding = crate::state::LibraryCellInstance::new("models", "nmos_18", "spice");
+        binding.source_path = Some(std::path::PathBuf::from("C:/models/foundry.lib"));
+        binding.model_section = Some("tt".to_owned());
+        binding.terminal_order = vec!["d".to_owned(), "g".to_owned()];
+        binding.interface_bound = true;
+        schematic.components.push(
+            crate::state::Component::new(
+                1,
+                crate::state::ComponentType::CellInstance,
+                crate::state::Point::origin(),
+            )
+            .with_library_cell(binding),
+        );
+        let mut generator = NetlistGenerator::new(&schematic);
+
+        generator.generate_library_view_includes();
+
+        assert!(generator.errors.is_empty(), "{:?}", generator.errors);
+        assert!(
+            generator
+                .lines
+                .iter()
+                .any(|line| line == ".lib C:/models/foundry.lib tt")
+        );
+    }
 
     #[test]
     fn hierarchical_veriloga_directives_are_hoisted_and_deduplicated_once() {

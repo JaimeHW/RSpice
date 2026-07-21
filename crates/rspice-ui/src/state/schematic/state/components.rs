@@ -49,7 +49,12 @@ impl SchematicState {
         library_cell: LibraryCellInstance,
     ) -> u64 {
         let id = self.next_id();
-        let name = self.generate_name(ComponentType::CellInstance);
+        let preferred_prefix = library_cell.effective_reference_prefix();
+        let name = if let Some(prefix) = preferred_prefix {
+            next_library_reference_name(&self.components, prefix)
+        } else {
+            self.generate_name(ComponentType::CellInstance)
+        };
         let mut component = Component::new(id, ComponentType::CellInstance, pos);
         component.name = name;
         component.rotation = self.preview_rotation;
@@ -208,6 +213,18 @@ impl SchematicState {
     }
 }
 
+fn next_library_reference_name(components: &[Component], prefix: &str) -> String {
+    let prefix = prefix.trim().to_ascii_uppercase();
+    (1_u64..)
+        .map(|ordinal| format!("{prefix}{ordinal}"))
+        .find(|candidate| {
+            components
+                .iter()
+                .all(|component| !component.name.eq_ignore_ascii_case(candidate))
+        })
+        .expect("library reference-designator namespace is unbounded")
+}
+
 fn legacy_terminal_points(component: &Component) -> Vec<Point> {
     component
         .terminal_positions()
@@ -364,5 +381,32 @@ mod tests {
         assert!(!schematic.is_dirty);
         assert_eq!(schematic.topology_version(), topology_version);
         assert!(schematic.components.is_empty());
+    }
+
+    #[test]
+    fn model_bound_reference_prefix_is_unique_and_invalid_prefix_fails_closed() {
+        let mut schematic = SchematicState::default();
+        let mut model = LibraryCellInstance::new("models", "nmos_18", "spice");
+        model.reference_prefix = Some("m".to_owned());
+
+        let first = schematic.add_library_cell_component(Point::origin(), model.clone());
+        let second = schematic.add_library_cell_component(Point::new(40, 0), model);
+        let invalid = LibraryCellInstance {
+            reference_prefix: Some("M;drop".to_owned()),
+            ..LibraryCellInstance::new("models", "unsafe", "spice")
+        };
+        let third = schematic.add_library_cell_component(Point::new(80, 0), invalid);
+
+        let name = |id| {
+            schematic
+                .components
+                .iter()
+                .find(|component| component.id == id)
+                .map(|component| component.name.as_str())
+                .expect("placed component")
+        };
+        assert_eq!(name(first), "M1");
+        assert_eq!(name(second), "M2");
+        assert_eq!(name(third), "X1");
     }
 }

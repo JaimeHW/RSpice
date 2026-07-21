@@ -99,6 +99,18 @@ fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
     field_cell(ui, label, |ui| mono_input(ui, value, ui.available_width()))
 }
 
+fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool) -> Response {
+    if !uses_two_column_fields(ui) {
+        return ui
+            .add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
+            .inner;
+    }
+    field_cell(ui, label, |ui| {
+        ui.add_enabled_ui(enabled, |ui| mono_input(ui, value, ui.available_width()))
+            .inner
+    })
+}
+
 fn quantity_input_row(
     ui: &mut Ui,
     label: &str,
@@ -461,10 +473,11 @@ pub(super) fn form(
             input_row(ui, "Harmonics", &mut setup.num_harmonics);
             input_row(ui, "Max iters", &mut setup.max_iter);
             choice_row(ui, "Method", &["shooting", "HB"], &mut setup.method_idx);
-            check_row(ui, "Oscillator mode", &mut setup.osc_mode);
-            if setup.osc_mode {
-                input_row(ui, "Osc node", &mut setup.osc_node);
-            }
+            check_row(ui, "Autonomous oscillator", &mut setup.osc_mode);
+            // The oscillator field is a stable member of the grid. Toggling
+            // autonomous mode changes enablement, not the position of every
+            // field that follows it.
+            input_row_enabled(ui, "Oscillator node", &mut setup.osc_node, setup.osc_mode);
             check_row(ui, "Save harmonics", &mut setup.save_harmonics);
             "Periodic steady state of the large-signal circuit."
         }
@@ -1049,4 +1062,52 @@ pub(super) fn form(
     };
     clear_pending_cell(ui);
     note
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::dialog::{PssConfig, PssDialogState};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pss_form_height(oscillator_mode: bool) -> f32 {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut setup = PssDialogState::from_config(&PssConfig::default());
+        setup.osc_mode = oscillator_mode;
+        let mut draft = AnalysisDraft::Pss(setup);
+        let mut height = 0.0;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(964.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        let top = ui.cursor().top();
+                        form(
+                            ui,
+                            &mut draft,
+                            QuantityPresentationPolicy::default(),
+                            UiNumberLocale::default(),
+                        );
+                        height = ui.cursor().top() - top;
+                    });
+            },
+        );
+        height
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pss_oscillator_toggle_preserves_form_geometry() {
+        let driven_height = pss_form_height(false);
+        let oscillator_height = pss_form_height(true);
+        assert_eq!(driven_height, oscillator_height);
+    }
 }

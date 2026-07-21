@@ -1,6 +1,25 @@
 use crate::simulation::multi_run::FrequencySweep;
 use serde::{Deserialize, Serialize};
 
+/// Numerical formulation used to solve a periodic steady-state request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PssMethod {
+    /// Time-domain shooting Newton solve.
+    #[default]
+    Shooting,
+    /// Frequency-domain harmonic-balance solve.
+    HarmonicBalance,
+}
+
+const fn default_pss_max_iterations() -> usize {
+    50
+}
+
+const fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OptimizationGoal {
     /// Minimize objective value.
@@ -149,6 +168,21 @@ pub enum AnalysisSpec {
         fundamental_freq: f64,
         num_harmonics: usize,
         tolerance: f64,
+        /// Maximum nonlinear solve iterations.
+        #[serde(default = "default_pss_max_iterations")]
+        max_iterations: usize,
+        /// Requested numerical formulation.
+        #[serde(default)]
+        method: PssMethod,
+        /// Whether the fundamental is an oscillator-period initial guess.
+        #[serde(default)]
+        oscillator_mode: bool,
+        /// Oscillator waveform used for period detection in autonomous mode.
+        #[serde(default)]
+        oscillator_node: Option<String>,
+        /// Preserve computed harmonics in the service result.
+        #[serde(default = "default_true")]
+        save_harmonics: bool,
     },
     /// Harmonic balance
     HarmonicBalance {

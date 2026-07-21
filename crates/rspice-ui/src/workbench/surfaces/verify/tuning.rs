@@ -178,6 +178,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             "the tuned revision was not committed because its required run is blocked: {reason}"
         ));
     }
+    super::invalidate_plan_bound_preflight(app);
     app.state.request_run_set_simulation();
     sync_tuning_session(app);
     app.state.workbench.analysis_lifecycle_status = format!(

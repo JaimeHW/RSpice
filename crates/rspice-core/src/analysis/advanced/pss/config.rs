@@ -68,6 +68,10 @@ pub struct PssConfig {
     /// Default: false
     pub auto_period: bool,
 
+    /// Optional node used for autonomous period detection. When omitted, the
+    /// first solved voltage waveform is used for backward compatibility.
+    pub oscillator_node: Option<String>,
+
     /// Initial guess for period when auto_period is true.
     /// Used to seed the period detection algorithm.
     /// Default: 1e-9 (1 ns, ~1 GHz)
@@ -123,6 +127,7 @@ impl PssConfig {
             tolerance: 1e-6,
             abstol: 1e-12,
             auto_period: false,
+            oscillator_node: None,
             period_guess: 1e-9,
             tstab_periods: 10,
             damping_factor: 1.0,
@@ -258,6 +263,13 @@ impl PssConfig {
         if period > 0.0 {
             self.fundamental_freq = 1.0 / period;
         }
+        self
+    }
+
+    /// Select the solved voltage waveform used for autonomous period detection.
+    pub fn with_oscillator_node(mut self, node: impl Into<String>) -> Self {
+        let node = node.into();
+        self.oscillator_node = (!node.trim().is_empty()).then_some(node);
         self
     }
 

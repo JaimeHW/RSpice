@@ -981,14 +981,23 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
                         if ui
                             .add_sized(
                                 [190.0, option_height],
-                                egui::Button::selectable(selected, label),
+                                egui::Button::selectable(selected, &label),
                             )
                             .clicked()
                         {
-                            app.state
-                                .sim_setup
-                                .set_reference_pvt(process, temperature)
-                                .expect("the mockup-defined reference PVT points are valid");
+                            match commit_reference_pvt(app, process, temperature) {
+                                Ok(true) => app.state.push_user_message(
+                                    crate::common::app::ConsoleMessage::info(format!(
+                                        "Reference PVT changed to {label}"
+                                    )),
+                                ),
+                                Ok(false) => {}
+                                Err(error) => app.state.push_user_message(
+                                    crate::common::app::ConsoleMessage::warning(format!(
+                                        "Reference PVT was not changed: {error}"
+                                    )),
+                                ),
+                            }
                             ui.close();
                         }
                     }
@@ -1038,6 +1047,37 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
         t.color.text_faint,
     );
     theme::paint_focus_ring_outset(ui, &response, response.rect);
+}
+
+fn commit_reference_pvt(
+    app: &mut RSpiceApp,
+    process: crate::simulation::dialog::corner::ProcessCorner,
+    temperature_celsius: f64,
+) -> Result<bool, String> {
+    let current = app.state.sim_setup.reference_pvt;
+    if current.process == process
+        && (current.temperature_celsius - temperature_celsius).abs() < f64::EPSILON
+    {
+        return Ok(false);
+    }
+    let mut setup = app.state.sim_setup.clone();
+    setup.set_reference_pvt(process, temperature_celsius)?;
+    let receipt = setup
+        .commit_active_plan_configuration_change(format!(
+            "Reference PVT changed to {} at {temperature_celsius} degrees Celsius.",
+            process.short_name()
+        ))
+        .map_err(|error| error.to_string())?;
+    app.state.sim_setup = setup;
+    app.invalidate_simulation_preflight();
+    app.state.workbench.analysis_lifecycle_status = format!(
+        "Configuration receipt #{} · revision {} to {} · {}",
+        receipt.sequence(),
+        receipt.source_revision().get(),
+        receipt.committed_revision().get(),
+        receipt.detail()
+    );
+    Ok(true)
 }
 
 fn brighten_srgb(color: egui::Color32, factor: f32) -> egui::Color32 {
@@ -1307,5 +1347,48 @@ mod tests {
     fn compact_toolbar_projects_the_mockup_button_limit_for_every_workspace() {
         let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
         assert_eq!(compact.toolbar_tool_limit, Some(2));
+    }
+
+    #[test]
+    fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
+        let mut app = RSpiceApp::test_instance();
+        let (plan_id, source_revision) = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .map(|plan| (plan.id(), plan.revision()))
+            .expect("default plan");
+        let (topology_root, topology_revision, topology_closure) =
+            crate::workbench::preflight::configured_topology_revision(&app.state);
+        app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
+            project_revision: app.state.workspace.project.revision().get(),
+            topology_root,
+            topology_revision,
+            topology_closure,
+            simulation_plan_id: Some(plan_id),
+            simulation_plan_revision: Some(source_revision),
+            blockers: Vec::new(),
+            advisories: Vec::new(),
+            prepared: None,
+        });
+
+        assert!(
+            commit_reference_pvt(
+                &mut app,
+                crate::simulation::dialog::corner::ProcessCorner::FF,
+                -40.0,
+            )
+            .expect("PVT selection commits")
+        );
+
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("plan remains available")
+                .revision(),
+            source_revision.next().expect("revision advances")
+        );
+        assert!(app.state.workbench.preflight.report.is_none());
     }
 }

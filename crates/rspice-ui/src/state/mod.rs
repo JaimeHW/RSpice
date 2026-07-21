@@ -6,6 +6,7 @@
 mod configuration_set;
 mod design_management;
 pub mod library_browser;
+mod model_bound_symbol;
 pub mod model_library;
 pub mod pdk_config;
 mod project_sources;
@@ -27,6 +28,18 @@ pub use design_management::*;
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryCellPlacementParameter, LibraryManager,
     NavColumn, View, ViewType, library_cell_placement_candidates,
+};
+pub use model_bound_symbol::{
+    GeneratedSymbolViews, ImportedGraphicFormat, ImportedGraphicSource, ImportedPinAnchor,
+    MODEL_BOUND_SYMBOL_METADATA_KEY, MODEL_BOUND_SYMBOL_SCHEMA_VERSION, ModelBoundSymbolDefinition,
+    ParameterInheritance, SYMBOL_IMPORT_SOURCE_METADATA_KEY, SYMBOL_PARAMETER_FORM_METADATA_KEY,
+    SymbolConstructionPlan, SymbolConstructionReceipt, SymbolDefinitionError,
+    SymbolDefinitionImport, SymbolElectricalType, SymbolFormDiagnostic, SymbolGraphicTemplate,
+    SymbolIdentity, SymbolImplementationView, SymbolImportFormat, SymbolImportReport,
+    SymbolModelReference, SymbolNetlistBinding, SymbolParameterConstraints, SymbolParameterDefault,
+    SymbolParameterField, SymbolParameterForm, SymbolParameterSection, SymbolParameterVisibility,
+    SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, SymbolTestFixtureAccess,
+    SymbolTestFixtureContract,
 };
 pub use model_library::ModelLibraryManager;
 pub use pdk_config::{ConfigError, DiscoveredFile, LibraryPathEntry, PdkConfig};

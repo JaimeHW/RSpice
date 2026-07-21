@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 
 use crate::product::ObjectRevision;
 use crate::state::{
-    Cell, CellViewRef, ComponentType, DesignManagementCatalog, OpenCellView, SchematicSnapshot,
-    SchematicState,
+    Cell, CellViewRef, ComponentType, DesignManagementCatalog, LibraryManager, OpenCellView,
+    SchematicSnapshot, SchematicState,
 };
 
 use super::AppState;
@@ -28,6 +28,7 @@ pub(crate) struct ProjectDesignHistory {
 enum ProjectDesignRecord {
     HierarchyExtraction(Box<HierarchyExtractionRecord>),
     DesignManagement(Box<DesignManagementRecord>),
+    SymbolDefinition(Box<SymbolDefinitionRecord>),
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +63,164 @@ struct DesignManagementRecord {
     after_schematics: BTreeMap<String, SchematicSnapshot>,
     undo_guard_revision: ObjectRevision,
     redo_guard_revision: Option<ObjectRevision>,
+}
+
+/// One guarded project-library symbol definition mutation.  Only the affected
+/// cell is retained: importing a new definition and publishing a parameter
+/// form are project-scoped edits, but neither operation owns unrelated
+/// schematics or libraries.
+#[derive(Debug, Clone)]
+struct SymbolDefinitionRecord {
+    description: String,
+    library: String,
+    cell: String,
+    before: Option<Cell>,
+    after: Option<Cell>,
+    undo_guard_revision: ObjectRevision,
+    redo_guard_revision: Option<ObjectRevision>,
+    fixture: Option<SymbolDefinitionFixtureRecord>,
+}
+
+#[derive(Debug, Clone)]
+struct SymbolDefinitionFixtureRecord {
+    reference: CellViewRef,
+    before: Option<SchematicState>,
+    after: Option<SchematicState>,
+}
+
+/// Optional real schematic-buffer delta published together with a symbol
+/// definition. Create Symbol uses this for its generated simulation fixture;
+/// import and parameter-form edits pass `None`.
+#[derive(Debug, Clone)]
+pub(crate) struct SymbolDefinitionFixtureDelta {
+    pub(crate) reference: CellViewRef,
+    pub(crate) before: Option<SchematicState>,
+    pub(crate) after: Option<SchematicState>,
+}
+
+pub(crate) struct SymbolDefinitionHistoryEntry {
+    pub(crate) description: String,
+    pub(crate) library: String,
+    pub(crate) cell: String,
+    pub(crate) before: Option<Cell>,
+    pub(crate) after: Option<Cell>,
+    pub(crate) committed_revision: ObjectRevision,
+    fixture: Option<SymbolDefinitionFixtureRecord>,
+}
+
+/// Atomically publish a fully validated candidate library manager and record
+/// the exact affected-cell transition in project Undo/Redo. Callers perform
+/// all format, symbol, pin, form and netlist validation on `candidate` first;
+/// this boundary owns authority/read-only checks and the monotonic project
+/// revision.
+pub(crate) fn publish_symbol_definition_candidate(
+    state: &mut AppState,
+    candidate: LibraryManager,
+    library_name: &str,
+    cell_name: &str,
+    description: impl Into<String>,
+) -> Result<ObjectRevision, String> {
+    publish_symbol_definition_candidate_with_fixture(
+        state,
+        candidate,
+        library_name,
+        cell_name,
+        description,
+        None,
+    )
+}
+
+pub(crate) fn publish_symbol_definition_candidate_with_fixture(
+    state: &mut AppState,
+    candidate: LibraryManager,
+    library_name: &str,
+    cell_name: &str,
+    description: impl Into<String>,
+    fixture: Option<SymbolDefinitionFixtureDelta>,
+) -> Result<ObjectRevision, String> {
+    if !state.project_lifecycle.project_open {
+        return Err("Symbol definitions require an open project.".to_owned());
+    }
+    if state.workbench.safe_mode.project_read_only() {
+        return Err("Symbol definitions cannot change while the project is read-only.".to_owned());
+    }
+    let source_library = state
+        .library_manager
+        .get_library(library_name)
+        .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
+    if source_library.read_only {
+        return Err(format!("Library '{library_name}' is read-only."));
+    }
+    let candidate_library = candidate
+        .get_library(library_name)
+        .ok_or_else(|| format!("Candidate library '{library_name}' is unavailable."))?;
+    if candidate_library.read_only {
+        return Err(format!("Candidate library '{library_name}' is read-only."));
+    }
+
+    let before = source_library.get_cell(cell_name).cloned();
+    let after = candidate_library.get_cell(cell_name).cloned();
+    if after.is_none() {
+        return Err(format!(
+            "Candidate symbol cell '{library_name}/{cell_name}' is unavailable."
+        ));
+    }
+    if cell_semantics_match(before.as_ref(), after.as_ref())
+        && fixture.as_ref().is_none_or(|fixture| {
+            schematic_option_matches(fixture.before.as_ref(), fixture.after.as_ref())
+        })
+    {
+        return Err("The symbol definition has no changes to publish.".to_owned());
+    }
+    if let Some(fixture) = fixture.as_ref() {
+        if !fixture.reference.library.eq_ignore_ascii_case(library_name)
+            || !fixture.reference.cell.eq_ignore_ascii_case(cell_name)
+        {
+            return Err(
+                "The generated fixture must belong to the published symbol cell.".to_owned(),
+            );
+        }
+        let observed = schematic_for_reference(state, &fixture.reference);
+        if !schematic_option_matches(observed, fixture.before.as_ref()) {
+            return Err(
+                "The generated fixture target changed before symbol publication.".to_owned(),
+            );
+        }
+    }
+
+    // `next_revision` proves the only fallible mutation before either live
+    // owner changes. `advance_revision` cannot then fail in this transaction.
+    let expected_revision = state
+        .workspace
+        .project
+        .next_revision()
+        .map_err(|error| error.to_string())?;
+    let committed_revision = state
+        .workspace
+        .project
+        .advance_revision()
+        .map_err(|error| error.to_string())?;
+    debug_assert_eq!(committed_revision, expected_revision);
+    state.library_manager = candidate;
+    if let Some(fixture) = fixture.as_ref() {
+        apply_symbol_fixture(state, &fixture.reference, fixture.after.as_ref());
+    }
+    state.workspace.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.record_symbol_definition_transaction(SymbolDefinitionHistoryEntry {
+        description: description.into(),
+        library: library_name.to_owned(),
+        cell: cell_name.to_owned(),
+        before,
+        after,
+        committed_revision,
+        fixture: fixture.map(|fixture| SymbolDefinitionFixtureRecord {
+            reference: fixture.reference,
+            before: fixture.before,
+            after: fixture.after,
+        }),
+    });
+    Ok(committed_revision)
 }
 
 pub(crate) struct DesignManagementHistoryEntry {
@@ -269,6 +428,37 @@ impl AppState {
         self.project_design_history.redo.clear();
     }
 
+    pub(crate) fn record_symbol_definition_transaction(
+        &mut self,
+        entry: SymbolDefinitionHistoryEntry,
+    ) {
+        if cell_semantics_match(entry.before.as_ref(), entry.after.as_ref())
+            && entry.fixture.as_ref().is_none_or(|fixture| {
+                schematic_option_matches(fixture.before.as_ref(), fixture.after.as_ref())
+            })
+        {
+            return;
+        }
+        self.project_design_history
+            .undo
+            .push(ProjectDesignRecord::SymbolDefinition(Box::new(
+                SymbolDefinitionRecord {
+                    description: entry.description,
+                    library: entry.library,
+                    cell: entry.cell,
+                    before: entry.before,
+                    after: entry.after,
+                    undo_guard_revision: entry.committed_revision,
+                    redo_guard_revision: None,
+                    fixture: entry.fixture,
+                },
+            )));
+        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
+            self.project_design_history.undo.remove(0);
+        }
+        self.project_design_history.redo.clear();
+    }
+
     pub(crate) fn can_undo_project_design(&self) -> bool {
         self.project_design_history
             .undo
@@ -348,6 +538,7 @@ impl ProjectDesignRecord {
         match self {
             Self::HierarchyExtraction(record) => record.after_design_matches(state),
             Self::DesignManagement(record) => record.after_design_matches(state),
+            Self::SymbolDefinition(record) => record.after_design_matches(state),
         }
     }
 
@@ -355,6 +546,7 @@ impl ProjectDesignRecord {
         match self {
             Self::HierarchyExtraction(record) => record.before_design_matches(state),
             Self::DesignManagement(record) => record.before_design_matches(state),
+            Self::SymbolDefinition(record) => record.before_design_matches(state),
         }
     }
 
@@ -362,6 +554,7 @@ impl ProjectDesignRecord {
         match self {
             Self::HierarchyExtraction(record) => record.validate_mutation(state, operation),
             Self::DesignManagement(record) => record.validate_mutation(state, operation),
+            Self::SymbolDefinition(record) => record.validate_mutation(state, operation),
         }
     }
 
@@ -372,6 +565,10 @@ impl ProjectDesignRecord {
                 active == record.parent_ref || active == record.target_schematic_ref
             }
             Self::DesignManagement(record) => active == record.owner,
+            Self::SymbolDefinition(record) => {
+                active.library.eq_ignore_ascii_case(&record.library)
+                    && active.cell.eq_ignore_ascii_case(&record.cell)
+            }
         }
     }
 
@@ -379,6 +576,7 @@ impl ProjectDesignRecord {
         match self {
             Self::HierarchyExtraction(record) => &record.description,
             Self::DesignManagement(record) => &record.description,
+            Self::SymbolDefinition(record) => &record.description,
         }
     }
 
@@ -386,6 +584,7 @@ impl ProjectDesignRecord {
         match self {
             Self::HierarchyExtraction(record) => record.apply_before(state),
             Self::DesignManagement(record) => record.apply_before(state),
+            Self::SymbolDefinition(record) => record.apply_before(state),
         }
     }
 
@@ -393,8 +592,249 @@ impl ProjectDesignRecord {
         match self {
             Self::HierarchyExtraction(record) => record.apply_after(state),
             Self::DesignManagement(record) => record.apply_after(state),
+            Self::SymbolDefinition(record) => record.apply_after(state),
         }
     }
+}
+
+impl SymbolDefinitionRecord {
+    fn after_design_matches(&self, state: &AppState) -> bool {
+        cell_semantics_match(
+            symbol_cell(state, &self.library, &self.cell),
+            self.after.as_ref(),
+        ) && self.fixture.as_ref().is_none_or(|fixture| {
+            schematic_option_matches(
+                schematic_for_reference(state, &fixture.reference),
+                fixture.after.as_ref(),
+            )
+        }) && state.workspace.project.revision() == self.undo_guard_revision
+    }
+
+    fn before_design_matches(&self, state: &AppState) -> bool {
+        cell_semantics_match(
+            symbol_cell(state, &self.library, &self.cell),
+            self.before.as_ref(),
+        ) && self.fixture.as_ref().is_none_or(|fixture| {
+            schematic_option_matches(
+                schematic_for_reference(state, &fixture.reference),
+                fixture.before.as_ref(),
+            )
+        }) && self
+            .redo_guard_revision
+            .is_some_and(|revision| state.workspace.project.revision() == revision)
+    }
+
+    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+        if !state.project_lifecycle.project_open {
+            return Err(format!(
+                "Symbol definition cannot be {operation} without an open project."
+            ));
+        }
+        if state.workbench.safe_mode.project_read_only() {
+            return Err(format!(
+                "Symbol definition cannot be {operation} while the project is read-only."
+            ));
+        }
+        let library = state
+            .library_manager
+            .get_library(&self.library)
+            .ok_or_else(|| format!("Library '{}' no longer exists.", self.library))?;
+        if library.read_only {
+            return Err(format!(
+                "Symbol definition cannot be {operation} because library '{}' is read-only.",
+                self.library
+            ));
+        }
+        if self.before.is_none()
+            && state.workspace.open_views.iter().any(|open| {
+                open.reference.library.eq_ignore_ascii_case(&self.library)
+                    && open.reference.cell.eq_ignore_ascii_case(&self.cell)
+            })
+        {
+            return Err(format!(
+                "Imported symbol cannot be {operation} while a view from '{}/{}' is open.",
+                self.library, self.cell
+            ));
+        }
+        let fixture_removed = self
+            .fixture
+            .as_ref()
+            .is_some_and(|fixture| match operation {
+                "undone" => fixture.before.is_none(),
+                "redone" => fixture.after.is_none(),
+                _ => false,
+            });
+        if fixture_removed
+            && self.fixture.as_ref().is_some_and(|fixture| {
+                state.workspace.active_schematic_reference() == fixture.reference
+                    || state
+                        .workspace
+                        .open_views
+                        .iter()
+                        .any(|open| open.reference == fixture.reference)
+            })
+        {
+            let fixture = self.fixture.as_ref().expect("fixture removal was checked");
+            return Err(format!(
+                "Generated fixture '{}' cannot be {operation} while it is open.",
+                fixture.reference.display_path()
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+        if !self.after_design_matches(state) {
+            return Err(
+                "Symbol definition cannot be undone because the target cell or project revision changed."
+                    .to_owned(),
+            );
+        }
+        self.validate_mutation(state, "undone")?;
+        let revision = replace_symbol_cell(state, &self.library, &self.cell, self.before.as_ref())?;
+        if let Some(fixture) = &self.fixture {
+            apply_symbol_fixture(state, &fixture.reference, fixture.before.as_ref());
+        }
+        self.redo_guard_revision = Some(revision);
+        Ok(())
+    }
+
+    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+        if !self.before_design_matches(state) {
+            return Err(
+                "Symbol definition cannot be redone because the target cell or project revision changed."
+                    .to_owned(),
+            );
+        }
+        self.validate_mutation(state, "redone")?;
+        self.undo_guard_revision =
+            replace_symbol_cell(state, &self.library, &self.cell, self.after.as_ref())?;
+        if let Some(fixture) = &self.fixture {
+            apply_symbol_fixture(state, &fixture.reference, fixture.after.as_ref());
+        }
+        Ok(())
+    }
+}
+
+fn symbol_cell<'a>(state: &'a AppState, library: &str, cell: &str) -> Option<&'a Cell> {
+    state
+        .library_manager
+        .get_library(library)
+        .and_then(|library| library.get_cell(cell))
+}
+
+fn cell_semantics_match(left: Option<&Cell>, right: Option<&Cell>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            matches!(
+                (serde_json::to_vec(left), serde_json::to_vec(right)),
+                (Ok(left), Ok(right)) if left == right
+            )
+        }
+        _ => false,
+    }
+}
+
+fn schematic_for_reference<'a>(
+    state: &'a AppState,
+    reference: &CellViewRef,
+) -> Option<&'a SchematicState> {
+    if state.workspace.active_schematic_reference() == *reference {
+        Some(&state.schematic)
+    } else {
+        state.workspace.schematic_buffers.get(&reference.key())
+    }
+}
+
+fn schematic_option_matches(
+    observed: Option<&SchematicState>,
+    expected: Option<&SchematicState>,
+) -> bool {
+    match (observed, expected) {
+        (None, None) => true,
+        (Some(observed), Some(expected)) => {
+            SchematicSnapshot::capture(expected).is_equal_state(observed)
+        }
+        _ => false,
+    }
+}
+
+fn apply_symbol_fixture(
+    state: &mut AppState,
+    reference: &CellViewRef,
+    replacement: Option<&SchematicState>,
+) {
+    let key = reference.key();
+    match replacement {
+        Some(schematic) => {
+            state
+                .workspace
+                .schematic_buffers
+                .insert(key.clone(), schematic.clone());
+            if state.workspace.active_schematic_reference() == *reference {
+                state.schematic = schematic.clone();
+            }
+            if let Some(open) = state
+                .workspace
+                .open_views
+                .iter_mut()
+                .find(|open| open.reference == *reference)
+            {
+                open.dirty = schematic.is_dirty;
+            }
+        }
+        None => {
+            state.workspace.schematic_buffers.remove(&key);
+        }
+    }
+}
+
+fn replace_symbol_cell(
+    state: &mut AppState,
+    library_name: &str,
+    cell_name: &str,
+    replacement: Option<&Cell>,
+) -> Result<ObjectRevision, String> {
+    let revision = state
+        .workspace
+        .project
+        .next_revision()
+        .map_err(|error| error.to_string())?;
+    let library = state
+        .library_manager
+        .get_library_mut(library_name)
+        .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
+    if library.read_only {
+        return Err(format!("Library '{library_name}' is read-only."));
+    }
+    match replacement {
+        Some(cell) => {
+            library.add_cell(cell.clone());
+        }
+        None => {
+            if !library.remove_cell(cell_name) {
+                return Err(format!(
+                    "Cell '{library_name}/{cell_name}' no longer exists."
+                ));
+            }
+            if state.library_manager.selected_library.as_deref() == Some(library_name)
+                && state.library_manager.selected_cell.as_deref() == Some(cell_name)
+            {
+                state.library_manager.selected_cell = None;
+                state.library_manager.selected_view = None;
+            }
+        }
+    }
+    state
+        .workspace
+        .project
+        .advance_revision()
+        .map_err(|error| error.to_string())?;
+    debug_assert_eq!(state.workspace.project.revision(), revision);
+    state.workspace.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    Ok(revision)
 }
 
 impl DesignManagementRecord {
@@ -1320,5 +1760,269 @@ mod tests {
         assert_eq!(reference(&state), "R42");
         assert!(state.redo_project_design().expect("redo").is_some());
         assert_eq!(reference(&state), expected_reference);
+    }
+
+    #[test]
+    fn symbol_definition_candidate_is_atomic_and_globally_undoable() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let library_name = state.workspace.active_view.library.clone();
+        let mut candidate = state.library_manager.clone();
+        let mut cell = Cell::new("imported_symbol");
+        let mut view = View::new("symbol", ViewType::Symbol);
+        view.metadata
+            .insert("rspice.symbol.test".to_owned(), "revision-1".to_owned());
+        cell.add_view(view);
+        candidate
+            .get_library_mut(&library_name)
+            .expect("writable project library")
+            .add_cell(cell);
+
+        let committed = publish_symbol_definition_candidate(
+            &mut state,
+            candidate,
+            &library_name,
+            "imported_symbol",
+            "import symbol definition",
+        )
+        .expect("publish");
+
+        assert_eq!(state.workspace.project.revision(), committed);
+        assert!(state.workspace.project_metadata_dirty);
+        assert!(state.can_undo_project_design());
+        assert!(state.undo_project_design().expect("undo").is_some());
+        assert!(
+            state
+                .library_manager
+                .get_library(&library_name)
+                .and_then(|library| library.get_cell("imported_symbol"))
+                .is_none()
+        );
+        assert!(state.redo_project_design().expect("redo").is_some());
+        assert!(
+            state
+                .library_manager
+                .get_library(&library_name)
+                .and_then(|library| library.get_cell("imported_symbol"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn symbol_definition_history_fails_closed_after_external_cell_edit() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let library_name = state.workspace.active_view.library.clone();
+        let mut candidate = state.library_manager.clone();
+        let mut cell = Cell::new("imported_symbol");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        candidate
+            .get_library_mut(&library_name)
+            .expect("writable project library")
+            .add_cell(cell);
+        publish_symbol_definition_candidate(
+            &mut state,
+            candidate,
+            &library_name,
+            "imported_symbol",
+            "import symbol definition",
+        )
+        .expect("publish");
+
+        state
+            .library_manager
+            .get_library_mut(&library_name)
+            .and_then(|library| library.get_cell_mut("imported_symbol"))
+            .expect("imported cell")
+            .description = "external edit".to_owned();
+
+        assert!(!state.can_undo_project_design());
+        assert_eq!(state.undo_project_design().expect("guarded"), None);
+        assert_eq!(
+            state
+                .library_manager
+                .get_library(&library_name)
+                .and_then(|library| library.get_cell("imported_symbol"))
+                .expect("cell retained")
+                .description,
+            "external edit"
+        );
+    }
+
+    #[test]
+    fn symbol_definition_and_generated_fixture_share_one_history_record() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let library_name = state.workspace.active_view.library.clone();
+        let fixture_ref = CellViewRef::new(&library_name, "fixture_symbol", "testbench");
+        let mut fixture = SchematicState::default();
+        fixture.add_component(ComponentType::Resistor, Point::origin());
+        let mut candidate = state.library_manager.clone();
+        let mut cell = Cell::new("fixture_symbol");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        cell.add_view(View::new("testbench", ViewType::Testbench));
+        candidate
+            .get_library_mut(&library_name)
+            .expect("writable project library")
+            .add_cell(cell);
+
+        publish_symbol_definition_candidate_with_fixture(
+            &mut state,
+            candidate,
+            &library_name,
+            "fixture_symbol",
+            "create symbol with fixture",
+            Some(SymbolDefinitionFixtureDelta {
+                reference: fixture_ref.clone(),
+                before: None,
+                after: Some(fixture.clone()),
+            }),
+        )
+        .expect("publish symbol and fixture");
+        assert!(
+            state
+                .workspace
+                .schematic_buffers
+                .get(&fixture_ref.key())
+                .is_some_and(|stored| SchematicSnapshot::capture(&fixture).is_equal_state(stored))
+        );
+
+        assert!(state.undo_project_design().expect("undo").is_some());
+        assert!(
+            !state
+                .workspace
+                .schematic_buffers
+                .contains_key(&fixture_ref.key())
+        );
+        assert!(
+            state
+                .library_manager
+                .get_library(&library_name)
+                .and_then(|library| library.get_cell("fixture_symbol"))
+                .is_none()
+        );
+
+        assert!(state.redo_project_design().expect("redo").is_some());
+        assert!(
+            state
+                .workspace
+                .schematic_buffers
+                .contains_key(&fixture_ref.key())
+        );
+        assert!(
+            state
+                .library_manager
+                .get_library(&library_name)
+                .and_then(|library| library.get_cell("fixture_symbol"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let library_name = state.workspace.active_view.library.clone();
+        let fixture_ref = CellViewRef::new(&library_name, "existing_symbol", "testbench");
+        state
+            .library_manager
+            .get_library_mut(&library_name)
+            .expect("writable project library")
+            .add_cell(Cell::new("existing_symbol"));
+
+        let mut candidate = state.library_manager.clone();
+        candidate
+            .get_library_mut(&library_name)
+            .and_then(|library| library.get_cell_mut("existing_symbol"))
+            .expect("existing cell")
+            .add_view(View::new("testbench", ViewType::Testbench));
+        let mut fixture = SchematicState::default();
+        fixture.add_component(ComponentType::Capacitor, Point::origin());
+        publish_symbol_definition_candidate_with_fixture(
+            &mut state,
+            candidate,
+            &library_name,
+            "existing_symbol",
+            "add generated fixture",
+            Some(SymbolDefinitionFixtureDelta {
+                reference: fixture_ref.clone(),
+                before: None,
+                after: Some(fixture),
+            }),
+        )
+        .expect("publish fixture");
+        state
+            .workspace
+            .open_views
+            .push(OpenCellView::new(fixture_ref.clone(), ViewType::Testbench));
+
+        assert!(!state.can_undo_project_design());
+        let error = state
+            .undo_project_design()
+            .expect_err("open generated fixture must block undo with an actionable reason");
+        assert!(error.contains("cannot be undone while it is open"));
+        assert!(
+            state
+                .workspace
+                .schematic_buffers
+                .contains_key(&fixture_ref.key())
+        );
+        assert!(
+            state
+                .library_manager
+                .get_library(&library_name)
+                .and_then(|library| library.get_cell("existing_symbol"))
+                .and_then(|cell| cell.get_view("testbench"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn symbol_history_refuses_to_remove_the_active_generated_fixture() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        let library_name = state.workspace.active_view.library.clone();
+        let fixture_ref = CellViewRef::new(&library_name, "active_fixture", "testbench");
+        state
+            .library_manager
+            .get_library_mut(&library_name)
+            .expect("writable project library")
+            .add_cell(Cell::new("active_fixture"));
+
+        let mut candidate = state.library_manager.clone();
+        candidate
+            .get_library_mut(&library_name)
+            .and_then(|library| library.get_cell_mut("active_fixture"))
+            .expect("existing cell")
+            .add_view(View::new("testbench", ViewType::Testbench));
+        let mut fixture = SchematicState::default();
+        fixture.add_component(ComponentType::Resistor, Point::origin());
+        publish_symbol_definition_candidate_with_fixture(
+            &mut state,
+            candidate,
+            &library_name,
+            "active_fixture",
+            "add active fixture",
+            Some(SymbolDefinitionFixtureDelta {
+                reference: fixture_ref.clone(),
+                before: None,
+                after: Some(fixture.clone()),
+            }),
+        )
+        .expect("publish fixture");
+        state.workspace.active_view = fixture_ref.clone();
+        state.schematic = fixture;
+
+        assert!(!state.can_undo_project_design());
+        let error = state
+            .undo_project_design()
+            .expect_err("active generated fixture must block undo with an actionable reason");
+        assert!(error.contains("cannot be undone while it is open"));
+        assert!(
+            state
+                .workspace
+                .schematic_buffers
+                .contains_key(&fixture_ref.key())
+        );
     }
 }

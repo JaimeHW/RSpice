@@ -319,11 +319,40 @@ impl<'a> NetlistGenerator<'a> {
                 }
 
                 let nodes = node_names.join(" ");
-                let params = self.format_params(&component.params);
-                Some(format!(
-                    "{} {} {}{}",
-                    instance_name, nodes, subckt_name, params
-                ))
+                if let Some(template) = binding.netlist_template.as_deref() {
+                    let params = match model_bound_instance_params(&binding, &component.params) {
+                        Ok(params) => params,
+                        Err(error) => {
+                            self.errors.push(format!(
+                                "Cell instance '{}' ({}/{}/{}) has invalid typed parameters: {error}",
+                                component.name, binding.library, binding.cell, binding.view
+                            ));
+                            return None;
+                        }
+                    };
+                    match render_model_bound_instance_template(
+                        template,
+                        &instance_name,
+                        &nodes,
+                        subckt_name,
+                        &params,
+                    ) {
+                        Ok(line) => Some(line),
+                        Err(error) => {
+                            self.errors.push(format!(
+                                "Cell instance '{}' ({}/{}/{}) has an invalid netlist template: {error}",
+                                component.name, binding.library, binding.cell, binding.view
+                            ));
+                            None
+                        }
+                    }
+                } else {
+                    let params = self.format_params(&component.params);
+                    Some(format!(
+                        "{} {} {}{}",
+                        instance_name, nodes, subckt_name, params
+                    ))
+                }
             }
 
             // XSPICE components: A name nodes model [params]
@@ -343,6 +372,213 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {}", instance_name, nodes, value_with_params))
             }
         }
+    }
+}
+
+fn render_model_bound_instance_template(
+    template: &str,
+    reference: &str,
+    nodes: &str,
+    model: &str,
+    params: &str,
+) -> Result<String, String> {
+    let template = template.trim();
+    crate::state::validate_library_netlist_template(template)?;
+
+    let reference_token = template
+        .split_ascii_whitespace()
+        .next()
+        .ok_or_else(|| "template is empty".to_owned())?;
+    let name = if reference_token == "{ref}" {
+        reference
+    } else {
+        let prefix = reference_token
+            .strip_suffix("{name}")
+            .ok_or_else(|| "template reference token is invalid".to_owned())?;
+        let Some(head) = reference.get(..prefix.len()) else {
+            return Err(format!(
+                "reference `{reference}` does not use prefix `{prefix}`"
+            ));
+        };
+        if !head.eq_ignore_ascii_case(prefix) {
+            return Err(format!(
+                "reference `{reference}` does not use prefix `{prefix}`"
+            ));
+        }
+        let suffix = &reference[prefix.len()..];
+        if suffix.is_empty() {
+            return Err(format!(
+                "reference `{reference}` has no identifier after prefix `{prefix}`"
+            ));
+        }
+        suffix
+    };
+    let mut rendered = template
+        .replace("{name}", name)
+        .replace("{ref}", reference)
+        .replace("{nodes}", nodes)
+        .replace("{model}", model)
+        .replace("{params}", params.trim());
+    rendered = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+    if rendered.is_empty() {
+        return Err("template produced an empty instance line".to_owned());
+    }
+    if !rendered
+        .split_ascii_whitespace()
+        .next()
+        .is_some_and(|emitted| emitted.eq_ignore_ascii_case(reference))
+    {
+        return Err("template changed the validated instance reference".to_owned());
+    }
+    Ok(rendered)
+}
+
+fn model_bound_instance_params(
+    binding: &crate::state::LibraryCellInstance,
+    raw: &str,
+) -> Result<String, String> {
+    if raw.trim().is_empty() {
+        return Ok(String::new());
+    }
+    if raw.chars().any(char::is_control) {
+        return Err("parameter text contains a line break or control character".to_owned());
+    }
+    let parsed = crate::state::parse_replacement_parameters_strict(raw)
+        .map_err(|error| error.to_string())?;
+    for (key, value) in &parsed {
+        if !binding
+            .parameter_order
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(key))
+        {
+            return Err(format!(
+                "parameter `{key}` is not declared by the symbol form"
+            ));
+        }
+        if value.is_empty()
+            || value.len() > 512
+            || value.chars().any(char::is_control)
+            || value
+                .chars()
+                .any(|character| matches!(character, ';' | '$' | '#' | '\\'))
+        {
+            return Err(format!("parameter `{key}` has an unsafe or invalid value"));
+        }
+    }
+    let formatted = binding
+        .parameter_order
+        .iter()
+        .filter_map(|key| {
+            parsed
+                .iter()
+                .find(|(parsed_key, _)| parsed_key.eq_ignore_ascii_case(key))
+                .map(|(_, value)| format!("{key}={value}"))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if formatted.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(format!(" {formatted}"))
+    }
+}
+
+#[cfg(test)]
+mod model_bound_template_tests {
+    use super::{model_bound_instance_params, render_model_bound_instance_template};
+    use crate::simulation::netlist_gen::NetlistGenerator;
+    use crate::state::{Component, ComponentType, LibraryCellInstance, Point, SchematicState};
+
+    #[test]
+    fn renders_primitive_model_instance_without_an_x_prefix() {
+        let line = render_model_bound_instance_template(
+            "M{name} {nodes} {model} {params}",
+            "M7",
+            "drain gate source bulk",
+            "nmos_18",
+            " w=1u l=180n",
+        )
+        .expect("valid template");
+
+        assert_eq!(line, "M7 drain gate source bulk nmos_18 w=1u l=180n");
+        assert_eq!(
+            render_model_bound_instance_template(
+                "M{name} {nodes} {model}",
+                "MFOO",
+                "drain gate source bulk",
+                "nmos_18",
+                "",
+            )
+            .unwrap(),
+            "MFOO drain gate source bulk nmos_18"
+        );
+    }
+
+    #[test]
+    fn rejects_multiline_and_unknown_template_content() {
+        assert!(
+            render_model_bound_instance_template(
+                "M{name} {nodes} {model}\n.include injected.lib",
+                "M1",
+                "d g s b",
+                "nmos",
+                "",
+            )
+            .is_err()
+        );
+        assert!(
+            render_model_bound_instance_template(
+                "Q{name} {nodes} {model}",
+                "M1",
+                "d g s b",
+                "nmos",
+                "",
+            )
+            .is_err()
+        );
+        assert!(
+            render_model_bound_instance_template(
+                "M{name} {nodes} {model} {unknown}",
+                "M1",
+                "d g s b",
+                "nmos",
+                "",
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn typed_instance_parameters_are_allowlisted_and_canonicalized() {
+        let mut binding = LibraryCellInstance::new("models", "nmos_18", "spice");
+        binding.parameter_order = vec!["w".to_owned(), "l".to_owned()];
+
+        assert_eq!(
+            model_bound_instance_params(&binding, "w=1u l=180n").unwrap(),
+            " w=1u l=180n"
+        );
+        assert!(model_bound_instance_params(&binding, "w=1u owner=hidden").is_err());
+        assert!(model_bound_instance_params(&binding, "w=1u\n.include attack.lib").is_err());
+        assert!(model_bound_instance_params(&binding, "w=1u stray").is_err());
+        assert!(model_bound_instance_params(&binding, "w=1u W=2u").is_err());
+        assert_eq!(
+            model_bound_instance_params(&binding, "w={base * 2} l=180n").unwrap(),
+            " w={base * 2} l=180n"
+        );
+    }
+
+    #[test]
+    fn model_bound_reference_is_not_reprefixed_as_a_subcircuit() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+        let mut binding = LibraryCellInstance::new("models", "nmos_18", "spice");
+        binding.netlist_template = Some("M{name} {nodes} {model}".to_owned());
+        binding.reference_prefix = Some("M".to_owned());
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(binding)
+            .with_name_value("M17", "nmos_18");
+
+        assert_eq!(generator.instance_name(&component), "M17");
     }
 }
 

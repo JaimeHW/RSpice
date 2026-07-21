@@ -197,7 +197,6 @@ fn instance_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .collect::<Vec<_>>();
 
     navigator_section_header(ui, "Instances", &components.len().to_string());
-    ui.add_space(4.0);
     let root = app.state.workspace.active_view.cell.clone();
     if nav_row(ui, WorkbenchIcon::Design, &root, false, Some("schematic")) {
         app.state.schematic.selection.clear();
@@ -217,7 +216,6 @@ fn instance_section(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.schematic.center_request = Some(position);
         }
     }
-    ui.add_space(7.0);
 }
 
 fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -233,7 +231,6 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .map(|label| (label.name.clone(), label.pos, label.is_ground()))
         .collect::<Vec<_>>();
     navigator_section_header(ui, "Nets", &labels.len().to_string());
-    ui.add_space(4.0);
     let graph = NetGraph::build(&app.state.schematic.wires, &app.state.schematic.junctions);
     for (name, position, ground) in labels {
         let connected = graph.find_connected_wires(position);
@@ -260,7 +257,6 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.schematic.center_request = Some(position);
         }
     }
-    ui.add_space(7.0);
 }
 
 fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -278,7 +274,6 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|(_, _, port)| matches_query(&query, &[&port.name, port.direction.keyword()]))
         .collect::<Vec<_>>();
     navigator_section_header(ui, "Named signals", &ports.len().to_string());
-    ui.add_space(4.0);
     for (component_id, position, port) in ports {
         if nav_row_indented_mono(
             ui,
@@ -295,7 +290,6 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.schematic.center_request = Some(position);
         }
     }
-    ui.add_space(7.0);
 }
 
 fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {

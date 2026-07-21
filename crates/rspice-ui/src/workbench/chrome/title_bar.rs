@@ -49,6 +49,7 @@ const DESIGN_EDIT_COMMANDS: [Command; 4] = [
     Command::ArraySelection,
     Command::ReplaceInstance,
 ];
+const BRAND_WORDMARK_WIDTH: f32 = 88.0;
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
@@ -313,7 +314,10 @@ fn brand(
 ) {
     let t = Tokens::get(ui.ctx());
     let width = if show_wordmark || retain_desktop_width {
-        112.0
+        // Icon (20), 7 px lockup gap, measured wordmark, and 10 px end
+        // padding. The previous 112 px minimum came from the HTML mock's
+        // generic lockup rule and left a conspicuous empty block before File.
+        BRAND_WORDMARK_WIDTH
     } else if large_target {
         44.0
     } else {
@@ -1561,28 +1565,25 @@ fn paint_title_context(
     } else {
         app.state.workspace.project.display_name().to_owned()
     };
-    let available_text_width = (bounds.width() - 26.0).max(12.0);
     let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let painter = ui
-        .painter()
-        .with_clip_rect(bounds.shrink2(egui::vec2(5.0, 0.0)));
+    let clip = bounds.shrink2(egui::vec2(5.0, 0.0));
+    let painter = ui.painter().with_clip_rect(clip);
+    let text_origin = if left_aligned {
+        bounds.left() + 12.0
+    } else {
+        bounds.left() + 5.0
+    };
+    let available_text_width = (clip.right() - text_origin).max(12.0);
     let text = ellipsize_to_width(&painter, &full, &font, available_text_width);
     let galley = painter.layout_no_wrap(text, font, t.color.text);
-    let total_width = 13.0 + galley.size().x;
+    let total_width = galley.size().x;
     let left = if left_aligned {
-        bounds.left() + 12.0
+        text_origin
     } else {
         (bounds.center().x - total_width * 0.5).max(bounds.left() + 5.0)
     };
-    let state_color = if dirty { t.color.warn } else { t.color.ok };
-    painter.circle_filled(
-        egui::pos2(left + 3.0, bounds.center().y),
-        6.0,
-        state_color.gamma_multiply(0.11),
-    );
-    painter.circle_filled(egui::pos2(left + 3.0, bounds.center().y), 3.0, state_color);
     painter.galley(
-        egui::pos2(left + 13.0, bounds.center().y - galley.size().y * 0.5),
+        egui::pos2(left, bounds.center().y - galley.size().y * 0.5),
         galley,
         t.color.text,
     );
@@ -2368,6 +2369,11 @@ mod tests {
                 Command::PlaceShape,
             ]
         );
+    }
+
+    #[test]
+    fn brand_lockup_does_not_reserve_space_after_the_wordmark() {
+        assert_eq!(BRAND_WORDMARK_WIDTH, 88.0);
     }
 
     #[test]

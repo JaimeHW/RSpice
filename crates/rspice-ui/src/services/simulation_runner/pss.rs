@@ -29,6 +29,32 @@ pub struct PssData {
     pub settling_cycles: usize,
 }
 
+/// Fully materialized shooting-PSS request used by the execution pipeline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PssRunConfig {
+    pub fundamental_freq: Value,
+    pub num_harmonics: usize,
+    pub tolerance: Value,
+    pub max_iterations: usize,
+    pub oscillator_mode: bool,
+    pub oscillator_node: Option<String>,
+    pub save_harmonics: bool,
+}
+
+impl PssRunConfig {
+    pub fn new(fundamental_freq: Value, num_harmonics: usize, tolerance: Value) -> Self {
+        Self {
+            fundamental_freq,
+            num_harmonics,
+            tolerance,
+            max_iterations: 50,
+            oscillator_mode: false,
+            oscillator_node: None,
+            save_harmonics: true,
+        }
+    }
+}
+
 /// Run PSS analysis
 ///
 /// Finds the periodic steady-state solution of a circuit with autonomous
@@ -57,11 +83,9 @@ pub fn run_pss_analysis_with_abort(
     tolerance: Value,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PssData> {
-    run_pss_analysis_with_source_path_and_abort(
+    run_pss_analysis_with_config_and_source_path_and_abort(
         netlist_text,
-        fundamental_freq,
-        num_harmonics,
-        tolerance,
+        &PssRunConfig::new(fundamental_freq, num_harmonics, tolerance),
         None,
         abort,
     )
@@ -96,22 +120,34 @@ pub fn run_pss_analysis_with_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PssData> {
+    run_pss_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        &PssRunConfig::new(fundamental_freq, num_harmonics, tolerance),
+        source_path,
+        abort,
+    )
+}
+
+/// Run a fully materialized shooting-PSS request with source-path resolution
+/// and cooperative cancellation.
+pub fn run_pss_analysis_with_config_and_source_path_and_abort(
+    netlist_text: &str,
+    config: &PssRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PssData> {
     ensure_not_aborted(abort)?;
-    let validation = validate_pss_parameters(fundamental_freq, num_harmonics, tolerance);
+    let validation = validate_pss_config(config);
     ensure_not_aborted(abort)?;
     validation.map_err(ServiceRunError::Failure)?;
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
 
     let mut sim_config = build_engine_config(&netlist, None);
-    sim_config.tolerance = tolerance;
+    sim_config.tolerance = config.tolerance;
     let engine = Engine::new(sim_config);
 
-    let pss_config = PssConfig::new(fundamental_freq)
-        .with_harmonics(num_harmonics)
-        .with_tolerance(tolerance)
-        .with_max_iterations(50)
-        .with_tstab_periods(10);
+    let pss_config = core_pss_config(config);
 
     let pss_result = engine
         .run_pss_with_abort(&netlist, pss_config, abort)
@@ -150,14 +186,21 @@ pub fn run_pss_analysis_with_source_path_and_abort(
     }
 
     let mut harmonics: Vec<(String, Vec<(Value, Value, Value)>)> = Vec::new();
-    for (name, waveform_values) in &waveforms {
-        ensure_not_aborted(abort)?;
-        let node_harmonics = if waveform_values.is_empty() {
-            Vec::new()
-        } else {
-            compute_fft_harmonics_with_abort(waveform_values, frequency, num_harmonics, abort)?
-        };
-        harmonics.push((name.clone(), node_harmonics));
+    if config.save_harmonics {
+        for (name, waveform_values) in &waveforms {
+            ensure_not_aborted(abort)?;
+            let node_harmonics = if waveform_values.is_empty() {
+                Vec::new()
+            } else {
+                compute_fft_harmonics_with_abort(
+                    waveform_values,
+                    frequency,
+                    config.num_harmonics,
+                    abort,
+                )?
+            };
+            harmonics.push((name.clone(), node_harmonics));
+        }
     }
 
     ensure_not_aborted(abort)?;
@@ -168,23 +211,46 @@ pub fn run_pss_analysis_with_source_path_and_abort(
         waveforms,
         harmonics,
         converged: true,
-        settling_cycles: 10,
+        settling_cycles: if config.oscillator_mode { 20 } else { 10 },
     })
 }
 
-fn validate_pss_parameters(
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    tolerance: Value,
-) -> Result<(), String> {
-    if !fundamental_freq.is_finite() || fundamental_freq <= 0.0 {
+fn core_pss_config(config: &PssRunConfig) -> PssConfig {
+    let mut pss_config = if config.oscillator_mode {
+        PssConfig::autonomous().with_period_guess(1.0 / config.fundamental_freq)
+    } else {
+        PssConfig::new(config.fundamental_freq)
+    }
+    .with_harmonics(config.num_harmonics)
+    .with_tolerance(config.tolerance)
+    .with_max_iterations(config.max_iterations)
+    .with_tstab_periods(if config.oscillator_mode { 20 } else { 10 });
+    if let Some(node) = config.oscillator_node.as_deref() {
+        pss_config = pss_config.with_oscillator_node(node);
+    }
+    pss_config
+}
+
+fn validate_pss_config(config: &PssRunConfig) -> Result<(), String> {
+    if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
         return Err("PSS fundamental frequency must be positive".to_string());
     }
-    if num_harmonics == 0 {
+    if config.num_harmonics == 0 {
         return Err("PSS num_harmonics must be greater than zero".to_string());
     }
-    if !tolerance.is_finite() || tolerance <= 0.0 {
+    if !config.tolerance.is_finite() || config.tolerance <= 0.0 {
         return Err("PSS tolerance must be positive".to_string());
+    }
+    if config.max_iterations == 0 {
+        return Err("PSS max_iterations must be greater than zero".to_string());
+    }
+    if config.oscillator_mode
+        && config
+            .oscillator_node
+            .as_deref()
+            .is_none_or(|node| node.trim().is_empty())
+    {
+        return Err("PSS oscillator node is required in oscillator mode".to_string());
     }
     Ok(())
 }
@@ -287,5 +353,27 @@ mod tests {
         let result = run_pss_analysis_with_abort("invalid", -1.0, 0, -1.0, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn configured_shooting_fields_reach_the_core_solver_request() {
+        let config = PssRunConfig {
+            fundamental_freq: 2.0e6,
+            num_harmonics: 13,
+            tolerance: 2.0e-5,
+            max_iterations: 77,
+            oscillator_mode: true,
+            oscillator_node: Some("osc".to_owned()),
+            save_harmonics: false,
+        };
+
+        let core = core_pss_config(&config);
+        assert!(core.auto_period);
+        assert_eq!(core.period_guess, 0.5e-6);
+        assert_eq!(core.num_harmonics, 13);
+        assert_eq!(core.tolerance, 2.0e-5);
+        assert_eq!(core.max_iterations, 77);
+        assert_eq!(core.tstab_periods, 20);
+        assert_eq!(core.oscillator_node.as_deref(), Some("osc"));
     }
 }

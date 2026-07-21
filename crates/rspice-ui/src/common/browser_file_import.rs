@@ -11,6 +11,7 @@ pub(crate) enum BrowserTextImportKind {
     Project,
     Schematic,
     ShortcutProfile,
+    SymbolDefinition,
     VerilogA,
 }
 
@@ -22,6 +23,7 @@ impl BrowserTextImportKind {
             Self::Project => "project",
             Self::Schematic => "schematic",
             Self::ShortcutProfile => "shortcut profile",
+            Self::SymbolDefinition => "symbol definition",
             Self::VerilogA => "Verilog-A source",
         }
     }
@@ -32,6 +34,7 @@ impl BrowserTextImportKind {
             Self::ShortcutProfile => {
                 crate::common::shortcut_profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
             }
+            Self::SymbolDefinition => crate::common::app::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
             Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
                 crate::io::project_io::MAX_PROJECT_FILE_BYTES
             }
@@ -253,6 +256,10 @@ mod tests {
         assert!(blocked.contains("file import is already in progress"));
 
         assert!(finish_text_import(netlist));
+        let symbol = try_begin_text_import(BrowserTextImportKind::SymbolDefinition)
+            .expect("symbol definition starts");
+        assert_eq!(symbol.kind, BrowserTextImportKind::SymbolDefinition);
+        assert!(finish_text_import(symbol));
         let veriloga =
             try_begin_text_import(BrowserTextImportKind::VerilogA).expect("Verilog-A starts");
         assert!(finish_text_import(veriloga));

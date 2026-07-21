@@ -758,7 +758,22 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     crate::ui::plot::set_interaction_mode(ui.ctx(), crate::ui::plot::InteractionMode::All);
     app.state.ui.results.set_sample_selection(None);
     prepare_viewer_state(app);
+    let plan_before_docbar = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(|plan| (plan.id(), plan.revision()));
     show_docbar(ui, &mut app.state);
+    let plan_after_docbar = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(|plan| (plan.id(), plan.revision()));
+    if plan_after_docbar != plan_before_docbar {
+        app.invalidate_simulation_preflight();
+    }
     show_viewer_well(ui, app);
 }
 

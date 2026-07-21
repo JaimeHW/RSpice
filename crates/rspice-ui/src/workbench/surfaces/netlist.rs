@@ -139,7 +139,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         .is_some_and(|previous| previous != input_digest);
     app.state.ui.netlist.current_generation_input_digest = Some(input_digest);
     if authoritative_input_changed {
-        app.simulation_controller.clear_prepared_run();
+        app.invalidate_simulation_preflight();
         super::super::netlist_document::invalidate_source_evidence(&mut app.state.ui.netlist);
         if let Some(document) = app.state.ui.netlist.generated_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());

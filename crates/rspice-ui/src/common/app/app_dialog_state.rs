@@ -4,8 +4,9 @@
 //! in `SimSetupState`, not here.
 
 use super::{
-    ConfigurationSetsDialogState, ConfirmationDialogState, DesignManagementDialogState,
-    ProjectReviewDialogState, SchematicEditAuthority,
+    ConfigurationSetsDialogState, ConfirmationDialogState, CreateModelBoundSymbolDialogState,
+    DesignManagementDialogState, ProjectReviewDialogState, SchematicEditAuthority,
+    SymbolImportDialogState, SymbolParameterFormDialogState,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1460,6 +1461,15 @@ pub struct DialogState {
     /// Project-owned sheet, variant, annotation, and hierarchy manager.
     pub(crate) design_management: DesignManagementDialogState,
 
+    /// Atomic source-, pin-, graphic-, and generated-view symbol transaction.
+    pub(crate) create_model_bound_symbol: CreateModelBoundSymbolDialogState,
+
+    /// Validated RSpice/SVG/EDIF symbol import transaction.
+    pub(crate) symbol_import: SymbolImportDialogState,
+
+    /// Typed, versioned component parameter-form transaction.
+    pub(crate) symbol_parameter_form: SymbolParameterFormDialogState,
+
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
     pub(crate) object_properties: ObjectPropertiesDialogState,
@@ -1524,6 +1534,9 @@ impl DialogState {
             || self.create_hierarchy.open
             || self.check_and_save.open
             || self.design_management.open
+            || self.create_model_bound_symbol.open
+            || self.symbol_import.open
+            || self.symbol_parameter_form.open
             || self.configuration_sets.open
             || self.object_properties.open
             || self.rename_selection.open
@@ -1556,6 +1569,9 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.rename_cell_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.rename_selection.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.design_management.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.create_model_bound_symbol.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.symbol_import.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.symbol_parameter_form.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);
