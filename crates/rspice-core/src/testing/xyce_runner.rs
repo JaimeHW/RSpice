@@ -19414,16 +19414,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         let source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
-        if Self::contains_control_block(&source) {
-            return Err(
-                "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
-                    .to_string(),
-            );
-        }
-        Self::reject_unsupported_source_directives(&source)?;
-        let source =
-            Self::source_with_wrapper_paramfile_bindings(&source, &deck.path, requires_wrapper)?;
 
+        // Wrapper-only decks without a checked-in oracle must be classified
+        // before expanding large continuation cards (for example, a massive
+        // OUTPUTTIMEPOINTS list).  The raw-source shape is sufficient for
+        // this fail-closed decision and avoids allocating parser-sized data
+        // structures for a contract that cannot execute natively.
         let output_override = requires_wrapper
             && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
         let noindex_header_wrapper = requires_wrapper
@@ -19439,6 +19435,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
+
+        if Self::contains_control_block(&source) {
+            return Err(
+                "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
+                    .to_string(),
+            );
+        }
+        Self::reject_unsupported_source_directives(&source)?;
+        let source =
+            Self::source_with_wrapper_paramfile_bindings(&source, &deck.path, requires_wrapper)?;
+
         let print_output = if output_override {
             Self::output_override_print_output_request(&source, "TRAN")?.ok_or_else(|| {
                 "output override deck has no .PRINT TRAN statement with static columns".to_string()
@@ -23116,6 +23123,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         source: &str,
         deck_path: &Path,
     ) -> Result<Option<XyceAcDataAnalysisInitFailure>, String> {
+        // Only an explicit `.AC ... DATA[=...]` command can enter this
+        // contract.  Keep the generic expected-error dispatch cheap for
+        // wrapper-only decks that contain large unrelated option cards.
+        if !Self::source_may_have_ac_data_analysis_command(source) {
+            return Ok(None);
+        }
+
         let netlist = match Self::parse_xyce_netlist(source, deck_path) {
             Ok(netlist) => netlist,
             Err(_) => return Ok(None),
@@ -23158,6 +23172,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             XyceAcDataAnalysisInitFailure::UnknownTable
         };
         Ok(Some(failure))
+    }
+
+    fn source_may_have_ac_data_analysis_command(source: &str) -> bool {
+        source.lines().any(|raw_line| {
+            let line = Self::strip_netlist_comment(raw_line).trim_start();
+            let mut fields = line.split_whitespace();
+            let Some(command) = fields.next() else {
+                return false;
+            };
+            command.eq_ignore_ascii_case(".ac")
+                && fields.any(|field| {
+                    field
+                        .split_once('=')
+                        .map_or(field, |(name, _)| name)
+                        .eq_ignore_ascii_case("data")
+                })
+        })
     }
 
     fn validate_expected_missing_inductor_value_error_source(
@@ -23210,6 +23241,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn source_may_have_pwl_repeat_option(source: &str) -> bool {
+        // Avoid rebuilding logical continuation lines for the common case
+        // where the source contains no PWL token at all.  This is especially
+        // important for wrapper-only decks that carry very large option
+        // cards: the preflight only needs to recognize a possible PWL repeat
+        // contract before deciding whether parser expansion is warranted.
+        if !source
+            .as_bytes()
+            .windows(3)
+            .any(|window| window.eq_ignore_ascii_case(b"pwl"))
+        {
+            return false;
+        }
+
         Self::logical_netlist_lines(source).iter().any(|line| {
             let compact = Self::strip_netlist_comment(line)
                 .chars()
@@ -33921,6 +33965,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         for line in lines.iter().skip(1) {
             let stripped = Self::strip_netlist_comment(line).trim();
+            // Analytic RC candidates admit only bounded TIMEINT/RELTOL/
+            // ABSTOL(/NEwLTE) option cards.  Reject Xyce's OUTPUT option from
+            // its first two raw tokens so a large OUTPUTTIMEPOINTS list is
+            // never expanded by the grouped-field tokenizer.
+            if stripped
+                .split_whitespace()
+                .next()
+                .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
+                && stripped
+                    .split_whitespace()
+                    .nth(1)
+                    .is_some_and(|option| option.eq_ignore_ascii_case("output"))
+            {
+                return false;
+            }
             let Ok(fields) = Self::split_grouped_whitespace_fields(
                 stripped,
                 "analytic first-order RC candidate statement",
@@ -34747,6 +34806,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut end_count = 0usize;
         for line in lines.iter().skip(1) {
             let stripped = Self::strip_netlist_comment(line).trim();
+            // Keep the candidate probe bounded for wrapper-only decks that
+            // carry a massive OUTPUTTIMEPOINTS option card.
+            if stripped
+                .split_whitespace()
+                .next()
+                .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
+                && stripped
+                    .split_whitespace()
+                    .nth(1)
+                    .is_some_and(|option| option.eq_ignore_ascii_case("output"))
+            {
+                return false;
+            }
             let Ok(fields) = Self::split_grouped_whitespace_fields(
                 stripped,
                 "analytic sinusoidal RC candidate statement",
@@ -59226,6 +59298,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    fn circuit_file_count(dir: &Path) -> Option<usize> {
+        Some(
+            fs::read_dir(dir)
+                .ok()?
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.file_type().ok().is_some_and(|kind| kind.is_file())
+                        && entry
+                            .path()
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                })
+                .count(),
+        )
+    }
+
     fn section_for_relative_path(relative_path: &str) -> XyceDeckSection {
         if relative_path.starts_with("Netlists/") {
             XyceDeckSection::Netlists
@@ -59265,6 +59354,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return None;
         }
         let parent = deck.path.parent()?;
+        // This relational contract is defined by one empty wrapper anchor and
+        // exactly six executable representations.  Reject other directory
+        // shapes before reading/parsing member sources; wrapper-only folders
+        // can contain very large cards that are not eligible for this family.
+        if Self::circuit_file_count(parent)? != 7 {
+            return None;
+        }
         let mut anchor_path = None;
         let mut records = Vec::<(
             PathBuf,
@@ -60900,6 +60996,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return None;
         }
         let parent = deck.path.parent()?;
+        // AC expression qualification requires exactly one native baseline
+        // and one wrapper representation.  The cardinality check keeps
+        // unrelated wrapper-only directories out of the parser path.
+        if Self::circuit_file_count(parent)? != 2 {
+            return None;
+        }
         let mut records = Vec::new();
         for entry in fs::read_dir(parent).ok()? {
             let entry = entry.ok()?;
@@ -65969,6 +66071,13 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             return None;
         }
         let parent = deck.path.parent()?;
+        // Every member is classified as a baseline/wrapper pair, so a valid
+        // family has an even number of circuit files and at least two pairs.
+        // Check that shape before qualifying source text.
+        let circuit_count = Self::circuit_file_count(parent)?;
+        if circuit_count < 4 || circuit_count % 2 != 0 {
+            return None;
+        }
         let mut paths = Vec::new();
         let mut baseline_count = 0usize;
         let mut target_count = 0usize;
@@ -66169,6 +66278,13 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             return None;
         }
         let parent = deck.path.parent()?;
+        // Transient expression qualification has the same paired-family
+        // cardinality as its DC counterpart; reject singleton wrapper decks
+        // before touching their potentially very large source cards.
+        let circuit_count = Self::circuit_file_count(parent)?;
+        if circuit_count < 4 || circuit_count % 2 != 0 {
+            return None;
+        }
         let mut paths = Vec::new();
         let mut baseline_count = 0usize;
         let mut target_count = 0usize;
@@ -82985,6 +83101,9 @@ R1 in 0 1k
 .PRINT AC V(in)
 .END
 ";
+        assert!(XyceTestRunner::source_may_have_ac_data_analysis_command(
+            unknown_table
+        ));
         assert_eq!(
             XyceTestRunner::expected_ac_data_analysis_init_failure(
                 unknown_table,
@@ -83024,6 +83143,9 @@ R1 in 0 1k
             .expect("resolved-table source validates"),
             None
         );
+        assert!(!XyceTestRunner::source_may_have_ac_data_analysis_command(
+            "large wrapper option card\n.OPTIONS OUTPUT outputtimepoints=0,1,2\n.TRAN 1n 1u\n"
+        ));
     }
 
     #[test]
