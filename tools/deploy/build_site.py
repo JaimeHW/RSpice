@@ -671,7 +671,10 @@ def main():
 
     root = Path(capture(["git", "rev-parse", "--show-toplevel"]))
     os.chdir(root)
-    target = Path("target/wasm32-unknown-unknown/release")
+    target_root = Path(os.environ.get("CARGO_TARGET_DIR", root / "target"))
+    if not target_root.is_absolute():
+        target_root = root / target_root
+    target = target_root / "wasm32-unknown-unknown" / "release"
     site_source = Path(args.site_source).resolve()
     validate_site_source(site_source)
     out = validated_output_path(root, site_source, args.out)
