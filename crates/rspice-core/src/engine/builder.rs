@@ -3931,7 +3931,7 @@ impl Engine {
             return Ok(None);
         };
         Ok(match parameter.to_ascii_uppercase().as_str() {
-            "R" | "VALUE" | "RES" | "RESISTANCE" => Some(parameters.resistance),
+            "R" | "VALUE" | "RES" | "RESISTANCE" => Some(parameters.reported_resistance),
             "W" | "WIDTH" | "DEFW" => Some(parameters.width),
             "TC" | "TC1" => Some(parameters.tc1),
             "TC2" => Some(parameters.tc2),

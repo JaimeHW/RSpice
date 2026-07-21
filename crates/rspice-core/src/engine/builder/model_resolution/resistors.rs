@@ -171,6 +171,87 @@ fn level2_requests_self_consistent_thermal_resistor(
     has_l && has_a && (has_instance_material || has_model_material)
 }
 
+/// The Xyce LEVEL=2 thermal resistor adds an explicit temperature state which
+/// is advanced from dissipated electrical power during transient integration.
+/// The scalar DC path is nevertheless well-defined at the ambient operating
+/// temperature: no thermal state is advanced, and the device contributes the
+/// material resistance `rho * L / A / M`.  Keep this boundary explicit so a
+/// static DC deck can use the canonical electrical operating point without
+/// accidentally advertising transient self-heating support.
+fn thermal_resistor_static_dc_contract(netlist: &Netlist) -> bool {
+    let mut has_dc = false;
+    for analysis in &netlist.analyses {
+        match analysis {
+            crate::netlist::AnalysisCommand::Dc { .. } => has_dc = true,
+            crate::netlist::AnalysisCommand::Op
+            | crate::netlist::AnalysisCommand::Step(_)
+            | crate::netlist::AnalysisCommand::Temp { .. } => {}
+            _ => return false,
+        }
+    }
+    has_dc
+}
+
+fn resolve_level2_thermal_resistor_static_value(
+    element_name: &str,
+    model_name: &str,
+    model_def: &crate::netlist::ModelDef,
+    instance_params: &[(String, f64)],
+    eval_ctx: &crate::netlist::ParamContext,
+) -> Result<f64, SimulationError> {
+    let resistivity = instance_param(instance_params, &["RESISTIVITY"]).or_else(|| {
+        resolve_model_param(model_def, &["RESISTIVITY"], eval_ctx)
+            .ok()
+            .flatten()
+    });
+    let Some(resistivity) = resistivity else {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' thermal DC value requires RESISTIVITY",
+            element_name, model_name
+        )));
+    };
+    let length = instance_param(instance_params, &["L", "LENGTH"]);
+    let area = instance_param(instance_params, &["A", "AREA"]);
+    let Some(length) = length else {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' thermal DC value requires instance L/LENGTH",
+            element_name, model_name
+        )));
+    };
+    let Some(area) = area else {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' thermal DC value requires instance A/AREA",
+            element_name, model_name
+        )));
+    };
+    let multiplicity = instance_param(instance_params, &["M", "MULT"]).unwrap_or(1.0);
+    if !resistivity.is_finite()
+        || resistivity <= 0.0
+        || !length.is_finite()
+        || length <= 0.0
+        || !area.is_finite()
+        || area <= 0.0
+        || !multiplicity.is_finite()
+        || multiplicity <= 0.0
+    {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' thermal DC geometry/material values must be finite and positive",
+            element_name, model_name
+        )));
+    }
+    // Keep the unscaled material value here.  The common instance-scaling
+    // path applies `1/M` exactly once below, while Xyce's `R` report exposes
+    // this nominal value even when multiplicity changes branch conductance.
+    let resistance = resistivity * length / area;
+    if !resistance.is_finite() || resistance <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' model '{}' thermal DC value is invalid: {}",
+            element_name, model_name, resistance
+        )));
+    }
+    Ok(resistance)
+}
+
 fn resistor_uses_xyce_default_value(instance_params: &[(String, f64)]) -> bool {
     instance_param(
         instance_params,
@@ -401,6 +482,11 @@ fn resolve_level1_model_geometry_resistance(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ResolvedResistorParameters {
     pub resistance: f64,
+    /// Value reported by Xyce's `R:<name>` parameter probe.  Ordinary
+    /// resistors report the effective branch resistance; LEVEL=2 thermal
+    /// resistors retain their nominal material value while `M` scales the
+    /// branch conductance.
+    pub reported_resistance: f64,
     pub width: f64,
     pub tc1: f64,
     pub tc2: f64,
@@ -451,9 +537,10 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
         if level == 2
             && level2_requests_self_consistent_thermal_resistor(model_def, instance_params)
+            && !thermal_resistor_static_dc_contract(netlist)
         {
             return Err(SimulationError::Circuit(format!(
-                "Resistor '{}' model '{}' requests Xyce LEVEL=2 self-consistent thermal resistor state, which has no native implementation yet",
+                "Resistor '{}' model '{}' requests Xyce LEVEL=2 self-consistent thermal resistor state outside the native static-DC contract; transient electrothermal state integration is not implemented",
                 element_name, model_name
             )));
         }
@@ -465,15 +552,25 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     let mut resistance = if let (Some(2), Some(model_def), Some(model_name)) =
         (resistor_level, model_def, model_name)
     {
-        Some(resolve_level2_resistor_electrical_subset(
-            element_name,
-            model_name,
-            value,
-            value_expr,
-            model_def,
-            instance_params,
-            &eval_ctx,
-        )?)
+        if level2_requests_self_consistent_thermal_resistor(model_def, instance_params) {
+            Some(resolve_level2_thermal_resistor_static_value(
+                element_name,
+                model_name,
+                model_def,
+                instance_params,
+                &eval_ctx,
+            )?)
+        } else {
+            Some(resolve_level2_resistor_electrical_subset(
+                element_name,
+                model_name,
+                value,
+                value_expr,
+                model_def,
+                instance_params,
+                &eval_ctx,
+            )?)
+        }
     } else {
         let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
         if resistance.is_none() && uses_xyce_default && model_def.is_none() {
@@ -625,10 +722,24 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         }
     }
 
+    let thermal_static_resistor = resistor_level == Some(2)
+        && model_def.is_some_and(|model| {
+            level2_requests_self_consistent_thermal_resistor(model, instance_params)
+        });
     let resistance =
         apply_resistor_instance_scaling(element_name, "resistance", resolved, instance_params)?;
+    let reported_resistance = if thermal_static_resistor {
+        // Xyce keeps the nominal material value in the R parameter report;
+        // multiplicity only scales the electrical branch conductance.
+        resolved
+    } else {
+        // Ordinary resistors report the effective branch resistance after
+        // model, temperature, and multiplicity scaling.
+        resistance
+    };
     Ok(ResolvedResistorParameters {
         resistance,
+        reported_resistance,
         width,
         tc1,
         tc2,
@@ -918,6 +1029,63 @@ R1 a 0 1k TC1=0.1 DTEMP=5
         );
         assert_eq!(dtemp.temperature_celsius, 35.0);
         assert_eq!(dtemp.resistance, 2_300.0);
+    }
+
+    #[test]
+    fn thermal_level2_static_dc_scales_branch_once_and_rejects_transient() {
+        let source = r#"thermal resistor static boundary
+V1 in 0 1
+R1 in 0 RMOD L=2 A=1 M=2
+.MODEL RMOD R (LEVEL=2 RESISTIVITY=1e-8 HEATCAPACITY=1)
+.DC V1 1 1 1
+.PRINT DC R1:R V(in) I(R1)
+.END
+"#;
+        let resolved = resolve_effective_parameters_from_source(source, "R1");
+        assert_eq!(resolved.resistance, 1.0e-8);
+        assert_eq!(resolved.reported_resistance, 2.0e-8);
+
+        let transient_source = source.replace(".DC V1 1 1 1", ".TRAN 1n 1u");
+        let netlist = crate::netlist::Netlist::parse_with_options(
+            &transient_source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("Xyce thermal transient boundary deck parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .expect("thermal resistor exists");
+        let crate::netlist::ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("thermal boundary fixture is not a resistor");
+        };
+        let error = resolve_resistor_effective_parameters(
+            &netlist,
+            &element.name,
+            *value,
+            value_expr.as_deref(),
+            model.as_deref(),
+            instance_params,
+            crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Xyce,
+        )
+        .expect_err("transient thermal state must remain outside the static contract");
+        assert!(
+            error
+                .to_string()
+                .contains("outside the native static-DC contract"),
+            "unexpected transient thermal boundary error: {error}"
+        );
     }
 
     #[test]
