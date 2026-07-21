@@ -183,6 +183,7 @@ impl AnalysisSpec {
                 num_harmonics,
                 tolerance,
                 max_iterations,
+                method,
                 oscillator_mode,
                 oscillator_node,
                 ..
@@ -205,6 +206,12 @@ impl AnalysisSpec {
                         .is_none_or(|node| node.trim().is_empty())
                 {
                     return Err("PSS oscillator_node must be set in oscillator mode".to_string());
+                }
+                if *oscillator_mode && *method == super::PssMethod::HarmonicBalance {
+                    return Err(
+                        "PSS oscillator mode requires the shooting method; harmonic balance requires a driven fundamental"
+                            .to_string(),
+                    );
                 }
                 Ok(())
             }
@@ -422,12 +429,13 @@ impl AnalysisSpec {
                 fundamental_freq,
                 num_harmonics,
                 output_node,
-                output_ref: _,
+                output_ref,
                 start_time,
                 stop_time,
+                ..
             } => {
-                if *fundamental_freq <= 0.0 {
-                    return Err("Fourier fundamental_freq must be > 0".to_string());
+                if !fundamental_freq.is_finite() || *fundamental_freq <= 0.0 {
+                    return Err("Fourier fundamental_freq must be finite and > 0".to_string());
                 }
                 if *num_harmonics == 0 {
                     return Err("Fourier num_harmonics must be > 0".to_string());
@@ -435,8 +443,17 @@ impl AnalysisSpec {
                 if output_node.trim().is_empty() {
                     return Err("Fourier output_node is required".to_string());
                 }
-                if *stop_time <= *start_time {
-                    return Err("Fourier stop_time must be greater than start_time".to_string());
+                crate::services::simulation_runner::validate_fourier_output_accessor(
+                    output_node,
+                    Some(output_ref),
+                )?;
+                if !start_time.is_finite() || *start_time < 0.0 {
+                    return Err("Fourier start_time must be finite and >= 0".to_string());
+                }
+                if !stop_time.is_finite() || *stop_time <= *start_time {
+                    return Err(
+                        "Fourier stop_time must be finite and greater than start_time".to_string(),
+                    );
                 }
                 Ok(())
             }
@@ -873,6 +890,64 @@ mod tests {
         };
 
         assert!(spec.validate().is_err());
+    }
+
+    #[test]
+    fn pss_validation_rejects_autonomous_harmonic_balance_before_dispatch() {
+        let spec = AnalysisSpec::Pss {
+            fundamental_freq: 1.0e6,
+            num_harmonics: 9,
+            tolerance: 1.0e-6,
+            max_iterations: 50,
+            method: PssMethod::HarmonicBalance,
+            oscillator_mode: true,
+            oscillator_node: Some("out".to_owned()),
+            save_harmonics: true,
+        };
+
+        let error = spec
+            .validate()
+            .expect_err("autonomous harmonic balance must fail validation");
+        assert!(error.contains("requires the shooting method"));
+    }
+
+    #[test]
+    fn fourier_validation_rejects_non_finite_or_negative_windows() {
+        let spec = |fundamental_freq, start_time, stop_time| AnalysisSpec::Fourier {
+            fundamental_freq,
+            num_harmonics: 9,
+            output_node: "out".to_owned(),
+            output_ref: "0".to_owned(),
+            start_time,
+            stop_time,
+            compute_thd: true,
+            normalize: false,
+        };
+
+        assert!(spec(f64::NAN, 0.0, 1.0).validate().is_err());
+        assert!(spec(1.0, f64::NAN, 1.0).validate().is_err());
+        assert!(spec(1.0, -1.0, 1.0).validate().is_err());
+        assert!(spec(1.0, 0.0, f64::INFINITY).validate().is_err());
+        assert!(spec(1.0, 0.0, 1.0).validate().is_ok());
+    }
+
+    #[test]
+    fn fourier_validation_rejects_a_reference_on_a_current_accessor() {
+        let spec = AnalysisSpec::Fourier {
+            fundamental_freq: 1.0,
+            num_harmonics: 9,
+            output_node: "I(V1)".to_owned(),
+            output_ref: "0".to_owned(),
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd: true,
+            normalize: false,
+        };
+
+        assert_eq!(
+            spec.validate().expect_err("current references are invalid"),
+            "Fourier current output must not specify a voltage reference"
+        );
     }
 
     fn hb_spec(collocation_points: Option<usize>) -> AnalysisSpec {

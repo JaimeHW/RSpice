@@ -7,6 +7,7 @@ pub mod automation;
 pub mod config;
 pub mod controller;
 pub mod convergence;
+pub(crate) mod dependency_contract;
 pub mod dialog;
 pub mod engine_bridge;
 pub(crate) mod execution;
@@ -24,6 +25,7 @@ pub mod plan;
 pub mod reliability_engine;
 pub mod results;
 pub mod runner;
+pub(crate) mod spice_value;
 pub mod status;
 
 pub use automation::{CommandOutput, ScriptExecutor};

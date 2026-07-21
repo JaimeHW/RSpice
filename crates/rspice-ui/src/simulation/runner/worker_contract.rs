@@ -8,7 +8,11 @@ mod tests {
         assert!(source.contains(&format!(
             "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
         )));
+        assert!(source.contains(&format!(
+            "const WORKER_REQUEST_PROTOCOL_VERSION = {WORKER_REQUEST_TRANSPORT_PROTOCOL};"
+        )));
         assert!(source.contains("response.protocolVersion !== WORKER_PROTOCOL_VERSION"));
+        assert!(source.contains("request.protocolVersion !== WORKER_REQUEST_PROTOCOL_VERSION"));
     }
     use crate::simulation::config::{
         AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
@@ -35,12 +39,146 @@ mod tests {
             netlist: "V1 in 0 1\nR1 in 0 1k\n.tran 1n 1u\n.end\n".to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let encoded = serde_json::to_string(&request).expect("request serializes");
         let decoded: WorkerRequest = serde_json::from_str(&encoded).expect("request deserializes");
 
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn legacy_fourier_specs_retain_dimensional_thd_behavior() {
+        let fields = serde_json::json!({
+            "fundamental_freq": 1.0,
+            "num_harmonics": 4,
+            "output_node": "out",
+            "output_ref": "0",
+            "start_time": 0.0,
+            "stop_time": 1.0
+        });
+        let analysis: AnalysisSpec = serde_json::from_value(serde_json::json!({
+            "Fourier": fields.clone()
+        }))
+        .expect("legacy analysis spec deserializes");
+        let worker: WorkerAnalysisSpec = serde_json::from_value(serde_json::json!({
+            "Fourier": fields
+        }))
+        .expect("legacy worker spec deserializes");
+
+        assert!(matches!(
+            analysis,
+            AnalysisSpec::Fourier {
+                compute_thd: true,
+                normalize: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            worker,
+            WorkerAnalysisSpec::Fourier {
+                compute_thd: true,
+                normalize: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn fourier_worker_consumes_exact_transient_dependency_artifact() {
+        use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+        use crate::simulation::execution::{
+            ExecutionArtifactEnvelope, PreparedDependencyBinding, ResolvedExecutionDependencies,
+        };
+
+        let producer = AnalysisInstanceId::new();
+        let source_revision = ObjectRevision::new(4).unwrap();
+        let snapshot_digest = ContentDigest::from_bytes([0x41; 32]);
+        let config_digest = ContentDigest::from_bytes([0x52; 32]);
+        let time = (0..=200)
+            .map(|index| f64::from(index) * 0.005)
+            .collect::<Vec<_>>();
+        let values = time
+            .iter()
+            .map(|time| (2.0 * std::f64::consts::PI * 2.0 * time).sin())
+            .collect::<Vec<_>>();
+        let transient = SimulationResult::Transient {
+            time: time.clone(),
+            waveforms: HashMap::from([(
+                "V(out)".to_owned(),
+                WaveformData::new_time_domain("V(out)", time, values),
+            )]),
+            measurements: Vec::new(),
+        };
+        let artifact = ExecutionArtifactEnvelope::from_transient_result(
+            snapshot_digest,
+            producer,
+            source_revision,
+            config_digest,
+            &transient,
+            &["out".to_owned()],
+        )
+        .unwrap()
+        .unwrap();
+        let binding = PreparedDependencyBinding::transient_trajectory(
+            producer,
+            source_revision,
+            config_digest,
+        );
+        let dependencies = ResolvedExecutionDependencies::resolve(
+            snapshot_digest,
+            vec![binding],
+            &HashMap::from([(producer, artifact)]),
+        )
+        .unwrap();
+        let request = WorkerRequest {
+            id: 9,
+            request: WorkerSimulationRequest::Spec {
+                spec: Box::new(WorkerAnalysisSpec::Fourier {
+                    fundamental_freq: 2.0,
+                    num_harmonics: 4,
+                    output_node: "out".to_owned(),
+                    output_ref: "0".to_owned(),
+                    start_time: 0.0,
+                    stop_time: 1.0,
+                    compute_thd: true,
+                    normalize: false,
+                }),
+                options: Box::new(WorkerSpecExecutionOptions::default()),
+            },
+            // Deliberately not a valid circuit: Fourier must consume the
+            // bound trajectory rather than launch a replacement transient.
+            netlist: "artifact-only Fourier request".to_owned(),
+            source_path: None,
+            project_veriloga_runtimes: Default::default(),
+            dependencies,
+        };
+        let transfer = WorkerRequestTransport::from_request(request.clone()).unwrap();
+        assert_eq!(transfer.protocol, WORKER_REQUEST_TRANSPORT_PROTOCOL);
+        assert_eq!(transfer.buffers.len(), 2);
+        let metadata = serde_json::to_vec(&transfer.request).unwrap();
+        assert!(
+            metadata.len() < 4_096,
+            "artifact samples must stay out of request metadata"
+        );
+        let restored = transfer.into_request().unwrap();
+        assert_eq!(restored, request);
+
+        let result = worker_response_from_request(restored)
+            .into_result()
+            .expect("worker Fourier consumes authenticated trajectory");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+                ..
+            } => {
+                assert_eq!(frequencies, vec![0.0, 2.0, 4.0, 6.0, 8.0]);
+                assert!(waveforms.contains_key("V(out) Spectrum"));
+            }
+            other => panic!("expected Fourier AC result, got {other:?}"),
+        }
     }
 
     #[test]
@@ -87,6 +225,7 @@ mod tests {
             project_veriloga_runtimes:
                 crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
                     .unwrap(),
+            dependencies: Default::default(),
         };
 
         let encoded = serde_json::to_vec(&request).unwrap();
@@ -913,6 +1052,8 @@ mod tests {
                 output_ref: "0".to_string(),
                 start_time: 1e-6,
                 stop_time: 10e-6,
+                compute_thd: false,
+                normalize: true,
             },
             AnalysisSpec::Reliability {
                 target_years: vec![1.0, 10.0],
@@ -972,6 +1113,7 @@ mod tests {
                 .to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let worker =
@@ -1019,6 +1161,7 @@ mod tests {
                 .to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let worker =
@@ -1099,6 +1242,7 @@ mod tests {
             netlist: "V1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let pac_worker =
@@ -1180,6 +1324,7 @@ mod tests {
             netlist: "V1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let pnoise_worker =
@@ -1236,6 +1381,7 @@ mod tests {
                 .to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let worker =
@@ -1297,6 +1443,7 @@ mod tests {
             netlist: "VDD vdd 0 1\nR1 vdd out 1k\nR2 out 0 1k\n.temp 25\n.end\n".to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let worker =
@@ -1683,6 +1830,7 @@ mod tests {
             netlist: "V1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
             source_path: Some(std::path::PathBuf::from("deck.cir")),
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let worker =
@@ -1705,6 +1853,7 @@ mod tests {
             netlist: "* worker op\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
 
         let response = worker_response_from_request(request);
@@ -1748,6 +1897,7 @@ mod tests {
             netlist: "* worker tf\nVstim in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
         };
         let worker =
             WorkerRequest::from_runner_parts(13, &request, &input).expect("request converts");
@@ -2029,6 +2179,73 @@ pub(crate) struct WorkerRequest {
     pub source_path: Option<String>,
     #[serde(default)]
     pub project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+    #[serde(default)]
+    pub(in crate::simulation) dependencies:
+        crate::simulation::execution::ResolvedExecutionDependencies,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 1;
+
+/// Browser-worker request split into compact metadata and transferable
+/// floating-point buffers. The embedded request deliberately carries empty
+/// dependencies; authenticated dependency metadata is encoded separately so
+/// its numerical payload never expands into per-sample JavaScript objects.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WorkerRequestTransport {
+    pub protocol: u8,
+    pub request: WorkerRequestTransportMetadata,
+    pub buffers: Vec<Vec<f64>>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerRequestTransportMetadata {
+    pub request: WorkerRequest,
+    pub dependency_metadata: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl WorkerRequestTransport {
+    #[cfg(test)]
+    pub(crate) fn from_request(mut request: WorkerRequest) -> Result<Self, String> {
+        let dependencies = std::mem::take(&mut request.dependencies);
+        let (dependency_metadata, buffers) = dependencies
+            .encode_transfer()
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            protocol: WORKER_REQUEST_TRANSPORT_PROTOCOL,
+            request: WorkerRequestTransportMetadata {
+                request,
+                dependency_metadata,
+            },
+            buffers,
+        })
+    }
+
+    pub(crate) fn into_request(self) -> Result<WorkerRequest, String> {
+        if self.protocol != WORKER_REQUEST_TRANSPORT_PROTOCOL {
+            return Err(format!(
+                "unsupported worker request transport protocol {}",
+                self.protocol
+            ));
+        }
+        let WorkerRequestTransportMetadata {
+            mut request,
+            dependency_metadata,
+        } = self.request;
+        if request.dependencies != Default::default() {
+            return Err("worker request metadata carries duplicate inline dependencies".to_owned());
+        }
+        request.dependencies =
+            crate::simulation::execution::ResolvedExecutionDependencies::decode_transfer(
+                &dependency_metadata,
+                self.buffers,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(request)
+    }
 }
 
 impl WorkerRequest {
@@ -2046,6 +2263,7 @@ impl WorkerRequest {
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
             project_veriloga_runtimes: input.project_veriloga_runtimes.clone(),
+            dependencies: input.dependencies.clone(),
         })
     }
 
@@ -2056,6 +2274,7 @@ impl WorkerRequest {
                 netlist: self.netlist,
                 source_path: self.source_path.map(PathBuf::from),
                 project_veriloga_runtimes: self.project_veriloga_runtimes,
+                dependencies: self.dependencies,
             },
         )
     }
@@ -3001,6 +3220,10 @@ pub(crate) enum WorkerAnalysisSpec {
         output_ref: String,
         start_time: f64,
         stop_time: f64,
+        #[serde(default = "worker_default_true")]
+        compute_thd: bool,
+        #[serde(default)]
+        normalize: bool,
     },
     /// Canonical manifest analysis whose typed request is transportable but
     /// whose engine capability is not present. The worker preserves the exact
@@ -3275,6 +3498,8 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 output_ref,
                 start_time,
                 stop_time,
+                compute_thd,
+                normalize,
             } => Ok(Self::Fourier {
                 fundamental_freq: *fundamental_freq,
                 num_harmonics: *num_harmonics,
@@ -3282,6 +3507,8 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 output_ref: output_ref.clone(),
                 start_time: *start_time,
                 stop_time: *stop_time,
+                compute_thd: *compute_thd,
+                normalize: *normalize,
             }),
             AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Hbsp { .. }
@@ -3561,6 +3788,8 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 output_ref,
                 start_time,
                 stop_time,
+                compute_thd,
+                normalize,
             } => Self::Fourier {
                 fundamental_freq,
                 num_harmonics,
@@ -3568,6 +3797,8 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 output_ref,
                 start_time,
                 stop_time,
+                compute_thd,
+                normalize,
             },
             WorkerAnalysisSpec::ManifestPreview(spec) => spec,
         }
@@ -5962,14 +6193,69 @@ fn emit_worker_progress_snapshot(progress: &SimulationProgress) {
 pub(crate) fn run_worker_request_value(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    let request: WorkerRequest = serde_wasm_bindgen::from_value(value)
-        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
+    let request = worker_request_from_value(value)?;
     let id = request.id;
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(Some(id)));
     let response =
         worker_response_from_request_with_progress(request, Some(emit_worker_progress_snapshot));
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(None));
     worker_response_transport_value(response)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn worker_request_from_value(
+    value: wasm_bindgen::JsValue,
+) -> Result<WorkerRequest, wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::JsValue;
+
+    let protocol = js_sys::Reflect::get(&value, &JsValue::from_str("protocolVersion"))
+        .map_err(worker_request_js_error)?
+        .as_f64()
+        .and_then(|value| {
+            (value.fract() == 0.0 && (0.0..=f64::from(u8::MAX)).contains(&value))
+                .then_some(value as u8)
+        })
+        .ok_or_else(|| {
+            JsValue::from_str("worker request transport protocolVersion must be an unsigned byte")
+        })?;
+
+    let request = js_sys::Reflect::get(&value, &JsValue::from_str("request"))
+        .map_err(worker_request_js_error)?;
+    let request = serde_wasm_bindgen::from_value::<WorkerRequestTransportMetadata>(request)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+
+    let buffers = js_sys::Reflect::get(&value, &JsValue::from_str("buffers"))
+        .map_err(worker_request_js_error)?
+        .dyn_into::<js_sys::Array>()
+        .map_err(|_| JsValue::from_str("worker request transport buffers must be an array"))?;
+    let mut decoded_buffers = Vec::with_capacity(buffers.length() as usize);
+    for index in 0..buffers.length() {
+        let view = buffers
+            .get(index)
+            .dyn_into::<js_sys::Float64Array>()
+            .map_err(|_| {
+                JsValue::from_str(&format!(
+                    "worker request transport buffer {index} is not a Float64Array"
+                ))
+            })?;
+        let mut values = vec![0.0; view.length() as usize];
+        view.copy_to(&mut values);
+        decoded_buffers.push(values);
+    }
+
+    WorkerRequestTransport {
+        protocol,
+        request,
+        buffers: decoded_buffers,
+    }
+    .into_request()
+    .map_err(|error| JsValue::from_str(&error))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn worker_request_js_error(error: wasm_bindgen::JsValue) -> wasm_bindgen::JsValue {
+    wasm_bindgen::JsValue::from_str(&worker_js_error(error).to_string())
 }
 
 #[cfg(target_arch = "wasm32")]

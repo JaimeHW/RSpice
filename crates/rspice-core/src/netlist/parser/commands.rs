@@ -225,7 +225,8 @@ pub(super) fn parse_command(
         }
         ".FOUR" | ".FOURIER" => {
             let authored_source = remaining_command_source(stream);
-            let (fundamental, outputs) = parse_four_command(stream, line_num, params)?;
+            let (fundamental, num_harmonics, outputs) =
+                parse_four_command(stream, line_num, params)?;
             output_requests.push(OutputRequest::from_four(
                 outputs.as_slice(),
                 origin.clone(),
@@ -234,7 +235,7 @@ pub(super) fn parse_command(
             analyses.push(AnalysisCommand::Four {
                 fundamental,
                 outputs,
-                num_harmonics: 9, // Default
+                num_harmonics,
             });
         }
         ".FFT" => {

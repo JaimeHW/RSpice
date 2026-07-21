@@ -5,6 +5,7 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::services::simulation_runner as svc_runner;
 
 use super::super::engine_bridge::EngineBridge;
+use super::super::execution::ResolvedExecutionDependencies;
 use super::super::multi_run::AnalysisSpec;
 use super::super::results::SimulationResult;
 use super::{SimulationError, SpecExecutionOptions};
@@ -21,6 +22,7 @@ pub(super) fn run_spec_request(
     options: SpecExecutionOptions,
     netlist: &str,
     source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
     abort_flag: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort_flag)?;
@@ -28,6 +30,9 @@ pub(super) fn run_spec_request(
     let validation = spec.validate();
     ensure_not_aborted(abort_flag)?;
     validation.map_err(SimulationError::InvalidConfig)?;
+    dependencies
+        .validate_for_spec(&spec)
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
 
     if matches!(spec, AnalysisSpec::Noise { .. }) {
         return Err(SimulationError::InvalidConfig(
@@ -60,7 +65,7 @@ pub(super) fn run_spec_request(
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
         | AnalysisSpec::Disto { .. } => {
-            periodic::run_periodic_spec(spec, netlist, source_path, abort_flag)
+            periodic::run_periodic_spec(spec, netlist, source_path, dependencies, abort_flag)
         }
         AnalysisSpec::SParameter { .. }
         | AnalysisSpec::Tf
@@ -275,6 +280,7 @@ R1 out 0 {rload}\n\
             SpecExecutionOptions::default(),
             netlist,
             Some(&temp.deck_path()),
+            &ResolvedExecutionDependencies::default(),
             &rspice_core::abort_signal::NoAbort,
         );
 
@@ -304,6 +310,7 @@ R2 out 0 1k\n\
             SpecExecutionOptions::default(),
             netlist,
             None,
+            &ResolvedExecutionDependencies::default(),
             &rspice_core::abort_signal::NoAbort,
         );
 
@@ -332,6 +339,7 @@ R2 out 0 1k\n\
             SpecExecutionOptions::default(),
             "blocked preview\nV1 out 0 1\n.end\n",
             None,
+            &ResolvedExecutionDependencies::default(),
             &rspice_core::abort_signal::NoAbort,
         );
         match result {
@@ -365,6 +373,7 @@ R2 out 0 1k\n\
             SpecExecutionOptions::default(),
             netlist,
             None,
+            &ResolvedExecutionDependencies::default(),
             &rspice_core::abort_signal::NoAbort,
         );
 
@@ -445,6 +454,7 @@ R2 out 0 1k\n\
                     AnalysisSpec::DcOp,
                     "",
                     None,
+                    &ResolvedExecutionDependencies::default(),
                     &rspice_core::abort_signal::NoAbort,
                 ),
                 "AnalysisSpec::DcOp",
@@ -516,6 +526,7 @@ R2 out 0 1k\n\
                 SpecExecutionOptions::default(),
                 "cancellation boundary\n.end\n",
                 None,
+                &ResolvedExecutionDependencies::default(),
                 &signal,
             );
 
@@ -596,6 +607,7 @@ R2 out 0 1k\n\
              C1 out 0 1n\n\
              .end\n",
             None,
+            &ResolvedExecutionDependencies::default(),
             &signal,
         );
 

@@ -698,6 +698,8 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             output_ref,
             start_time,
             stop_time,
+            compute_thd,
+            normalize,
         } => {
             writer.f64(*fundamental_freq);
             writer.usize(*num_harmonics);
@@ -705,6 +707,8 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             writer.string(output_ref);
             writer.f64(*start_time);
             writer.f64(*stop_time);
+            writer.bool(*compute_thd);
+            writer.bool(*normalize);
         }
         AnalysisSpec::Qpss {
             tones,
@@ -1249,6 +1253,27 @@ mod tests {
             content_digest("source/v1", b"same"),
             content_digest("model/v1", b"same")
         );
+    }
+
+    #[test]
+    fn fourier_result_controls_are_bound_into_the_config_digest() {
+        let spec = |compute_thd, normalize| AnalysisSpec::Fourier {
+            fundamental_freq: 1.0e6,
+            num_harmonics: 10,
+            output_node: "out".to_owned(),
+            output_ref: "0".to_owned(),
+            start_time: 0.0,
+            stop_time: 10.0e-6,
+            compute_thd,
+            normalize,
+        };
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(".four", spec, None, &SpecExecutionOptions::default())
+        };
+
+        let baseline = digest(&spec(true, false));
+        assert_ne!(baseline, digest(&spec(false, false)));
+        assert_ne!(baseline, digest(&spec(true, true)));
     }
 
     #[test]

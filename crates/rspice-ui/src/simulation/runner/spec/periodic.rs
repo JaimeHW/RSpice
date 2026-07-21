@@ -4,6 +4,7 @@ use std::path::Path;
 use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
+use crate::simulation::execution::{ResolvedExecutionDependencies, TransientTrajectoryArtifact};
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, PssMethod};
 use crate::simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
@@ -12,6 +13,7 @@ pub(super) fn run_periodic_spec(
     spec: AnalysisSpec,
     netlist: &str,
     source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
@@ -120,8 +122,9 @@ pub(super) fn run_periodic_spec(
             output_ref,
             start_time,
             stop_time,
+            compute_thd,
+            normalize,
         } => run_fourier(
-            netlist,
             fundamental_freq,
             FourierRunRequest {
                 num_harmonics,
@@ -129,8 +132,14 @@ pub(super) fn run_periodic_spec(
                 output_ref,
                 start_time,
                 stop_time,
+                compute_thd,
+                normalize,
             },
-            source_path,
+            dependencies.transient_trajectory().map_err(|error| {
+                SimulationError::InvalidConfig(format!(
+                    "Fourier dependency artifact is unavailable: {error}"
+                ))
+            })?,
             abort,
         ),
         AnalysisSpec::Disto {
@@ -273,13 +282,14 @@ struct FourierRunRequest {
     output_ref: String,
     start_time: f64,
     stop_time: f64,
+    compute_thd: bool,
+    normalize: bool,
 }
 
 fn run_fourier(
-    netlist: &str,
     fundamental_freq: f64,
     request: FourierRunRequest,
-    source_path: Option<&Path>,
+    trajectory: &TransientTrajectoryArtifact,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let FourierRunRequest {
@@ -288,7 +298,14 @@ fn run_fourier(
         output_ref,
         start_time,
         stop_time,
+        compute_thd,
+        normalize,
     } = request;
+    let output_unit = if normalize {
+        "ratio"
+    } else {
+        fourier_output_unit(&output_node)
+    };
     let output_ref = (!output_ref.trim().is_empty()).then_some(output_ref);
     let cfg = svc_runner::FourierRunConfig {
         fundamental_freq,
@@ -297,15 +314,11 @@ fn run_fourier(
         output_ref,
         start_time,
         stop_time,
+        compute_thd,
+        normalize,
     };
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_fourier_analysis_with_source_path_and_abort(
-            netlist,
-            &cfg,
-            source_path,
-            abort,
-        )
-    })?;
+    cfg.validate().map_err(SimulationError::InvalidConfig)?;
+    let data = fourier_from_transient_artifact(trajectory, &cfg, abort)?;
 
     let mut real = Vec::with_capacity(data.response.len());
     let mut imaginary = Vec::with_capacity(data.response.len());
@@ -315,29 +328,31 @@ fn run_fourier(
         imaginary.push(value.im);
     }
     let mut waveforms = HashMap::new();
-    waveforms.insert(
-        format!("{} Spectrum", data.output_label),
-        WaveformData::new_complex(
-            format!("{} Spectrum", data.output_label),
-            clone_values_with_abort(&data.frequencies, abort)?,
-            real,
-            imaginary,
-        ),
+    let spectrum_name = format!("{} Spectrum", data.output_label);
+    let mut spectrum = WaveformData::new_complex(
+        spectrum_name.clone(),
+        clone_values_with_abort(&data.frequencies, abort)?,
+        real,
+        imaginary,
     );
-    insert_scalar_waveform(
-        &mut waveforms,
-        "THD(%)".to_string(),
-        vec![fundamental_freq],
-        vec![data.thd_percent],
-        "%",
-        "Hz",
-    );
+    spectrum.y_unit = output_unit.to_string();
+    waveforms.insert(spectrum_name, spectrum);
+    if let Some(thd_percent) = data.thd_percent {
+        insert_scalar_waveform(
+            &mut waveforms,
+            "THD(%)".to_string(),
+            vec![fundamental_freq],
+            vec![thd_percent],
+            "%",
+            "Hz",
+        );
+    }
     insert_scalar_waveform(
         &mut waveforms,
         "DC".to_string(),
         vec![0.0],
         vec![data.dc_component],
-        "V",
+        output_unit,
         "Hz",
     );
 
@@ -345,6 +360,46 @@ fn run_fourier(
         frequencies: data.frequencies,
         waveforms,
         measurements: Vec::new(),
+    })
+}
+
+fn fourier_from_transient_artifact(
+    trajectory: &TransientTrajectoryArtifact,
+    config: &svc_runner::FourierRunConfig,
+    abort: &dyn AbortSignal,
+) -> Result<svc_runner::FourierData, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    let node_values = trajectory.waveform(&config.output_node).ok_or_else(|| {
+        SimulationError::InvalidConfig(format!(
+            "Fourier output node '{}' is absent from bound transient artifact",
+            config.output_node.trim()
+        ))
+    })?;
+    let reference_values = config
+        .output_ref
+        .as_deref()
+        .filter(|reference| {
+            let reference = reference.trim();
+            !reference.is_empty() && !reference.eq_ignore_ascii_case("0")
+        })
+        .map(|reference| {
+            trajectory.waveform(reference).ok_or_else(|| {
+                SimulationError::InvalidConfig(format!(
+                    "Fourier reference node '{}' is absent from bound transient artifact",
+                    reference.trim()
+                ))
+            })
+        })
+        .transpose()?;
+
+    let mut signal = Vec::with_capacity(trajectory.time().len());
+    for (index, &value) in node_values.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        signal.push(reference_values.map_or(value, |reference| value - reference[index]));
+    }
+
+    super::run_abort_aware_service(abort, || {
+        svc_runner::run_fourier_from_signal_with_abort(trajectory.time(), &signal, config, abort)
     })
 }
 
@@ -521,4 +576,23 @@ fn insert_scalar_waveform(
             y_imag: None,
         },
     );
+}
+
+fn fourier_output_unit(output_expression: &str) -> &'static str {
+    if svc_runner::fourier_output_is_current(output_expression) {
+        "A"
+    } else {
+        "V"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fourier_output_unit;
+
+    #[test]
+    fn fourier_results_preserve_voltage_and_current_dimensions() {
+        assert_eq!(fourier_output_unit("V(out)"), "V");
+        assert_eq!(fourier_output_unit("  i(Rload)"), "A");
+    }
 }

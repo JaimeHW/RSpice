@@ -117,12 +117,41 @@ fn transient_start_index(time: &[f64], start_time: f64) -> usize {
 fn transient_sample_count_after_index(
     time: &[f64],
     voltages: &[Vec<f64>],
+    branch_currents: &[Vec<f64>],
     start_idx: usize,
 ) -> usize {
     let max_time_len = time.len().saturating_sub(start_idx);
-    voltages.iter().fold(max_time_len, |acc, trace| {
-        acc.min(trace.len().saturating_sub(start_idx))
-    })
+    voltages
+        .iter()
+        .chain(branch_currents)
+        .fold(max_time_len, |acc, trace| {
+            acc.min(trace.len().saturating_sub(start_idx))
+        })
+}
+
+fn filtered_transient_values(
+    time: &[f64],
+    values: &[f64],
+    start_idx: usize,
+    sample_count: usize,
+    start_time: f64,
+    interpolate_start: bool,
+) -> Result<Vec<f64>, SimulationError> {
+    let mut filtered = Vec::with_capacity(sample_count + usize::from(interpolate_start));
+    if interpolate_start {
+        let lower = start_idx - 1;
+        let span = time[start_idx] - time[lower];
+        if !span.is_finite() || span <= 0.0 {
+            return Err(SimulationError::SolverError(
+                "transient engine returned a non-increasing time axis at the requested output start"
+                    .to_owned(),
+            ));
+        }
+        let fraction = (start_time - time[lower]) / span;
+        filtered.push(values[lower] + fraction * (values[start_idx] - values[lower]));
+    }
+    filtered.extend_from_slice(&values[start_idx..start_idx + sample_count]);
+    Ok(filtered)
 }
 
 fn convert_transient_result(
@@ -133,9 +162,27 @@ fn convert_transient_result(
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort)?;
     let start_idx = transient_start_index(&tran_result.time, start_time);
-    let sample_count =
-        transient_sample_count_after_index(&tran_result.time, &tran_result.voltages, start_idx);
-    let filtered_time = tran_result.time[start_idx..start_idx + sample_count].to_vec();
+    let sample_count = transient_sample_count_after_index(
+        &tran_result.time,
+        &tran_result.voltages,
+        &tran_result.branch_currents,
+        start_idx,
+    );
+    // The adaptive engine emits accepted timesteps rather than an interpolated
+    // output grid. If it steps across an authored nonzero `.tran` start, retain
+    // the authored boundary itself (with interpolated traces), not the sample
+    // before it and not the first later timestep. This preserves visible
+    // output semantics and gives dependent Fourier windows exact coverage.
+    let interpolate_start = start_time.is_finite()
+        && start_time > 0.0
+        && start_idx > 0
+        && sample_count > 0
+        && tran_result.time[start_idx] > start_time;
+    let mut filtered_time = Vec::with_capacity(sample_count + usize::from(interpolate_start));
+    if interpolate_start {
+        filtered_time.push(start_time);
+    }
+    filtered_time.extend_from_slice(&tran_result.time[start_idx..start_idx + sample_count]);
     let mut waveforms = HashMap::new();
 
     for (node_idx, voltages) in tran_result.voltages.iter().enumerate() {
@@ -151,7 +198,46 @@ fn convert_transient_result(
             WaveformData::new_time_domain(
                 &name,
                 filtered_time.clone(),
-                voltages[start_idx..start_idx + sample_count].to_vec(),
+                filtered_transient_values(
+                    &tran_result.time,
+                    voltages,
+                    start_idx,
+                    sample_count,
+                    start_time,
+                    interpolate_start,
+                )?,
+            ),
+        );
+    }
+
+    for (branch_idx, currents) in tran_result.branch_currents.iter().enumerate() {
+        ensure_not_aborted(abort)?;
+        let branch = tran_result
+            .branch_names
+            .get(branch_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("branch{}", branch_idx + 1));
+        let name = if branch.len() >= 3
+            && (branch.starts_with("I(") || branch.starts_with("i("))
+            && branch.ends_with(')')
+        {
+            branch
+        } else {
+            format!("I({branch})")
+        };
+        waveforms.insert(
+            name.clone(),
+            WaveformData::new_time_domain(
+                &name,
+                filtered_time.clone(),
+                filtered_transient_values(
+                    &tran_result.time,
+                    currents,
+                    start_idx,
+                    sample_count,
+                    start_time,
+                    interpolate_start,
+                )?,
             ),
         );
     }
@@ -293,5 +379,95 @@ mod tests {
             matches!(prepared, std::borrow::Cow::Borrowed(_)),
             "matching manual .tran decks should avoid cloning the parsed netlist"
         );
+    }
+
+    #[test]
+    fn transient_conversion_preserves_branch_current_waveforms() {
+        let netlist = parse_netlist("branch current\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 2n\n.end\n");
+        let result = rspice_core::engine::TransientResult {
+            time: vec![0.0, 1.0e-9, 2.0e-9],
+            voltages: vec![vec![0.0, 1.0, 1.0]],
+            branch_currents: vec![vec![0.0, -1.0e-3, -1.0e-3]],
+            num_nodes: 1,
+            node_names: vec!["out".to_owned()],
+            branch_names: vec!["V1".to_owned()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let converted =
+            convert_transient_result(&netlist, result, 0.0, &rspice_core::abort_signal::NoAbort)
+                .expect("transient conversion");
+        let SimulationResult::Transient { waveforms, .. } = converted else {
+            panic!("expected transient result");
+        };
+        assert_eq!(waveforms["I(V1)"].y_values, vec![0.0, -1.0e-3, -1.0e-3]);
+    }
+
+    #[test]
+    fn adaptive_step_crossing_output_start_is_interpolated_exactly_for_fourier() {
+        let netlist = parse_netlist(
+            "adaptive start boundary\nV1 out 0 1\nR1 out 0 1k\n.tran 50m 1.15 125m\n.end\n",
+        );
+        let time = (0..=23)
+            .map(|index| f64::from(index) * 0.05)
+            .collect::<Vec<_>>();
+        let values = time
+            .iter()
+            .map(|time| (2.0 * std::f64::consts::PI * time).sin())
+            .collect::<Vec<_>>();
+        let branch_values = values.iter().map(|value| -*value).collect::<Vec<_>>();
+        let result = rspice_core::engine::TransientResult {
+            time: time.clone(),
+            voltages: vec![values],
+            branch_currents: vec![branch_values],
+            num_nodes: 1,
+            node_names: vec!["out".to_owned()],
+            branch_names: vec!["V1".to_owned()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        let converted =
+            convert_transient_result(&netlist, result, 0.125, &rspice_core::abort_signal::NoAbort)
+                .expect("adaptive transient conversion");
+        let SimulationResult::Transient {
+            time, waveforms, ..
+        } = converted
+        else {
+            panic!("expected transient result");
+        };
+        assert_eq!(
+            time.first().copied().map(f64::to_bits),
+            Some(0.125_f64.to_bits())
+        );
+        assert_eq!(waveforms["out"].x_values, time);
+        assert_eq!(waveforms["I(V1)"].x_values, time);
+        assert_eq!(
+            waveforms["I(V1)"].y_values[0].to_bits(),
+            (-waveforms["out"].y_values[0]).to_bits()
+        );
+
+        let config = crate::services::simulation_runner::FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 1,
+            output_node: "out".to_owned(),
+            output_ref: None,
+            start_time: 0.125,
+            stop_time: 1.125,
+            compute_thd: true,
+            normalize: false,
+        };
+        crate::services::simulation_runner::run_fourier_from_signal_with_abort(
+            &time,
+            &waveforms["out"].y_values,
+            &config,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("Fourier consumes the exact interpolated start boundary");
     }
 }

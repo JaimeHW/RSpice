@@ -79,6 +79,7 @@ struct DerivedTransientBranchCurrent {
 enum DerivedTransientBranchCurrentKind {
     LinearResistor,
     LinearCapacitor,
+    IndependentCurrentSource,
     XyceMemristor,
     BehavioralCurrentSource,
     VoltageSwitch,
@@ -160,6 +161,21 @@ impl Engine {
             }
             derived.push(DerivedTransientBranchCurrent {
                 kind: DerivedTransientBranchCurrentKind::LinearCapacitor,
+                index,
+            });
+        }
+        for (index, name) in circuit.current_sources.names.iter().enumerate() {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+                || derived.iter().any(|&branch| {
+                    Self::derived_transient_branch_name(circuit, branch).eq_ignore_ascii_case(name)
+                })
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::IndependentCurrentSource,
                 index,
             });
         }
@@ -262,6 +278,9 @@ impl Engine {
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 circuit.capacitors.names[branch.index].clone()
             }
+            DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
+                circuit.current_sources.names[branch.index].clone()
+            }
             DerivedTransientBranchCurrentKind::XyceMemristor => {
                 circuit.xyce_memristors[branch.index].name.clone()
             }
@@ -342,6 +361,9 @@ impl Engine {
             }
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 circuit.capacitors.i_prev[branch.index]
+            }
+            DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
+                circuit.current_sources.value_at_time(branch.index, time)
             }
             DerivedTransientBranchCurrentKind::XyceMemristor => {
                 let binding = &circuit.xyce_memristors[branch.index];
@@ -5068,6 +5090,27 @@ mod tests {
         assert!(
             (after - before).abs() <= 1.0e-12,
             "resume current discontinuity: before={before}, resumed={after}"
+        );
+    }
+
+    #[test]
+    fn independent_current_source_has_an_exact_transient_branch_waveform() {
+        let netlist = Netlist::parse(
+            "independent current source output\nI1 out 0 2m\nR1 out 0 1k\n.SAVE I(I1)\n.TRAN 1u 5u\n.END\n",
+        )
+        .expect("deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 5.0e-6, 1.0e-6)
+            .expect("transient solves");
+        let current = result
+            .try_branch_current_waveform_named("I1")
+            .expect("current-source branch waveform exists");
+        assert_eq!(current.len(), result.time.len());
+        assert!(
+            current
+                .iter()
+                .all(|value| (*value - 2.0e-3).abs() <= 1.0e-15),
+            "current-source waveform must preserve its exact source value: {current:?}"
         );
     }
 

@@ -396,13 +396,17 @@ pub(super) fn parse_temp_command(
     Ok(temperatures)
 }
 
-/// Parse .FOUR command: .FOUR freq output1 [output2...]
+/// Parse .FOUR command: .FOUR freq [num_harmonics] output1 [output2...]
 pub(super) fn parse_four_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(Value, Vec<String>), ParseError> {
+) -> Result<(Value, usize, Vec<String>), ParseError> {
     let fundamental = expect_value(stream, line_num, params)?;
+    let num_harmonics = match try_value(stream, params) {
+        Some(value) => parse_four_harmonic_count(value, line_num)?,
+        None => 9,
+    };
 
     let mut outputs = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -423,7 +427,70 @@ pub(super) fn parse_four_command(
         });
     }
 
-    Ok((fundamental, outputs))
+    Ok((fundamental, num_harmonics, outputs))
+}
+
+fn parse_four_harmonic_count(value: Value, line_num: usize) -> Result<usize, ParseError> {
+    let usize_upper_bound = 2.0_f64.powi(usize::BITS as i32);
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 || value >= usize_upper_bound {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".FOUR harmonic count must be a positive integer representable as usize, found {value}"
+            ),
+        });
+    }
+    Ok(value as usize)
+}
+
+#[cfg(test)]
+mod four_command_tests {
+    use crate::netlist::{AnalysisCommand, Netlist};
+
+    #[test]
+    fn four_accepts_an_optional_harmonic_count_and_preserves_the_default() {
+        let explicit = Netlist::parse(
+            "explicit Fourier harmonics\nV1 out 0 1\n.FOUR 60 15 I(V1) V(out)\n.END\n",
+        )
+        .expect("explicit harmonic count parses");
+        let [
+            AnalysisCommand::Four {
+                fundamental,
+                num_harmonics,
+                outputs,
+            },
+        ] = explicit.analyses.as_slice()
+        else {
+            panic!("expected one Fourier analysis, got {:?}", explicit.analyses);
+        };
+        assert!((*fundamental - 60.0).abs() <= f64::EPSILON);
+        assert_eq!(*num_harmonics, 15);
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs[0].eq_ignore_ascii_case("I(V1)"), "{outputs:?}");
+        assert!(outputs[1].eq_ignore_ascii_case("V(out)"), "{outputs:?}");
+
+        let defaulted =
+            Netlist::parse("default Fourier harmonics\nV1 out 0 1\n.FOUR 60 V(out)\n.END\n")
+                .expect("default harmonic count parses");
+        assert!(matches!(
+            defaulted.analyses.as_slice(),
+            [AnalysisCommand::Four {
+                num_harmonics: 9,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn four_rejects_non_integral_or_zero_harmonic_counts() {
+        for count in ["0", "1.5"] {
+            let error = Netlist::parse(&format!(
+                "invalid Fourier harmonics\nV1 out 0 1\n.FOUR 60 {count} V(out)\n.END\n"
+            ))
+            .expect_err("invalid harmonic count must fail closed");
+            assert!(error.to_string().contains("harmonic count"), "{error}");
+        }
+    }
 }
 
 /// Parse .SP command: .SP DEC|LIN|OCT np fstart fstop [donoise]

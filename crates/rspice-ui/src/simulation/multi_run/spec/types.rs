@@ -299,6 +299,15 @@ pub enum AnalysisSpec {
         output_ref: String,
         start_time: f64,
         stop_time: f64,
+        /// Retain the derived total-harmonic-distortion result.
+        #[serde(default = "default_true")]
+        compute_thd: bool,
+        /// Scale spectral components and DC by the fundamental magnitude.
+        ///
+        /// Older serialized specifications omitted this field and produced
+        /// dimensional, unnormalized results, so its serde default is false.
+        #[serde(default)]
+        normalize: bool,
     },
     /// Quasi-periodic multi-tone steady state. Configuration is transportable,
     /// but execution currently fails closed until the QPSS solver is present.

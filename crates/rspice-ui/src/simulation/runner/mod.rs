@@ -14,7 +14,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 
 use super::config::AnalysisConfig;
-use super::execution::AuthorizedTaskDispatch;
+use super::execution::{ResolvedExecutionDependencies, ResolvedTaskDispatch};
 use super::multi_run::AnalysisSpec;
 use super::results::SimulationResult;
 use super::status::{SimulationProgress, SimulationStatus};
@@ -55,6 +55,7 @@ pub(crate) struct NetlistInput {
     netlist: String,
     source_path: Option<PathBuf>,
     project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+    dependencies: ResolvedExecutionDependencies,
 }
 
 /// Thread-safe simulation runner
@@ -250,9 +251,10 @@ impl SimulationRunner {
     /// unavailable here: the worker cannot reopen editor-era dependencies.
     pub(in crate::simulation) fn start_prepared(
         &mut self,
-        dispatch: AuthorizedTaskDispatch,
+        dispatch: ResolvedTaskDispatch,
     ) -> Result<(), SimulationError> {
-        let (task, executable_netlist, project_veriloga_runtimes) = dispatch.into_runner_parts();
+        let (task, executable_netlist, project_veriloga_runtimes, dependencies) =
+            dispatch.into_runner_parts();
         let request = match task.config {
             Some(config) => SimulationRequest::Config(Box::new(config)),
             None => SimulationRequest::Spec {
@@ -266,6 +268,7 @@ impl SimulationRunner {
                 netlist: executable_netlist.to_string(),
                 source_path: None,
                 project_veriloga_runtimes,
+                dependencies,
             },
         )
     }
@@ -292,6 +295,7 @@ impl SimulationRunner {
                 netlist,
                 source_path,
                 project_veriloga_runtimes: Default::default(),
+                dependencies: Default::default(),
             },
         )
     }
@@ -340,6 +344,7 @@ impl SimulationRunner {
                 netlist,
                 source_path,
                 project_veriloga_runtimes: Default::default(),
+                dependencies: Default::default(),
             },
         )
     }
@@ -764,6 +769,10 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
 
     let result = match request {
         SimulationRequest::Config(config) => {
+            input
+                .dependencies
+                .validate_for_config()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             // Run simulation via engine bridge with abort support
             log::info!("Running simulation via engine bridge: {:?}", config);
             match bridge.run_with_abort_and_source_path(
@@ -790,6 +799,7 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
                 *options,
                 &input.netlist,
                 input.source_path.as_deref(),
+                &input.dependencies,
                 &signal,
             )?
         }

@@ -1936,7 +1936,7 @@ pub enum AnalysisCommand {
         input_source: String,
     },
 
-    /// Fourier analysis: .FOUR freq output1 [output2...]
+    /// Fourier analysis: .FOUR freq [num_harmonics] output1 [output2...]
     Four {
         fundamental: Value,
         outputs: Vec<String>,

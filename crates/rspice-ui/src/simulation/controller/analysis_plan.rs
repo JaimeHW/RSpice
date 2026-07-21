@@ -1,5 +1,7 @@
 use super::*;
-use crate::simulation::execution::PreparedTask;
+use std::collections::HashMap;
+
+use crate::simulation::execution::{PreparedDependencyBinding, PreparedTask};
 use crate::simulation::plan::FrozenSimulationPlan;
 
 impl SimulationController {
@@ -196,10 +198,57 @@ impl SimulationController {
             queue.push(prepared);
         }
 
-        if errors.is_empty() {
-            Ok(queue)
-        } else {
+        if !errors.is_empty() {
             Err(errors)
+        } else {
+            let producer_identities = queue
+                .iter()
+                .map(|task| {
+                    (
+                        task.instance_id(),
+                        (
+                            task.source_revision(),
+                            task.config_digest(),
+                            matches!(task.queued_analysis().spec, AnalysisSpec::Transient { .. }),
+                        ),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+            for task in &mut queue {
+                if !matches!(task.queued_analysis().spec, AnalysisSpec::Fourier { .. }) {
+                    continue;
+                }
+                let transient_producers = task
+                    .dependencies()
+                    .iter()
+                    .filter_map(|dependency| {
+                        producer_identities
+                            .get(dependency)
+                            .filter(|(_, _, transient)| *transient)
+                            .map(|(revision, config_digest, _)| {
+                                PreparedDependencyBinding::transient_trajectory(
+                                    *dependency,
+                                    *revision,
+                                    *config_digest,
+                                )
+                            })
+                    })
+                    .collect::<Vec<_>>();
+                if transient_producers.len() != 1 {
+                    errors.push(format!(
+                        "{} must bind exactly one prepared Transient task, found {}",
+                        task.queued_analysis().spec.run_type().display_name(),
+                        transient_producers.len()
+                    ));
+                } else {
+                    task.set_dependency_bindings(transient_producers);
+                }
+            }
+            if errors.is_empty() {
+                Ok(queue)
+            } else {
+                Err(errors)
+            }
         }
     }
 

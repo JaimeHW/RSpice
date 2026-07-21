@@ -74,6 +74,20 @@ pub(super) fn build_manual_deck_queue(
         if matches!(command, AnalysisCommand::Temp { .. }) {
             continue;
         }
+        if let AnalysisCommand::Four {
+            fundamental,
+            outputs,
+            num_harmonics,
+        } = command
+        {
+            for output in outputs {
+                match fourier_queue_item(&parsed, *fundamental, output, *num_harmonics) {
+                    Ok(item) => queue.push(item),
+                    Err(error) => errors.push(error),
+                }
+            }
+            continue;
+        }
         match command_to_queue_item(state, &parsed, command) {
             Ok(item) => queue.push(item),
             Err(err) => errors.push(err),
@@ -86,10 +100,54 @@ pub(super) fn build_manual_deck_queue(
                 .to_string(),
         ])
     } else if errors.is_empty() {
-        Ok(queue)
+        match finalize_manual_fourier_contracts(&mut queue) {
+            Ok(()) => Ok(queue),
+            Err(error) => Err(vec![error]),
+        }
     } else {
         Err(errors)
     }
+}
+
+fn finalize_manual_fourier_contracts(queue: &mut [QueuedAnalysis]) -> Result<(), String> {
+    let fourier_count = queue
+        .iter()
+        .filter(|item| matches!(&item.spec, AnalysisSpec::Fourier { .. }))
+        .count();
+    if fourier_count == 0 {
+        return Ok(());
+    }
+
+    let transient_windows = queue
+        .iter()
+        .filter_map(|item| match &item.spec {
+            AnalysisSpec::Transient {
+                start_time,
+                stop_time,
+                ..
+            } => Some((*start_time, *stop_time)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if transient_windows.len() != 1 {
+        return Err(format!(
+            "Manual-deck .FOUR requires exactly one .TRAN analysis so its numerical trajectory is unambiguous; found {}",
+            transient_windows.len()
+        ));
+    }
+    let (transient_start, transient_stop) = transient_windows[0];
+    for item in queue {
+        if let AnalysisSpec::Fourier {
+            start_time,
+            stop_time,
+            ..
+        } = &mut item.spec
+        {
+            *start_time = transient_start;
+            *stop_time = transient_stop;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -882,19 +940,7 @@ fn command_to_queue_item(
             let Some(output) = outputs.first() else {
                 return Err(".four requires at least one output".to_string());
             };
-            Ok(QueuedAnalysis {
-                spec: AnalysisSpec::Fourier {
-                    fundamental_freq: *fundamental,
-                    num_harmonics: *num_harmonics,
-                    output_node: output.clone(),
-                    output_ref: "0".to_string(),
-                    start_time: 0.0,
-                    stop_time: 0.0,
-                },
-                config: None,
-                spec_options,
-                analysis_line: ".four".to_string(),
-            })
+            fourier_queue_item(netlist, *fundamental, output, *num_harmonics)
         }
         AnalysisCommand::MonteCarlo(_) => Ok(QueuedAnalysis {
             spec: AnalysisSpec::MonteCarlo,
@@ -911,6 +957,140 @@ fn command_to_queue_item(
         AnalysisCommand::Temp { .. } => {
             Err(".temp directives must be planned as temperature sweeps before queueing".to_string())
         }
+    }
+}
+
+fn fourier_queue_item(
+    netlist: &Netlist,
+    fundamental: f64,
+    output: &str,
+    num_harmonics: usize,
+) -> Result<QueuedAnalysis, String> {
+    let (output_node, output_ref) = parse_fourier_output(output)?;
+    validate_manual_fourier_current_capability(netlist, &output_node)?;
+    Ok(QueuedAnalysis {
+        spec: AnalysisSpec::Fourier {
+            fundamental_freq: fundamental,
+            num_harmonics,
+            output_node,
+            output_ref,
+            // Bound to the exact manual .TRAN window after the complete
+            // directive list has been compiled.
+            start_time: 0.0,
+            stop_time: 0.0,
+            // Classic .FOUR retains THD and dimensional Fourier components.
+            compute_thd: true,
+            normalize: false,
+        },
+        config: None,
+        spec_options: SpecExecutionOptions::default(),
+        analysis_line: ".four".to_string(),
+    })
+}
+
+fn validate_manual_fourier_current_capability(
+    netlist: &Netlist,
+    output_node: &str,
+) -> Result<(), String> {
+    let Some(device) = output_node
+        .strip_prefix("I(")
+        .or_else(|| output_node.strip_prefix("i("))
+        .and_then(|inner| inner.strip_suffix(')'))
+        .map(str::trim)
+    else {
+        return Ok(());
+    };
+
+    let designator = device
+        .rsplit(['.', ':'])
+        .next()
+        .and_then(|leaf| leaf.chars().next())
+        .map(|value| value.to_ascii_uppercase());
+    let supported = matches!(
+        designator,
+        Some('R' | 'C' | 'L' | 'V' | 'I' | 'E' | 'H' | 'B' | 'S' | 'W' | 'Y' | 'O' | 'T')
+    );
+    if !supported {
+        return Err(format!(
+            "Manual-deck .FOUR current output 'I({device})' is not an exact retained Transient branch. Use a voltage/current source, passive branch, supported controlled source, switch, memristor, or transmission-line branch; semiconductor terminal currents require a typed terminal-current selector."
+        ));
+    }
+
+    // Top-level names are fully known at parse time. Hierarchical names are
+    // resolved after subcircuit expansion, so their designator contract is the
+    // strongest fail-closed check available at this stage.
+    if !device.contains('.') && !device.contains(':') {
+        let Some(element) = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(device))
+        else {
+            return Err(format!(
+                "Manual-deck .FOUR current output 'I({device})' does not name a top-level circuit element"
+            ));
+        };
+        if !matches!(
+            element.kind,
+            ElementKind::Resistor { .. }
+                | ElementKind::Capacitor { .. }
+                | ElementKind::Inductor { .. }
+                | ElementKind::JilesAthertonInductor { .. }
+                | ElementKind::VoltageSource(_)
+                | ElementKind::VoltageSourceDeferred(_)
+                | ElementKind::CurrentSource(_)
+                | ElementKind::CurrentSourceDeferred(_)
+                | ElementKind::Vcvs { .. }
+                | ElementKind::Ccvs { .. }
+                | ElementKind::BehavioralVoltage { .. }
+                | ElementKind::BehavioralCurrent { .. }
+                | ElementKind::VSwitch { .. }
+                | ElementKind::ISwitch { .. }
+                | ElementKind::GenericSwitch { .. }
+                | ElementKind::XyceMemristor { .. }
+                | ElementKind::TransmissionLine { .. }
+        ) {
+            return Err(format!(
+                "Manual-deck .FOUR current output 'I({device})' does not map to an exact retained Transient branch"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parse_fourier_output(output: &str) -> Result<(String, String), String> {
+    let trimmed = output.trim();
+    if trimmed.len() >= 4
+        && (trimmed.starts_with("I(") || trimmed.starts_with("i("))
+        && trimmed.ends_with(')')
+    {
+        let device = trimmed[2..trimmed.len() - 1].trim();
+        if !device.is_empty() && !device.contains(',') {
+            return Ok((format!("I({device})"), String::new()));
+        }
+        return Err(format!(
+            "Manual-deck .FOUR current output '{trimmed}' must identify exactly one device"
+        ));
+    }
+    if trimmed.len() < 4
+        || !(trimmed.starts_with("V(") || trimmed.starts_with("v("))
+        || !trimmed.ends_with(')')
+    {
+        return Err(format!(
+            "Manual-deck .FOUR output '{trimmed}' is unsupported; use V(node), V(node+, node-), or I(device)"
+        ));
+    }
+    let nodes = trimmed[2..trimmed.len() - 1]
+        .split(',')
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    match nodes.as_slice() {
+        [node] if !node.is_empty() => Ok(((*node).to_owned(), "0".to_owned())),
+        [positive, reference] if !positive.is_empty() && !reference.is_empty() => {
+            Ok(((*positive).to_owned(), (*reference).to_owned()))
+        }
+        _ => Err(format!(
+            "Manual-deck .FOUR output '{trimmed}' must contain one node or one differential node pair"
+        )),
     }
 }
 
@@ -957,6 +1137,123 @@ mod tests {
                 && (stop_time - 1e-6).abs() < 1e-18
                 && start_time == 0.0
         ));
+    }
+
+    #[test]
+    fn manual_fourier_inherits_the_exact_transient_window() {
+        let specs = specs_for(
+            "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.tran 10u 5m 1m\n.end\n",
+        );
+
+        assert!(matches!(
+            specs[0],
+            AnalysisSpec::Fourier {
+                start_time,
+                stop_time,
+                ..
+            } if (start_time - 1.0e-3).abs() < 1.0e-15
+                && (stop_time - 5.0e-3).abs() < 1.0e-15
+        ));
+    }
+
+    #[test]
+    fn manual_fourier_preserves_each_voltage_output_and_reference() {
+        let specs = specs_for(
+            "Fourier deck\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nR2 out 0 1k\n.four 1k V(out) V(out,in)\n.tran 10u 5m\n.end\n",
+        );
+
+        assert_eq!(specs.len(), 3);
+        assert!(matches!(
+            &specs[0],
+            AnalysisSpec::Fourier {
+                output_node,
+                output_ref,
+                ..
+            } if output_node.eq_ignore_ascii_case("out")
+                && (output_ref == "0" || output_ref.eq_ignore_ascii_case("gnd"))
+        ));
+        assert!(matches!(
+            &specs[1],
+            AnalysisSpec::Fourier {
+                output_node,
+                output_ref,
+                ..
+            } if output_node.eq_ignore_ascii_case("out")
+                && output_ref.eq_ignore_ascii_case("in")
+        ));
+    }
+
+    #[test]
+    fn manual_fourier_preserves_a_branch_current_output() {
+        let specs = specs_for(
+            "Fourier current deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k I(V1)\n.tran 10u 5m\n.end\n",
+        );
+
+        assert!(matches!(
+            &specs[0],
+            AnalysisSpec::Fourier {
+                output_node,
+                output_ref,
+                ..
+            } if output_node.eq_ignore_ascii_case("I(V1)") && output_ref.is_empty()
+        ));
+    }
+
+    #[test]
+    fn manual_fourier_preserves_an_explicit_harmonic_count() {
+        let specs = specs_for(
+            "Fourier harmonic count\nV1 out 0 SIN(0 1 60)\nR1 out 0 1k\n.four 60 15 I(V1)\n.tran 100u 50m\n.end\n",
+        );
+
+        assert!(matches!(
+            &specs[0],
+            AnalysisSpec::Fourier {
+                num_harmonics: 15,
+                output_node,
+                ..
+            } if output_node.eq_ignore_ascii_case("I(V1)")
+        ));
+    }
+
+    #[test]
+    fn manual_fourier_current_output_fails_closed_before_transient_when_unavailable() {
+        let state = AppState::default();
+        let semiconductor = build_manual_deck_queue(
+            &state,
+            "Fourier diode current\nV1 in 0 SIN(0 1 1k)\nD1 in 0 DMOD\n.model DMOD D\n.four 1k I(D1)\n.tran 10u 5m\n.end\n",
+        )
+        .expect_err("an unavailable semiconductor terminal current must fail preflight");
+        assert!(
+            semiconductor
+                .join("; ")
+                .contains("typed terminal-current selector"),
+            "{semiconductor:?}"
+        );
+
+        let missing = build_manual_deck_queue(
+            &state,
+            "Fourier missing current\nV1 in 0 SIN(0 1 1k)\n.four 1k I(R404)\n.tran 10u 5m\n.end\n",
+        )
+        .expect_err("a missing branch identity must fail preflight");
+        assert!(missing.join("; ").contains("does not name a top-level"));
+    }
+
+    #[test]
+    fn manual_fourier_rejects_missing_or_ambiguous_transient_producers() {
+        let state = AppState::default();
+        let missing = build_manual_deck_queue(
+            &state,
+            "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.end\n",
+        )
+        .expect_err(".FOUR without .TRAN must fail closed");
+        assert!(missing.join("; ").contains("exactly one .TRAN"));
+
+        let ambiguous = build_manual_deck_queue(
+            &state,
+            "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 1m\n.tran 20u 2m\n.four 1k V(out)\n.end\n",
+        )
+        .expect_err(".FOUR with multiple .TRAN producers must fail closed");
+        assert!(ambiguous.join("; ").contains("found 2"));
     }
 
     #[test]

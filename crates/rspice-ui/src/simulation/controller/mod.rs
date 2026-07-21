@@ -13,7 +13,7 @@
 //!
 //! Call `SimulationController::update()` once per frame in the app update loop.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(test)]
 use std::path::PathBuf;
 
@@ -25,7 +25,7 @@ use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
     PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
-use crate::simulation::execution::TouchstoneExportPolicy;
+use crate::simulation::execution::{ExecutionArtifactEnvelope, TouchstoneExportPolicy};
 use crate::simulation::multi_run::{
     AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
     OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
@@ -90,6 +90,8 @@ pub struct SimulationController {
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
     current_provenance: Option<AnalysisResultProvenance>,
+    /// Digest of the exact prepared payload currently executing.
+    current_config_digest: Option<crate::product::ContentDigest>,
     /// Immutable output contracts authenticated with the current task before
     /// its dispatch token is moved into the runner.
     current_saved_output_contracts: Vec<PreparedSavedOutput>,
@@ -108,6 +110,8 @@ pub struct SimulationController {
     /// A dependent task is dispatchable only when every frozen prerequisite
     /// appears here; failed and skipped tasks never grant dependency authority.
     successful_analysis_instances: HashSet<crate::product::AnalysisInstanceId>,
+    /// Batch-local numerical artifacts keyed by their exact producer task.
+    execution_artifacts: HashMap<crate::product::AnalysisInstanceId, ExecutionArtifactEnvelope>,
     /// Current analysis index (1-based for display: "Analysis 2/4")
     current_analysis_idx: usize,
     /// Total number of analyses in current batch
@@ -141,11 +145,13 @@ impl SimulationController {
             current_config: None,
             current_spec: None,
             current_provenance: None,
+            current_config_digest: None,
             current_saved_output_contracts: Vec::new(),
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
+            execution_artifacts: HashMap::new(),
             current_analysis_idx: 0,
             total_analyses: 0,
             cached_netlist: None,
@@ -285,6 +291,7 @@ impl SimulationController {
 
         self.pending_analyses.clear();
         self.successful_analysis_instances.clear();
+        self.execution_artifacts.clear();
         self.current_source_domain = source_domain;
         self.total_analyses = dispatch.task_count();
         self.current_analysis_idx = 0;
@@ -393,11 +400,13 @@ impl SimulationController {
         self.runner.reset_for_design_replacement();
         self.pending_analyses.clear();
         self.successful_analysis_instances.clear();
+        self.execution_artifacts.clear();
         self.cached_netlist = None;
         self.clear_prepared_run();
         self.current_config = None;
         self.current_spec = None;
         self.current_provenance = None;
+        self.current_config_digest = None;
         self.current_saved_output_contracts.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
@@ -427,6 +436,7 @@ impl SimulationController {
         self.current_config = None;
         self.current_spec = None;
         self.current_provenance = None;
+        self.current_config_digest = None;
         self.current_saved_output_contracts.clear();
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
 
@@ -545,6 +555,7 @@ impl SimulationController {
         self.current_config = config.clone();
         self.current_spec = Some(spec.clone());
         self.current_provenance = Some(provenance);
+        self.current_config_digest = Some(next_analysis.config_digest());
         self.current_saved_output_contracts = next_analysis.saved_output_contracts().to_vec();
 
         // Update status with multi-analysis progress
@@ -604,7 +615,10 @@ impl SimulationController {
         }
 
         // Start the simulation
-        let start_result = self.runner.start_prepared(next_analysis);
+        let start_result = next_analysis
+            .resolve_dependency_artifacts(&self.execution_artifacts)
+            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
+            .and_then(|dispatch| self.runner.start_prepared(dispatch));
         match start_result {
             Ok(()) => {
                 if let Some(run_id) = self.target_run_id(state)
@@ -734,9 +748,11 @@ impl SimulationController {
         // Clear cached netlist
         self.cached_netlist = None;
         self.successful_analysis_instances.clear();
+        self.execution_artifacts.clear();
         self.current_config = None;
         self.current_spec = None;
         self.current_provenance = None;
+        self.current_config_digest = None;
         self.current_saved_output_contracts.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
@@ -1045,6 +1061,66 @@ impl SimulationController {
                         .unwrap_or(AnalysisType::DcOp);
                     let target_run_id = self.target_run_id(state);
 
+                    let required_artifact_waveforms = self
+                        .current_provenance
+                        .as_ref()
+                        .map(|provenance| provenance.source_instance_id())
+                        .into_iter()
+                        .flat_map(|producer| {
+                            self.pending_analyses.iter().filter_map(move |task| {
+                                let AnalysisSpec::Fourier {
+                                    output_node,
+                                    output_ref,
+                                    ..
+                                } = task.spec()
+                                else {
+                                    return None;
+                                };
+                                task.dependencies().contains(&producer).then(|| {
+                                    let mut required = vec![output_node.clone()];
+                                    if !output_ref.trim().is_empty()
+                                        && !output_ref.trim().eq_ignore_ascii_case("0")
+                                    {
+                                        required.push(output_ref.clone());
+                                    }
+                                    required
+                                })
+                            })
+                        })
+                        .flatten()
+                        .collect::<Vec<_>>();
+                    let produced_artifact = if !required_artifact_waveforms.is_empty()
+                        && matches!(
+                            self.current_spec.as_ref(),
+                            Some(AnalysisSpec::Transient { .. })
+                        ) {
+                        match (self.current_provenance.as_ref(), self.current_config_digest) {
+                            (Some(provenance), Some(config_digest)) => {
+                                match ExecutionArtifactEnvelope::from_transient_result(
+                                    provenance.prepared_snapshot_digest(),
+                                    provenance.source_instance_id(),
+                                    provenance.source_revision(),
+                                    config_digest,
+                                    &sim_result,
+                                    &required_artifact_waveforms,
+                                ) {
+                                    Ok(artifact) => artifact,
+                                    Err(error) => {
+                                        let message = format!(
+                                            "Transient result could not produce its authenticated dependency artifact: {error}"
+                                        );
+                                        log::error!("{message}");
+                                        state.push_sim_message(ConsoleMessage::error(message));
+                                        None
+                                    }
+                                }
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+
                     self.apply_result_side_effects(state, &sim_result);
                     if let crate::simulation::SimulationResult::Transient {
                         time, waveforms, ..
@@ -1096,6 +1172,7 @@ impl SimulationController {
                     self.materialize_current_saved_outputs(&mut analysis_result);
                     let retention_error = analysis_result.error_message.clone();
                     if let Some(provenance) = self.current_provenance.take() {
+                        let completed_instance = provenance.source_instance_id();
                         match self.retain_completed_analysis(
                             state,
                             target_run_id,
@@ -1103,6 +1180,10 @@ impl SimulationController {
                             provenance,
                         ) {
                             Ok(true) => {
+                                if let Some(artifact) = produced_artifact {
+                                    self.execution_artifacts
+                                        .insert(completed_instance, artifact);
+                                }
                                 if self.total_analyses > 1 {
                                     state.push_sim_message(ConsoleMessage::info(format!(
                                         "{} completed ({}/{})",
@@ -1180,10 +1261,12 @@ impl SimulationController {
                     }
                     self.pending_analyses.clear();
                     self.successful_analysis_instances.clear();
+                    self.execution_artifacts.clear();
                     self.cached_netlist = None;
                     self.current_config = None;
                     self.current_spec = None;
                     self.current_provenance = None;
+                    self.current_config_digest = None;
                     self.current_saved_output_contracts.clear();
                     self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
                     self.current_run_id = None;

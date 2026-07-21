@@ -133,6 +133,30 @@ fn quantity_input_row(
     response
 }
 
+fn quantity_input_row_enabled(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+    enabled: bool,
+) -> Response {
+    let response = input_row_enabled(ui, label, value, enabled);
+    if enabled
+        && response.lost_focus()
+        && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
+    {
+        let schema_value = if kind == QuantityInputKind::Temperature {
+            parsed - 273.15
+        } else {
+            parsed
+        };
+        *value = format!("{schema_value:.17e}");
+    }
+    response
+}
+
 fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> bool {
     if !uses_two_column_fields(ui) {
         return inspector_choice_row(ui, label, options, value);
@@ -382,12 +406,10 @@ pub(super) fn form(
             // shifts every following field by one column and leaves Step 2
             // stranded on a partial final row.
             clear_pending_cell(ui);
-            if setup.nested {
-                input_row(ui, "Source 2", &mut setup.source2);
-                input_row(ui, "Start 2", &mut setup.start2);
-                input_row(ui, "Stop 2", &mut setup.stop2);
-                input_row(ui, "Step 2", &mut setup.step2);
-            }
+            input_row_enabled(ui, "Source 2", &mut setup.source2, setup.nested);
+            input_row_enabled(ui, "Start 2", &mut setup.start2, setup.nested);
+            input_row_enabled(ui, "Stop 2", &mut setup.stop2, setup.nested);
+            input_row_enabled(ui, "Step 2", &mut setup.step2, setup.nested);
             "Sweeps a source over the operating range."
         }
         AnalysisDraft::Noise(setup) => {
@@ -431,16 +453,15 @@ pub(super) fn form(
         AnalysisDraft::Sensitivity(setup) => {
             input_row(ui, "Output", &mut setup.output_expr);
             choice_row(ui, "Mode", &["DC", "AC"], &mut setup.sens_type_idx);
-            if setup.sens_type_idx == 1 {
-                quantity_input_row(
-                    ui,
-                    "Frequency",
-                    &mut setup.ac_freq,
-                    QuantityInputKind::Frequency,
-                    policy,
-                    locale,
-                );
-            }
+            quantity_input_row_enabled(
+                ui,
+                "Frequency",
+                &mut setup.ac_freq,
+                QuantityInputKind::Frequency,
+                policy,
+                locale,
+                setup.sens_type_idx == 1,
+            );
             check_row(ui, "Include parameters", &mut setup.include_params);
             check_row(ui, "Include devices", &mut setup.include_devices);
             "Sensitivity of the output to every parameter."
@@ -754,39 +775,53 @@ pub(super) fn form(
             check_row(ui, "FS — fast/slow", &mut setup.process_fs);
             sub_header(ui, "Supply");
             check_row(ui, "Sweep voltage", &mut setup.enable_voltage_sweep);
-            if setup.enable_voltage_sweep {
-                input_row(ui, "Min", &mut setup.voltage_min);
-                input_row(ui, "Nominal", &mut setup.voltage_nom);
-                input_row(ui, "Max", &mut setup.voltage_max);
-            }
+            input_row_enabled(
+                ui,
+                "Min",
+                &mut setup.voltage_min,
+                setup.enable_voltage_sweep,
+            );
+            input_row_enabled(
+                ui,
+                "Nominal",
+                &mut setup.voltage_nom,
+                setup.enable_voltage_sweep,
+            );
+            input_row_enabled(
+                ui,
+                "Max",
+                &mut setup.voltage_max,
+                setup.enable_voltage_sweep,
+            );
             sub_header(ui, "Temperature");
             check_row(ui, "Sweep temperature", &mut setup.enable_temp_sweep);
-            if setup.enable_temp_sweep {
-                quantity_input_row(
-                    ui,
-                    "Cold",
-                    &mut setup.temp_cold,
-                    QuantityInputKind::Temperature,
-                    policy,
-                    locale,
-                );
-                quantity_input_row(
-                    ui,
-                    "Room",
-                    &mut setup.temp_room,
-                    QuantityInputKind::Temperature,
-                    policy,
-                    locale,
-                );
-                quantity_input_row(
-                    ui,
-                    "Hot",
-                    &mut setup.temp_hot,
-                    QuantityInputKind::Temperature,
-                    policy,
-                    locale,
-                );
-            }
+            quantity_input_row_enabled(
+                ui,
+                "Cold",
+                &mut setup.temp_cold,
+                QuantityInputKind::Temperature,
+                policy,
+                locale,
+                setup.enable_temp_sweep,
+            );
+            quantity_input_row_enabled(
+                ui,
+                "Room",
+                &mut setup.temp_room,
+                QuantityInputKind::Temperature,
+                policy,
+                locale,
+                setup.enable_temp_sweep,
+            );
+            quantity_input_row_enabled(
+                ui,
+                "Hot",
+                &mut setup.temp_hot,
+                QuantityInputKind::Temperature,
+                policy,
+                locale,
+                setup.enable_temp_sweep,
+            );
             ui.add_space(4.0);
             check_row(ui, "Full matrix", &mut setup.full_matrix);
             choice_row(
@@ -867,9 +902,7 @@ pub(super) fn form(
             input_row(ui, "Objective", &mut setup.objective_node);
             input_row(ui, "Obj ref", &mut setup.objective_ref);
             choice_row(ui, "Goal", &["min", "max", "target"], &mut setup.goal_mode);
-            if setup.goal_mode == 2 {
-                input_row(ui, "Target", &mut setup.target_value);
-            }
+            input_row_enabled(ui, "Target", &mut setup.target_value, setup.goal_mode == 2);
             choice_row(
                 ui,
                 "Method",
@@ -898,21 +931,13 @@ pub(super) fn form(
                 locale,
             );
             check_row(ui, "Check Vgs", &mut setup.check_vgs_max);
-            if setup.check_vgs_max {
-                input_row(ui, "Max Vgs", &mut setup.max_vgs);
-            }
+            input_row_enabled(ui, "Max Vgs", &mut setup.max_vgs, setup.check_vgs_max);
             check_row(ui, "Check Vds", &mut setup.check_vds_max);
-            if setup.check_vds_max {
-                input_row(ui, "Max Vds", &mut setup.max_vds);
-            }
+            input_row_enabled(ui, "Max Vds", &mut setup.max_vds, setup.check_vds_max);
             check_row(ui, "Check Vbe", &mut setup.check_vbe_max);
-            if setup.check_vbe_max {
-                input_row(ui, "Max Vbe", &mut setup.max_vbe);
-            }
+            input_row_enabled(ui, "Max Vbe", &mut setup.max_vbe, setup.check_vbe_max);
             check_row(ui, "Check Vce", &mut setup.check_vce_max);
-            if setup.check_vce_max {
-                input_row(ui, "Max Vce", &mut setup.max_vce);
-            }
+            input_row_enabled(ui, "Max Vce", &mut setup.max_vce, setup.check_vce_max);
             "Flags excursions outside the safe operating area during transient."
         }
         AnalysisDraft::Disto(setup) => {
@@ -943,9 +968,12 @@ pub(super) fn form(
             input_row(ui, "Max iterations", &mut setup.max_iterations);
             input_row(ui, "Relative tolerance", &mut setup.relative_tolerance);
             check_row(ui, "Autonomous oscillator", &mut setup.autonomous);
-            if setup.autonomous {
-                input_row(ui, "Oscillator node", &mut setup.oscillator_node);
-            }
+            input_row_enabled(
+                ui,
+                "Oscillator node",
+                &mut setup.oscillator_node,
+                setup.autonomous,
+            );
             "Multi-tone spectral-lattice operating state (needs OP)."
         }
         AnalysisDraft::Hbsp(setup) => {
@@ -1068,14 +1096,12 @@ pub(super) fn form(
 mod tests {
     use super::*;
     use crate::simulation::dialog::{PssConfig, PssDialogState};
+    use crate::simulation::plan::AnalysisKind;
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn pss_form_height(oscillator_mode: bool) -> f32 {
+    fn analysis_form_height(mut draft: AnalysisDraft) -> f32 {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let mut setup = PssDialogState::from_config(&PssConfig::default());
-        setup.osc_mode = oscillator_mode;
-        let mut draft = AnalysisDraft::Pss(setup);
         let mut height = 0.0;
         let _ = ctx.run(
             egui::RawInput {
@@ -1104,10 +1130,92 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn pss_form_height(oscillator_mode: bool) -> f32 {
+        let mut setup = PssDialogState::from_config(&PssConfig::default());
+        setup.osc_mode = oscillator_mode;
+        analysis_form_height(AnalysisDraft::Pss(setup))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn pss_oscillator_toggle_preserves_form_geometry() {
         let driven_height = pss_form_height(false);
         let oscillator_height = pss_form_height(true);
         assert_eq!(driven_height, oscillator_height);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn conditional_analysis_controls_preserve_form_geometry() {
+        let mut pairs = Vec::new();
+
+        let disabled = AnalysisDraft::for_kind(AnalysisKind::DcSweep);
+        let mut enabled = disabled.clone();
+        if let AnalysisDraft::DcSweep(setup) = &mut enabled {
+            setup.nested = true;
+        }
+        pairs.push((disabled, enabled));
+
+        let disabled = AnalysisDraft::for_kind(AnalysisKind::Sensitivity);
+        let mut enabled = disabled.clone();
+        if let AnalysisDraft::Sensitivity(setup) = &mut enabled {
+            setup.sens_type_idx = 1;
+        }
+        pairs.push((disabled, enabled));
+
+        let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Corner);
+        let mut enabled = disabled.clone();
+        if let AnalysisDraft::Corner(setup) = &mut disabled {
+            setup.enable_voltage_sweep = false;
+            setup.enable_temp_sweep = false;
+        }
+        if let AnalysisDraft::Corner(setup) = &mut enabled {
+            setup.enable_voltage_sweep = true;
+            setup.enable_temp_sweep = true;
+        }
+        pairs.push((disabled, enabled));
+
+        let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Optimization);
+        let mut enabled = disabled.clone();
+        if let AnalysisDraft::Optimization(setup) = &mut disabled {
+            setup.goal_mode = 0;
+        }
+        if let AnalysisDraft::Optimization(setup) = &mut enabled {
+            setup.goal_mode = 2;
+        }
+        pairs.push((disabled, enabled));
+
+        let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Soa);
+        let mut enabled = disabled.clone();
+        if let AnalysisDraft::Soa(setup) = &mut disabled {
+            setup.check_vgs_max = false;
+            setup.check_vds_max = false;
+            setup.check_vbe_max = false;
+            setup.check_vce_max = false;
+        }
+        if let AnalysisDraft::Soa(setup) = &mut enabled {
+            setup.check_vgs_max = true;
+            setup.check_vds_max = true;
+            setup.check_vbe_max = true;
+            setup.check_vce_max = true;
+        }
+        pairs.push((disabled, enabled));
+
+        let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Qpss);
+        let mut enabled = disabled.clone();
+        if let AnalysisDraft::Qpss(setup) = &mut disabled {
+            setup.autonomous = false;
+        }
+        if let AnalysisDraft::Qpss(setup) = &mut enabled {
+            setup.autonomous = true;
+        }
+        pairs.push((disabled, enabled));
+
+        for (disabled, enabled) in pairs {
+            assert_eq!(
+                analysis_form_height(disabled),
+                analysis_form_height(enabled)
+            );
+        }
     }
 }

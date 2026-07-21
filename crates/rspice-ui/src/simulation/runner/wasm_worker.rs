@@ -36,15 +36,15 @@ mod browser {
         atomic::{AtomicBool, Ordering},
     };
 
-    use js_sys::{Object, Reflect};
+    use js_sys::{Array, Object, Reflect};
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::prelude::*;
 
     use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
     use crate::simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
-        WorkerProgressSnapshot, WorkerRequest, validate_worker_response_id,
-        worker_response_from_value,
+        WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
+        WorkerRequestTransportMetadata, validate_worker_response_id, worker_response_from_value,
     };
     use crate::simulation::runner::{NetlistInput, SimulationError, SimulationRequest};
     use crate::simulation::status::{SimulationProgress, SimulationStatus};
@@ -243,7 +243,7 @@ mod browser {
 
         let id = handle.allocate_request_id();
         let worker_request = WorkerRequest::from_runner_parts(id, &request, &input)?;
-        let message = worker_message(&worker_request)?;
+        let message = worker_message(worker_request)?;
         {
             let mut state = handle.state.borrow_mut();
             state.active_request_id = Some(id);
@@ -261,7 +261,7 @@ mod browser {
             }
         };
 
-        if let Err(error) = worker.post_message(&message) {
+        if let Err(error) = worker.post_message_with_transfer(&message.value, &message.transfer) {
             let mut state = handle.state.borrow_mut();
             state.active_request_id = None;
             state.active_progress = None;
@@ -442,7 +442,48 @@ mod browser {
         .filter(|url| !url.trim().is_empty())
     }
 
-    fn worker_message(request: &WorkerRequest) -> Result<JsValue, SimulationError> {
+    struct PreparedWorkerMessage {
+        value: JsValue,
+        transfer: Array,
+    }
+
+    fn worker_message(
+        mut request: WorkerRequest,
+    ) -> Result<PreparedWorkerMessage, SimulationError> {
+        let request_id = request.id;
+        let (dependency_metadata, dependency_buffers) = request
+            .dependencies
+            .encode_transfer_borrowed()
+            .map_err(|error| {
+                SimulationError::InvalidConfig(format!(
+                    "failed to prepare simulation request transfer: {error}"
+                ))
+            })?;
+
+        let buffers = Array::new();
+        let transfer = Array::new();
+        for (index, values) in dependency_buffers.into_iter().enumerate() {
+            let length = u32::try_from(values.len()).map_err(|_| {
+                SimulationError::InvalidConfig(format!(
+                    "simulation request transfer buffer {index} exceeds browser typed-array limits"
+                ))
+            })?;
+            let view = js_sys::Float64Array::new_with_length(length);
+            view.copy_from(values);
+            transfer.push(&view.buffer());
+            buffers.push(&view);
+        }
+
+        // Numerical dependencies have already been copied once into detached,
+        // transferable browser buffers. Remove the authenticated Rust payload
+        // before serializing request metadata so samples cannot be duplicated
+        // as JavaScript objects or retained in an intermediate staging copy.
+        request.dependencies = Default::default();
+        let transport = WorkerRequestTransportMetadata {
+            request,
+            dependency_metadata,
+        };
+
         let message = Object::new();
         Reflect::set(
             &message,
@@ -453,17 +494,34 @@ mod browser {
         Reflect::set(
             &message,
             &JsValue::from_str("id"),
-            &JsValue::from_f64(request.id as f64),
+            &JsValue::from_f64(request_id as f64),
         )
         .map_err(reflect_error)?;
-        let request_value = serde_wasm_bindgen::to_value(request).map_err(|error| {
+
+        let request_value = Object::new();
+        Reflect::set(
+            &request_value,
+            &JsValue::from_str("protocolVersion"),
+            &JsValue::from_f64(f64::from(WORKER_REQUEST_TRANSPORT_PROTOCOL)),
+        )
+        .map_err(reflect_error)?;
+        let metadata = serde_wasm_bindgen::to_value(&transport).map_err(|error| {
             SimulationError::InvalidConfig(format!(
-                "failed to serialize simulation request for worker: {error}"
+                "failed to serialize simulation request metadata for worker: {error}"
             ))
         })?;
+        Reflect::set(&request_value, &JsValue::from_str("request"), &metadata)
+            .map_err(reflect_error)?;
+
+        Reflect::set(&request_value, &JsValue::from_str("buffers"), &buffers)
+            .map_err(reflect_error)?;
         Reflect::set(&message, &JsValue::from_str("request"), &request_value)
             .map_err(reflect_error)?;
-        Ok(JsValue::from(message))
+
+        Ok(PreparedWorkerMessage {
+            value: JsValue::from(message),
+            transfer,
+        })
     }
 
     fn mark_worker_started(progress: &Arc<Mutex<SimulationProgress>>) {

@@ -183,10 +183,12 @@ pub struct FourierRunConfig {
     pub output_ref: Option<String>,
     pub start_time: Value,
     pub stop_time: Value,
+    pub compute_thd: bool,
+    pub normalize: bool,
 }
 
 impl FourierRunConfig {
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
             return Err("Fourier fundamental frequency must be positive".to_string());
         }
@@ -196,6 +198,7 @@ impl FourierRunConfig {
         if self.output_node.trim().is_empty() {
             return Err("Fourier output node must be specified".to_string());
         }
+        validate_fourier_output_accessor(&self.output_node, self.output_ref.as_deref())?;
         if !self.start_time.is_finite() || self.start_time < 0.0 {
             return Err("Fourier start_time must be >= 0".to_string());
         }
@@ -206,12 +209,66 @@ impl FourierRunConfig {
     }
 }
 
+pub(crate) fn fourier_output_is_current(output_node: &str) -> bool {
+    let output = output_node.trim();
+    output
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("I("))
+        && output.ends_with(')')
+}
+
+pub(crate) fn validate_fourier_output_accessor(
+    output_node: &str,
+    output_ref: Option<&str>,
+) -> Result<(), String> {
+    let output = output_node.trim();
+    if output.is_empty() {
+        return Err("Fourier output node must be specified".to_owned());
+    }
+    if fourier_output_is_current(output) {
+        let device = output[2..output.len() - 1].trim();
+        if device.is_empty() || device.contains(',') || device.contains('(') || device.contains(')')
+        {
+            return Err("Fourier current output must identify exactly one device".to_owned());
+        }
+        if output_ref.is_some_and(|reference| !reference.trim().is_empty()) {
+            return Err("Fourier current output must not specify a voltage reference".to_owned());
+        }
+        return Ok(());
+    }
+
+    let node = if output
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
+        && output.ends_with(')')
+    {
+        output[2..output.len() - 1].trim()
+    } else {
+        if output.contains('(') || output.contains(')') {
+            return Err(
+                "Fourier output must be a node, V(node), or qualified I(device)".to_owned(),
+            );
+        }
+        output
+    };
+    if node.is_empty() || node.contains(',') || node.contains('(') || node.contains(')') {
+        return Err("Fourier voltage output must identify exactly one positive node".to_owned());
+    }
+    if let Some(reference) = output_ref {
+        let reference = reference.trim();
+        if reference.contains(',') || reference.contains('(') || reference.contains(')') {
+            return Err("Fourier voltage reference must identify exactly one node".to_owned());
+        }
+    }
+    Ok(())
+}
+
 /// Fourier analysis output.
 #[derive(Debug, Clone)]
 pub struct FourierData {
     pub frequencies: Vec<Value>,
     pub response: Vec<Complex64>,
-    pub thd_percent: Value,
+    pub thd_percent: Option<Value>,
     pub dc_component: Value,
     pub output_label: String,
 }
@@ -294,46 +351,198 @@ pub fn run_fourier_analysis_with_source_path_and_abort(
         config.output_ref.as_deref(),
         abort,
     )?;
-    let mut window_time = Vec::new();
-    let mut window_values = Vec::new();
-    for (sample_idx, (&time, &value)) in transient.time.iter().zip(signal.iter()).enumerate() {
-        poll_periodically(abort, sample_idx)?;
-        if time >= config.start_time && time <= config.stop_time {
-            window_time.push(time);
-            window_values.push(value);
-        }
+    run_fourier_from_signal_with_abort(&transient.time, &signal, config, abort)
+}
+
+/// Compute a Fourier result from one already-authenticated transient signal.
+///
+/// Prepared dependency consumers use this path so they share the standalone
+/// Fourier implementation's validation, windowing, resource checks, and
+/// cooperative cancellation without launching a replacement transient solve.
+pub(crate) fn run_fourier_from_signal_with_abort(
+    time: &[Value],
+    signal: &[Value],
+    config: &FourierRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<FourierData> {
+    ensure_not_aborted(abort)?;
+    let validation = config.validate();
+    ensure_not_aborted(abort)?;
+    validation.map_err(ServiceRunError::Failure)?;
+    if time.len() != signal.len() {
+        return Err(ServiceRunError::Failure(format!(
+            "Fourier trajectory contains {} time samples and {} signal samples",
+            time.len(),
+            signal.len()
+        )));
     }
+
+    let (window_time, window_values) =
+        exact_fourier_window(time, signal, config.start_time, config.stop_time, abort)?;
     if window_time.len() < 3 {
         return Err(ServiceRunError::Failure(
             "Fourier analysis window has insufficient samples".to_string(),
         ));
     }
 
-    let decomposition = analyze_fourier_with_abort(
+    let observed_duration = window_time[window_time.len() - 1] - window_time[0];
+    let fundamental_period = 1.0 / config.fundamental_freq;
+    let duration_tolerance =
+        16.0 * f64::EPSILON * observed_duration.abs().max(fundamental_period).max(1.0);
+    if observed_duration + duration_tolerance < fundamental_period {
+        return Err(ServiceRunError::Failure(format!(
+            "Fourier artifact window spans {observed_duration:.12e}s, shorter than one fundamental period {fundamental_period:.12e}s"
+        )));
+    }
+    let mut observed_max_interval = 0.0_f64;
+    for (index, samples) in window_time.windows(2).enumerate() {
+        poll_periodically(abort, index)?;
+        observed_max_interval = observed_max_interval.max(samples[1] - samples[0]);
+    }
+    let maximum_frequency = config.fundamental_freq * (config.num_harmonics as f64 + 1.0);
+    let required_interval = 1.0 / (maximum_frequency * 8.0);
+    if observed_max_interval > required_interval * (1.0 + 16.0 * f64::EPSILON) {
+        return Err(ServiceRunError::Failure(format!(
+            "Fourier artifact sampling interval {observed_max_interval:.12e}s is too coarse for the requested harmonic basis; use {required_interval:.12e}s or less"
+        )));
+    }
+
+    let mut decomposition = analyze_fourier_with_abort(
         &window_time,
         &window_values,
         config.fundamental_freq,
         config.num_harmonics,
         abort,
     )?;
-    let output_label = if let Some(ref_node) = config.output_ref.as_deref() {
-        if ref_node.trim().is_empty() || ref_node.eq_ignore_ascii_case("0") {
-            format!("V({})", config.output_node.trim())
-        } else {
-            format!("V({}, {})", config.output_node.trim(), ref_node.trim())
-        }
-    } else {
-        format!("V({})", config.output_node.trim())
-    };
+    if config.normalize {
+        normalize_fourier_decomposition(&mut decomposition)?;
+    }
+    let output_label = fourier_output_label(config);
 
     ensure_not_aborted(abort)?;
     Ok(FourierData {
         frequencies: decomposition.frequencies,
         response: decomposition.response,
-        thd_percent: decomposition.thd_percent,
+        thd_percent: config.compute_thd.then_some(decomposition.thd_percent),
         dc_component: decomposition.dc_component,
         output_label,
     })
+}
+
+fn normalize_fourier_decomposition(
+    decomposition: &mut FourierDecomposition,
+) -> ServiceRunResult<()> {
+    let fundamental_magnitude = decomposition
+        .response
+        .get(1)
+        .map_or(0.0, |component| component.norm());
+    if !fundamental_magnitude.is_finite() || fundamental_magnitude <= 1.0e-15 {
+        return Err(ServiceRunError::Failure(
+            "Fourier fundamental component is too small to normalize".to_owned(),
+        ));
+    }
+    for component in &mut decomposition.response {
+        *component /= fundamental_magnitude;
+    }
+    decomposition.dc_component /= fundamental_magnitude;
+    Ok(())
+}
+
+fn exact_fourier_window(
+    time: &[Value],
+    signal: &[Value],
+    start_time: Value,
+    stop_time: Value,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<(Vec<Value>, Vec<Value>)> {
+    ensure_not_aborted(abort)?;
+    let Some((&first_time, &last_time)) = time.first().zip(time.last()) else {
+        return Err(ServiceRunError::Failure(
+            "Fourier trajectory is empty".to_owned(),
+        ));
+    };
+    if start_time < first_time || stop_time > last_time {
+        return Err(ServiceRunError::Failure(format!(
+            "Fourier window [{start_time:.12e}, {stop_time:.12e}]s is outside the transient artifact range [{first_time:.12e}, {last_time:.12e}]s"
+        )));
+    }
+    if time.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return Err(ServiceRunError::Failure(
+            "Fourier trajectory time axis is not strictly increasing".to_owned(),
+        ));
+    }
+    if time.iter().any(|value| !value.is_finite()) || signal.iter().any(|value| !value.is_finite())
+    {
+        return Err(ServiceRunError::Failure(
+            "Fourier trajectory contains a non-finite sample".to_owned(),
+        ));
+    }
+
+    let start_value = interpolated_signal_value(time, signal, start_time)?;
+    let stop_value = interpolated_signal_value(time, signal, stop_time)?;
+    let interior_count = time
+        .iter()
+        .filter(|sample| **sample > start_time && **sample < stop_time)
+        .count();
+    let mut window_time = Vec::with_capacity(interior_count.saturating_add(2));
+    let mut window_values = Vec::with_capacity(interior_count.saturating_add(2));
+    window_time.push(start_time);
+    window_values.push(start_value);
+    for (sample_idx, (&sample_time, &value)) in time.iter().zip(signal.iter()).enumerate() {
+        poll_periodically(abort, sample_idx)?;
+        if sample_time > start_time && sample_time < stop_time {
+            window_time.push(sample_time);
+            window_values.push(value);
+        }
+    }
+    window_time.push(stop_time);
+    window_values.push(stop_value);
+    ensure_not_aborted(abort)?;
+    Ok((window_time, window_values))
+}
+
+fn interpolated_signal_value(
+    time: &[Value],
+    signal: &[Value],
+    target: Value,
+) -> ServiceRunResult<Value> {
+    match time.binary_search_by(|sample| sample.total_cmp(&target)) {
+        Ok(index) => Ok(signal[index]),
+        Err(upper) if upper > 0 && upper < time.len() => {
+            let lower = upper - 1;
+            let span = time[upper] - time[lower];
+            let fraction = (target - time[lower]) / span;
+            Ok(signal[lower] + fraction * (signal[upper] - signal[lower]))
+        }
+        _ => Err(ServiceRunError::Failure(format!(
+            "Fourier window boundary {target:.12e}s cannot be interpolated from the transient artifact"
+        ))),
+    }
+}
+
+fn fourier_output_label(config: &FourierRunConfig) -> String {
+    let output = config.output_node.trim();
+    if fourier_output_is_current(output) {
+        return format!("I({})", output[2..output.len() - 1].trim());
+    }
+    let voltage_node = if output
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
+        && output.ends_with(')')
+    {
+        output[2..output.len() - 1].trim()
+    } else {
+        output
+    };
+    if let Some(ref_node) = config.output_ref.as_deref() {
+        if ref_node.trim().is_empty() || ref_node.trim().eq_ignore_ascii_case("0") {
+            format!("V({voltage_node})")
+        } else {
+            format!("V({voltage_node}, {})", ref_node.trim())
+        }
+    } else {
+        format!("V({voltage_node})")
+    }
 }
 
 struct FourierDecomposition {
@@ -560,6 +769,7 @@ fn normalize_waveform_node_name(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -644,6 +854,8 @@ mod tests {
             output_ref: None,
             start_time: -1.0,
             stop_time: -1.0,
+            compute_thd: true,
+            normalize: false,
         };
         let abort = AbortOnPoll {
             abort_on: 2,
@@ -653,5 +865,114 @@ mod tests {
         let result = run_fourier_analysis_with_abort("invalid", &config, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn current_fourier_preserves_the_qualified_output_label() {
+        let time = (0..=100)
+            .map(|index| index as Value / 100.0)
+            .collect::<Vec<_>>();
+        let signal = time
+            .iter()
+            .map(|time| (2.0 * PI * time).sin())
+            .collect::<Vec<_>>();
+        let config = FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 1,
+            output_node: "I(V1)".to_owned(),
+            output_ref: None,
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd: true,
+            normalize: false,
+        };
+
+        let result = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort)
+            .expect("current Fourier decomposition should succeed");
+
+        assert_eq!(result.output_label, "I(V1)");
+    }
+
+    #[test]
+    fn thd_retention_and_fundamental_normalization_are_independent_controls() {
+        let time = (0..=800)
+            .map(|index| index as Value / 800.0)
+            .collect::<Vec<_>>();
+        let signal = time
+            .iter()
+            .map(|time| 0.25 + 2.0 * (2.0 * PI * time).sin() + 0.5 * (4.0 * PI * time).sin())
+            .collect::<Vec<_>>();
+        let config = |compute_thd, normalize| FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 2,
+            output_node: "V(out)".to_owned(),
+            output_ref: None,
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd,
+            normalize,
+        };
+
+        let raw =
+            run_fourier_from_signal_with_abort(&time, &signal, &config(true, false), &NoAbort)
+                .expect("raw Fourier decomposition");
+        let normalized =
+            run_fourier_from_signal_with_abort(&time, &signal, &config(false, true), &NoAbort)
+                .expect("normalized Fourier decomposition");
+
+        assert!(raw.thd_percent.is_some());
+        assert_eq!(normalized.thd_percent, None);
+        assert!((raw.response[1].norm() - 2.0).abs() < 1.0e-9);
+        assert!((normalized.response[1].norm() - 1.0).abs() < 1.0e-9);
+        assert!((normalized.response[2].norm() - 0.25).abs() < 1.0e-9);
+        assert!((normalized.dc_component - 0.125).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn unaligned_exact_period_window_interpolates_both_boundaries() {
+        let time = (0..=101)
+            .map(|index| index as Value / 100.0)
+            .collect::<Vec<_>>();
+        let signal = time
+            .iter()
+            .map(|time| (2.0 * PI * time).sin())
+            .collect::<Vec<_>>();
+        let config = FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 1,
+            output_node: "V(out)".to_owned(),
+            output_ref: None,
+            start_time: 0.005,
+            stop_time: 1.005,
+            compute_thd: true,
+            normalize: false,
+        };
+
+        let result = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort)
+            .expect("unaligned one-period window should be interpolated exactly");
+
+        assert_eq!(result.output_label, "V(out)");
+        assert_eq!(result.frequencies.len(), 2);
+    }
+
+    #[test]
+    fn current_fourier_rejects_a_voltage_reference() {
+        let config = FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 1,
+            output_node: "I(V1)".to_owned(),
+            output_ref: Some("0".to_owned()),
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd: true,
+            normalize: false,
+        };
+
+        assert_eq!(
+            config
+                .validate()
+                .expect_err("current references are invalid"),
+            "Fourier current output must not specify a voltage reference"
+        );
     }
 }

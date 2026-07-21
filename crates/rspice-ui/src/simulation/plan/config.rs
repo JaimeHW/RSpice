@@ -1,12 +1,16 @@
 use serde::{Deserialize, Serialize};
 
 use crate::common::app::{AcSetup, DcSetup, NoiseSetup, TranSetup};
+use crate::simulation::dependency_contract::{
+    FourierTransientRequirement, TransientCapability, validate_fourier_transient_contract,
+};
 use crate::simulation::dialog::{
     CornerDialogState, EnvelopeDialogState, FourierDialogState, HbDialogState, McDialogState,
     OpDialogState, OptimizationDialogState, PacDialogState, PnoiseDialogState, PssDialogState,
     PstbDialogState, PxfDialogState, PzDialogState, ReliabilityDialogState, SensDialogState,
     SoaDialogState, SpDialogState, StbDialogState, TempDialogState, XfDialogState,
 };
+use crate::simulation::spice_value::parse_spice_value_checked;
 
 use super::AnalysisKind;
 
@@ -593,6 +597,101 @@ impl AnalysisDraft {
             _ => None,
         }
     }
+}
+
+fn fourier_requirement(draft: &FourierDialogState) -> Result<FourierTransientRequirement, String> {
+    let config = draft.to_config()?;
+    Ok(FourierTransientRequirement {
+        start_time: config.start_time,
+        stop_time: config.stop_time,
+        fundamental_freq: config.fundamental_freq,
+        num_harmonics: config.num_harmonics,
+    })
+}
+
+fn transient_capability(draft: &TranSetup) -> Result<TransientCapability, String> {
+    let max_timestep = match draft.max_step.trim() {
+        "" => None,
+        value if value.eq_ignore_ascii_case("auto") => None,
+        value => Some(parse_spice_value_checked(value)?),
+    };
+    Ok(TransientCapability {
+        start_time: parse_spice_value_checked(&draft.start)?,
+        stop_time: parse_spice_value_checked(&draft.stop)?,
+        step_time: parse_spice_value_checked(&draft.step)?,
+        max_timestep,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum DependencyConfigurationIssue {
+    InvalidDependent(String),
+    InvalidPrerequisite(String),
+    Incompatible(String),
+}
+
+impl DependencyConfigurationIssue {
+    pub(super) fn detail(&self) -> &str {
+        match self {
+            Self::InvalidDependent(detail)
+            | Self::InvalidPrerequisite(detail)
+            | Self::Incompatible(detail) => detail,
+        }
+    }
+}
+
+pub(super) fn dependency_configuration_issue(
+    dependent: &AnalysisDraft,
+    prerequisite: &AnalysisDraft,
+) -> Option<DependencyConfigurationIssue> {
+    let (AnalysisDraft::Fourier(fourier), AnalysisDraft::Transient(transient)) =
+        (dependent, prerequisite)
+    else {
+        return None;
+    };
+    let requirement = match fourier_requirement(fourier) {
+        Ok(requirement) => requirement,
+        Err(detail) => {
+            return Some(DependencyConfigurationIssue::InvalidDependent(format!(
+                "Fourier configuration is invalid: {detail}"
+            )));
+        }
+    };
+    let capability = match transient_capability(transient) {
+        Ok(capability) => capability,
+        Err(detail) => {
+            return Some(DependencyConfigurationIssue::InvalidPrerequisite(format!(
+                "Transient configuration is invalid: {detail}"
+            )));
+        }
+    };
+    validate_fourier_transient_contract(requirement, capability)
+        .err()
+        .map(DependencyConfigurationIssue::Incompatible)
+}
+
+pub(super) fn prerequisite_draft_for(
+    dependent: &AnalysisDraft,
+    prerequisite: AnalysisKind,
+) -> Result<AnalysisDraft, String> {
+    if prerequisite == AnalysisKind::Transient
+        && let AnalysisDraft::Fourier(fourier) = dependent
+    {
+        let requirement = fourier_requirement(fourier)
+            .map_err(|detail| format!("Fourier configuration is invalid: {detail}"))?;
+        let required_interval = requirement.required_sample_interval()?;
+        // Preserve margin against text round-tripping and future solver output
+        // interpolation by targeting 10 samples for every highest-basis cycle.
+        let interval = required_interval * 0.8;
+        return Ok(AnalysisDraft::Transient(TranSetup {
+            stop: format!("{:.12e}", requirement.stop_time),
+            step: format!("{interval:.12e}"),
+            start: format!("{:.12e}", requirement.start_time),
+            max_step: format!("{interval:.12e}"),
+            uic: false,
+        }));
+    }
+    Ok(AnalysisDraft::for_kind(prerequisite))
 }
 
 fn parse_positive(text: &str, field: &str) -> Result<f64, String> {

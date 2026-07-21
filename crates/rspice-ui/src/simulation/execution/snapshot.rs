@@ -15,6 +15,11 @@ use crate::state::{
     PreparedSourceCheckReceipt, SimulationRunIntent,
 };
 
+use super::artifact::{
+    ExecutionArtifactEnvelope, ExecutionArtifactError, ExecutionArtifactKind,
+    PreparedDependencyBinding, ResolvedExecutionDependencies,
+    validate_prepared_dependency_contract,
+};
 use super::canonical::{
     CanonicalWriter, analysis_config_digest, analysis_kind_tag, content_digest,
 };
@@ -330,6 +335,7 @@ pub(in crate::simulation) struct PreparedTask {
     instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
+    dependency_bindings: Vec<PreparedDependencyBinding>,
     label: String,
     config_digest: ContentDigest,
     task: QueuedAnalysis,
@@ -357,6 +363,7 @@ impl PreparedTask {
             instance_id,
             source_revision,
             dependencies,
+            dependency_bindings: Vec::new(),
             label: label.into(),
             config_digest,
             task,
@@ -381,16 +388,28 @@ impl PreparedTask {
         self
     }
 
+    pub(in crate::simulation) fn set_dependency_bindings(
+        &mut self,
+        bindings: Vec<PreparedDependencyBinding>,
+    ) {
+        self.dependency_bindings = bindings;
+    }
+
+    pub(in crate::simulation) fn set_dependencies(
+        &mut self,
+        dependencies: Vec<AnalysisInstanceId>,
+    ) {
+        self.dependencies = dependencies;
+    }
+
     pub(in crate::simulation) const fn instance_id(&self) -> AnalysisInstanceId {
         self.instance_id
     }
 
-    #[cfg(test)]
     pub(in crate::simulation) const fn source_revision(&self) -> ObjectRevision {
         self.source_revision
     }
 
-    #[cfg(test)]
     pub(in crate::simulation) fn dependencies(&self) -> &[AnalysisInstanceId] {
         &self.dependencies
     }
@@ -519,6 +538,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
+    dependency_bindings: Vec<PreparedDependencyBinding>,
     label: String,
     config_digest: ContentDigest,
     task: QueuedAnalysis,
@@ -526,6 +546,14 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     executable_netlist: Arc<str>,
     project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
     touchstone_export: TouchstoneExportPolicy,
+}
+
+/// A prepared task paired with the exact batch-local artifacts required by
+/// its authenticated dependency contract.
+#[derive(Debug)]
+pub(in crate::simulation) struct ResolvedTaskDispatch {
+    dispatch: AuthorizedTaskDispatch,
+    dependencies: ResolvedExecutionDependencies,
 }
 
 impl AuthorizedRunDispatch {
@@ -619,6 +647,22 @@ impl AuthorizedTaskDispatch {
         &self.dependencies
     }
 
+    pub(in crate::simulation) fn resolve_dependency_artifacts(
+        self,
+        artifacts: &HashMap<AnalysisInstanceId, ExecutionArtifactEnvelope>,
+    ) -> Result<ResolvedTaskDispatch, ExecutionArtifactError> {
+        let dependencies = ResolvedExecutionDependencies::resolve(
+            self.snapshot_digest,
+            self.dependency_bindings.clone(),
+            artifacts,
+        )?;
+        dependencies.validate_for_spec(&self.task.spec)?;
+        Ok(ResolvedTaskDispatch {
+            dispatch: self,
+            dependencies,
+        })
+    }
+
     pub(in crate::simulation) fn label(&self) -> &str {
         &self.label
     }
@@ -642,18 +686,22 @@ impl AuthorizedTaskDispatch {
     pub(in crate::simulation) fn saved_output_contracts(&self) -> &[PreparedSavedOutput] {
         &self.saved_output_contracts
     }
+}
 
+impl ResolvedTaskDispatch {
     pub(in crate::simulation) fn into_runner_parts(
         self,
     ) -> (
         QueuedAnalysis,
         Arc<str>,
         crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+        ResolvedExecutionDependencies,
     ) {
         (
-            self.task,
-            self.executable_netlist,
-            self.project_veriloga_runtimes,
+            self.dispatch.task,
+            self.dispatch.executable_netlist,
+            self.dispatch.project_veriloga_runtimes,
+            self.dependencies,
         )
     }
 }
@@ -874,6 +922,66 @@ impl PreparedRunSnapshot {
                     ));
                 }
             }
+
+            let expected_binding_count =
+                usize::from(matches!(task.task.spec, AnalysisSpec::Fourier { .. }));
+            if task.dependency_bindings.len() != expected_binding_count {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "Prepared {} task {} requires {expected_binding_count} typed artifact binding(s), received {}",
+                        task.task.spec.run_type().display_name(),
+                        task.instance_id,
+                        task.dependency_bindings.len()
+                    ),
+                ));
+            }
+            let mut bound_producers = HashSet::with_capacity(task.dependency_bindings.len());
+            for binding in &task.dependency_bindings {
+                let producer_id = binding.producer_instance_id();
+                if !bound_producers.insert(producer_id) {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared analysis {} repeats typed artifact producer {}",
+                            task.instance_id, producer_id
+                        ),
+                    ));
+                }
+                if !task.dependencies.contains(&producer_id) {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared analysis {} artifact producer {} is not an authenticated dependency edge",
+                            task.instance_id, producer_id
+                        ),
+                    ));
+                }
+                let producer = &parts.tasks[positions[&producer_id]];
+                if binding.kind() != ExecutionArtifactKind::TransientTrajectory
+                    || !matches!(producer.task.spec, AnalysisSpec::Transient { .. })
+                    || binding.producer_source_revision() != producer.source_revision
+                    || binding.producer_config_digest() != producer.config_digest
+                {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Prepared analysis {} has a mismatched typed artifact binding for producer {}",
+                            task.instance_id, producer_id
+                        ),
+                    ));
+                }
+                validate_prepared_dependency_contract(&task.task.spec, &producer.task.spec)
+                    .map_err(|error| {
+                        PreparationError::new(
+                            PreparationStage::AnalysisPlan,
+                            format!(
+                                "Prepared analysis {} dependency contract with producer {} is invalid: {error}",
+                                task.instance_id, producer_id
+                            ),
+                        )
+                    })?;
+            }
         }
 
         // Model identities describe a set. Sort by canonical label/digest so
@@ -1086,6 +1194,7 @@ impl PreparedRunSnapshot {
                     instance_id: prepared.instance_id,
                     source_revision: prepared.source_revision,
                     dependencies: prepared.dependencies,
+                    dependency_bindings: prepared.dependency_bindings,
                     label: prepared.label,
                     config_digest: prepared.config_digest,
                     task: prepared.task,
@@ -1336,7 +1445,7 @@ fn snapshot_digest(
     touchstone_export: &TouchstoneExportPolicy,
     executable_netlist: &str,
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v6");
+    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v7");
     writer.domain("run-intent");
     writer.u8(match intent {
         SimulationRunIntent::SimulateRunSet => 0,
@@ -1376,6 +1485,11 @@ fn snapshot_digest(
         writer.sequence(task.dependencies.len());
         for dependency in &task.dependencies {
             writer.uuid(dependency.as_uuid());
+        }
+        writer.domain("typed-dependency-bindings");
+        writer.sequence(task.dependency_bindings.len());
+        for binding in &task.dependency_bindings {
+            binding.encode(&mut writer);
         }
         writer.domain("saved-output-contracts");
         writer.sequence(task.saved_output_contracts.len());
@@ -2004,9 +2118,15 @@ mod tests {
         assert!(authorized.dependencies().is_empty());
         assert_eq!(authorized.label(), "DC Operating Point");
         assert_eq!(authorized.config_digest(), parts().tasks[0].config_digest());
-        let (_, netlist, runtimes) = authorized.into_runner_parts();
+        let resolved = authorized
+            .resolve_dependency_artifacts(&HashMap::new())
+            .expect("artifact-free task resolves");
+        let (_, netlist, runtimes, dependencies) = resolved.into_runner_parts();
         assert_eq!(&*netlist, "deck\n.op\n.end\n");
         assert!(runtimes.is_empty());
+        dependencies
+            .validate_for_config()
+            .expect("OP has no typed dependencies");
         assert!(tasks.is_empty());
     }
 

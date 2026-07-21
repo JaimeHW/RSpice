@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::product::{AnalysisInstanceId, ObjectRevision, RevisionError, RunId, SimulationPlanId};
 
+use super::config::{
+    DependencyConfigurationIssue, dependency_configuration_issue, prerequisite_draft_for,
+};
 use super::{AnalysisDraft, AnalysisKind};
 
 /// Explicit, typed dependency from an analysis to one prerequisite instance.
@@ -507,6 +510,12 @@ pub enum AnalysisPlanIssue {
         dependent: AnalysisInstanceId,
         target: AnalysisInstanceId,
     },
+    IncompatibleDependencyConfiguration {
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+        target: AnalysisInstanceId,
+        detail: String,
+    },
     DependencyCycle {
         members: Vec<AnalysisInstanceId>,
     },
@@ -541,7 +550,9 @@ impl AnalysisPlanIssue {
     const fn is_structural(&self) -> bool {
         !matches!(
             self,
-            Self::NoEnabledInstances | Self::MissingPrerequisite { .. }
+            Self::NoEnabledInstances
+                | Self::MissingPrerequisite { .. }
+                | Self::IncompatibleDependencyConfiguration { .. }
         )
     }
 }
@@ -628,6 +639,15 @@ impl fmt::Display for AnalysisPlanIssue {
             Self::DependencyNotEarlier { dependent, target } => write!(
                 formatter,
                 "Analysis {dependent} must follow prerequisite {target}."
+            ),
+            Self::IncompatibleDependencyConfiguration {
+                dependent,
+                prerequisite,
+                target,
+                detail,
+            } => write!(
+                formatter,
+                "Analysis {dependent} cannot use {prerequisite} prerequisite {target}: {detail}."
             ),
             Self::DependencyCycle { members } => {
                 formatter.write_str("The analysis dependency graph contains a cycle involving ")?;
@@ -718,6 +738,11 @@ pub enum AnalysisPlanError {
         dependent: AnalysisInstanceId,
         target: AnalysisInstanceId,
     },
+    DependencyConfigurationInvalid {
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+        detail: String,
+    },
     ReferencedBy {
         target: AnalysisInstanceId,
         dependents: Vec<AnalysisInstanceId>,
@@ -786,6 +811,14 @@ impl fmt::Display for AnalysisPlanError {
             Self::DependencyTargetNotEarlier { dependent, target } => write!(
                 formatter,
                 "Analysis {dependent} must follow prerequisite {target}."
+            ),
+            Self::DependencyConfigurationInvalid {
+                dependent,
+                prerequisite,
+                detail,
+            } => write!(
+                formatter,
+                "Analysis {dependent} cannot repair its {prerequisite} prerequisite: {detail}."
             ),
             Self::ReferencedBy { target, dependents } => {
                 write!(formatter, "Analysis {target} is still required by ")?;
@@ -1198,6 +1231,47 @@ impl SimulationPlan {
         self.instances.iter().find(|instance| instance.id == id)
     }
 
+    /// Whether an exact target can satisfy a prerequisite without a known
+    /// numerical-contract failure. Used by selectors as well as mutations so
+    /// the UI cannot offer a binding that the plan will reject.
+    #[must_use]
+    pub fn dependency_candidate_is_compatible(
+        &self,
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+        target: AnalysisInstanceId,
+    ) -> bool {
+        let (Some(dependent), Some(target)) = (self.instance(dependent), self.instance(target))
+        else {
+            return false;
+        };
+        Self::dependency_candidate_compatibility(dependent, prerequisite, target)
+            .is_ok_and(|compatible| compatible)
+    }
+
+    /// Whether quick repair can synthesize a valid draft for this role from
+    /// the dependent's current configuration.
+    #[must_use]
+    pub fn dependency_prerequisite_is_repairable(
+        &self,
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+    ) -> bool {
+        self.instance(dependent)
+            .is_some_and(|instance| prerequisite_draft_for(&instance.draft, prerequisite).is_ok())
+    }
+
+    fn dependency_candidate_compatibility(
+        dependent: &AnalysisInstance,
+        prerequisite: AnalysisKind,
+        target: &AnalysisInstance,
+    ) -> Result<bool, String> {
+        if dependent.id == target.id || target.kind != prerequisite {
+            return Ok(false);
+        }
+        Ok(dependency_configuration_issue(&dependent.draft, &target.draft).is_none())
+    }
+
     /// Repair runtime-only dialog sentinels and relinquish runner authority.
     ///
     /// A queued, running, or paused state belongs to the process that owned
@@ -1326,6 +1400,22 @@ impl SimulationPlan {
                         target: target.id,
                         actual: target.kind,
                     });
+                } else if instance.enabled {
+                    match dependency_configuration_issue(&instance.draft, &target.draft) {
+                        Some(DependencyConfigurationIssue::InvalidPrerequisite(detail))
+                        | Some(DependencyConfigurationIssue::Incompatible(detail)) => {
+                            issues.push(AnalysisPlanIssue::IncompatibleDependencyConfiguration {
+                                dependent: instance.id,
+                                prerequisite: dependency.prerequisite,
+                                target: target.id,
+                                detail,
+                            });
+                        }
+                        // The dependent's own form validation owns this error.
+                        // Suppressing a dependency repair CTA avoids promising a
+                        // prerequisite mutation that cannot repair the consumer.
+                        Some(DependencyConfigurationIssue::InvalidDependent(_)) | None => {}
+                    }
                 }
                 if instance.enabled {
                     if !target.enabled {
@@ -1890,6 +1980,12 @@ impl SimulationPlan {
                                         target.id == dependency.target
                                             && target.enabled
                                             && target.kind == *prerequisite
+                                            && Self::dependency_candidate_compatibility(
+                                                &candidate.instances[index],
+                                                *prerequisite,
+                                                target,
+                                            )
+                                            .is_ok_and(|compatible| compatible)
                                     })
                                 })
                         })
@@ -2014,6 +2110,16 @@ impl SimulationPlan {
                         target,
                     });
                 }
+                if let Some(issue) = dependency_configuration_issue(
+                    &candidate.instances[dependent_index].draft,
+                    &target_instance.draft,
+                ) {
+                    return Err(AnalysisPlanError::DependencyConfigurationInvalid {
+                        dependent,
+                        prerequisite,
+                        detail: issue.detail().to_owned(),
+                    });
+                }
                 let instance = &mut candidate.instances[dependent_index];
                 instance
                     .dependencies
@@ -2074,7 +2180,15 @@ impl SimulationPlan {
                         candidate.instances[..dependent_index]
                             .iter()
                             .rev()
-                            .find(|instance| instance.enabled && instance.kind == prerequisite)
+                            .find(|instance| {
+                                instance.enabled
+                                    && Self::dependency_candidate_compatibility(
+                                        &candidate.instances[dependent_index],
+                                        prerequisite,
+                                        instance,
+                                    )
+                                    .is_ok_and(|compatible| compatible)
+                            })
                             .map(|target| AnalysisDependency::new(prerequisite, target.id))
                     })
                     .collect();
@@ -2205,6 +2319,12 @@ impl SimulationPlan {
         repair: &mut AnalysisDependencyRepair,
     ) -> Result<AnalysisInstanceId, AnalysisPlanError> {
         let dependent_index = self.index_of(dependent)?;
+        let dependent_draft = self.instances[dependent_index].draft.clone();
+        let is_compatible = |candidate: &AnalysisInstance| {
+            let dependent_instance = &self.instances[dependent_index];
+            Self::dependency_candidate_compatibility(dependent_instance, prerequisite, candidate)
+                .is_ok_and(|compatible| compatible)
+        };
         let explicit_target = self.instances[dependent_index]
             .dependencies
             .iter()
@@ -2212,33 +2332,29 @@ impl SimulationPlan {
             .and_then(|dependency| {
                 self.instances
                     .iter()
-                    .find(|candidate| {
-                        candidate.id == dependency.target
-                            && candidate.id != dependent
-                            && candidate.kind == prerequisite
-                    })
+                    .find(|candidate| candidate.id == dependency.target && is_compatible(candidate))
                     .map(|candidate| candidate.id)
             });
         let target = explicit_target.or_else(|| {
             self.instances[..dependent_index]
                 .iter()
                 .rev()
-                .find(|candidate| candidate.enabled && candidate.kind == prerequisite)
+                .find(|candidate| candidate.enabled && is_compatible(candidate))
                 .or_else(|| {
                     self.instances[..dependent_index]
                         .iter()
                         .rev()
-                        .find(|candidate| candidate.kind == prerequisite)
+                        .find(|candidate| is_compatible(candidate))
                 })
                 .or_else(|| {
                     self.instances[dependent_index + 1..]
                         .iter()
-                        .find(|candidate| candidate.enabled && candidate.kind == prerequisite)
+                        .find(|candidate| candidate.enabled && is_compatible(candidate))
                 })
                 .or_else(|| {
                     self.instances[dependent_index + 1..]
                         .iter()
-                        .find(|candidate| candidate.kind == prerequisite)
+                        .find(|candidate| is_compatible(candidate))
                 })
                 .map(|candidate| candidate.id)
         });
@@ -2247,15 +2363,17 @@ impl SimulationPlan {
             Some(target) => target,
             None => {
                 let target = self.fresh_identity();
+                let draft =
+                    prerequisite_draft_for(&dependent_draft, prerequisite).map_err(|detail| {
+                        AnalysisPlanError::DependencyConfigurationInvalid {
+                            dependent,
+                            prerequisite,
+                            detail,
+                        }
+                    })?;
                 self.instances.insert(
                     dependent_index,
-                    AnalysisInstance::fresh(
-                        target,
-                        AnalysisDraft::for_kind(prerequisite),
-                        true,
-                        Vec::new(),
-                        revision,
-                    ),
+                    AnalysisInstance::fresh(target, draft, true, Vec::new(), revision),
                 );
                 repair.inserted.push(target);
                 target
@@ -2397,6 +2515,201 @@ mod tests {
 
     fn snapshot(plan: &SimulationPlan) -> String {
         serde_json::to_string(plan).expect("plan serializes")
+    }
+
+    fn configure_high_frequency_fourier(plan: &mut SimulationPlan, id: AnalysisInstanceId) {
+        plan.edit(id, |draft| {
+            let AnalysisDraft::Fourier(draft) = draft else {
+                panic!("expected Fourier draft");
+            };
+            draft.fundamental = "100Meg".to_owned();
+            draft.harmonics = "10".to_owned();
+            draft.start_time = "0".to_owned();
+            draft.stop_time = "100n".to_owned();
+        })
+        .expect("Fourier draft edits");
+    }
+
+    fn configure_fine_transient(plan: &mut SimulationPlan, id: AnalysisInstanceId) {
+        plan.edit(id, |draft| {
+            let AnalysisDraft::Transient(draft) = draft else {
+                panic!("expected Transient draft");
+            };
+            draft.start = "0".to_owned();
+            draft.stop = "1u".to_owned();
+            draft.step = "100p".to_owned();
+            draft.max_step = "100p".to_owned();
+        })
+        .expect("Transient draft edits");
+    }
+
+    #[test]
+    fn fourier_repair_skips_a_coarse_transient_and_inserts_a_compatible_one() {
+        let mut plan = SimulationPlan::new();
+        let original = plan.instances()[0].id();
+        let original_draft = plan.instance(original).unwrap().draft().clone();
+        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        configure_high_frequency_fourier(&mut plan, fourier);
+
+        let (repair, _) = plan
+            .repair_dependencies(fourier)
+            .expect("repair synthesizes an adequate transient");
+        assert_eq!(repair.inserted().len(), 1);
+        let target = plan.instance(fourier).unwrap().dependencies()[0].target();
+        assert_ne!(target, original);
+        assert!(plan.dependency_candidate_is_compatible(fourier, AnalysisKind::Transient, target));
+        assert_eq!(
+            serde_json::to_string(plan.instance(original).unwrap().draft()).unwrap(),
+            serde_json::to_string(&original_draft).unwrap(),
+            "repair must not mutate an unrelated coarse transient"
+        );
+        assert!(plan.validation_issues().is_empty());
+    }
+
+    #[test]
+    fn fourier_repair_reuses_an_earlier_compatible_transient() {
+        let mut plan = SimulationPlan::new();
+        let transient = plan.instances()[0].id();
+        configure_fine_transient(&mut plan, transient);
+        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        configure_high_frequency_fourier(&mut plan, fourier);
+
+        let (repair, _) = plan
+            .repair_dependencies(fourier)
+            .expect("repair reuses the compatible transient");
+        assert!(repair.inserted().is_empty());
+        assert_eq!(
+            plan.instance(fourier).unwrap().dependencies()[0].target(),
+            transient
+        );
+    }
+
+    #[test]
+    fn fourier_repair_skips_an_invalid_transient_but_invalid_fourier_is_atomic() {
+        let mut plan = SimulationPlan::new();
+        let transient = plan.instances()[0].id();
+        plan.edit(transient, |draft| {
+            let AnalysisDraft::Transient(draft) = draft else {
+                panic!("expected Transient draft");
+            };
+            draft.step = "unfinished(".to_owned();
+        })
+        .expect("in-progress transient edit is retained");
+        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        configure_high_frequency_fourier(&mut plan, fourier);
+        let (repair, _) = plan
+            .repair_dependencies(fourier)
+            .expect("invalid producer is replaced, not bound");
+        assert_eq!(repair.inserted().len(), 1);
+        assert_ne!(
+            plan.instance(fourier).unwrap().dependencies()[0].target(),
+            transient
+        );
+
+        let mut invalid_consumer = SimulationPlan::new();
+        let (fourier, _) = invalid_consumer
+            .insert(AnalysisKind::Fourier)
+            .expect("Fourier inserts");
+        invalid_consumer
+            .edit(fourier, |draft| {
+                let AnalysisDraft::Fourier(draft) = draft else {
+                    panic!("expected Fourier draft");
+                };
+                draft.fundamental = "unfinished(".to_owned();
+            })
+            .expect("in-progress Fourier edit is retained");
+        let before = snapshot(&invalid_consumer);
+        assert!(matches!(
+            invalid_consumer.repair_dependencies(fourier),
+            Err(AnalysisPlanError::DependencyConfigurationInvalid { .. })
+        ));
+        assert_eq!(snapshot(&invalid_consumer), before);
+    }
+
+    #[test]
+    fn incompatible_fourier_binding_is_editable_but_cannot_freeze_or_auto_bind() {
+        let mut plan = SimulationPlan::new();
+        let transient = plan.instances()[0].id();
+        configure_fine_transient(&mut plan, transient);
+        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        configure_high_frequency_fourier(&mut plan, fourier);
+        plan.bind_dependency(fourier, AnalysisKind::Transient, transient)
+            .expect("compatible dependency binds");
+
+        plan.edit(transient, |draft| {
+            let AnalysisDraft::Transient(draft) = draft else {
+                panic!("expected Transient draft");
+            };
+            draft.step = "10n".to_owned();
+            draft.max_step = "10n".to_owned();
+        })
+        .expect("draft remains editable while temporarily incompatible");
+        assert!(plan.validation_issues().iter().any(|issue| matches!(
+            issue,
+            AnalysisPlanIssue::IncompatibleDependencyConfiguration {
+                dependent,
+                target,
+                ..
+            } if *dependent == fourier && *target == transient
+        )));
+        plan.validate_structure()
+            .expect("configuration incompatibility is non-structural while editing");
+        assert!(matches!(
+            plan.freeze(),
+            Err(AnalysisPlanError::InvalidPlan(_))
+        ));
+
+        let mut auto = SimulationPlan::new();
+        let coarse = auto.instances()[0].id();
+        let (fourier, _) = auto.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        configure_high_frequency_fourier(&mut auto, fourier);
+        auto.auto_bind_dependencies(fourier)
+            .expect("auto-bind completes without a bad edge");
+        assert!(auto.instance(fourier).unwrap().dependencies().is_empty());
+        assert!(matches!(
+            auto.bind_dependency(fourier, AnalysisKind::Transient, coarse),
+            Err(AnalysisPlanError::DependencyConfigurationInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_bound_transient_is_reported_and_atomically_replaced_by_repair() {
+        let mut plan = SimulationPlan::new();
+        let transient = plan.instances()[0].id();
+        configure_fine_transient(&mut plan, transient);
+        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        configure_high_frequency_fourier(&mut plan, fourier);
+        plan.bind_dependency(fourier, AnalysisKind::Transient, transient)
+            .expect("compatible dependency binds");
+
+        plan.edit(transient, |draft| {
+            let AnalysisDraft::Transient(draft) = draft else {
+                panic!("expected Transient draft");
+            };
+            draft.step = "unfinished(".to_owned();
+        })
+        .expect("in-progress producer edit is retained");
+
+        assert!(plan.validation_issues().iter().any(|issue| matches!(
+            issue,
+            AnalysisPlanIssue::IncompatibleDependencyConfiguration {
+                dependent,
+                target,
+                detail,
+                ..
+            } if *dependent == fourier
+                && *target == transient
+                && detail.contains("Transient configuration is invalid")
+        )));
+        let (repair, _) = plan
+            .repair_dependencies(fourier)
+            .expect("invalid producer is replaced");
+        assert_eq!(repair.inserted().len(), 1);
+        assert_ne!(
+            plan.instance(fourier).unwrap().dependencies()[0].target(),
+            transient
+        );
+        assert!(plan.validation_issues().is_empty());
     }
 
     #[test]

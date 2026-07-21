@@ -54,6 +54,9 @@ pub use envelope_fourier::{
     run_fourier_analysis_with_abort, run_fourier_analysis_with_source_path,
     run_fourier_analysis_with_source_path_and_abort,
 };
+pub(crate) use envelope_fourier::{
+    fourier_output_is_current, run_fourier_from_signal_with_abort, validate_fourier_output_accessor,
+};
 pub use error::{ServiceRunError, ServiceRunResult};
 pub use hb::{
     HbData, HbRunConfig, HbToneRunConfig, run_hb_analysis, run_hb_analysis_with_abort,

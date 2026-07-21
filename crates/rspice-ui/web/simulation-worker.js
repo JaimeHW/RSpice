@@ -18,6 +18,7 @@ let initPromise = null;
 let runWorkerRequest = null;
 let runVerilogACompileRequest = null;
 const WORKER_PROTOCOL_VERSION = 3;
+const WORKER_REQUEST_PROTOCOL_VERSION = 1;
 
 function asErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -91,7 +92,15 @@ self.addEventListener("message", (event) => {
   void (async () => {
     try {
       await ensureReady();
-      const response = runWorkerRequest(message.request);
+      const request = message.request;
+      if (
+        !request ||
+        request.protocolVersion !== WORKER_REQUEST_PROTOCOL_VERSION ||
+        !Array.isArray(request.buffers)
+      ) {
+        throw new Error("Unsupported or malformed RSpice worker request transport.");
+      }
+      const response = runWorkerRequest(request);
       postMessage(
         { type: "result", id: message.id, response },
         responseTransferList(response),

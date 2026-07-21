@@ -118,12 +118,6 @@ enum AnalysisAction {
     SetEnabled(bool),
 }
 
-impl AnalysisAction {
-    const fn structurally_changes_stack(self) -> bool {
-        matches!(self, Self::Clone | Self::RepairDependencies | Self::Remove)
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 enum StackAction {
     Select(AnalysisInstanceId),
@@ -150,6 +144,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .vertical_scroll_offset(app.state.workbench.simulation_surface_scroll_y)
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let scroll_content_origin_y = ui.min_rect().top();
                 // Resolve the content width after the scroll area has reserved
                 // its solid scrollbar track. Reusing the outer width clips the
                 // right edge beneath that track.
@@ -157,7 +152,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
                 workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
-                analysis_workspace(ui, app, surface_width);
+                analysis_workspace(ui, app, surface_width, scroll_content_origin_y);
             });
         let pending_delta = std::mem::take(
             &mut app
@@ -174,7 +169,12 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     simulation_workflow_dialog(ui.ctx(), app);
 }
 
-fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
+fn analysis_workspace(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    surface_width: f32,
+    scroll_content_origin_y: f32,
+) {
     let viewport_width = ui.ctx().content_rect().width();
     let responsive_width = viewport_width.min(surface_width);
     if analysis_workspace_is_split(responsive_width, surface_width) {
@@ -193,7 +193,7 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             ui.allocate_ui_with_layout(
                 vec2(right_width, column_min_height),
                 Layout::top_down(Align::Min),
-                |ui| analysis_editor(ui, app, responsive_width, false),
+                |ui| analysis_editor(ui, app, responsive_width, scroll_content_origin_y),
             );
         });
         ui.painter().set(
@@ -207,7 +207,7 @@ fn analysis_workspace(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     } else {
         ordered_instance_stack(ui, app);
         ui.add_space(STACKED_WORKSPACE_GAP);
-        analysis_editor(ui, app, responsive_width, true);
+        analysis_editor(ui, app, responsive_width, scroll_content_origin_y);
     }
 }
 
@@ -2381,7 +2381,12 @@ fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
     }
 }
 
-fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32, stacked: bool) {
+fn analysis_editor(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    viewport_width: f32,
+    scroll_content_origin_y: f32,
+) {
     let selected = match selected_analysis(app) {
         Ok(Some(selected)) => selected,
         Ok(None) => {
@@ -2441,6 +2446,7 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32, stacke
         form_anchor_y
     });
     let form_anchor_y = editor_response.inner;
+    let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
     let editor_response = editor_response.response;
     ui.painter().hline(
         editor_response.rect.x_range(),
@@ -2448,20 +2454,16 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32, stacke
         Stroke::new(1.0, t.color.border_strong),
     );
 
-    if stacked {
-        if let Some(anchor_y) = app
-            .state
+    if let Some(anchor_y) = app
+        .state
+        .workbench
+        .simulation_surface_editor_anchor_y
+        .take()
+    {
+        app.state
             .workbench
-            .simulation_surface_editor_anchor_y
-            .take()
-        {
-            app.state
-                .workbench
-                .simulation_surface_pending_scroll_delta_y +=
-                editor_anchor_scroll_delta(anchor_y, form_anchor_y);
-        }
-    } else {
-        app.state.workbench.simulation_surface_editor_anchor_y = None;
+            .simulation_surface_pending_scroll_delta_y +=
+            editor_anchor_scroll_delta(anchor_y, form_anchor_content_y);
     }
 
     let draft_changed = match (serialized_before, serde_json::to_vec(&draft)) {
@@ -2472,20 +2474,24 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32, stacke
                 "Analysis edit",
                 &format!("the draft could not be serialized exactly: {error}"),
             );
+            app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
             lifecycle_receipt_strip(ui, app);
             return;
         }
     };
 
+    // Retain the selected form's content-space anchor every frame. Any edit,
+    // dependency bind, enable toggle, insertion, removal, or repair that changes
+    // content above it is then compensated on the next frame without maintaining
+    // a fragile action whitelist.
+    app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
     if draft_changed {
         commit_draft(app, selected.id, draft);
+        ui.ctx().request_repaint();
     }
     if let Some(action) = action {
-        if stacked && action.structurally_changes_stack() {
-            app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_y);
-            ui.ctx().request_repaint();
-        }
         apply_analysis_action(app, selected.id, action);
+        ui.ctx().request_repaint();
     }
     lifecycle_receipt_strip(ui, app);
     preflight_strip(ui, app);
@@ -2494,6 +2500,10 @@ fn analysis_editor(ui: &mut Ui, app: &mut RSpiceApp, viewport_width: f32, stacke
 
 fn editor_anchor_scroll_delta(anchor_y: f32, current_y: f32) -> f32 {
     current_y - anchor_y
+}
+
+fn content_space_anchor(screen_y: f32, scroll_content_origin_y: f32) -> f32 {
+    screen_y - scroll_content_origin_y
 }
 
 fn adjusted_scroll_for_stack_delta(scroll_y: f32, before: f32, after: f32) -> f32 {
@@ -3804,7 +3814,14 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
             let candidates = plan.instances()[..position]
                 .iter()
                 .enumerate()
-                .filter(|(_, candidate)| candidate.enabled() && candidate.kind() == *prerequisite)
+                .filter(|(_, candidate)| {
+                    candidate.enabled()
+                        && plan.dependency_candidate_is_compatible(
+                            id,
+                            *prerequisite,
+                            candidate.id(),
+                        )
+                })
                 .map(|(candidate_position, candidate)| DependencyCandidate {
                     id: candidate.id(),
                     label: format!(
@@ -4239,7 +4256,10 @@ fn issue_applies_to(issue: &AnalysisPlanIssue, id: AnalysisInstanceId) -> bool {
         | AnalysisPlanIssue::DanglingDependency { dependent, .. }
         | AnalysisPlanIssue::WrongDependencyKind { dependent, .. }
         | AnalysisPlanIssue::DisabledDependency { dependent, .. }
-        | AnalysisPlanIssue::DependencyNotEarlier { dependent, .. } => *dependent == id,
+        | AnalysisPlanIssue::DependencyNotEarlier { dependent, .. }
+        | AnalysisPlanIssue::IncompatibleDependencyConfiguration { dependent, .. } => {
+            *dependent == id
+        }
         AnalysisPlanIssue::DependencyCycle { members } => members.contains(&id),
         AnalysisPlanIssue::DuplicateTombstoneId { .. }
         | AnalysisPlanIssue::InvalidTombstoneRevision { .. }
@@ -4261,6 +4281,7 @@ const fn dependency_issue_is_repairable(issue: &AnalysisPlanIssue) -> bool {
             | AnalysisPlanIssue::WrongDependencyKind { .. }
             | AnalysisPlanIssue::DisabledDependency { .. }
             | AnalysisPlanIssue::DependencyNotEarlier { .. }
+            | AnalysisPlanIssue::IncompatibleDependencyConfiguration { .. }
     )
 }
 
@@ -4272,6 +4293,14 @@ fn dependency_repair_cta(
     let issue = issues
         .iter()
         .find(|issue| dependency_issue_is_repairable(issue))?;
+    if let AnalysisPlanIssue::MissingPrerequisite {
+        dependent,
+        prerequisite,
+    } = issue
+        && !plan.dependency_prerequisite_is_repairable(*dependent, *prerequisite)
+    {
+        return None;
+    }
     let prerequisite_for_target = |target| {
         dependencies
             .iter()
@@ -4282,44 +4311,7 @@ fn dependency_repair_cta(
         AnalysisPlanIssue::MissingPrerequisite {
             dependent,
             prerequisite,
-        } => {
-            let dependent_position = plan
-                .instances()
-                .iter()
-                .position(|instance| instance.id() == *dependent);
-            dependent_position.map_or_else(
-                || "Repair prerequisites".to_owned(),
-                |position| {
-                    let before = &plan.instances()[..position];
-                    let after = &plan.instances()[position + 1..];
-                    if before
-                        .iter()
-                        .rev()
-                        .any(|candidate| candidate.enabled() && candidate.kind() == *prerequisite)
-                    {
-                        format!("Bind {}", prerequisite.label())
-                    } else if before
-                        .iter()
-                        .rev()
-                        .any(|candidate| candidate.kind() == *prerequisite)
-                    {
-                        format!("Enable {}", prerequisite.label())
-                    } else if after
-                        .iter()
-                        .any(|candidate| candidate.enabled() && candidate.kind() == *prerequisite)
-                    {
-                        format!("Move {} earlier", prerequisite.label())
-                    } else if after
-                        .iter()
-                        .any(|candidate| candidate.kind() == *prerequisite)
-                    {
-                        format!("Enable and move {} earlier", prerequisite.label())
-                    } else {
-                        format!("Add {}", prerequisite.label())
-                    }
-                },
-            )
-        }
+        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
         AnalysisPlanIssue::DisabledDependency { dependent, target } => {
             let also_needs_move = issues.iter().any(|candidate| {
                 matches!(
@@ -4346,8 +4338,62 @@ fn dependency_repair_cta(
                 || "Repair prerequisites".to_owned(),
                 |prerequisite| format!("Move {} earlier", prerequisite.label()),
             ),
+        AnalysisPlanIssue::IncompatibleDependencyConfiguration {
+            dependent,
+            prerequisite,
+            ..
+        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
         _ => "Repair prerequisites".to_owned(),
     })
+}
+
+fn compatible_dependency_repair_label(
+    plan: &crate::simulation::plan::SimulationPlan,
+    dependent: AnalysisInstanceId,
+    prerequisite: AnalysisKind,
+) -> String {
+    let qualifier = if prerequisite == AnalysisKind::Transient
+        && plan
+            .instance(dependent)
+            .is_some_and(|instance| instance.kind() == AnalysisKind::Fourier)
+    {
+        "compatible "
+    } else {
+        ""
+    };
+    let Some(position) = plan
+        .instances()
+        .iter()
+        .position(|instance| instance.id() == dependent)
+    else {
+        return "Repair prerequisites".to_owned();
+    };
+    let before = &plan.instances()[..position];
+    let after = &plan.instances()[position + 1..];
+    if before.iter().rev().any(|candidate| {
+        candidate.enabled()
+            && plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+    }) {
+        format!("Bind {qualifier}{}", prerequisite.label())
+    } else if before.iter().rev().any(|candidate| {
+        plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+    }) {
+        format!("Enable {qualifier}{}", prerequisite.label())
+    } else if after.iter().any(|candidate| {
+        candidate.enabled()
+            && plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+    }) {
+        format!("Move {qualifier}{} earlier", prerequisite.label())
+    } else if after.iter().any(|candidate| {
+        plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+    }) {
+        format!(
+            "Enable and move {qualifier}{} earlier",
+            prerequisite.label()
+        )
+    } else {
+        format!("Add {qualifier}{}", prerequisite.label())
+    }
 }
 
 fn dependency_closure_ids(
@@ -4451,6 +4497,15 @@ fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
         AnalysisPlanIssue::DependencyNotEarlier { dependent, target } => {
             format!("Analysis {dependent} prerequisite instance {target} must appear earlier.")
         }
+        AnalysisPlanIssue::IncompatibleDependencyConfiguration {
+            dependent,
+            prerequisite,
+            target,
+            detail,
+        } => format!(
+            "Analysis {dependent} cannot use {} instance {target}: {detail}.",
+            prerequisite.label()
+        ),
         AnalysisPlanIssue::DependencyCycle { members } => format!(
             "Analysis dependency cycle contains {} instance{}.",
             members.len(),
@@ -4664,6 +4719,60 @@ mod tests {
             )
             .as_deref(),
             Some("Repair prerequisites")
+        );
+    }
+
+    #[test]
+    fn fourier_dependency_cta_requires_a_valid_compatible_transient() {
+        let mut plan = crate::simulation::plan::SimulationPlan::new();
+        let coarse = plan.instances()[0].id();
+        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
+        plan.edit(fourier, |draft| {
+            let AnalysisDraft::Fourier(draft) = draft else {
+                panic!("expected Fourier draft");
+            };
+            draft.fundamental = "100Meg".to_owned();
+            draft.harmonics = "10".to_owned();
+            draft.start_time = "0".to_owned();
+            draft.stop_time = "100n".to_owned();
+        })
+        .expect("Fourier edits");
+        let missing = AnalysisPlanIssue::MissingPrerequisite {
+            dependent: fourier,
+            prerequisite: AnalysisKind::Transient,
+        };
+        assert!(!plan.dependency_candidate_is_compatible(fourier, AnalysisKind::Transient, coarse));
+        assert_eq!(
+            dependency_repair_cta(&plan, std::slice::from_ref(&missing), &[]).as_deref(),
+            Some("Add compatible Transient")
+        );
+        let incompatible = AnalysisPlanIssue::IncompatibleDependencyConfiguration {
+            dependent: fourier,
+            prerequisite: AnalysisKind::Transient,
+            target: coarse,
+            detail: "sample interval is too coarse".to_owned(),
+        };
+        let dependencies = plan
+            .instance(fourier)
+            .expect("Fourier remains in the plan")
+            .dependencies();
+        assert_eq!(
+            dependency_repair_cta(&plan, std::slice::from_ref(&incompatible), dependencies)
+                .as_deref(),
+            Some("Add compatible Transient")
+        );
+
+        plan.edit(fourier, |draft| {
+            let AnalysisDraft::Fourier(draft) = draft else {
+                panic!("expected Fourier draft");
+            };
+            draft.fundamental = "unfinished(".to_owned();
+        })
+        .expect("in-progress draft is retained");
+        assert_eq!(
+            dependency_repair_cta(&plan, std::slice::from_ref(&missing), &[]),
+            None,
+            "repair must not be offered until the consumer configuration is valid"
         );
     }
 
@@ -5305,7 +5414,7 @@ mod tests {
     }
 
     #[test]
-    fn stacked_dependency_repair_preserves_the_selected_editor_viewport_anchor() {
+    fn editor_structure_changes_preserve_the_selected_form_viewport_anchor() {
         let anchor_y = 135.0;
         let displaced_y = anchor_y + 2.0 * ANALYSIS_ROW_HEIGHT + ANALYSIS_GROUP_HEADER_HEIGHT;
         let measured_delta = editor_anchor_scroll_delta(anchor_y, displaced_y);
@@ -5316,5 +5425,19 @@ mod tests {
         );
         assert_eq!(editor_anchor_scroll_delta(280.0, 180.0), -100.0);
         assert_eq!(adjusted_scroll_for_stack_delta(20.0, 0.0, -100.0), 0.0);
+    }
+
+    #[test]
+    fn editor_anchor_ignores_user_scroll_but_tracks_layout_displacement() {
+        let before = content_space_anchor(320.0, 80.0);
+        let after_user_scroll = content_space_anchor(270.0, 30.0);
+        let after_layout_change = content_space_anchor(296.0, 30.0);
+
+        assert_eq!(before, after_user_scroll);
+        assert_eq!(editor_anchor_scroll_delta(before, after_user_scroll), 0.0);
+        assert_eq!(
+            editor_anchor_scroll_delta(before, after_layout_change),
+            26.0
+        );
     }
 }

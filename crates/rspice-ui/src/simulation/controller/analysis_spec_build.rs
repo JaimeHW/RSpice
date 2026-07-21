@@ -579,6 +579,8 @@ impl SimulationController {
             output_ref: fourier_cfg.output_ref.clone(),
             start_time: fourier_cfg.start_time,
             stop_time: fourier_cfg.stop_time,
+            compute_thd: fourier_cfg.compute_thd,
+            normalize: fourier_cfg.normalize,
         })
     }
 
@@ -937,5 +939,26 @@ mod manifest_tests {
                 save_harmonics: false,
             }
         );
+    }
+
+    #[test]
+    fn fourier_draft_projects_thd_and_normalization_controls() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.fourier.ensure_initialized();
+        state.sim_setup.fourier.compute_thd = false;
+        state.sim_setup.fourier.normalize = true;
+
+        let spec = controller
+            .build_fourier_spec(&state)
+            .expect("Fourier spec builds");
+        assert!(matches!(
+            spec,
+            AnalysisSpec::Fourier {
+                compute_thd: false,
+                normalize: true,
+                ..
+            }
+        ));
     }
 }

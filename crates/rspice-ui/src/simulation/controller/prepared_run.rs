@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -7,9 +7,9 @@ use rspice_core::netlist::{IncludeProcessor, parse_include_directive, parse_lib_
 use super::*;
 use crate::simulation::execution::{
     AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionPermit, ExecutionTargetCapabilities,
-    ModelSourceIdentity, PreparationError, PreparationStage, PreparedRunMetadata,
-    PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy, SnapshotParts,
-    TouchstoneExportPolicy, analysis_kind_tag, content_digest, drc_receipt_digest,
+    ModelSourceIdentity, PreparationError, PreparationStage, PreparedDependencyBinding,
+    PreparedRunMetadata, PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy,
+    SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag, content_digest, drc_receipt_digest,
     manual_deck_analysis_instance_id, manual_source_receipt_digest,
 };
 
@@ -473,7 +473,7 @@ impl SimulationController {
             source_digest,
             state.workspace.project.revision(),
             queued_tasks,
-        );
+        )?;
         reject_deferred_corner_model_sources(tasks.iter().map(PreparedTask::queued_analysis))?;
         let analysis_config_digests = tasks
             .iter()
@@ -529,9 +529,9 @@ impl SimulationController {
         expanded_source_identity: crate::product::ContentDigest,
         source_revision: crate::product::ObjectRevision,
         tasks: Vec<QueuedAnalysis>,
-    ) -> Vec<PreparedTask> {
+    ) -> Result<Vec<PreparedTask>, PreparationError> {
         let mut kind_occurrences = std::collections::HashMap::<u8, usize>::new();
-        tasks
+        let mut prepared = tasks
             .into_iter()
             .map(|task| {
                 let occurrence = kind_occurrences
@@ -547,7 +547,71 @@ impl SimulationController {
                 let label = self.analysis_name_for_spec(&task.spec);
                 PreparedTask::new(instance_id, source_revision, Vec::new(), label, task)
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        let fourier_count = prepared
+            .iter()
+            .filter(|task| matches!(&task.queued_analysis().spec, AnalysisSpec::Fourier { .. }))
+            .count();
+        if fourier_count == 0 {
+            return Ok(prepared);
+        }
+        let transient_producers = prepared
+            .iter()
+            .filter(|task| matches!(&task.queued_analysis().spec, AnalysisSpec::Transient { .. }))
+            .map(|task| {
+                (
+                    task.instance_id(),
+                    task.source_revision(),
+                    task.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let [(producer_id, producer_revision, producer_config_digest)] =
+            transient_producers.as_slice()
+        else {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Manual-deck Fourier tasks require exactly one prepared Transient producer; found {}",
+                    transient_producers.len()
+                ),
+            ));
+        };
+        for task in &mut prepared {
+            if matches!(&task.queued_analysis().spec, AnalysisSpec::Fourier { .. }) {
+                task.set_dependencies(vec![*producer_id]);
+                task.set_dependency_bindings(vec![
+                    PreparedDependencyBinding::transient_trajectory(
+                        *producer_id,
+                        *producer_revision,
+                        *producer_config_digest,
+                    ),
+                ]);
+            }
+        }
+
+        // Analysis directives are declarative, so source order cannot make a
+        // .FOUR consumer precede its .TRAN producer. Preserve authored order
+        // among every currently-ready task while applying the exact graph.
+        let mut ordered = Vec::with_capacity(prepared.len());
+        let mut completed = HashSet::with_capacity(prepared.len());
+        while !prepared.is_empty() {
+            let Some(ready_index) = prepared.iter().position(|task| {
+                task.dependencies()
+                    .iter()
+                    .all(|dependency| completed.contains(dependency))
+            }) else {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    "Manual-deck analysis dependencies contain a cycle",
+                ));
+            };
+            let task = prepared.remove(ready_index);
+            completed.insert(task.instance_id());
+            ordered.push(task);
+        }
+        Ok(ordered)
     }
 }
 
@@ -1460,6 +1524,33 @@ mod tests {
         let path = policy.output_path(4, 1, 2).expect("export is enabled");
         assert!(path.ends_with("imported/rf_fixture_run0004_sp01.s2p"));
         assert!(!path.to_string_lossy().contains("schematic"));
+    }
+
+    #[test]
+    fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
+        let mut state = AppState::default();
+        state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+        state.workspace.netlist_source = Some(
+            "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.tran 10u 5m\n.end\n"
+                .to_owned(),
+        );
+
+        let mut controller = SimulationController::new();
+        let snapshot = controller
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare manual Fourier dependency graph");
+        controller
+            .authorize_snapshot(snapshot)
+            .expect("authorize manual Fourier dependency graph");
+        let dispatch = controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .expect("dispatch manual Fourier dependency graph");
+        let tasks = dispatch.tasks().collect::<Vec<_>>();
+
+        assert_eq!(tasks.len(), 2);
+        assert!(matches!(tasks[0].spec(), AnalysisSpec::Transient { .. }));
+        assert!(matches!(tasks[1].spec(), AnalysisSpec::Fourier { .. }));
+        assert_eq!(tasks[1].dependencies(), &[tasks[0].instance_id()]);
     }
 
     #[test]
