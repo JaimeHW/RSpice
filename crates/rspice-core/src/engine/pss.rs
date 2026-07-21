@@ -20,7 +20,7 @@
 //! 4. Build final `PssResult` with periodic waveform and harmonics
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-use super::{Engine, SimulationError, TransientResult};
+use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
     BreakpointManager, CompanionCoefficients, LteEstimator, TimestepController, TrapGearController,
@@ -105,6 +105,36 @@ fn pss_integration_method(
     }
 }
 
+fn ensure_pss_traversal_complete(
+    time: Value,
+    tstop: Value,
+    total_iterations: usize,
+    max_iterations: usize,
+    fixed_grid: bool,
+    fixed_index: usize,
+    fixed_steps: usize,
+    retained_endpoint: Option<Value>,
+) -> Result<(), SimulationError> {
+    if time != tstop {
+        let reason = if total_iterations >= max_iterations {
+            format!("reached the hard {max_iterations}-iteration guard")
+        } else if fixed_grid && fixed_index >= fixed_steps {
+            format!("exhausted the {fixed_steps}-step fixed grid")
+        } else {
+            "terminated without an accepted endpoint".to_string()
+        };
+        return Err(SimulationError::Circuit(format!(
+            "PSS transient traversal {reason} at t={time:.17e} before the exact stop t={tstop:.17e}; refusing to publish a partial trajectory"
+        )));
+    }
+    if retained_endpoint != Some(tstop) {
+        return Err(SimulationError::Circuit(format!(
+            "PSS transient traversal reached tstop={tstop:.17e} without retaining that exact endpoint"
+        )));
+    }
+    Ok(())
+}
+
 /// PSS-specific error types
 #[derive(Debug, Clone)]
 pub enum PssError {
@@ -182,6 +212,39 @@ pub struct PssAnalysisResult {
     pub is_stable: bool,
 }
 
+/// Phase-consistent state at the end of one converged PSS period, projected
+/// onto time zero and ready for
+/// the transient integrator's breakpoint-restart continuation contract.
+///
+/// State families whose accepted histories cannot be projected safely are
+/// rejected before this artifact is created. For envelope initialization, the
+/// artifact also authenticates the exact independent sources that were frozen
+/// at their original time-zero values during PSS and may be reactivated when
+/// transient integration starts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PssContinuationState {
+    period: Value,
+    frozen_sources: Vec<String>,
+    checkpoint: TransientCheckpoint,
+}
+
+impl PssContinuationState {
+    /// Converged fundamental period in seconds.
+    pub fn period(&self) -> Value {
+        self.period
+    }
+
+    /// Absolute simulation time represented by this phase-equivalent state.
+    pub fn time_origin(&self) -> Value {
+        self.checkpoint.time
+    }
+
+    /// Canonical independent-source names frozen during the periodic solve.
+    pub fn frozen_sources(&self) -> &[String] {
+        &self.frozen_sources
+    }
+}
+
 impl Engine {
     /// Run Periodic Steady-State analysis
     ///
@@ -218,6 +281,357 @@ impl Engine {
             .map(|(result, _, _, _)| result)
     }
 
+    /// Run PSS and materialize a phase-consistent transient continuation
+    /// state from one final fixed-grid traversal of the converged orbit.
+    ///
+    /// This is the warm-start contract for analyses such as envelope
+    /// simulation. It is intentionally fail-closed for runtime state families
+    /// that shooting PSS does not yet advance with the transient integrator's
+    /// accepted-step lifecycle; returning a checkpoint for those circuits
+    /// would misrepresent stale internal state as periodic.
+    pub fn run_pss_with_continuation_state(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
+        self.run_pss_with_continuation_state_abort(netlist, config, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::run_pss_with_continuation_state`].
+    pub fn run_pss_with_continuation_state_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
+        self.run_pss_with_frozen_source_continuation_state_abort(netlist, config, &[], abort)
+    }
+
+    /// Run PSS with selected independent source waveforms frozen at their
+    /// exact time-zero values, then return a continuation artifact authorized
+    /// to reactivate only those waveforms against the original netlist.
+    ///
+    /// This makes a carrier-periodic operating point well-defined when slower
+    /// envelope/modulation sources would otherwise make the authored deck
+    /// non-periodic. Source names are matched case-insensitively after circuit
+    /// elaboration; unknown, empty, or duplicate names are rejected.
+    pub fn run_pss_with_frozen_source_continuation_state(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        frozen_source_names: &[String],
+    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
+        self.run_pss_with_frozen_source_continuation_state_abort(
+            netlist,
+            config,
+            frozen_source_names,
+            &NoAbort,
+        )
+    }
+
+    /// Cancellable form of
+    /// [`Self::run_pss_with_frozen_source_continuation_state`].
+    pub fn run_pss_with_frozen_source_continuation_state_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        frozen_source_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        // This identity includes fully elaborated semantics and the bytes of
+        // every external dependency (for example PWL FILE data). Capture it
+        // before circuit construction reads any of those dependencies, then
+        // authenticate the same snapshot after both expensive traversals.
+        let authenticated_netlist_identity = Self::pss_continuation_netlist_identity(netlist)?;
+        let authenticated_fingerprint = super::transient::netlist_fingerprint(netlist);
+        let engine = self.resolved_for_netlist(netlist);
+        let continuation_config = config.clone();
+        let frozen_source_set = Self::validate_pss_frozen_source_names(frozen_source_names)?;
+        let (analysis, mut circuit, mut matrix, shooting_state) = engine
+            .run_pss_with_state_and_frozen_sources_abort(
+                netlist,
+                config,
+                &frozen_source_set,
+                true,
+                abort,
+            )?;
+        Self::ensure_pss_continuation_netlist_identity(
+            netlist,
+            &authenticated_netlist_identity,
+            "the periodic solve",
+        )?;
+        // The pre-solve check in `run_pss_with_state_and_frozen_sources_abort`
+        // is the authoritative gate. Repeat it against the returned circuit
+        // so a future refactor cannot accidentally bypass the allowlist.
+        Self::ensure_pss_continuation_state_supported(&circuit)?;
+        let mut frozen_sources = circuit
+            .voltage_sources
+            .names
+            .iter()
+            .chain(&circuit.current_sources.names)
+            .filter(|name| frozen_source_set.contains(&name.to_ascii_lowercase()))
+            .cloned()
+            .collect::<Vec<_>>();
+        frozen_sources.sort_by_key(|name| name.to_ascii_lowercase());
+
+        let period = analysis.period;
+        let max_step = period / continuation_config.points_per_period as Value;
+        engine.pss_set_reactive_state(&mut circuit, &shooting_state);
+        let seed = engine.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
+        let mut trace = PssStateTrace::default();
+        engine.pss_run_tran_internal(
+            &mut circuit,
+            &mut matrix,
+            seed,
+            period,
+            max_step,
+            true,
+            Some(&mut trace),
+            continuation_config.integration_method,
+            abort,
+        )?;
+        Self::ensure_pss_continuation_netlist_identity(
+            netlist,
+            &authenticated_netlist_identity,
+            "the final converged-orbit traversal",
+        )?;
+        let endpoint = trace.solutions.last().ok_or_else(|| {
+            SimulationError::Circuit(
+                "PSS continuation state could not capture the converged orbit endpoint".to_string(),
+            )
+        })?;
+        let lte_reference = engine.config.transient_lte_reference.unwrap_or_else(|| {
+            engine
+                .config
+                .spice_dialect
+                .default_transient_lte_reference()
+        });
+        let mut lte_estimator = LteEstimator::with_tolerances_and_reference(
+            engine.transient_lte_reltol(),
+            engine.transient_lte_abstol(),
+            lte_reference,
+        );
+        for solution in &trace.solutions {
+            lte_estimator.record(solution, max_step);
+        }
+        let checkpoint = TransientCheckpoint::capture(
+            authenticated_fingerprint,
+            Some(authenticated_netlist_identity),
+            super::transient::simulation_checkpoint_identity(&engine.config),
+            0.0,
+            endpoint,
+            &circuit,
+            Some(&lte_estimator),
+        );
+
+        Ok((
+            analysis,
+            PssContinuationState {
+                period,
+                frozen_sources,
+                checkpoint,
+            },
+        ))
+    }
+
+    /// Continue transient integration for `duration` seconds from a converged
+    /// PSS state. Returned sample times remain absolute and start at
+    /// `state.time_origin()`.
+    pub fn run_tran_from_pss_state(
+        &self,
+        netlist: &Netlist,
+        state: &PssContinuationState,
+        duration: Value,
+        max_step: Value,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        self.run_tran_from_pss_state_with_abort(netlist, state, duration, max_step, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::run_tran_from_pss_state`].
+    pub fn run_tran_from_pss_state_with_abort(
+        &self,
+        netlist: &Netlist,
+        state: &PssContinuationState,
+        duration: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "PSS continuation duration must be finite and positive, got {duration:e}"
+            )));
+        }
+        let tstop = state.time_origin() + duration;
+        if !tstop.is_finite() || tstop <= state.time_origin() {
+            return Err(SimulationError::Circuit(format!(
+                "PSS continuation stop time overflowed for origin {:e} and duration {duration:e}",
+                state.time_origin()
+            )));
+        }
+        self.run_tran_resume_with_abort(netlist, &state.checkpoint, tstop, max_step, abort)
+    }
+
+    fn ensure_pss_continuation_state_supported(circuit: &Circuit) -> Result<(), SimulationError> {
+        let mut blockers = Vec::new();
+        // Keep this list aligned with transient/residual.rs and
+        // transient/state_commit.rs. Shooting PSS currently advances only the
+        // ordinary capacitor and inductor companion histories exactly.
+        if !circuit.diodes.is_empty() {
+            blockers.push("diode junction/diffusion charge history");
+        }
+        if !circuit.bjts.is_empty() {
+            blockers.push("BJT/VBIC charge and internal-state history");
+        }
+        if !circuit.jfets.is_empty() {
+            blockers.push("JFET/MESFET charge and trap history");
+        }
+        if !circuit.mosfets.is_empty() {
+            blockers.push("classic MOSFET charge history");
+        }
+        if !circuit.b3soi.is_empty() || !circuit.b3soi_fd.is_empty() || !circuit.b3soi_pd.is_empty()
+        {
+            blockers.push("BSIMSOI charge history");
+        }
+        if !circuit.bsim3v3.is_empty() {
+            blockers.push("BSIM3 charge history");
+        }
+        if !circuit.bsim4v8.is_empty() {
+            blockers.push("BSIM4 charge and NQS history");
+        }
+        if !circuit.ekv26s.is_empty() {
+            blockers.push("EKV 2.6 charge history");
+        }
+        if !circuit.ekv3s.is_empty() {
+            blockers.push("EKV3 charge history");
+        }
+        if !circuit.vdmoses.is_empty() {
+            blockers.push("VDMOS charge history");
+        }
+        if !circuit.couplings.is_empty() || !circuit.coupled_inductor_pairs.is_empty() {
+            blockers.push("coupled-inductor mutual history");
+        }
+        if !circuit.multi_winding_transformers.is_empty() {
+            blockers.push("multi-winding transformer history");
+        }
+        if !circuit.tlines.is_empty() {
+            blockers.push("transmission-line delay history");
+        }
+        if !circuit.coupled_tlines.is_empty() {
+            blockers.push("coupled transmission-line convolution history");
+        }
+        if !circuit.xspice_instances.is_empty() {
+            blockers.push("XSPICE accepted-step and event state");
+        }
+        if !circuit.generic_switches.is_empty()
+            || !circuit.vswitches.is_empty()
+            || !circuit.iswitches.is_empty()
+        {
+            blockers.push("switch hysteresis state");
+        }
+        if !circuit.xyce_memristors.is_empty() {
+            blockers.push("native memristor resistance state");
+        }
+        if !circuit.jiles_atherton_inductors.is_empty() {
+            blockers.push("Jiles-Atherton hysteretic magnetic history");
+        }
+        if !circuit.behavioral_sources.is_empty() {
+            blockers.push("behavioral-source accepted-step memory");
+        }
+        #[cfg(feature = "veriloga")]
+        if circuit.has_veriloga_devices() {
+            blockers.push("Verilog-A integration state");
+        }
+        #[cfg(feature = "veriloga-builtins")]
+        if circuit.has_generated_veriloga_devices() {
+            blockers.push("generated Verilog-A integration state");
+        }
+
+        if blockers.is_empty() {
+            Ok(())
+        } else {
+            blockers.sort_unstable();
+            blockers.dedup();
+            Err(SimulationError::Circuit(format!(
+                "PSS transient continuation is unavailable because the circuit contains {}; the shooting period map advances only ordinary capacitor and inductor companion history exactly",
+                blockers.join(", ")
+            )))
+        }
+    }
+
+    fn pss_continuation_netlist_identity(netlist: &Netlist) -> Result<String, SimulationError> {
+        super::transient::netlist_checkpoint_identity(netlist).ok_or_else(|| {
+            SimulationError::Circuit(
+                "PSS continuation could not authenticate the semantic netlist and its external dependencies before circuit construction"
+                    .to_string(),
+            )
+        })
+    }
+
+    fn ensure_pss_continuation_netlist_identity(
+        netlist: &Netlist,
+        expected: &str,
+        phase: &str,
+    ) -> Result<(), SimulationError> {
+        let current = Self::pss_continuation_netlist_identity(netlist)?;
+        if current == expected {
+            Ok(())
+        } else {
+            Err(SimulationError::Circuit(format!(
+                "PSS continuation input dependencies changed during {phase}; the semantic netlist or external-file content no longer matches the authenticated pre-build snapshot"
+            )))
+        }
+    }
+
+    fn validate_pss_frozen_source_names(
+        frozen_source_names: &[String],
+    ) -> Result<std::collections::BTreeSet<String>, SimulationError> {
+        let mut normalized = std::collections::BTreeSet::new();
+        for source in frozen_source_names {
+            let source = source.trim().to_ascii_lowercase();
+            if source.is_empty() {
+                return Err(SimulationError::Circuit(
+                    "PSS frozen-source selection contains an empty source name".to_string(),
+                ));
+            }
+            if !normalized.insert(source.clone()) {
+                return Err(SimulationError::Circuit(format!(
+                    "PSS frozen-source selection contains duplicate source '{source}'"
+                )));
+            }
+        }
+        Ok(normalized)
+    }
+
+    fn freeze_pss_independent_sources(
+        circuit: &mut Circuit,
+        frozen_sources: &std::collections::BTreeSet<String>,
+    ) -> Result<(), SimulationError> {
+        for source in frozen_sources {
+            let value = circuit
+                .voltage_sources
+                .freeze_transient_source_at_time(source, 0.0)
+                .or_else(|| {
+                    circuit
+                        .current_sources
+                        .freeze_transient_source_at_time(source, 0.0)
+                })
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "PSS frozen-source selection references unknown independent source '{source}'"
+                    ))
+                })?;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "PSS frozen source '{source}' evaluates to non-finite value {value:e} at time zero"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// `run_pss` plus the converged artifacts the oscillator phase-noise
     /// machinery needs: the prepared circuit/matrix pair and the converged
     /// shooting state x0.
@@ -225,6 +639,23 @@ impl Engine {
         &self,
         netlist: &Netlist,
         config: PssConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
+        self.run_pss_with_state_and_frozen_sources_abort(
+            netlist,
+            config,
+            &std::collections::BTreeSet::new(),
+            false,
+            abort,
+        )
+    }
+
+    fn run_pss_with_state_and_frozen_sources_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        frozen_sources: &std::collections::BTreeSet<String>,
+        require_exact_continuation_state: bool,
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
         if abort.is_aborted() {
@@ -235,7 +666,11 @@ impl Engine {
 
         // Build and prepare circuit
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        Self::freeze_pss_independent_sources(&mut circuit, frozen_sources)?;
         Self::ensure_supported_xyce_memristor_small_signal(&circuit, "PSS")?;
+        if require_exact_continuation_state {
+            Self::ensure_pss_continuation_state_supported(&circuit)?;
+        }
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -1171,6 +1606,16 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        if !tstop.is_finite() || tstop <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "PSS transient traversal stop time must be finite and positive, got {tstop:e}"
+            )));
+        }
+        if !max_step.is_finite() || max_step <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "PSS transient traversal maximum step must be finite and positive, got {max_step:e}"
+            )));
+        }
         let num_nodes = circuit.num_nodes();
 
         let fixed_steps = (tstop / max_step).round().max(1.0) as usize;
@@ -1229,17 +1674,34 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             total_iterations += 1;
-            let dt = if fixed_grid {
+            let (dt, t_next) = if fixed_grid {
                 if fixed_index >= fixed_steps {
-                    break;
+                    return Err(SimulationError::Circuit(format!(
+                        "PSS fixed-grid traversal exhausted {fixed_steps} scheduled steps at t={t:.17e} before the exact stop t={tstop:.17e}"
+                    )));
                 }
                 // Anchor each step to the grid so rounding cannot drift the
-                // endpoint: t_next = (i+1)*dt exactly.
-                (fixed_index + 1) as Value * fixed_dt - t
+                // endpoint. The final target is assigned from `tstop`
+                // directly rather than reconstructed by multiplication.
+                let next_index = fixed_index + 1;
+                let t_next = if next_index == fixed_steps {
+                    tstop
+                } else {
+                    next_index as Value * fixed_dt
+                };
+                (t_next - t, t_next)
             } else {
-                let (dt, _) = breakpoints.limit_step(t, timestep.dt());
-                dt.min(tstop - t)
+                let remaining = tstop - t;
+                let (limited_dt, _) = breakpoints.limit_step(t, timestep.dt());
+                let dt = limited_dt.min(remaining);
+                let t_next = if dt == remaining { tstop } else { t + dt };
+                (dt, t_next)
             };
+            if !dt.is_finite() || dt <= 0.0 || !t_next.is_finite() || t_next <= t {
+                return Err(SimulationError::Circuit(format!(
+                    "PSS transient traversal produced an invalid step dt={dt:.17e} from t={t:.17e} toward tstop={tstop:.17e}"
+                )));
+            }
 
             // First step runs backward Euler: it reads no capacitor-current or
             // inductor-voltage history, so the trajectory depends only on the
@@ -1253,7 +1715,7 @@ impl Engine {
             let coeff = accepted_step_history.coefficients_for_trial(current_method, dt);
 
             let Some(new_solution) =
-                self.pss_newton_solve(circuit, matrix, &coeff, t + dt, dt, &solution, abort)?
+                self.pss_newton_solve(circuit, matrix, &coeff, t_next, dt, &solution, abort)?
             else {
                 if fixed_grid {
                     // The grid is the contract: a Newton failure on it is a
@@ -1268,7 +1730,7 @@ impl Engine {
                 fixed_index += 1;
             }
 
-            t += dt;
+            t = t_next;
             first_step = false;
 
             // Update capacitor history with the same companion that built this
@@ -1299,6 +1761,20 @@ impl Engine {
                 circuit.capacitors.v_prev[cap_idx] = v_new;
             }
 
+            // Evaluate the candidate against history from previously accepted
+            // points before rotating that history. `recommend_scale` already
+            // returns the multiplicative dt ratio; feeding `lte / scale` into
+            // `TimestepController::adjust` applies a second, unrelated error
+            // controller and can ratchet a smooth RC/RL stabilization down to
+            // the hard minimum timestep. PSS stabilization accepts every
+            // Newton-converged point, so retain the point and use the LTE only
+            // to size the *next* interval.
+            let accepted_step_scale = if fixed_grid {
+                None
+            } else {
+                let (lte, _) = lte_estimator.estimate(&new_solution, dt);
+                Some(lte_estimator.recommend_scale(lte))
+            };
             lte_estimator.record(&new_solution, dt);
             trapgear.update(&new_solution, dt);
 
@@ -1333,12 +1809,25 @@ impl Engine {
                 voltages.push(solution.get(i).copied().unwrap_or(0.0));
             }
 
-            if !fixed_grid {
-                let (lte, _) = lte_estimator.estimate(&solution, dt);
-                let scale = lte_estimator.recommend_scale(lte);
-                timestep.adjust(lte / scale);
+            if let Some(scale) = accepted_step_scale {
+                // The estimator bounds its recommendation to [0.25, 2.0].
+                // Anchor the proposal to the interval that was actually
+                // accepted, which is important when a source breakpoint made
+                // that interval shorter than the controller's prior proposal.
+                timestep.force_step(dt * scale);
             }
         }
+
+        ensure_pss_traversal_complete(
+            t,
+            tstop,
+            total_iterations,
+            MAX_ITERATIONS,
+            fixed_grid,
+            fixed_index,
+            fixed_steps,
+            result.time.last().copied(),
+        )?;
 
         Ok(result)
     }
@@ -1466,5 +1955,83 @@ mod tests {
             backward_euler.coeff_v_n_minus_1
         );
         assert!(!coefficients.needs_two_history);
+    }
+
+    #[test]
+    fn continuation_state_rejects_unadvanced_delay_history() {
+        let mut circuit = Circuit::new();
+        circuit.tlines.push(crate::device::TransmissionLine::new(
+            "T1".to_string(),
+            1,
+            0,
+            2,
+            0,
+            50.0,
+            1.0e-9,
+        ));
+
+        let error = Engine::ensure_pss_continuation_state_supported(&circuit)
+            .expect_err("transmission-line continuation must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("transmission-line delay history")
+        );
+    }
+
+    #[test]
+    fn pss_iteration_guard_refuses_a_partial_trajectory() {
+        let error =
+            ensure_pss_traversal_complete(0.75, 1.0, 100_000, 100_000, false, 0, 0, Some(0.75))
+                .expect_err("the traversal guard must never publish a partial result");
+        let message = error.to_string();
+        assert!(message.contains("hard 100000-iteration guard"));
+        assert!(message.contains("refusing to publish a partial trajectory"));
+    }
+
+    #[test]
+    fn pss_traversal_requires_the_exact_retained_endpoint() {
+        let rounded = Value::from_bits(1.0_f64.to_bits() - 1);
+        let error =
+            ensure_pss_traversal_complete(rounded, 1.0, 32, 100_000, true, 32, 32, Some(rounded))
+                .expect_err("a nearby floating endpoint is not an exact completed traversal");
+        assert!(
+            error
+                .to_string()
+                .contains("exhausted the 32-step fixed grid")
+        );
+
+        ensure_pss_traversal_complete(1.0, 1.0, 32, 100_000, true, 32, 32, Some(1.0))
+            .expect("the exact retained endpoint is complete");
+    }
+
+    #[test]
+    fn pss_continuation_recheck_detects_changed_external_dependency_bytes() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-pss-identity-unit-{}.csv",
+            std::process::id()
+        ));
+        std::fs::write(&path, "0,0\n1e-6,1\n").expect("temporary PWL file is writable");
+        let path_text = path.to_string_lossy().replace('\\', "/");
+        let netlist = Netlist::parse(&format!(
+            "* external identity test\nV1 out 0 PWL FILE=\"{path_text}\"\nC1 out 0 1p\n.end\n"
+        ))
+        .expect("external PWL dependency parses");
+        let authenticated = Engine::pss_continuation_netlist_identity(&netlist)
+            .expect("pre-build dependency snapshot is authenticated");
+
+        // Change both bytes and length so this remains robust on filesystems
+        // with coarse metadata granularity or aggressive read caching.
+        std::fs::write(&path, "0,0\n1e-6,200\n").expect("temporary PWL file can change");
+        let error = Engine::ensure_pss_continuation_netlist_identity(
+            &netlist,
+            &authenticated,
+            "the test traversal",
+        )
+        .expect_err("changed external bytes must invalidate the pre-build snapshot");
+        let _ = std::fs::remove_file(path);
+        let message = error.to_string();
+        assert!(message.contains("changed during the test traversal"));
+        assert!(message.contains("external-file content"));
     }
 }

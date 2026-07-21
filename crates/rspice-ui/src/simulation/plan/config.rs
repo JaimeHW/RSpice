@@ -487,6 +487,17 @@ impl AnalysisDraft {
         }
     }
 
+    /// Exact prerequisite roles required by this configured draft.
+    ///
+    /// Envelope owns its selected periodic initializer as part of one
+    /// authenticated execution. Exposing a separate HB/PSS task here would be
+    /// incorrect until that task can publish a typed continuation artifact
+    /// that Envelope actually consumes.
+    #[must_use]
+    pub fn prerequisite_roles(&self) -> &'static [AnalysisKind] {
+        self.kind().prerequisites()
+    }
+
     /// Current singleton-model index, for deterministic migration only.
     #[must_use]
     pub const fn legacy_index(&self) -> usize {
@@ -958,6 +969,18 @@ mod tests {
         };
         assert!(state.initialized);
         assert_eq!(state.temperature, "unfinished(");
+    }
+
+    #[test]
+    fn envelope_periodic_initializer_is_owned_by_the_envelope_task() {
+        let mut draft = AnalysisDraft::for_kind(AnalysisKind::Envelope);
+        for selection in 0..=2 {
+            let AnalysisDraft::Envelope(state) = &mut draft else {
+                panic!("expected Envelope draft");
+            };
+            state.initial_periodic_solve_idx = selection;
+            assert!(draft.prerequisite_roles().is_empty());
+        }
     }
 
     #[test]

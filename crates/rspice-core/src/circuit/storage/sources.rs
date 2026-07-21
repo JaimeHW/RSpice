@@ -234,18 +234,58 @@ impl VoltageSources {
         self.names.is_empty()
     }
 
-    pub(crate) fn transient_specs_with_pwl(
+    pub(crate) fn freeze_transient_source_at_time(
+        &mut self,
+        name: &str,
+        time: Value,
+    ) -> Option<Value> {
+        let index = self
+            .names
+            .iter()
+            .position(|source_name| source_name.eq_ignore_ascii_case(name))?;
+        let value = match self.source_specs[index].as_ref() {
+            Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
+                spec,
+                time,
+                self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
+            ),
+            None => self.dc_values[index],
+        };
+        self.dc_values[index] = value;
+        // Freezing is a whole-source contract for periodic initialization,
+        // not merely removal of its time-domain waveform.  HB treats a
+        // source with no specification but a non-zero AC phasor as a carrier
+        // drive, so retaining these sidecar fields would silently reactivate
+        // a selected DcAcTransient modulation source during the frozen solve.
+        self.ac_magnitudes[index] = 0.0;
+        self.ac_phases[index] = 0.0;
+        self.source_specs[index] = None;
+        self.pwl_waveforms[index] = None;
+        Some(value)
+    }
+
+    /// Iterate transient specifications with their canonical source names and
+    /// circuit-owned PWL snapshots. Keeping the name coupled to the same SoA
+    /// ordinal lets analysis clients select authored sources without reparsing
+    /// or accidentally reading a changed external waveform file.
+    pub(crate) fn transient_specs_named_with_pwl(
         &self,
     ) -> impl Iterator<
         Item = (
+            &str,
             &crate::netlist::SourceSpec,
             Option<&crate::device::pwl_file::PwlWaveform>,
         ),
     > {
-        self.source_specs
+        self.names
             .iter()
+            .zip(&self.source_specs)
             .zip(&self.pwl_waveforms)
-            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform.as_deref())))
+            .filter_map(|((name, spec), waveform)| {
+                spec.as_ref()
+                    .map(|spec| (name.as_str(), spec, waveform.as_deref()))
+            })
     }
 
     /// Link indices to StaticMatrix for O(1) stamping
@@ -1640,18 +1680,42 @@ impl CurrentSources {
         self.names.is_empty()
     }
 
-    pub(crate) fn transient_specs_with_pwl(
+    pub(crate) fn freeze_transient_source_at_time(
+        &mut self,
+        name: &str,
+        time: Value,
+    ) -> Option<Value> {
+        let index = self.index_by_name(name)?;
+        let value = self.value_at_time(index, time);
+        self.dc_values[index] = value;
+        // See the voltage-source implementation above: a frozen source must
+        // not retain a separate AC/HB drive contract.
+        self.ac_magnitudes[index] = 0.0;
+        self.ac_phases[index] = 0.0;
+        self.source_specs[index] = None;
+        self.pwl_waveforms[index] = None;
+        Some(value)
+    }
+
+    /// Iterate transient specifications with their canonical source names and
+    /// circuit-owned PWL snapshots.
+    pub(crate) fn transient_specs_named_with_pwl(
         &self,
     ) -> impl Iterator<
         Item = (
+            &str,
             &crate::netlist::SourceSpec,
             Option<&crate::device::pwl_file::PwlWaveform>,
         ),
     > {
-        self.source_specs
+        self.names
             .iter()
+            .zip(&self.source_specs)
             .zip(&self.pwl_waveforms)
-            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform.as_deref())))
+            .filter_map(|((name, spec), waveform)| {
+                spec.as_ref()
+                    .map(|spec| (name.as_str(), spec, waveform.as_deref()))
+            })
     }
 
     /// Stamp all current sources

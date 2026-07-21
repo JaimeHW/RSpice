@@ -405,23 +405,65 @@ impl AnalysisSpec {
             }
             AnalysisSpec::Envelope {
                 fundamental_freq,
+                additional_carrier_tones,
                 stop_time,
                 num_harmonics,
-                max_step,
+                envelope_step,
+                modulation_sources,
+                initial_periodic_solve,
+                adaptive_mode,
+                extraction_path: _,
             } => {
-                if *fundamental_freq <= 0.0 {
-                    return Err("Envelope fundamental_freq must be > 0".to_string());
+                let carrier_tones =
+                    std::iter::once(fundamental_freq).chain(additional_carrier_tones.iter());
+                let mut seen_tones = std::collections::HashSet::new();
+                for tone in carrier_tones {
+                    if !tone.is_finite() || *tone <= 0.0 {
+                        return Err("Envelope carrier tones must be finite and > 0".to_string());
+                    }
+                    if !seen_tones.insert(tone.to_bits()) {
+                        return Err("Envelope carrier tones must be unique".to_string());
+                    }
                 }
-                if *stop_time <= 0.0 {
-                    return Err("Envelope stop_time must be > 0".to_string());
+                if !stop_time.is_finite() || *stop_time <= 0.0 {
+                    return Err("Envelope stop_time must be finite and > 0".to_string());
                 }
                 if *num_harmonics == 0 {
                     return Err("Envelope num_harmonics must be > 0".to_string());
                 }
-                if let Some(step) = max_step
-                    && *step <= 0.0
+                if let Some(step) = envelope_step
+                    && (!step.is_finite() || *step <= 0.0)
                 {
-                    return Err("Envelope max_step must be > 0 when set".to_string());
+                    return Err(
+                        "Envelope envelope_step must be finite and > 0 when set".to_string()
+                    );
+                }
+                if envelope_step.is_some_and(|step| step > *stop_time) {
+                    return Err("Envelope envelope_step cannot exceed stop_time".to_string());
+                }
+                let legacy_source_inference = *initial_periodic_solve
+                    == super::EnvelopeInitialPeriodicSolve::TransientSpectralEstimate
+                    && *adaptive_mode == super::EnvelopeAdaptiveMode::FixedEnvelopeStep;
+                if modulation_sources.is_empty() && !legacy_source_inference {
+                    return Err(
+                        "Envelope modulation_sources are required for periodic or adaptive execution"
+                            .to_string(),
+                    );
+                }
+                // Every source present in either a legacy or current request
+                // has a stable, canonical identity.
+                let mut seen_sources = std::collections::HashSet::new();
+                for source in modulation_sources {
+                    let trimmed = source.trim();
+                    if trimmed.is_empty() || trimmed != source {
+                        return Err(
+                            "Envelope modulation source names must be nonempty and trimmed"
+                                .to_string(),
+                        );
+                    }
+                    if !seen_sources.insert(trimmed.to_ascii_lowercase()) {
+                        return Err("Envelope modulation source names must be unique".to_string());
+                    }
                 }
                 Ok(())
             }
@@ -852,7 +894,10 @@ fn validate_periodic_network(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::multi_run::{HbToneSpec, PssMethod};
+    use crate::simulation::multi_run::{
+        EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
+        PssMethod,
+    };
 
     #[test]
     fn legacy_pss_specs_receive_compatible_execution_defaults() {
@@ -909,6 +954,70 @@ mod tests {
             .validate()
             .expect_err("autonomous harmonic balance must fail validation");
         assert!(error.contains("requires the shooting method"));
+    }
+
+    #[test]
+    fn legacy_envelope_spec_migrates_without_inventing_a_source_binding() {
+        let spec: AnalysisSpec = serde_json::from_str(
+            r#"{"Envelope":{"fundamental_freq":1000000.0,"stop_time":0.01,"num_harmonics":9,"max_step":0.000001}}"#,
+        )
+        .expect("legacy Envelope spec deserializes");
+
+        assert_eq!(
+            spec,
+            AnalysisSpec::Envelope {
+                fundamental_freq: 1.0e6,
+                additional_carrier_tones: Vec::new(),
+                stop_time: 0.01,
+                num_harmonics: 9,
+                envelope_step: Some(1.0e-6),
+                modulation_sources: Vec::new(),
+                initial_periodic_solve: EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+                adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
+                extraction_path: EnvelopeExtractionPath::Preview,
+            }
+        );
+        assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn envelope_validation_rejects_duplicate_tones_and_invalid_source_names() {
+        let spec = |additional_carrier_tones, modulation_sources| AnalysisSpec::Envelope {
+            fundamental_freq: 1.0e6,
+            additional_carrier_tones,
+            stop_time: 0.01,
+            num_harmonics: 9,
+            envelope_step: Some(1.0e-6),
+            modulation_sources,
+            initial_periodic_solve: EnvelopeInitialPeriodicSolve::HarmonicBalance,
+            adaptive_mode: EnvelopeAdaptiveMode::Enabled,
+            extraction_path: EnvelopeExtractionPath::Preview,
+        };
+
+        assert!(
+            spec(vec![1.0e6], vec!["VIN_AM".to_owned()])
+                .validate()
+                .unwrap_err()
+                .contains("unique")
+        );
+        assert!(
+            spec(Vec::new(), vec![" VIN_AM".to_owned()])
+                .validate()
+                .unwrap_err()
+                .contains("trimmed")
+        );
+        assert!(
+            spec(vec![2.0e6], vec!["VIN_AM".to_owned(), "vin_am".to_owned()])
+                .validate()
+                .unwrap_err()
+                .contains("unique")
+        );
+        assert!(
+            spec(Vec::new(), Vec::new())
+                .validate()
+                .unwrap_err()
+                .contains("required")
+        );
     }
 
     #[test]

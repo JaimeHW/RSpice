@@ -32,6 +32,51 @@ c1 out 0 {C}
 }
 
 #[test]
+fn adaptive_stabilization_with_nonzero_tstab_completes_for_linear_rc_and_rl() {
+    let period = 1.0 / F0;
+    let inductance = R / (std::f64::consts::TAU * F0);
+    let decks = [
+        format!(
+            "* adaptive PSS stabilization RC\n\
+             V1 in 0 SIN(0 1 {F0})\n\
+             R1 in out {R}\n\
+             C1 out 0 {C}\n\
+             .end\n"
+        ),
+        format!(
+            "* adaptive PSS stabilization RL\n\
+             V1 in 0 SIN(0 1 {F0})\n\
+             R1 in out {R}\n\
+             L1 out 0 {inductance}\n\
+             .end\n"
+        ),
+    ];
+
+    for deck in decks {
+        let netlist = Netlist::parse(&deck).expect("linear stabilization deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_pss(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab(8.0 * period)
+                    .with_tolerance(1.0e-7),
+            )
+            .expect("adaptive nonzero-tstab traversal reaches the shooting solve");
+
+        assert_eq!(
+            result.result.time.last().copied(),
+            Some(period),
+            "the converged fixed-grid orbit retains its exact endpoint"
+        );
+        assert!(
+            result.final_residual < 1.0e-4,
+            "linear periodic orbit closes after stabilization: {}",
+            result.final_residual
+        );
+    }
+}
+
+#[test]
 fn pss_rejects_zero_max_iterations_as_invalid_config() {
     let deck = format!(
         "\

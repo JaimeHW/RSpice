@@ -305,10 +305,17 @@ impl Engine {
             let spectrum =
                 Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
             if spectrum.harmonics.is_empty() {
-                solver.add_voltage_source_branch(np, nn, spectrum.dc);
+                let branch = solver.add_voltage_source_branch(np, nn, spectrum.dc);
+                solver.set_voltage_source_branch_name(branch, source_name);
                 continue;
             }
-            solver.add_voltage_source_branch_harmonics(np, nn, spectrum.dc, &spectrum.harmonics);
+            let branch = solver.add_voltage_source_branch_harmonics(
+                np,
+                nn,
+                spectrum.dc,
+                &spectrum.harmonics,
+            );
+            solver.set_voltage_source_branch_name(branch, source_name);
         }
         Ok(())
     }

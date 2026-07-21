@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::common::RSpiceApp;
-use crate::product::AnalysisInstanceId;
+use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::simulation::plan::{
     AnalysisDependency, AnalysisDraft, AnalysisKind, AnalysisLifecycleCommand,
     AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
@@ -71,6 +71,7 @@ struct SelectedAnalysis {
     kind: AnalysisKind,
     draft: AnalysisDraft,
     dependencies: Vec<AnalysisDependency>,
+    prerequisite_roles: Vec<AnalysisKind>,
     prerequisite_candidates: Vec<(AnalysisKind, Vec<DependencyCandidate>)>,
     lifecycle: AnalysisLifecycleState,
     position: usize,
@@ -83,6 +84,43 @@ struct SelectedAnalysis {
 struct DependencyCandidate {
     id: AnalysisInstanceId,
     label: String,
+}
+
+#[derive(Clone)]
+struct EnvelopeSourceCatalog {
+    source_digest: ContentDigest,
+    names: Vec<String>,
+    diagnostic: Option<String>,
+}
+
+impl EnvelopeSourceCatalog {
+    fn selection_error(&self, requested: &[String]) -> Option<String> {
+        if requested.is_empty() {
+            return None;
+        }
+        if let Some(diagnostic) = &self.diagnostic {
+            return Some(format!(
+                "The circuit modulation-source catalog is unavailable: {diagnostic}"
+            ));
+        }
+        let missing = requested
+            .iter()
+            .filter(|requested| {
+                !self
+                    .names
+                    .iter()
+                    .any(|available| available.eq_ignore_ascii_case(requested))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        (!missing.is_empty()).then(|| {
+            format!(
+                "Unknown or DC-only circuit modulation source{}: {}",
+                if missing.len() == 1 { "" } else { "s" },
+                missing.join(", ")
+            )
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -2381,6 +2419,37 @@ fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
     }
 }
 
+fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
+    let source = app.state.simulation.netlist_content.as_str();
+    let source_digest = crate::workbench::netlist_document::source_content_digest(source);
+    let cache_id = egui::Id::new("simulation-envelope-source-catalog");
+    if let Some(cached) = ui
+        .ctx()
+        .data(|data| data.get_temp::<EnvelopeSourceCatalog>(cache_id))
+        && cached.source_digest == source_digest
+    {
+        return cached;
+    }
+
+    let (names, diagnostic) = match rspice_core::Netlist::parse(source) {
+        Ok(netlist) => match rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .transient_source_names(&netlist)
+        {
+            Ok(names) => (names, None),
+            Err(error) => (Vec::new(), Some(error.to_string())),
+        },
+        Err(error) => (Vec::new(), Some(error.to_string())),
+    };
+    let catalog = EnvelopeSourceCatalog {
+        source_digest,
+        names,
+        diagnostic,
+    };
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(cache_id, catalog.clone()));
+    catalog
+}
+
 fn analysis_editor(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -2425,6 +2494,8 @@ fn analysis_editor(
     let mut draft = selected.draft.clone();
     let serialized_before = serde_json::to_vec(&draft);
     let mut action = None;
+    let envelope_sources =
+        matches!(draft, AnalysisDraft::Envelope(_)).then(|| envelope_source_catalog(ui, app));
 
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
@@ -2441,8 +2512,9 @@ fn analysis_editor(
             viewport_width <= 760.0,
             &mut action,
         );
-        let (note, form_anchor_y) = analysis_form_body(ui, app, &mut draft);
-        form_status(ui, app, &draft, note);
+        let (note, form_anchor_y) =
+            analysis_form_body(ui, app, &mut draft, envelope_sources.as_ref());
+        form_status(ui, app, &draft, note, envelope_sources.as_ref());
         form_anchor_y
     });
     let form_anchor_y = editor_response.inner;
@@ -2780,6 +2852,7 @@ fn analysis_form_body(
     ui: &mut Ui,
     app: &RSpiceApp,
     draft: &mut AnalysisDraft,
+    envelope_sources: Option<&EnvelopeSourceCatalog>,
 ) -> (&'static str, f32) {
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
@@ -2799,15 +2872,32 @@ fn analysis_form_body(
                 draft,
                 app.state.ui.preferences.quantity_presentation_policy(),
                 app.state.ui.number_locale,
+                envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
             )
         });
     (output.inner, output.response.rect.top())
 }
 
-fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) {
+fn form_status(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    draft: &AnalysisDraft,
+    note: &str,
+    envelope_sources: Option<&EnvelopeSourceCatalog>,
+) {
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
-    let validation_error = app.state.sim_setup.analysis_draft_validation_error(draft);
+    let validation_error = app
+        .state
+        .sim_setup
+        .analysis_draft_validation_error(draft)
+        .or_else(|| match (draft, envelope_sources) {
+            (AnalysisDraft::Envelope(setup), Some(catalog)) => setup
+                .to_config()
+                .ok()
+                .and_then(|config| catalog.selection_error(&config.modulation_sources)),
+            _ => None,
+        });
     let valid = validation_error.is_none();
     let detail = validation_error.as_deref().unwrap_or(note);
     let response = egui::Frame::new()
@@ -2903,12 +2993,12 @@ fn form_status(ui: &mut Ui, app: &RSpiceApp, draft: &AnalysisDraft, note: &str) 
 }
 
 fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<AnalysisAction> {
-    if selected.kind.prerequisites().is_empty() {
+    if selected.prerequisite_roles.is_empty() {
         property_row(ui, "Prerequisites", "none declared");
         return None;
     }
     let mut requested = None;
-    for prerequisite in selected.kind.prerequisites() {
+    for prerequisite in &selected.prerequisite_roles {
         let bound = selected
             .dependencies
             .iter()
@@ -3806,9 +3896,8 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
         .filter_map(|closure_id| plan.instance(*closure_id))
         .flat_map(|instance| instance.dependencies().iter().copied())
         .collect();
-    let prerequisite_candidates = instance
-        .kind()
-        .prerequisites()
+    let prerequisite_roles = instance.prerequisite_roles().to_vec();
+    let prerequisite_candidates = prerequisite_roles
         .iter()
         .map(|prerequisite| {
             let candidates = plan.instances()[..position]
@@ -3841,6 +3930,7 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
         kind: instance.kind(),
         draft: instance.draft().clone(),
         dependencies: instance.dependencies().to_vec(),
+        prerequisite_roles,
         prerequisite_candidates,
         lifecycle: instance.lifecycle(),
         position,
@@ -3887,7 +3977,10 @@ fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) {
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
-                let bind_receipt = (!kind.prerequisites().is_empty()).then(|| {
+                let has_prerequisites = plan
+                    .instance(id)
+                    .is_some_and(|instance| !instance.prerequisite_roles().is_empty());
+                let bind_receipt = has_prerequisites.then(|| {
                     plan.auto_bind_dependencies(id)
                         .map_err(|error| error.to_string())
                 });
@@ -4557,6 +4650,20 @@ mod tests {
             )
             .expect("valid test provenance"),
         )
+    }
+
+    #[test]
+    fn envelope_source_catalog_rejects_unknown_and_dc_only_selections() {
+        let catalog = EnvelopeSourceCatalog {
+            source_digest: ContentDigest::from_bytes([0x33; 32]),
+            names: vec!["Xdrv.VMOD".to_owned(), "VPULSE".to_owned()],
+            diagnostic: None,
+        };
+        assert_eq!(catalog.selection_error(&["xDRV.vmod".to_owned()]), None);
+        assert_eq!(
+            catalog.selection_error(&["VBIAS".to_owned()]).as_deref(),
+            Some("Unknown or DC-only circuit modulation source: VBIAS")
+        );
     }
 
     #[test]

@@ -396,7 +396,7 @@ impl AnalysisKind {
                 "Large-signal noise, folding, correlation, and noise-figure metrics around harmonic balance."
             }
             Self::Envelope => {
-                "Slow modulation envelope around a harmonic-balance carrier solution."
+                "Slow modulation envelope with an internally authenticated periodic initializer."
             }
             Self::Pac => "Frequency-translated small-signal response around a periodic solution.",
             Self::Pnoise => "Cyclostationary noise and folding around a periodic operating point.",
@@ -592,7 +592,7 @@ impl AnalysisKind {
             | Self::TransferFunction => OP,
             Self::Qpss => OP,
             Self::Pac | Self::Pnoise | Self::Pxf | Self::Pstb | Self::Psp => PSS,
-            Self::Envelope | Self::Hbsp | Self::Hbnoise => HB,
+            Self::Hbsp | Self::Hbnoise => HB,
             Self::Qpac | Self::Qpnoise | Self::Qpxf => QPSS,
             Self::Fourier | Self::TransientNoise => TRAN,
             Self::DcMismatch => OP,
@@ -603,6 +603,7 @@ impl AnalysisKind {
             | Self::MonteCarlo
             | Self::Temperature
             | Self::Corner
+            | Self::Envelope
             | Self::Reliability
             | Self::Optimization
             | Self::Soa => NONE,
@@ -668,7 +669,6 @@ mod tests {
             (AnalysisKind::Pnoise, AnalysisKind::Pss),
             (AnalysisKind::Pxf, AnalysisKind::Pss),
             (AnalysisKind::Pstb, AnalysisKind::Pss),
-            (AnalysisKind::Envelope, AnalysisKind::HarmonicBalance),
             (AnalysisKind::Fourier, AnalysisKind::Transient),
             (AnalysisKind::Disto, AnalysisKind::Ac),
             (AnalysisKind::Qpss, AnalysisKind::OperatingPoint),

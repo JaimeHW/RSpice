@@ -83,8 +83,10 @@ pub use advanced::pss::{
 
 // Re-export Harmonic Balance types
 pub use advanced::harmonic_balance::{
-    FrequencyIndex, FrequencyMap, HarmonicData, HbConfig, HbError, HbFft, HbResult, HbSolver,
-    HbSolverState, HbTone, MultiToneConfig, SpectralVoltage,
+    FrequencyIndex, FrequencyMap, HarmonicData, HbConfig, HbContinuationLimitation, HbError, HbFft,
+    HbPhaseProjectionError, HbPhaseState, HbReactiveKind, HbReactivePhaseState, HbReactiveSpectrum,
+    HbResult, HbSolver, HbSolverState, HbTone, MultiToneConfig, SpectralBranchCurrent,
+    SpectralVoltage,
 };
 
 // Re-export key types from output

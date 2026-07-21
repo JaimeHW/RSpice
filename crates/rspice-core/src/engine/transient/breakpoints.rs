@@ -85,7 +85,10 @@ impl Engine {
             tstop,
             tstep_hint,
             dialect,
-        );
+            &crate::abort_signal::NoAbort,
+            usize::MAX,
+        )
+        .expect("unbounded non-cancellable breakpoint collection cannot fail");
     }
 
     fn add_source_spec_breakpoints_with_pwl(
@@ -95,7 +98,9 @@ impl Engine {
         tstop: Value,
         tstep_hint: Value,
         dialect: crate::engine::SpiceDialect,
-    ) {
+        abort: &dyn crate::abort_signal::AbortSignal,
+        max_points: usize,
+    ) -> Result<(), crate::engine::SimulationError> {
         use crate::netlist::SourceSpec;
 
         match spec {
@@ -107,7 +112,9 @@ impl Engine {
                     tstop,
                     tstep_hint,
                     dialect,
-                );
+                    abort,
+                    max_points,
+                )?;
             }
             SourceSpec::RfPort { inner, .. } => {
                 Self::add_source_spec_breakpoints_with_pwl(
@@ -117,7 +124,9 @@ impl Engine {
                     tstop,
                     tstep_hint,
                     dialect,
-                );
+                    abort,
+                    max_points,
+                )?;
             }
             // TRNOISE breakpoints come from its expanded PWL sample train;
             // the unexpanded spec itself schedules none.
@@ -134,7 +143,9 @@ impl Engine {
                     tstop,
                     tstep_hint,
                     dialect,
-                );
+                    abort,
+                    max_points,
+                )?;
             }
             SourceSpec::Pulse {
                 delay,
@@ -172,14 +183,22 @@ impl Engine {
                 } else {
                     0.0
                 };
-                let max_cycles = if per_valid {
+                let requested_cycles = if per_valid {
                     (((tstop - td - phase_time).max(0.0) / per).ceil() as usize).saturating_add(1)
                 } else {
                     1
                 };
-                let max_cycles = max_cycles.min(1_000_000);
+                if max_points != usize::MAX && requested_cycles > 1_000_000 {
+                    return Err(crate::engine::SimulationError::Circuit(format!(
+                        "transient source-event schedule requires {requested_cycles} PULSE cycles, exceeding the exact enumeration limit 1000000"
+                    )));
+                }
+                let max_cycles = requested_cycles.min(1_000_000);
 
                 for cycle in 0..max_cycles {
+                    if cycle % 1024 == 0 {
+                        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
+                    }
                     let cycle_start = if per_valid {
                         td - phase_time + per * cycle as Value
                     } else {
@@ -221,7 +240,9 @@ impl Engine {
                     *repeat_from,
                     *delay,
                     tstop,
-                );
+                    abort,
+                    max_points,
+                )?;
             }
             SourceSpec::PwlFile {
                 path,
@@ -239,7 +260,9 @@ impl Engine {
                         repeat_from.map(|value| value * *time_scale),
                         *delay + *time_offset,
                         tstop,
-                    );
+                        abort,
+                        max_points,
+                    )?;
                 }
                 None => match crate::device::pwl_file::load_pwl_file(path) {
                     Ok(wf) => {
@@ -251,7 +274,9 @@ impl Engine {
                             repeat_from.map(|value| value * *time_scale),
                             *delay + *time_offset,
                             tstop,
-                        );
+                            abort,
+                            max_points,
+                        )?;
                     }
                     Err(err) => {
                         log::warn!(
@@ -279,7 +304,7 @@ impl Engine {
                     || *fall <= 0.0
                     || *sample <= 0.0
                 {
-                    return;
+                    return Ok(());
                 }
 
                 let mut source_times = Vec::new();
@@ -293,7 +318,7 @@ impl Engine {
                     |source_time, _| source_times.push(source_time),
                 );
                 if source_times.is_empty() {
-                    return;
+                    return Ok(());
                 }
 
                 for &source_time in &source_times {
@@ -301,26 +326,34 @@ impl Engine {
                 }
 
                 if *repeat_count == 0 {
-                    return;
+                    return Ok(());
                 }
                 let Some(pattern_duration) =
                     crate::circuit::VoltageSources::pat_pattern_duration(data, *sample)
                 else {
-                    return;
+                    return Ok(());
                 };
                 if !pattern_duration.is_finite() || pattern_duration <= 0.0 {
-                    return;
+                    return Ok(());
                 }
 
-                let max_cycles = if *repeat_count < 0 {
+                let requested_cycles = if *repeat_count < 0 {
                     (((tstop - *delay).max(0.0) / pattern_duration).ceil() as usize)
                         .saturating_add(1)
                 } else {
                     *repeat_count as usize
+                };
+                if max_points != usize::MAX && requested_cycles > 1_000_000 {
+                    return Err(crate::engine::SimulationError::Circuit(format!(
+                        "transient source-event schedule requires {requested_cycles} PAT cycles, exceeding the exact enumeration limit 1000000"
+                    )));
                 }
-                .min(1_000_000);
+                let max_cycles = requested_cycles.min(1_000_000);
 
                 for cycle in 1..=max_cycles {
+                    if cycle % 1024 == 0 {
+                        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
+                    }
                     let offset = cycle as Value * pattern_duration;
                     if *delay + offset > tstop && source_times[0] >= 0.0 {
                         break;
@@ -340,7 +373,7 @@ impl Engine {
                 // but do not introduce timestep boundaries that Xyce itself
                 // does not request when running in its compatibility dialect.
                 if dialect == crate::engine::SpiceDialect::Xyce {
-                    return;
+                    return Ok(());
                 }
                 // Match the waveform runtime: omitted or zero delays
                 // resolve to tstep-based defaults (ngspice vsrcload.c).
@@ -373,6 +406,7 @@ impl Engine {
                 Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
             }
         }
+        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
 
     fn add_repeating_pwl_breakpoints<I>(
@@ -381,7 +415,10 @@ impl Engine {
         repeat_from: Option<Value>,
         time_offset: Value,
         tstop: Value,
-    ) where
+        abort: &dyn crate::abort_signal::AbortSignal,
+        max_points: usize,
+    ) -> Result<(), crate::engine::SimulationError>
+    where
         I: IntoIterator<Item = Value>,
     {
         let times = times
@@ -389,26 +426,26 @@ impl Engine {
             .filter(|time| time.is_finite())
             .collect::<Vec<_>>();
         if times.is_empty() {
-            return;
+            return Ok(());
         }
         for &time in &times {
             Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
         }
 
         let Some(repeat_from) = repeat_from else {
-            return;
+            return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         };
         let Some(&last) = times.last() else {
-            return;
+            return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         };
         let first = times[0];
         let repeat_start = (time_offset + repeat_from).max(first);
         if !repeat_start.is_finite() || repeat_start >= last {
-            return;
+            return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
         let period = last - repeat_start;
         if !period.is_finite() || period <= Value::EPSILON {
-            return;
+            return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
 
         let repeating_knots = times
@@ -417,10 +454,13 @@ impl Engine {
             .filter(|time| *time >= repeat_start)
             .collect::<Vec<_>>();
         if repeating_knots.is_empty() {
-            return;
+            return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
         let mut cycle = 1.0;
         loop {
+            if cycle as usize % 1024 == 0 {
+                Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
+            }
             let cycle_offset = period * cycle;
             let mut added = false;
             for &time in &repeating_knots {
@@ -436,9 +476,33 @@ impl Engine {
             }
             cycle += 1.0;
             if cycle > 1.0e6 {
+                if max_points != usize::MAX && repeat_start + period * cycle <= tstop {
+                    return Err(crate::engine::SimulationError::Circuit(
+                        "transient source-event PWL repetition exceeds the exact enumeration limit 1000000"
+                            .to_string(),
+                    ));
+                }
                 break;
             }
         }
+        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
+    }
+
+    fn check_source_breakpoint_collection(
+        breakpoints: &BreakpointManager,
+        abort: &dyn crate::abort_signal::AbortSignal,
+        max_points: usize,
+    ) -> Result<(), crate::engine::SimulationError> {
+        if abort.is_aborted() {
+            return Err(crate::engine::SimulationError::Aborted);
+        }
+        let count = breakpoints.times().len();
+        if count > max_points {
+            return Err(crate::engine::SimulationError::Circuit(format!(
+                "transient source-event schedule requires more than the configured {max_points} analysis points"
+            )));
+        }
+        Ok(())
     }
 
     pub(in crate::engine) fn collect_transient_source_breakpoints(
@@ -448,20 +512,17 @@ impl Engine {
         dialect: crate::engine::SpiceDialect,
         breakpoints: &mut BreakpointManager,
     ) {
-        for (spec, pwl_waveform) in circuit
-            .voltage_sources
-            .transient_specs_with_pwl()
-            .chain(circuit.current_sources.transient_specs_with_pwl())
-        {
-            Self::add_source_spec_breakpoints_with_pwl(
-                breakpoints,
-                spec,
-                pwl_waveform,
-                tstop,
-                tstep_hint,
-                dialect,
-            );
-        }
+        Self::collect_independent_source_breakpoints(
+            circuit,
+            tstop,
+            tstep_hint,
+            dialect,
+            None,
+            breakpoints,
+            &crate::abort_signal::NoAbort,
+            usize::MAX,
+        )
+        .expect("unbounded non-cancellable breakpoint collection cannot fail");
 
         for switch in &circuit.generic_switches {
             for &time in switch.time_breakpoints() {
@@ -492,6 +553,49 @@ impl Engine {
                 }
             }
         }
+    }
+
+    /// Collect authored independent-source events, optionally restricted to a
+    /// case-folded source-name set. This is deliberately narrower than the
+    /// transient integrator's complete breakpoint schedule: envelope
+    /// event-aligned sampling must follow the selected modulation sources,
+    /// not internal switch, transmission-line, or code-model events.
+    pub(in crate::engine) fn collect_independent_source_breakpoints(
+        circuit: &crate::circuit::Circuit,
+        tstop: Value,
+        tstep_hint: Value,
+        dialect: crate::engine::SpiceDialect,
+        selected_sources: Option<&std::collections::HashSet<String>>,
+        breakpoints: &mut BreakpointManager,
+        abort: &dyn crate::abort_signal::AbortSignal,
+        max_points: usize,
+    ) -> Result<(), crate::engine::SimulationError> {
+        for (index, (name, spec, pwl_waveform)) in circuit
+            .voltage_sources
+            .transient_specs_named_with_pwl()
+            .chain(circuit.current_sources.transient_specs_named_with_pwl())
+            .enumerate()
+        {
+            if index % 256 == 0 {
+                Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
+            }
+            if selected_sources
+                .is_some_and(|selected| !selected.contains(name.to_ascii_lowercase().as_str()))
+            {
+                continue;
+            }
+            Self::add_source_spec_breakpoints_with_pwl(
+                breakpoints,
+                spec,
+                pwl_waveform,
+                tstop,
+                tstep_hint,
+                dialect,
+                abort,
+                max_points,
+            )?;
+        }
+        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
 
     pub(super) fn transmission_line_delays(circuit: &crate::circuit::Circuit) -> Vec<Value> {
@@ -764,7 +868,10 @@ mod tests {
             10.0,
             0.1,
             crate::engine::SpiceDialect::Xyce,
-        );
+            &crate::abort_signal::NoAbort,
+            usize::MAX,
+        )
+        .expect("unbounded breakpoint extraction");
 
         assert_delays_close(breakpoints.times(), &[4.0, 8.0]);
     }

@@ -520,7 +520,7 @@ fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, 
 /// Collision-resistant identity of the fully elaborated semantic netlist.
 /// Source paths, diagnostics, and original source spelling are excluded;
 /// expanded include/SPEF content and public post-parse AST edits are included.
-pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
+pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"rspice-transient-elaborated-netlist-v3\0");
     hash_field(&mut hasher, "title", &netlist.title);
@@ -569,7 +569,7 @@ pub(super) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     Some(hasher.finalize().to_hex().to_string())
 }
 
-pub(super) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
+pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"rspice-transient-resolved-config-v2\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());

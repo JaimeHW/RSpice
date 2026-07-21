@@ -103,15 +103,27 @@ pub(super) fn run_periodic_spec(
         }
         AnalysisSpec::Envelope {
             fundamental_freq,
+            additional_carrier_tones,
             stop_time,
             num_harmonics,
-            max_step,
+            envelope_step,
+            modulation_sources,
+            initial_periodic_solve,
+            adaptive_mode,
+            extraction_path,
         } => run_envelope(
             netlist,
-            fundamental_freq,
-            stop_time,
-            num_harmonics,
-            max_step,
+            svc_runner::EnvelopeRunConfig {
+                fundamental_freq,
+                additional_carrier_tones,
+                stop_time,
+                num_harmonics,
+                envelope_step,
+                modulation_sources,
+                initial_periodic_solve,
+                adaptive_mode,
+                extraction_path,
+            },
             source_path,
             abort,
         ),
@@ -238,19 +250,10 @@ fn run_harmonic_balance(
 
 fn run_envelope(
     netlist: &str,
-    fundamental_freq: f64,
-    stop_time: f64,
-    num_harmonics: usize,
-    max_step: Option<f64>,
+    cfg: svc_runner::EnvelopeRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    let cfg = svc_runner::EnvelopeRunConfig {
-        fundamental_freq,
-        stop_time,
-        num_harmonics,
-        max_step,
-    };
     let data = super::run_abort_aware_service(abort, || {
         svc_runner::run_envelope_analysis_with_source_path_and_abort(
             netlist,
@@ -263,9 +266,16 @@ fn run_envelope(
     for (name, values) in data.waveforms {
         super::ensure_not_aborted(abort)?;
         let waveform_time = clone_values_with_abort(&data.time, abort)?;
+        let mut real = Vec::with_capacity(values.len());
+        let mut imaginary = Vec::with_capacity(values.len());
+        for (index, value) in values.into_iter().enumerate() {
+            poll_periodically(abort, index)?;
+            real.push(value.re);
+            imaginary.push(value.im);
+        }
         waveforms.insert(
             name.clone(),
-            WaveformData::new_time_domain(name, waveform_time, values),
+            WaveformData::new_complex_time_domain(name, waveform_time, real, imaginary),
         );
     }
 

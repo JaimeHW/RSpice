@@ -33,6 +33,28 @@ impl HbSolver {
             result.spectral_voltages.push(sv);
         }
 
+        for (branch_idx, spectrum) in state.mna_branch_currents.iter().enumerate() {
+            result.mna_branch_currents.push(SpectralBranchCurrent {
+                device_name: self
+                    .voltage_source_branch_names
+                    .get(branch_idx)
+                    .cloned()
+                    .unwrap_or_else(|| format!("V{}", branch_idx + 1)),
+                coefficients: spectrum
+                    .iter()
+                    .enumerate()
+                    .map(|(harmonic, &coefficient)| {
+                        if harmonic == 0 {
+                            coefficient
+                        } else {
+                            coefficient * 2.0
+                        }
+                    })
+                    .collect(),
+                frequencies: self.config.harmonic_frequencies(),
+            });
+        }
+
         result
     }
 }

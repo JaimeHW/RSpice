@@ -559,8 +559,8 @@ impl SimSetupState {
                 }
             }
             19 => format!(
-                "f0 {} · to {}",
-                self.envelope.fundamental, self.envelope.stop_time
+                "tones {} · to {}",
+                self.envelope.carrier_tones, self.envelope.stop_time
             ),
             20 => format!(
                 "f0 {} · {}h @ {}",

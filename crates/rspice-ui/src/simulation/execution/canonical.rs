@@ -15,7 +15,8 @@ use crate::services::simulation_runner::{
 use crate::simulation::AnalysisConfig;
 use crate::simulation::config::{AcSweepType, PzAnalysisType};
 use crate::simulation::multi_run::{
-    AnalysisSpec, FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
+    AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
+    FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
 };
 use crate::simulation::runner::SpecExecutionOptions;
 
@@ -682,14 +683,27 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
         }
         AnalysisSpec::Envelope {
             fundamental_freq,
+            additional_carrier_tones,
             stop_time,
             num_harmonics,
-            max_step,
+            envelope_step,
+            modulation_sources,
+            initial_periodic_solve,
+            adaptive_mode,
+            extraction_path,
         } => {
             writer.f64(*fundamental_freq);
+            encode_f64_slice(writer, additional_carrier_tones);
             writer.f64(*stop_time);
             writer.usize(*num_harmonics);
-            writer.option(max_step.as_ref(), |w, v| w.f64(*v));
+            writer.option(envelope_step.as_ref(), |w, v| w.f64(*v));
+            writer.sequence(modulation_sources.len());
+            for source in modulation_sources {
+                writer.string(source);
+            }
+            encode_envelope_initial_periodic_solve(writer, *initial_periodic_solve);
+            encode_envelope_adaptive_mode(writer, *adaptive_mode);
+            encode_envelope_extraction_path(writer, *extraction_path);
         }
         AnalysisSpec::Fourier {
             fundamental_freq,
@@ -1112,6 +1126,31 @@ fn encode_frequency_sweep(writer: &mut CanonicalWriter, sweep: FrequencySweep) {
     });
 }
 
+fn encode_envelope_initial_periodic_solve(
+    writer: &mut CanonicalWriter,
+    value: EnvelopeInitialPeriodicSolve,
+) {
+    writer.u8(match value {
+        EnvelopeInitialPeriodicSolve::HarmonicBalance => 0,
+        EnvelopeInitialPeriodicSolve::PeriodicSteadyState => 1,
+        EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => 2,
+    });
+}
+
+fn encode_envelope_adaptive_mode(writer: &mut CanonicalWriter, value: EnvelopeAdaptiveMode) {
+    writer.u8(match value {
+        EnvelopeAdaptiveMode::Enabled => 0,
+        EnvelopeAdaptiveMode::FixedEnvelopeStep => 1,
+        EnvelopeAdaptiveMode::EventAlignedOnly => 2,
+    });
+}
+
+fn encode_envelope_extraction_path(writer: &mut CanonicalWriter, value: EnvelopeExtractionPath) {
+    writer.u8(match value {
+        EnvelopeExtractionPath::Preview => 0,
+    });
+}
+
 pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
     match spec {
         AnalysisSpec::DcOp => 0,
@@ -1274,6 +1313,60 @@ mod tests {
         let baseline = digest(&spec(true, false));
         assert_ne!(baseline, digest(&spec(false, false)));
         assert_ne!(baseline, digest(&spec(true, true)));
+    }
+
+    #[test]
+    fn envelope_owned_controls_are_bound_into_the_config_digest() {
+        let base = AnalysisSpec::Envelope {
+            fundamental_freq: 1.0e6,
+            additional_carrier_tones: vec![2.0e6],
+            stop_time: 10.0e-3,
+            num_harmonics: 9,
+            envelope_step: Some(1.0e-6),
+            modulation_sources: vec!["VIN_AM".to_owned()],
+            initial_periodic_solve: EnvelopeInitialPeriodicSolve::HarmonicBalance,
+            adaptive_mode: EnvelopeAdaptiveMode::Enabled,
+            extraction_path: EnvelopeExtractionPath::Preview,
+        };
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(".envlp", spec, None, &SpecExecutionOptions::default())
+        };
+        let baseline = digest(&base);
+
+        let mut changed_tones = base.clone();
+        if let AnalysisSpec::Envelope {
+            additional_carrier_tones,
+            ..
+        } = &mut changed_tones
+        {
+            additional_carrier_tones.push(3.0e6);
+        }
+        assert_ne!(baseline, digest(&changed_tones));
+
+        let mut changed_sources = base.clone();
+        if let AnalysisSpec::Envelope {
+            modulation_sources, ..
+        } = &mut changed_sources
+        {
+            modulation_sources.push("VCTRL".to_owned());
+        }
+        assert_ne!(baseline, digest(&changed_sources));
+
+        let mut changed_initial = base.clone();
+        if let AnalysisSpec::Envelope {
+            initial_periodic_solve,
+            ..
+        } = &mut changed_initial
+        {
+            *initial_periodic_solve = EnvelopeInitialPeriodicSolve::PeriodicSteadyState;
+        }
+        assert_ne!(baseline, digest(&changed_initial));
+
+        let mut changed_adaptive = base.clone();
+        if let AnalysisSpec::Envelope { adaptive_mode, .. } = &mut changed_adaptive {
+            *adaptive_mode = EnvelopeAdaptiveMode::EventAlignedOnly;
+        }
+        assert_ne!(baseline, digest(&changed_adaptive));
     }
 
     #[test]

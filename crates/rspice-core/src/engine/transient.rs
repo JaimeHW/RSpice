@@ -64,7 +64,7 @@ mod truncation;
 mod vbic;
 
 pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
-use checkpoint::{netlist_checkpoint_identity, simulation_checkpoint_identity};
+pub(crate) use checkpoint::{netlist_checkpoint_identity, simulation_checkpoint_identity};
 
 mod history;
 pub(self) use history::*;
@@ -660,6 +660,216 @@ impl Engine {
         max_step: Value,
     ) -> Result<TransientResult, SimulationError> {
         self.run_tran_with_abort(netlist, tstop, max_step, &NoAbort)
+    }
+
+    /// Return the exact discontinuity/event times authored by selected
+    /// independent transient sources over `[0, tstop]`.
+    ///
+    /// This uses the same dialect-aware PULSE/PWL/PAT/default-resolution code
+    /// and immutable external-PWL snapshots as the transient integrator. An
+    /// empty `source_names` slice selects every independent source. Names are
+    /// matched case-insensitively and unknown names are rejected rather than
+    /// silently producing an incomplete event-aligned schedule.
+    ///
+    /// The returned schedule intentionally excludes internally generated
+    /// switch, transmission-line, behavioral-expression, and XSPICE events;
+    /// it is the source-event contract needed by analyses whose sampling is
+    /// explicitly aligned to authored modulation sources.
+    pub fn transient_source_event_times(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        source_names: &[String],
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.transient_source_event_times_with_abort(
+            netlist,
+            tstop,
+            max_step,
+            source_names,
+            &NoAbort,
+        )
+    }
+
+    /// Cancellable, resource-bounded form of
+    /// [`Self::transient_source_event_times`].
+    pub fn transient_source_event_times_with_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        source_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        validate_transient_window(tstop, max_step)?;
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_transient_request_floor(tstop, max_step)?;
+        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
+            Some(expanded) => engine.transient_source_event_times_resolved(
+                &expanded,
+                tstop,
+                max_step,
+                source_names,
+                abort,
+            ),
+            None => engine.transient_source_event_times_resolved(
+                netlist,
+                tstop,
+                max_step,
+                source_names,
+                abort,
+            ),
+        }
+    }
+
+    /// List every elaborated independent source with an authored transient
+    /// waveform in deterministic canonical-name order.
+    pub fn transient_source_names(
+        &self,
+        netlist: &Netlist,
+    ) -> Result<Vec<String>, SimulationError> {
+        self.transient_source_names_with_abort(netlist, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::transient_source_names`]. Names are the
+    /// canonical, hierarchy-expanded circuit identities accepted by
+    /// [`Self::validate_transient_source_names`].
+    pub fn transient_source_names_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<String>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        let mut names = circuit
+            .voltage_sources
+            .transient_specs_named_with_pwl()
+            .chain(circuit.current_sources.transient_specs_named_with_pwl())
+            .map(|(name, _, _)| name.to_owned())
+            .collect::<Vec<_>>();
+        names.sort_by(|left, right| {
+            left.to_ascii_lowercase()
+                .cmp(&right.to_ascii_lowercase())
+                .then_with(|| left.cmp(right))
+        });
+        names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+        Ok(names)
+    }
+
+    /// Validate that every requested case-insensitive source name resolves to
+    /// an elaborated independent source with an authored transient waveform.
+    pub fn validate_transient_source_names(
+        &self,
+        netlist: &Netlist,
+        source_names: &[String],
+    ) -> Result<(), SimulationError> {
+        self.validate_transient_source_names_with_abort(netlist, source_names, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::validate_transient_source_names`].
+    pub fn validate_transient_source_names_with_abort(
+        &self,
+        netlist: &Netlist,
+        source_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        Self::validated_transient_source_selection(&circuit, source_names)?;
+        Ok(())
+    }
+
+    fn validated_transient_source_selection(
+        circuit: &crate::circuit::Circuit,
+        source_names: &[String],
+    ) -> Result<std::collections::HashSet<String>, SimulationError> {
+        let available = circuit
+            .voltage_sources
+            .names
+            .iter()
+            .chain(&circuit.current_sources.names)
+            .map(|name| name.to_ascii_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let transient = circuit
+            .voltage_sources
+            .transient_specs_named_with_pwl()
+            .chain(circuit.current_sources.transient_specs_named_with_pwl())
+            .map(|(name, _, _)| name.to_ascii_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let mut selected = std::collections::HashSet::with_capacity(source_names.len());
+        for source in source_names {
+            let normalized = source.trim().to_ascii_lowercase();
+            if normalized.is_empty() {
+                return Err(SimulationError::Circuit(
+                    "transient source selection contains an empty source name".to_string(),
+                ));
+            }
+            if !selected.insert(normalized.clone()) {
+                return Err(SimulationError::Circuit(format!(
+                    "transient source selection repeats independent source '{normalized}'"
+                )));
+            }
+            if !available.contains(&normalized) {
+                return Err(SimulationError::Circuit(format!(
+                    "transient source selection references unknown independent source '{normalized}'"
+                )));
+            }
+            if !transient.contains(&normalized) {
+                return Err(SimulationError::Circuit(format!(
+                    "transient source selection '{normalized}' has no time-varying waveform"
+                )));
+            }
+        }
+        Ok(selected)
+    }
+
+    fn transient_source_event_times_resolved(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        source_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let selected = Self::validated_transient_source_selection(&circuit, source_names)?;
+
+        let hinted_max_step = circuit
+            .transient_max_step_hint
+            .map_or(max_step, |hint| max_step.min(hint));
+        let hinted_max_step = self
+            .config
+            .transient_timeint_max_timestep
+            .filter(|bound| bound.is_finite() && *bound > 0.0)
+            .map_or(hinted_max_step, |bound| hinted_max_step.min(bound));
+        let hinted_max_step =
+            if self.config.max_timestep.is_finite() && self.config.max_timestep > 0.0 {
+                hinted_max_step.min(self.config.max_timestep)
+            } else {
+                hinted_max_step
+            };
+        let source_step_hint = Self::transient_source_step_hint(netlist, hinted_max_step);
+        let mut breakpoints = BreakpointManager::new();
+        Self::collect_independent_source_breakpoints(
+            &circuit,
+            tstop,
+            source_step_hint,
+            self.config.spice_dialect,
+            (!selected.is_empty()).then_some(&selected),
+            &mut breakpoints,
+            abort,
+            self.config.resource_limits.max_analysis_points,
+        )?;
+        Ok(breakpoints.times().to_vec())
     }
 
     /// Run transient analysis with abort signal for cancellation

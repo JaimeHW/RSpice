@@ -12,6 +12,36 @@ pub enum PssMethod {
     HarmonicBalance,
 }
 
+/// Periodic initialization used before an envelope-following solve.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvelopeInitialPeriodicSolve {
+    HarmonicBalance,
+    PeriodicSteadyState,
+    /// Compatibility default for specifications saved before this control existed.
+    #[default]
+    TransientSpectralEstimate,
+}
+
+/// Slow-time step policy for envelope analysis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvelopeAdaptiveMode {
+    Enabled,
+    /// Compatibility default preserving legacy fixed-step envelope requests.
+    #[default]
+    FixedEnvelopeStep,
+    EventAlignedOnly,
+}
+
+/// Available envelope result-extraction implementation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvelopeExtractionPath {
+    #[default]
+    Preview,
+}
+
 const fn default_pss_max_iterations() -> usize {
     50
 }
@@ -286,10 +316,23 @@ pub enum AnalysisSpec {
     },
     /// Envelope transient analysis
     Envelope {
+        /// First carrier frequency. Retained as a scalar for legacy payload
+        /// compatibility; subsequent carriers are stored separately.
         fundamental_freq: f64,
+        #[serde(default)]
+        additional_carrier_tones: Vec<f64>,
         stop_time: f64,
         num_harmonics: usize,
-        max_step: Option<f64>,
+        #[serde(default, alias = "max_step")]
+        envelope_step: Option<f64>,
+        #[serde(default)]
+        modulation_sources: Vec<String>,
+        #[serde(default)]
+        initial_periodic_solve: EnvelopeInitialPeriodicSolve,
+        #[serde(default)]
+        adaptive_mode: EnvelopeAdaptiveMode,
+        #[serde(default)]
+        extraction_path: EnvelopeExtractionPath,
     },
     /// Fourier analysis
     Fourier {

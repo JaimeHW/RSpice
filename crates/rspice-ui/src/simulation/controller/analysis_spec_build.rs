@@ -557,12 +557,21 @@ impl SimulationController {
         let envelope_cfg = envelope_state
             .to_config()
             .map_err(|e| format!("invalid envelope settings: {}", e))?;
-        let max_step = (envelope_cfg.max_step > 0.0).then_some(envelope_cfg.max_step);
+        let (fundamental_freq, additional_carrier_tones) = envelope_cfg
+            .carrier_tones
+            .split_first()
+            .map(|(first, additional)| (*first, additional.to_vec()))
+            .ok_or_else(|| "invalid envelope settings: carrier tone list is empty".to_owned())?;
         Ok(AnalysisSpec::Envelope {
-            fundamental_freq: envelope_cfg.fundamental_freq,
+            fundamental_freq,
+            additional_carrier_tones,
             stop_time: envelope_cfg.stop_time,
-            num_harmonics: envelope_cfg.num_harmonics as usize,
-            max_step,
+            num_harmonics: envelope_cfg.harmonic_order as usize,
+            envelope_step: Some(envelope_cfg.envelope_step),
+            modulation_sources: envelope_cfg.modulation_sources,
+            initial_periodic_solve: envelope_cfg.initial_periodic_solve,
+            adaptive_mode: envelope_cfg.adaptive_mode,
+            extraction_path: envelope_cfg.extraction_path,
         })
     }
 
@@ -872,6 +881,9 @@ fn parse_lattice_ranges(text: &str) -> Result<([i32; 2], [i32; 2]), String> {
 #[cfg(test)]
 mod manifest_tests {
     use super::*;
+    use crate::simulation::multi_run::{
+        EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
+    };
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     #[test]
@@ -960,5 +972,38 @@ mod manifest_tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn envelope_draft_projects_every_mockup_owned_execution_field() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.envelope.ensure_initialized();
+        state.sim_setup.envelope.carrier_tones = "1Meg, 2.5Meg".to_owned();
+        state.sim_setup.envelope.stop_time = "10m".to_owned();
+        state.sim_setup.envelope.envelope_step = "1u".to_owned();
+        state.sim_setup.envelope.harmonic_order = "11".to_owned();
+        state.sim_setup.envelope.modulation_sources = "VIN_AM, VCTRL".to_owned();
+        state.sim_setup.envelope.initial_periodic_solve_idx = 1;
+        state.sim_setup.envelope.adaptive_mode_idx = 2;
+        state.sim_setup.envelope.extraction_path_idx = 0;
+
+        let spec = controller
+            .build_envelope_spec(&state)
+            .expect("Envelope spec builds");
+        assert_eq!(
+            spec,
+            AnalysisSpec::Envelope {
+                fundamental_freq: 1.0e6,
+                additional_carrier_tones: vec![2.5e6],
+                stop_time: 10.0e-3,
+                num_harmonics: 11,
+                envelope_step: Some(1.0e-6),
+                modulation_sources: vec!["VIN_AM".to_owned(), "VCTRL".to_owned()],
+                initial_periodic_solve: EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
+                adaptive_mode: EnvelopeAdaptiveMode::EventAlignedOnly,
+                extraction_path: EnvelopeExtractionPath::Preview,
+            }
+        );
     }
 }

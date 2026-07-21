@@ -94,7 +94,7 @@ pub use mc::{McBaseAnalysis, McConfig, McDialogState, McDistribution};
 pub use temp::{TempBaseAnalysis, TempConfig, TempDialogState};
 
 // Re-exports - Envelope/Fourier
-pub use envelope::{EnvelopeConfig, EnvelopeDialogState, ModulationType};
+pub use envelope::{EnvelopeConfig, EnvelopeDialogState};
 pub use fourier::{FourierConfig, FourierDialogState};
 pub use optimization::{
     OptimizationAlgorithmMode, OptimizationConfig, OptimizationDialogState, OptimizationGoalMode,

@@ -390,6 +390,12 @@ impl AnalysisInstance {
         &self.dependencies
     }
 
+    /// Exact dependency roles required by this instance's current draft.
+    #[must_use]
+    pub fn prerequisite_roles(&self) -> &'static [AnalysisKind] {
+        self.draft.prerequisite_roles()
+    }
+
     #[must_use]
     pub const fn lifecycle(&self) -> AnalysisLifecycleState {
         self.lifecycle
@@ -1266,7 +1272,10 @@ impl SimulationPlan {
         prerequisite: AnalysisKind,
         target: &AnalysisInstance,
     ) -> Result<bool, String> {
-        if dependent.id == target.id || target.kind != prerequisite {
+        if dependent.id == target.id
+            || !dependent.prerequisite_roles().contains(&prerequisite)
+            || target.kind != prerequisite
+        {
             return Ok(false);
         }
         Ok(dependency_configuration_issue(&dependent.draft, &target.draft).is_none())
@@ -1282,6 +1291,15 @@ impl SimulationPlan {
     pub fn prepare_after_restore(&mut self) {
         for instance in &mut self.instances {
             instance.draft.prepare_after_restore();
+            let required_roles = instance.draft.prerequisite_roles();
+            // Schema migrations may retire a dependency role. Retaining such
+            // an edge would make an otherwise valid saved plan structurally
+            // corrupt, so restore prunes only roles the current typed draft no
+            // longer owns. Required edges and immutable receipt history remain
+            // untouched.
+            instance
+                .dependencies
+                .retain(|dependency| required_roles.contains(&dependency.prerequisite));
             if instance.lifecycle.is_executing() {
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -1365,8 +1383,7 @@ impl SimulationPlan {
             let mut roles = HashSet::new();
             for dependency in &instance.dependencies {
                 if !instance
-                    .kind
-                    .prerequisites()
+                    .prerequisite_roles()
                     .contains(&dependency.prerequisite)
                 {
                     issues.push(AnalysisPlanIssue::UnexpectedDependencyRole {
@@ -1433,7 +1450,7 @@ impl SimulationPlan {
                 }
             }
             if instance.enabled {
-                for prerequisite in instance.kind.prerequisites() {
+                for prerequisite in instance.prerequisite_roles() {
                     if !roles.contains(prerequisite) {
                         issues.push(AnalysisPlanIssue::MissingPrerequisite {
                             dependent: instance.id,
@@ -1860,7 +1877,20 @@ impl SimulationPlan {
                 if expected != actual {
                     return Err(AnalysisPlanError::DraftKindMismatch { expected, actual });
                 }
+                let required_roles = candidate.instances[index]
+                    .draft
+                    .prerequisite_roles()
+                    .to_vec();
                 let instance = &mut candidate.instances[index];
+                // A draft edit can legitimately change the dependency schema.
+                // Remove obsolete edges in the same atomic edit so an ordinary
+                // form change cannot create structural corruption. A newly
+                // required unbound role remains a precise MissingPrerequisite
+                // issue and can be resolved by bind/repair without rewriting
+                // history.
+                instance
+                    .dependencies
+                    .retain(|dependency| required_roles.contains(&dependency.prerequisite));
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -1966,8 +1996,7 @@ impl SimulationPlan {
                 }
                 let retained_dependencies = enabled.then(|| {
                     candidate.instances[index]
-                        .kind
-                        .prerequisites()
+                        .prerequisite_roles()
                         .iter()
                         .filter_map(|prerequisite| {
                             candidate.instances[index]
@@ -2077,8 +2106,7 @@ impl SimulationPlan {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
                 if !candidate.instances[dependent_index]
-                    .kind
-                    .prerequisites()
+                    .prerequisite_roles()
                     .contains(&prerequisite)
                 {
                     return Err(AnalysisPlanError::UnexpectedDependencyRole {
@@ -2171,8 +2199,7 @@ impl SimulationPlan {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
                 let prerequisites = candidate.instances[dependent_index]
-                    .kind
-                    .prerequisites()
+                    .prerequisite_roles()
                     .to_vec();
                 let dependencies = prerequisites
                     .into_iter()
@@ -2272,8 +2299,7 @@ impl SimulationPlan {
         self.ensure_editable(dependent_index)?;
         visiting.push(dependent);
         let prerequisites = self.instances[dependent_index]
-            .kind
-            .prerequisites()
+            .prerequisite_roles()
             .to_vec();
 
         for prerequisite in prerequisites {
@@ -2541,6 +2567,51 @@ mod tests {
             draft.max_step = "100p".to_owned();
         })
         .expect("Transient draft edits");
+    }
+
+    #[test]
+    fn envelope_initializer_remains_internal_and_dependency_free() {
+        let mut plan = SimulationPlan::empty();
+        let (envelope, _) = plan
+            .insert(AnalysisKind::Envelope)
+            .expect("Envelope inserts");
+
+        for selection in 0..=2 {
+            plan.edit(envelope, |draft| {
+                let AnalysisDraft::Envelope(draft) = draft else {
+                    panic!("expected Envelope draft");
+                };
+                draft.initial_periodic_solve_idx = selection;
+            })
+            .expect("Envelope initializer edits");
+            assert!(plan.instance(envelope).unwrap().dependencies().is_empty());
+            assert!(plan.validation_issues().is_empty());
+        }
+    }
+
+    #[test]
+    fn restore_prunes_the_retired_external_envelope_initializer_role() {
+        let mut plan = SimulationPlan::empty();
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let (hb, _) = plan
+            .insert(AnalysisKind::HarmonicBalance)
+            .expect("HB inserts");
+        plan.bind_dependency(hb, AnalysisKind::OperatingPoint, op)
+            .expect("HB binds OP");
+        let (envelope, _) = plan
+            .insert(AnalysisKind::Envelope)
+            .expect("Envelope inserts");
+        let envelope_index = plan.index_of(envelope).expect("Envelope index");
+        plan.instances[envelope_index]
+            .dependencies
+            .push(AnalysisDependency::new(AnalysisKind::HarmonicBalance, hb));
+
+        plan.prepare_after_restore();
+
+        assert!(plan.instance(envelope).unwrap().dependencies().is_empty());
+        assert!(plan.validation_issues().is_empty());
     }
 
     #[test]

@@ -19,8 +19,9 @@ mod tests {
         PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
     };
     use crate::simulation::multi_run::{
-        AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
-        OptimizationVariable, PssMethod, SpPort,
+        AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
+        FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
+        PssMethod, SpPort,
     };
     use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
     use std::collections::HashMap;
@@ -83,6 +84,38 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn legacy_envelope_specs_migrate_identically_across_worker_transport() {
+        let fields = serde_json::json!({
+            "fundamental_freq": 1.0e6,
+            "stop_time": 10.0e-3,
+            "num_harmonics": 9,
+            "max_step": 1.0e-6
+        });
+        let analysis: AnalysisSpec = serde_json::from_value(serde_json::json!({
+            "Envelope": fields.clone()
+        }))
+        .expect("legacy analysis spec deserializes");
+        let worker: WorkerAnalysisSpec = serde_json::from_value(serde_json::json!({
+            "Envelope": fields
+        }))
+        .expect("legacy worker spec deserializes");
+
+        let expected = AnalysisSpec::Envelope {
+            fundamental_freq: 1.0e6,
+            additional_carrier_tones: Vec::new(),
+            stop_time: 10.0e-3,
+            num_harmonics: 9,
+            envelope_step: Some(1.0e-6),
+            modulation_sources: Vec::new(),
+            initial_periodic_solve: EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+            adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
+            extraction_path: EnvelopeExtractionPath::Preview,
+        };
+        assert_eq!(analysis, expected);
+        assert_eq!(AnalysisSpec::from(worker), expected);
     }
 
     #[test]
@@ -1041,9 +1074,14 @@ mod tests {
             },
             AnalysisSpec::Envelope {
                 fundamental_freq: 1e6,
+                additional_carrier_tones: vec![2e6],
                 stop_time: 10e-6,
                 num_harmonics: 7,
-                max_step: Some(10e-9),
+                envelope_step: Some(10e-9),
+                modulation_sources: vec!["VIN_AM".to_owned(), "VCTRL".to_owned()],
+                initial_periodic_solve: EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
+                adaptive_mode: EnvelopeAdaptiveMode::EventAlignedOnly,
+                extraction_path: EnvelopeExtractionPath::Preview,
             },
             AnalysisSpec::Fourier {
                 fundamental_freq: 1e6,
@@ -2161,8 +2199,9 @@ use crate::simulation::config::{
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{
-    AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
-    OptimizationVariable, PssMethod, SpPort,
+    AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
+    FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
+    PssMethod, SpPort,
 };
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use crate::simulation::results::{
@@ -3209,9 +3248,20 @@ pub(crate) enum WorkerAnalysisSpec {
     },
     Envelope {
         fundamental_freq: f64,
+        #[serde(default)]
+        additional_carrier_tones: Vec<f64>,
         stop_time: f64,
         num_harmonics: usize,
-        max_step: Option<f64>,
+        #[serde(default, alias = "max_step")]
+        envelope_step: Option<f64>,
+        #[serde(default)]
+        modulation_sources: Vec<String>,
+        #[serde(default)]
+        initial_periodic_solve: EnvelopeInitialPeriodicSolve,
+        #[serde(default)]
+        adaptive_mode: EnvelopeAdaptiveMode,
+        #[serde(default)]
+        extraction_path: EnvelopeExtractionPath,
     },
     Fourier {
         fundamental_freq: f64,
@@ -3482,14 +3532,24 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             }),
             AnalysisSpec::Envelope {
                 fundamental_freq,
+                additional_carrier_tones,
                 stop_time,
                 num_harmonics,
-                max_step,
+                envelope_step,
+                modulation_sources,
+                initial_periodic_solve,
+                adaptive_mode,
+                extraction_path,
             } => Ok(Self::Envelope {
                 fundamental_freq: *fundamental_freq,
+                additional_carrier_tones: additional_carrier_tones.clone(),
                 stop_time: *stop_time,
                 num_harmonics: *num_harmonics,
-                max_step: *max_step,
+                envelope_step: *envelope_step,
+                modulation_sources: modulation_sources.clone(),
+                initial_periodic_solve: *initial_periodic_solve,
+                adaptive_mode: *adaptive_mode,
+                extraction_path: *extraction_path,
             }),
             AnalysisSpec::Fourier {
                 fundamental_freq,
@@ -3772,14 +3832,24 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             },
             WorkerAnalysisSpec::Envelope {
                 fundamental_freq,
+                additional_carrier_tones,
                 stop_time,
                 num_harmonics,
-                max_step,
+                envelope_step,
+                modulation_sources,
+                initial_periodic_solve,
+                adaptive_mode,
+                extraction_path,
             } => Self::Envelope {
                 fundamental_freq,
+                additional_carrier_tones,
                 stop_time,
                 num_harmonics,
-                max_step,
+                envelope_step,
+                modulation_sources,
+                initial_periodic_solve,
+                adaptive_mode,
+                extraction_path,
             },
             WorkerAnalysisSpec::Fourier {
                 fundamental_freq,

@@ -479,7 +479,21 @@ fn validate_choice_indices(plan: &SimSetupState) -> Result<(), String> {
         ("pxf.sweep_type_idx", plan.pxf.sweep_type_idx, 2),
         ("xf.sweep_type_idx", plan.xf.sweep_type_idx, 2),
         ("corner.base_analysis_idx", plan.corner.base_analysis_idx, 3),
-        ("envelope.modulation_idx", plan.envelope.modulation_idx, 3),
+        (
+            "envelope.initial_periodic_solve_idx",
+            plan.envelope.initial_periodic_solve_idx,
+            2,
+        ),
+        (
+            "envelope.adaptive_mode_idx",
+            plan.envelope.adaptive_mode_idx,
+            2,
+        ),
+        (
+            "envelope.extraction_path_idx",
+            plan.envelope.extraction_path_idx,
+            0,
+        ),
         ("optimization.goal_mode", plan.optimization.goal_mode, 2),
         ("optimization.algorithm", plan.optimization.algorithm, 2),
     ];

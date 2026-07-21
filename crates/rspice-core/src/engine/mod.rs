@@ -70,9 +70,12 @@ pub use dc::DcSweepPointResult;
 pub use error::{
     SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
-pub use hb::{HbAnalysisResult, PacAnalysisResult, PnoiseAnalysisResult};
+pub use hb::{
+    HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee, PacAnalysisResult,
+    PnoiseAnalysisResult,
+};
 pub use health::EngineHealthReport;
-pub use pss::{PssAnalysisResult, PssError};
+pub use pss::{PssAnalysisResult, PssContinuationState, PssError};
 pub use pss_noise::OscPnoiseResult;
 pub use result::{TransientResult, TransientStoreTrace};
 pub use stb::StbAnalysisResult;

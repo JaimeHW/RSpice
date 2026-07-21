@@ -137,7 +137,8 @@ impl SimSetupState {
         let mut instances = Vec::with_capacity(staged.len());
         for (position, (id, kind, draft, enabled)) in staged.iter().cloned().enumerate() {
             let dependencies = if enabled {
-                kind.prerequisites()
+                draft
+                    .prerequisite_roles()
                     .iter()
                     .filter_map(|prerequisite| {
                         staged[..position]

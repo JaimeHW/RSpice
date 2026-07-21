@@ -16,11 +16,31 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, check_row as inspector_check_row, choice_row as inspector_choice_row,
-    input_row as inspector_input_row, mono_input, select,
+    input_row as inspector_input_row, mono_input, select, select_mono_with_response,
 };
 use crate::workbench::design_system::property_row as inspector_property_row;
 
 const SWEEP_KINDS: &[&str] = &["dec", "oct", "lin"];
+const ENVELOPE_FIELD_LABELS: [&str; 8] = [
+    "Carrier tones",
+    "Envelope stop",
+    "Envelope step",
+    "Harmonic order",
+    "Modulation sources",
+    "Initial periodic solve",
+    "Output schedule",
+    "Extraction path",
+];
+const ENVELOPE_INITIAL_SOLVE_CHOICES: &[&str] = &["HB", "PSS", "Transient spectral estimate"];
+const ENVELOPE_ADAPTIVE_CHOICES: &[&str] = &[
+    "Adaptive solver samples",
+    "Fixed envelope step",
+    "Event-aligned only",
+];
+const ENVELOPE_DECLARED_SOURCES_CHOICE: &str = "Declared list...";
+const ENVELOPE_EXTRACTION_PATH: &str = "Preview";
+const ENVELOPE_HARMONIC_ORDER_HELPER: &str = "positive integer";
+const ENVELOPE_INLINE_CONTROL_GAP: f32 = 6.0;
 const FIELD_COLUMN_GAP: f32 = 14.0;
 const FIELD_ROW_GAP: f32 = 10.0;
 const FIELD_LABEL_HEIGHT: f32 = 15.0;
@@ -68,7 +88,12 @@ fn next_field_cell(ui: &mut Ui) -> Rect {
     left
 }
 
-fn field_cell<R>(ui: &mut Ui, label: &str, add_control: impl FnOnce(&mut Ui) -> R) -> R {
+fn field_cell<R>(
+    ui: &mut Ui,
+    label: &str,
+    helper: Option<&str>,
+    add_control: impl FnOnce(&mut Ui) -> R,
+) -> R {
     let t = Tokens::get(ui.ctx());
     let rect = next_field_cell(ui);
     let mut cell = ui.new_child(
@@ -89,6 +114,15 @@ fn field_cell<R>(ui: &mut Ui, label: &str, add_control: impl FnOnce(&mut Ui) -> 
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
+    if let Some(helper) = helper {
+        cell.painter().text(
+            label_rect.right_center(),
+            egui::Align2::RIGHT_CENTER,
+            helper,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        );
+    }
     add_control(&mut cell)
 }
 
@@ -96,7 +130,9 @@ fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
     if !uses_two_column_fields(ui) {
         return inspector_input_row(ui, label, value);
     }
-    field_cell(ui, label, |ui| mono_input(ui, value, ui.available_width()))
+    field_cell(ui, label, Some("engineering notation"), |ui| {
+        mono_input(ui, value, ui.available_width())
+    })
 }
 
 fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool) -> Response {
@@ -105,7 +141,7 @@ fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool
             .add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
             .inner;
     }
-    field_cell(ui, label, |ui| {
+    field_cell(ui, label, Some("engineering notation"), |ui| {
         ui.add_enabled_ui(enabled, |ui| mono_input(ui, value, ui.available_width()))
             .inner
     })
@@ -161,7 +197,7 @@ fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> 
     if !uses_two_column_fields(ui) {
         return inspector_choice_row(ui, label, options, value);
     }
-    field_cell(ui, label, |ui| {
+    field_cell(ui, label, Some("domain constrained"), |ui| {
         let options = options
             .iter()
             .map(|option| (*option).to_owned())
@@ -179,11 +215,241 @@ fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> 
     })
 }
 
+fn mono_input_with_suffix(ui: &mut Ui, value: &mut String, suffix: &'static str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let suffix_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let suffix_width = ui
+        .painter()
+        .layout_no_wrap(suffix.to_owned(), suffix_font.clone(), t.color.text_dim)
+        .size()
+        .x;
+    ui.allocate_ui_with_layout(
+        vec2(width, t.metrics.ctl_h),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
+            let input_width = (width - suffix_width - ENVELOPE_INLINE_CONTROL_GAP).max(1.0);
+            let response = mono_input(ui, value, input_width);
+            let (suffix_rect, _) =
+                ui.allocate_exact_size(vec2(suffix_width, t.metrics.ctl_h), egui::Sense::hover());
+            ui.painter().text(
+                suffix_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                suffix,
+                suffix_font,
+                t.color.text_dim,
+            );
+            response
+        },
+    )
+    .inner
+}
+
+fn normalize_quantity_on_focus_loss(
+    response: &Response,
+    value: &mut String,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
+    if response.lost_focus()
+        && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
+    {
+        let schema_value = if kind == QuantityInputKind::Temperature {
+            parsed - 273.15
+        } else {
+            parsed
+        };
+        *value = format!("{schema_value:.17e}");
+    }
+}
+
+fn envelope_time_input_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) -> Response {
+    let response = if uses_two_column_fields(ui) {
+        field_cell(ui, label, Some("engineering notation"), |ui| {
+            mono_input_with_suffix(ui, value, "s")
+        })
+    } else {
+        let t = Tokens::get(ui.ctx());
+        let row_h = t.metrics.row_h;
+        let color = t.color.text_dim;
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), row_h),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let (label_rect, _) =
+                    ui.allocate_exact_size(vec2(96.0, row_h), egui::Sense::hover());
+                ui.painter().text(
+                    label_rect.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    label,
+                    theme::sans(tokens::FS_1, FontWeight::Regular),
+                    color,
+                );
+                mono_input_with_suffix(ui, value, "s")
+            },
+        )
+        .inner
+    };
+    normalize_quantity_on_focus_loss(&response, value, QuantityInputKind::Time, policy, locale);
+    response
+}
+
+fn envelope_harmonic_order_row(ui: &mut Ui, value: &mut String) -> Response {
+    if !uses_two_column_fields(ui) {
+        return inspector_input_row(ui, ENVELOPE_FIELD_LABELS[3], value);
+    }
+    field_cell(
+        ui,
+        ENVELOPE_FIELD_LABELS[3],
+        Some(ENVELOPE_HARMONIC_ORDER_HELPER),
+        |ui| mono_input(ui, value, ui.available_width()),
+    )
+}
+
+fn envelope_choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> bool {
+    let mut add_control = |ui: &mut Ui| {
+        let options = options
+            .iter()
+            .map(|option| (*option).to_owned())
+            .collect::<Vec<_>>();
+        let current = options
+            .get(*value)
+            .map_or("Schema unavailable", String::as_str);
+        let salt = format!("analysis-envelope-field-{}-{label}", ui.id().value());
+        if let Some(index) =
+            select_mono_with_response(ui, &salt, label, current, &options, ui.available_width())
+                .picked
+        {
+            *value = index;
+            true
+        } else {
+            false
+        }
+    };
+
+    if uses_two_column_fields(ui) {
+        return field_cell(ui, label, Some("domain constrained"), add_control);
+    }
+
+    let t = Tokens::get(ui.ctx());
+    let row_h = t.metrics.row_h;
+    let color = t.color.text_dim;
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), row_h),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (label_rect, _) = ui.allocate_exact_size(vec2(96.0, row_h), egui::Sense::hover());
+            ui.painter().text(
+                label_rect.left_center(),
+                egui::Align2::LEFT_CENTER,
+                label,
+                theme::sans(tokens::FS_1, FontWeight::Regular),
+                color,
+            );
+            add_control(ui)
+        },
+    )
+    .inner
+}
+
+fn envelope_modulation_control_widths(available_width: f32) -> (f32, f32) {
+    let content_width = (available_width - ENVELOPE_INLINE_CONTROL_GAP).max(2.0);
+    let selector_width = content_width * 0.58;
+    (selector_width, content_width - selector_width)
+}
+
+fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sources: &[String]) {
+    let catalog_selection = circuit_sources
+        .iter()
+        .position(|source| source.eq_ignore_ascii_case(value.trim()));
+    let declared_index = circuit_sources.len();
+    let mut selected = catalog_selection.unwrap_or(declared_index);
+    let mut add_control = |ui: &mut Ui| {
+        let mut options = circuit_sources.to_vec();
+        options.push(ENVELOPE_DECLARED_SOURCES_CHOICE.to_owned());
+        let current = options
+            .get(selected)
+            .map_or(ENVELOPE_DECLARED_SOURCES_CHOICE, String::as_str);
+        let width = ui.available_width();
+        let (selector_width, editor_width) = envelope_modulation_control_widths(width);
+        ui.allocate_ui_with_layout(
+            vec2(width, Tokens::get(ui.ctx()).metrics.ctl_h),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
+                let salt = format!("analysis-envelope-modulation-source-{}", ui.id().value());
+                if let Some(index) = select_mono_with_response(
+                    ui,
+                    &salt,
+                    "Modulation sources",
+                    current,
+                    &options,
+                    selector_width,
+                )
+                .picked
+                {
+                    selected = index;
+                    if let Some(source) = circuit_sources.get(index) {
+                        *value = source.clone();
+                    } else if catalog_selection.is_some() {
+                        value.clear();
+                    }
+                }
+                if selected == declared_index {
+                    mono_input(ui, value, editor_width);
+                } else {
+                    ui.allocate_exact_size(vec2(editor_width, 1.0), egui::Sense::hover());
+                }
+            },
+        );
+    };
+
+    if uses_two_column_fields(ui) {
+        field_cell(
+            ui,
+            ENVELOPE_FIELD_LABELS[4],
+            Some("domain constrained"),
+            add_control,
+        );
+        return;
+    }
+
+    let t = Tokens::get(ui.ctx());
+    let row_h = t.metrics.row_h;
+    let color = t.color.text_dim;
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), row_h),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (label_rect, _) = ui.allocate_exact_size(vec2(96.0, row_h), egui::Sense::hover());
+            ui.painter().text(
+                label_rect.left_center(),
+                egui::Align2::LEFT_CENTER,
+                ENVELOPE_FIELD_LABELS[4],
+                theme::sans(tokens::FS_1, FontWeight::Regular),
+                color,
+            );
+            add_control(ui);
+        },
+    );
+}
+
 fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
     if !uses_two_column_fields(ui) {
         return inspector_check_row(ui, label, value);
     }
-    field_cell(ui, label, |ui| {
+    field_cell(ui, label, Some("domain constrained"), |ui| {
         let row_size = vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
         ui.allocate_ui_with_layout(row_size, Layout::left_to_right(Align::Center), |ui| {
             // The cell owns the full grid column, but the checkbox keeps its
@@ -205,7 +471,7 @@ fn property_row(ui: &mut Ui, label: &str, value: &str) {
         return;
     }
     let t = Tokens::get(ui.ctx());
-    field_cell(ui, label, |ui| {
+    field_cell(ui, label, None, |ui| {
         let (rect, _) = ui.allocate_exact_size(
             vec2(ui.available_width(), t.metrics.ctl_h),
             egui::Sense::hover(),
@@ -321,6 +587,7 @@ pub(super) fn form(
     draft: &mut AnalysisDraft,
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
+    envelope_modulation_sources: &[String],
 ) -> &'static str {
     clear_pending_cell(ui);
     ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;
@@ -833,29 +1100,41 @@ pub(super) fn form(
             "Repeats the base analysis across the selected corners."
         }
         AnalysisDraft::Envelope(setup) => {
-            quantity_input_row(
+            input_row(ui, ENVELOPE_FIELD_LABELS[0], &mut setup.carrier_tones);
+            envelope_time_input_row(
                 ui,
-                "Fundamental",
-                &mut setup.fundamental,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop time",
+                ENVELOPE_FIELD_LABELS[1],
                 &mut setup.stop_time,
-                QuantityInputKind::Time,
                 policy,
                 locale,
             );
-            input_row(ui, "Harmonics", &mut setup.harmonics);
-            choice_row(
+            envelope_time_input_row(
                 ui,
-                "Modulation",
-                &["AM", "FM", "PM", "IQ"],
-                &mut setup.modulation_idx,
+                ENVELOPE_FIELD_LABELS[2],
+                &mut setup.envelope_step,
+                policy,
+                locale,
             );
+            envelope_harmonic_order_row(ui, &mut setup.harmonic_order);
+            envelope_modulation_source_row(
+                ui,
+                &mut setup.modulation_sources,
+                envelope_modulation_sources,
+            );
+            envelope_choice_row(
+                ui,
+                ENVELOPE_FIELD_LABELS[5],
+                ENVELOPE_INITIAL_SOLVE_CHOICES,
+                &mut setup.initial_periodic_solve_idx,
+            );
+            envelope_choice_row(
+                ui,
+                ENVELOPE_FIELD_LABELS[6],
+                ENVELOPE_ADAPTIVE_CHOICES,
+                &mut setup.adaptive_mode_idx,
+            );
+            setup.extraction_path_idx = 0;
+            property_row(ui, ENVELOPE_FIELD_LABELS[7], ENVELOPE_EXTRACTION_PATH);
             "Envelope-following transient for modulated carriers."
         }
         AnalysisDraft::Fourier(setup) => {
@@ -1121,6 +1400,7 @@ mod tests {
                             &mut draft,
                             QuantityPresentationPolicy::default(),
                             UiNumberLocale::default(),
+                            &["VIN_AM".to_owned(), "VIN_IQ".to_owned()],
                         );
                         height = ui.cursor().top() - top;
                     });
@@ -1217,5 +1497,65 @@ mod tests {
                 analysis_form_height(enabled)
             );
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn envelope_modulation_source_modes_preserve_form_geometry() {
+        let mut named = AnalysisDraft::for_kind(AnalysisKind::Envelope);
+        let mut declared = named.clone();
+        if let AnalysisDraft::Envelope(setup) = &mut named {
+            setup.modulation_sources = "VIN_AM".to_owned();
+        }
+        if let AnalysisDraft::Envelope(setup) = &mut declared {
+            setup.modulation_sources = "VCTRL, VDATA".to_owned();
+        }
+
+        assert_eq!(analysis_form_height(named), analysis_form_height(declared));
+    }
+
+    #[test]
+    fn envelope_modulation_source_split_is_fixed_and_fills_the_control_row() {
+        for available_width in [1.0, 120.0, 320.0, 640.0] {
+            let (selector, editor) = envelope_modulation_control_widths(available_width);
+            assert!(selector > 0.0);
+            assert!(editor > 0.0);
+            assert_eq!(
+                selector + editor + ENVELOPE_INLINE_CONTROL_GAP,
+                available_width.max(ENVELOPE_INLINE_CONTROL_GAP + 2.0)
+            );
+        }
+    }
+
+    #[test]
+    fn envelope_form_matches_mockup_owned_contract() {
+        assert_eq!(
+            ENVELOPE_FIELD_LABELS,
+            [
+                "Carrier tones",
+                "Envelope stop",
+                "Envelope step",
+                "Harmonic order",
+                "Modulation sources",
+                "Initial periodic solve",
+                "Output schedule",
+                "Extraction path",
+            ]
+        );
+        assert_eq!(
+            ENVELOPE_INITIAL_SOLVE_CHOICES,
+            ["HB", "PSS", "Transient spectral estimate"]
+        );
+        assert_eq!(
+            ENVELOPE_ADAPTIVE_CHOICES,
+            [
+                "Adaptive solver samples",
+                "Fixed envelope step",
+                "Event-aligned only",
+            ]
+        );
+        assert_eq!(ENVELOPE_DECLARED_SOURCES_CHOICE, "Declared list...");
+        assert_eq!(ENVELOPE_HARMONIC_ORDER_HELPER, "positive integer");
+        assert_eq!(ENVELOPE_EXTRACTION_PATH, "Preview");
     }
 }

@@ -6,7 +6,7 @@
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::config::HbConfig;
 use super::fft::HbFft;
-use super::result::{HbResult, SpectralVoltage};
+use super::result::{HbResult, SpectralBranchCurrent, SpectralVoltage};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 #[cfg(feature = "veriloga")]
@@ -29,7 +29,7 @@ pub use periodic_ac::{PeriodicAcExcitation, PeriodicNoiseSource};
 /// path (full-spectrum residual, Jacobian, DC seed, linear solve). One value
 /// everywhere keeps the operating point and the seed solving the same
 /// circuit.
-pub(super) const DC_SHORT_CONDUCTANCE: Value = 1e6;
+pub(crate) const DC_SHORT_CONDUCTANCE: Value = 1e6;
 
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
@@ -99,6 +99,11 @@ pub struct HbSolverState {
 
     /// Converged flag
     pub converged: bool,
+
+    /// Spectra for branch-current unknowns retained by an actual MNA solve.
+    /// Nonlinear HB currently uses node-only Newton state, so this remains
+    /// empty for that path rather than synthesizing non-existent unknowns.
+    pub mna_branch_currents: Vec<Vec<Complex64>>,
 }
 
 impl HbSolverState {
@@ -112,6 +117,7 @@ impl HbSolverState {
             iteration: 0,
             total_iterations: 0,
             converged: false,
+            mna_branch_currents: Vec::new(),
         }
     }
 
@@ -271,6 +277,9 @@ pub struct HbSolver {
     /// Voltage source branches for MNA
     /// Each branch may define AC entries on arbitrary HB harmonics.
     voltage_source_branches: Vec<VoltageSourceBranch>,
+
+    /// Authored names aligned with `voltage_source_branches`.
+    voltage_source_branch_names: Vec<String>,
 
     /// Node names
     node_names: Vec<String>,

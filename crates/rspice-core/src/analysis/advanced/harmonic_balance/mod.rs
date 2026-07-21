@@ -44,7 +44,11 @@ pub use config::{HbConfig, HbTone};
 pub use fft::HbFft;
 pub use multi_tone::{FrequencyIndex, FrequencyMap, MultiToneConfig};
 pub use nonlinear::{HbBjt, HbBjtType, HbDevice, HbDeviceCollection, HbDiode, HbMosType, HbMosfet};
-pub use result::{HarmonicData, HbResult, SpectralVoltage};
+pub use result::{
+    HarmonicData, HbContinuationLimitation, HbPhaseProjectionError, HbPhaseState, HbReactiveKind,
+    HbReactivePhaseState, HbReactiveSpectrum, HbResult, SpectralBranchCurrent, SpectralVoltage,
+};
+pub(crate) use solver::DC_SHORT_CONDUCTANCE;
 pub use solver::{
     DepletionCap, HbError, HbSolver, HbSolverState, NonlinearDeviceInstance, NonlinearDeviceParams,
     NonlinearDeviceType, PeriodicAcExcitation, PeriodicNoiseSource,

@@ -22,6 +22,7 @@ impl HbSolver {
             c_matrix: Vec::new(),
             l_matrix: Vec::new(),
             voltage_source_branches: Vec::new(),
+            voltage_source_branch_names: Vec::new(),
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
@@ -103,6 +104,8 @@ impl HbSolver {
         self.voltage_source_branches.push(VoltageSourceBranch::new(
             node_pos, node_neg, branch_idx, dc_voltage,
         ));
+        self.voltage_source_branch_names
+            .push(format!("V{}", branch_idx + 1));
         self.num_branches += 1;
         branch_idx
     }
@@ -121,6 +124,8 @@ impl HbSolver {
             VoltageSourceBranch::new(node_pos, node_neg, branch_idx, dc_voltage)
                 .with_ac(ac_magnitude, ac_phase),
         );
+        self.voltage_source_branch_names
+            .push(format!("V{}", branch_idx + 1));
         self.num_branches += 1;
         branch_idx
     }
@@ -139,8 +144,17 @@ impl HbSolver {
             branch = branch.with_harmonic(*harmonic, *magnitude, *phase);
         }
         self.voltage_source_branches.push(branch);
+        self.voltage_source_branch_names
+            .push(format!("V{}", branch_idx + 1));
         self.num_branches += 1;
         branch_idx
+    }
+
+    /// Preserve the authored name for an already-added MNA branch.
+    pub fn set_voltage_source_branch_name(&mut self, branch_idx: usize, name: impl Into<String>) {
+        if let Some(slot) = self.voltage_source_branch_names.get_mut(branch_idx) {
+            *slot = name.into();
+        }
     }
 
     /// Get number of MNA branch currents
@@ -532,6 +546,7 @@ impl HbSolver {
             self.compute_linear_residual_with_branches(state, &branch_currents)
         };
         state.converged = state.residual_norm < self.config.tolerance;
+        state.mna_branch_currents = branch_currents;
 
         Ok(())
     }

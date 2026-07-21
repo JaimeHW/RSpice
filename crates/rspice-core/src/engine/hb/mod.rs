@@ -31,9 +31,11 @@ mod drive;
 mod pac;
 mod pnoise;
 mod stamping;
+mod state;
 
 pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
+pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
 /// HB-specific error types
 #[derive(Debug, Clone)]
@@ -182,7 +184,14 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        // Validate configuration
+        self.hb_validate_config(&config)?;
+
+        // Build circuit using SoA architecture
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+        self.run_hb_with_prebuilt_circuit_abort(netlist, circuit, config, abort)
+    }
+
+    fn hb_validate_config(&self, config: &HbConfig) -> Result<(), SimulationError> {
         if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
             return Err(HbError::InvalidConfig(
                 "Fundamental frequency must be finite and positive".to_string(),
@@ -213,10 +222,20 @@ impl Engine {
         }
         self.ensure_analysis_points(config.fft_size())?;
         self.ensure_analysis_points(config.num_harmonics.saturating_add(1))?;
+        Ok(())
+    }
 
-        // Build circuit using SoA architecture
-        let circuit = self.build_circuit_with_abort(netlist, abort)?;
-
+    /// Solve an already elaborated circuit. HB-specific clients use this
+    /// boundary when they must authenticate a source transformation before
+    /// the periodic solve; ordinary callers always enter through
+    /// [`Self::run_hb_with_abort`].
+    fn run_hb_with_prebuilt_circuit_abort(
+        &self,
+        netlist: &Netlist,
+        circuit: CircuitData,
+        config: HbConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<HbAnalysisResult, SimulationError> {
         // Get node count (excluding ground)
         let num_nodes = circuit.num_nodes();
         if num_nodes == 0 {
@@ -319,7 +338,8 @@ impl Engine {
         }
 
         // Build result
-        let result = solver.build_result(&state);
+        let mut result = solver.build_result(&state);
+        self.hb_attach_periodic_state(&circuit, &mut result, has_supported_nonlinear);
 
         Ok(HbAnalysisResult {
             result,
