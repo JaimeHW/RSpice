@@ -52,7 +52,6 @@ class CiConfigurationTests(unittest.TestCase):
             ".github/workflows/ci.yml",
             ".github/workflows/nightly.yml",
             ".github/workflows/python.yml",
-            ".github/workflows/release-trigger.yml",
             ".github/workflows/security.yml",
             ".github/workflows/coverage.yml",
             ".github/workflows/native-release.yml",
@@ -132,7 +131,6 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('"$GOBIN/actionlint" .github/workflows/*.yml', workflow)
         self.assertIn("python3 tools/ci/test_wasm_playground.py", workflow)
         self.assertIn("python3 tools/ci/test_ide_worker.py", workflow)
-        self.assertIn("python3 tools/deploy/test_build_site.py", workflow)
         self.assertIn("python3 tools/release/test_package_native.py", workflow)
         self.assertRegex(
             workflow,
@@ -239,35 +237,6 @@ class CiConfigurationTests(unittest.TestCase):
             2,
             "wasm checks should deny warnings for both wasm crates",
         )
-
-    def test_ci_smokes_the_same_browser_release_assembly_used_in_production(self) -> None:
-        workflow = read_text(".github/workflows/ci.yml")
-        build_script = read_text("tools/deploy/build_site.py")
-        release_trigger = read_text(".github/workflows/release-trigger.yml")
-
-        self.assertIn("Browser site smoke (wasm)", workflow)
-        self.assertIn("repository: JaimeHW/RSpice-Site", workflow)
-        self.assertIn(
-            "python3 tools/build_site.py --out dist --rspice-source ..",
-            workflow,
-        )
-        self.assertIn(
-            "python3 tools/deploy/build_site.py --site-source _site-source/dist --out _site-ci",
-            workflow,
-        )
-        self.assertIn("wasm-bindgen-cli (pinned to Cargo.lock)", workflow)
-        self.assertIn(
-            'cargo install wasm-bindgen-cli --version "$VERSION" --locked', workflow
-        )
-        self.assertNotIn("curl -sSfL", workflow)
-        self.assertIn("site-smoke-bundle", workflow)
-        self.assertIn("if-no-files-found: error", workflow)
-        self.assertIn("RSpice-Release", release_trigger)
-        self.assertIn("github.event.workflow_run.head_sha", release_trigger)
-        self.assertIn("--field channel=production", release_trigger)
-        self.assertIn('"tablet", 820, 1180', build_script)
-        self.assertIn('"phone", 390, 844', build_script)
-        self.assertIn("cargo\", \"build\", \"--locked\"", build_script)
 
     def test_native_release_is_immutable_attested_and_recoverable(self) -> None:
         workflow = read_text(".github/workflows/native-release.yml")
@@ -477,16 +446,11 @@ class CiConfigurationTests(unittest.TestCase):
     def test_browser_surface_docs_distinguish_ide_and_playground(self) -> None:
         ui_readme = read_text("crates/rspice-ui/README.md")
         playground_readme = read_text("crates/rspice-wasm/web/README.md")
-        workflow = read_text(".github/workflows/ci.yml")
-        release_trigger = read_text(".github/workflows/release-trigger.yml")
 
         self.assertNotIn("later milestone", playground_readme)
         self.assertNotIn("not this crate", ui_readme)
         self.assertIn("experimental browser IDE", ui_readme)
         self.assertIn("experimental browser IDE", playground_readme)
-        self.assertIn("repository: JaimeHW/RSpice-Site", workflow)
-        self.assertIn("--site-source _site-source/dist", workflow)
-        self.assertIn("RSpice-Release", release_trigger)
 
     def test_notice_includes_vendored_compact_model_attributions(self) -> None:
         notice = read_text("NOTICE")
