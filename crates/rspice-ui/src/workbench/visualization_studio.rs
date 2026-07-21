@@ -3203,7 +3203,7 @@ const fn analysis_manifest_id(analysis: crate::state::AnalysisType) -> &'static 
         AnalysisType::Transient => "tran",
         AnalysisType::Noise => "noise",
         AnalysisType::PoleZero => "pz",
-        AnalysisType::Tf => "tf",
+        AnalysisType::Tf => "xf",
         AnalysisType::Sensitivity => "sens",
         AnalysisType::Pac => "pac",
         AnalysisType::Pnoise => "pnoise",
@@ -6809,6 +6809,22 @@ mod integrity_scan_tests {
         app.state.simulation.runs = vec![run];
         assert!(app.state.simulation.select_run(0));
         app
+    }
+
+    #[test]
+    fn transfer_function_result_resolves_the_canonical_xf_viewer_contract() {
+        let analysis_ids = [analysis_manifest_id(AnalysisType::Tf)];
+        assert_eq!(analysis_ids, ["xf"]);
+        assert_eq!(
+            viewer_compatibility(
+                "viewer-transfer-function",
+                ViewerCapabilities {
+                    analysis_ids: &analysis_ids,
+                    external_capabilities: &[],
+                },
+            ),
+            ViewerCompatibility::Compatible
+        );
     }
 
     fn exact_source_checksum(app: &RSpiceApp) -> u64 {

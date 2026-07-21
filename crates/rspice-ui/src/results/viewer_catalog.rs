@@ -391,6 +391,17 @@ pub const VIEWER_DOCUMENTS: &[ViewerDocumentDefinition] = &[
         external_capability: None,
     },
     ViewerDocumentDefinition {
+        id: "viewer-transfer-function",
+        group: ViewerGroup::StatisticalAndTabular,
+        title: "Transfer function",
+        domain: "XF · DC operating point",
+        x_axis: "Declared source / output",
+        y_axis: "Gain and resistance",
+        art: ViewerArt::Table,
+        analysis_ids: &["xf"],
+        external_capability: None,
+    },
+    ViewerDocumentDefinition {
         id: "viewer-table",
         group: ViewerGroup::StatisticalAndTabular,
         title: "Tabular datasheet",
@@ -677,6 +688,13 @@ pub const VIEWER_QUICK_MODES: &[ViewerQuickModeDefinition] = &[
         analysis_ids: &["sp"],
     },
     ViewerQuickModeDefinition {
+        id: "xf",
+        document_id: "viewer-transfer-function",
+        icon: QuickModeIcon::Cells,
+        label: "XF",
+        analysis_ids: &["xf"],
+    },
+    ViewerQuickModeDefinition {
         id: "sens",
         document_id: "viewer-table",
         icon: QuickModeIcon::Chart,
@@ -819,6 +837,7 @@ mod tests {
         "viewer-constellation",
         "viewer-ccdf",
         "viewer-tdr",
+        "viewer-transfer-function",
         "viewer-table",
         "viewer-histogram",
         "viewer-scatter",
@@ -851,6 +870,7 @@ mod tests {
         ("hb", "viewer-spectrum"),
         ("phase-noise", "viewer-phase-noise"),
         ("smith", "viewer-smith"),
+        ("xf", "viewer-transfer-function"),
         ("sens", "viewer-table"),
         ("op", "viewer-table"),
         ("specs", "viewer-table"),
@@ -861,7 +881,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_manifest_document_ids_and_order() {
-        assert_eq!(VIEWER_DOCUMENTS.len(), 37);
+        assert_eq!(VIEWER_DOCUMENTS.len(), 38);
         assert_eq!(
             VIEWER_DOCUMENTS
                 .iter()
@@ -873,7 +893,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_manifest_quick_mode_ids_and_owners() {
-        assert_eq!(VIEWER_QUICK_MODES.len(), 15);
+        assert_eq!(VIEWER_QUICK_MODES.len(), 16);
         assert_eq!(
             VIEWER_QUICK_MODES
                 .iter()
@@ -915,7 +935,7 @@ mod tests {
         );
         assert_eq!(
             ViewerGroup::ALL.map(|group| documents_in_group(group).count()),
-            [5, 3, 9, 9, 4, 1, 6]
+            [5, 3, 9, 10, 4, 1, 6]
         );
     }
 
