@@ -490,11 +490,9 @@ fn strip_artifact_inline_comment(line: &str) -> &str {
     let mut in_double_quote = false;
     let mut escaped = false;
     let mut chars = line.char_indices().peekable();
-    let mut previous = None;
     while let Some((index, character)) = chars.next() {
         if escaped {
             escaped = false;
-            previous = Some(character);
             continue;
         }
         match character {
@@ -502,21 +500,8 @@ fn strip_artifact_inline_comment(line: &str) -> &str {
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
             ';' if !in_single_quote && !in_double_quote => return &line[..index],
-            '$' if !in_single_quote && !in_double_quote => {
-                if chars.peek().is_none_or(|(_, next)| next.is_whitespace()) {
-                    return &line[..index];
-                }
-            }
-            '/' if !in_single_quote && !in_double_quote => {
-                if matches!(chars.peek(), Some((_, '/')))
-                    && previous.map_or(true, char::is_whitespace)
-                {
-                    return &line[..index];
-                }
-            }
             _ => {}
         }
-        previous = Some(character);
     }
     line
 }

@@ -138,8 +138,11 @@ impl Netlist {
             poll_parse_abort(abort, line_index)?;
             poll_parse_text(abort, raw_line)?;
             let line_number = line_index + 1;
-            let record =
-                super::parser::strip_device_initial_condition_record_comment(raw_line).trim();
+            let record = super::parser::strip_device_initial_condition_record_comment(
+                raw_line,
+                self.params.expression_dialect() != super::ExpressionDialect::Xyce,
+            )
+            .trim();
             if record.is_empty() || record.starts_with('*') {
                 continue;
             }

@@ -4849,4 +4849,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn xyce_mode_retains_standalone_dollar_and_double_slash_fields() {
+        let netlist = Netlist::parse_with_options(
+            "standalone punctuation fields\n\
+             V$ $ 0 1\n\
+             R// // 0 1\n\
+             .DC V$ 1 1 1\n\
+             .PRINT DC V($) V(//)\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce permits standalone $ and // DEV/NODE fields");
+
+        let voltage = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "V$")
+            .expect("standalone-dollar voltage source is retained");
+        assert_eq!(voltage.nodes, ["$", "0"]);
+        let resistor = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "R//")
+            .expect("double-slash resistor name is retained");
+        assert_eq!(resistor.nodes, ["//", "0"]);
+    }
 }

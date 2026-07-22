@@ -2,7 +2,17 @@
 
 use super::*;
 
-pub(super) fn strip_inline_semicolon_comment(line: &str) -> &str {
+/// Strip inline comments using the selected SPICE dialect's comment rules.
+///
+/// Ngspice accepts token-leading `$` and `//` as inline comment markers.
+/// Xyce's field scanner does not: both spellings are legal in a standalone
+/// DEV/NODE field, so only semicolon comments are removed in Xyce mode.  The
+/// caller supplies the dialect policy explicitly so preprocessing and parsing
+/// use the same lexical contract.
+pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
+    line: &str,
+    allow_non_semicolon_comments: bool,
+) -> &str {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escaped = false;
@@ -29,12 +39,19 @@ pub(super) fn strip_inline_semicolon_comment(line: &str) -> &str {
             ';' if !in_single_quote && !in_double_quote => {
                 return &line[..idx];
             }
-            '$' if !in_single_quote && !in_double_quote => {
-                if chars.peek().is_none_or(|(_, next)| next.is_whitespace()) {
+            '$' if allow_non_semicolon_comments && !in_single_quote && !in_double_quote => {
+                // Xyce permits `$` inside a DEV/NODE name (for example
+                // `V1$`).  A dollar starts an inline comment only when it is
+                // itself the beginning of a token; a contiguous `$` belongs
+                // to the preceding field and must remain available to the
+                // lexer/parser.
+                if prev_char.is_none_or(char::is_whitespace)
+                    && chars.peek().is_none_or(|(_, next)| next.is_whitespace())
+                {
                     return &line[..idx];
                 }
             }
-            '/' if !in_single_quote && !in_double_quote => {
+            '/' if allow_non_semicolon_comments && !in_single_quote && !in_double_quote => {
                 if matches!(chars.peek(), Some((_, '/')))
                     && prev_char.map_or(true, |prev: char| prev.is_whitespace())
                 {
@@ -731,17 +748,25 @@ mod tests {
     #[test]
     fn slash_comments_do_not_strip_urls() {
         assert_eq!(
-            strip_inline_semicolon_comment(".ends // SUBCKT sar_adc").trim_end(),
+            strip_inline_semicolon_comment_with_non_semicolon_comments(
+                ".ends // SUBCKT sar_adc",
+                true,
+            )
+            .trim_end(),
             ".ends"
         );
         assert_eq!(
-            strip_inline_semicolon_comment("A1 m file=https://example.test/model // comment")
-                .trim_end(),
+            strip_inline_semicolon_comment_with_non_semicolon_comments(
+                "A1 m file=https://example.test/model // comment",
+                true,
+            )
+            .trim_end(),
             "A1 m file=https://example.test/model"
         );
         assert_eq!(
-            strip_inline_semicolon_comment(
+            strip_inline_semicolon_comment_with_non_semicolon_comments(
                 "A1 m file=\"https://example.test/model // not a comment\" // comment",
+                true,
             )
             .trim_end(),
             "A1 m file=\"https://example.test/model // not a comment\""
@@ -751,12 +776,32 @@ mod tests {
     #[test]
     fn dollar_global_nodes_do_not_start_inline_comments() {
         assert_eq!(
-            strip_inline_semicolon_comment("U1 NAND(2) $G_DPWR $G_DGND a b y").trim_end(),
+            strip_inline_semicolon_comment_with_non_semicolon_comments(
+                "U1 NAND(2) $G_DPWR $G_DGND a b y",
+                true,
+            )
+            .trim_end(),
             "U1 NAND(2) $G_DPWR $G_DGND a b y"
         );
         assert_eq!(
-            strip_inline_semicolon_comment("R1 a b 1k $ comment").trim_end(),
+            strip_inline_semicolon_comment_with_non_semicolon_comments("R1 a b 1k $ comment", true)
+                .trim_end(),
             "R1 a b 1k"
+        );
+        assert_eq!(
+            strip_inline_semicolon_comment_with_non_semicolon_comments("V1$ 1 0 1", true)
+                .trim_end(),
+            "V1$ 1 0 1"
+        );
+        assert_eq!(
+            strip_inline_semicolon_comment_with_non_semicolon_comments("V$ $ 0 1", false)
+                .trim_end(),
+            "V$ $ 0 1"
+        );
+        assert_eq!(
+            strip_inline_semicolon_comment_with_non_semicolon_comments("V// // 0 1", false)
+                .trim_end(),
+            "V// // 0 1"
         );
     }
 

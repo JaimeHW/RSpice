@@ -68,7 +68,10 @@ impl ParsedNetlistSourceMap {
         };
 
         let mut builder = SourceMapBuilder::default();
-        builder.scan(source);
+        builder.scan(
+            source,
+            netlist.params.expression_dialect() != super::ExpressionDialect::Xyce,
+        );
         builder.into_map()
     }
 
@@ -123,10 +126,10 @@ struct SourceMapBuilder {
 }
 
 impl SourceMapBuilder {
-    fn scan(&mut self, source: &str) {
+    fn scan(&mut self, source: &str, allow_dollar_comments: bool) {
         for (idx, line) in source.lines().enumerate().skip(1) {
             let line_num = idx + 1;
-            let comment_start = inline_comment_start(line);
+            let comment_start = inline_comment_start(line, allow_dollar_comments);
             let stripped = &line[..comment_start];
             let trimmed = stripped.trim();
 
@@ -573,14 +576,17 @@ fn dot_command_argument(line: &str, index: usize) -> Option<&str> {
     line.split_whitespace().nth(index)
 }
 
-fn inline_comment_start(line: &str) -> usize {
+fn inline_comment_start(line: &str, allow_dollar_comments: bool) -> usize {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escaped = false;
 
-    for (idx, ch) in line.char_indices() {
+    let mut previous = None;
+    let mut chars = line.char_indices().peekable();
+    while let Some((idx, ch)) = chars.next() {
         if escaped {
             escaped = false;
+            previous = Some(ch);
             continue;
         }
 
@@ -588,9 +594,17 @@ fn inline_comment_start(line: &str) -> usize {
             '\\' if in_single_quote || in_double_quote => escaped = true,
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            ';' | '$' if !in_single_quote && !in_double_quote => return idx,
+            ';' if !in_single_quote && !in_double_quote => return idx,
+            '$' if allow_dollar_comments && !in_single_quote && !in_double_quote => {
+                if previous.is_none_or(char::is_whitespace)
+                    && chars.peek().is_none_or(|(_, next)| next.is_whitespace())
+                {
+                    return idx;
+                }
+            }
             _ => {}
         }
+        previous = Some(ch);
     }
     line.len()
 }

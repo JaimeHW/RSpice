@@ -373,8 +373,14 @@ pub(crate) fn parse_device_initial_condition_record(
     parse_device_initial_condition_entries(&mut stream, line_num, params, origin)
 }
 
-pub(crate) fn strip_device_initial_condition_record_comment(record: &str) -> &str {
-    line::strip_inline_semicolon_comment(record)
+pub(crate) fn strip_device_initial_condition_record_comment(
+    record: &str,
+    allow_non_semicolon_comments: bool,
+) -> &str {
+    line::strip_inline_semicolon_comment_with_non_semicolon_comments(
+        record,
+        allow_non_semicolon_comments,
+    )
 }
 
 fn parse_netlist_impl(
@@ -405,12 +411,19 @@ fn parse_netlist_impl(
     if original_lines.is_empty() {
         return Ok(Netlist::default());
     }
-    let preprocess = prescan_root_preprocess(&original_lines, source_schedule.as_ref(), abort)?;
+    let allow_non_semicolon_comments = options.expression_dialect != ExpressionDialect::Xyce;
+    let preprocess = prescan_root_preprocess_with_dialect(
+        &original_lines,
+        source_schedule.as_ref(),
+        allow_non_semicolon_comments,
+        abort,
+    )?;
     let transformed_input = apply_root_preprocessing(
         input,
         &original_lines,
         source_schedule.as_ref(),
         preprocess.replace_ground == Some(true),
+        allow_non_semicolon_comments,
         abort,
     )?;
     let parse_input = transformed_input.as_str();
@@ -447,11 +460,17 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    if let Some(seed) = prescan_random_seed_with_abort(&lines, abort)? {
+    if let Some(seed) = prescan_random_seed_with_abort(&lines, allow_non_semicolon_comments, abort)?
+    {
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
     }
-    prescan_temperature_options_with_abort(&lines, &mut state, abort)?;
+    prescan_temperature_options_with_abort(
+        &lines,
+        &mut state,
+        allow_non_semicolon_comments,
+        abort,
+    )?;
 
     let mut line_num = 1;
     let mut continuation = String::new();
@@ -500,7 +519,10 @@ fn parse_netlist_impl(
         // Strip inline comments (common SPICE syntax), then trim.
         // We intentionally keep this simple and treat these markers as comment
         // starts only when they appear outside quoted strings.
-        let no_inline_comment = strip_inline_semicolon_comment(line);
+        let no_inline_comment = strip_inline_semicolon_comment_with_non_semicolon_comments(
+            line,
+            allow_non_semicolon_comments,
+        );
         let trimmed = no_inline_comment.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
@@ -695,6 +717,7 @@ fn apply_root_preprocessing(
     lines: &[&str],
     source_schedule: Option<&SourceEventSchedule>,
     replace_ground: bool,
+    allow_non_semicolon_comments: bool,
     abort: &dyn AbortSignal,
 ) -> Result<String, ParseWithAbortError> {
     let root_path = source_schedule
@@ -708,11 +731,18 @@ fn apply_root_preprocessing(
         InertIncludedPreprocess,
     }
 
-    fn logical_line_policy(line: &str, is_root: bool) -> LogicalLinePolicy {
-        let head = strip_inline_semicolon_comment(line)
-            .split_whitespace()
-            .next()
-            .unwrap_or_default();
+    fn logical_line_policy(
+        line: &str,
+        is_root: bool,
+        allow_non_semicolon_comments: bool,
+    ) -> LogicalLinePolicy {
+        let head = strip_inline_semicolon_comment_with_non_semicolon_comments(
+            line,
+            allow_non_semicolon_comments,
+        )
+        .split_whitespace()
+        .next()
+        .unwrap_or_default();
         if !is_root && head.eq_ignore_ascii_case(".PREPROCESS") {
             return LogicalLinePolicy::InertIncludedPreprocess;
         }
@@ -749,7 +779,11 @@ fn apply_root_preprocessing(
             logical_policy = LogicalLinePolicy::Rewrite;
         }
 
-        let stripped = strip_inline_semicolon_comment(line).trim();
+        let stripped = strip_inline_semicolon_comment_with_non_semicolon_comments(
+            line,
+            allow_non_semicolon_comments,
+        )
+        .trim();
         let is_comment_or_blank = stripped.is_empty() || stripped.starts_with('*');
         let is_continuation = !is_comment_or_blank && stripped.starts_with('+');
         let is_indented_preprocess_comment = line.starts_with([' ', '\t'])
@@ -759,7 +793,7 @@ fn apply_root_preprocessing(
                 .next()
                 .is_some_and(|head| head.eq_ignore_ascii_case(".PREPROCESS"));
         if !is_comment_or_blank && !is_continuation && !is_indented_preprocess_comment {
-            logical_policy = logical_line_policy(line, is_root);
+            logical_policy = logical_line_policy(line, is_root, allow_non_semicolon_comments);
         }
         if index == 0 {
             logical_policy = LogicalLinePolicy::Rewrite;
@@ -953,7 +987,7 @@ mod replaceground_lexical_tests {
                 "protected directive\n.PREPROCESS REPLACEGROUND TRUE\n{directive}\n+ GND GROUND\n"
             );
             let lines = source.lines().collect::<Vec<_>>();
-            let transformed = apply_root_preprocessing(&source, &lines, None, true, &NoAbort)
+            let transformed = apply_root_preprocessing(&source, &lines, None, true, true, &NoAbort)
                 .expect("NoAbort cannot cancel preprocessing");
             assert!(
                 transformed.contains("+ GND GROUND"),
@@ -1695,9 +1729,10 @@ struct RootPreprocessPolicy {
     add_resistors_extra_lines: Vec<usize>,
 }
 
-fn prescan_root_preprocess(
+fn prescan_root_preprocess_with_dialect(
     lines: &[&str],
     source_schedule: Option<&SourceEventSchedule>,
+    allow_non_semicolon_comments: bool,
     abort: &dyn AbortSignal,
 ) -> Result<RootPreprocessPolicy, ParseWithAbortError> {
     let root_path = source_schedule
@@ -1736,7 +1771,10 @@ fn prescan_root_preprocess(
             }
             physical_line = origin.line;
         }
-        let without_comment = strip_inline_semicolon_comment(line);
+        let without_comment = strip_inline_semicolon_comment_with_non_semicolon_comments(
+            line,
+            allow_non_semicolon_comments,
+        );
         let first_nonblank = without_comment.trim_start_matches([' ', '\t']);
         if first_nonblank.is_empty() || first_nonblank.starts_with('*') {
             continue;
@@ -3053,6 +3091,7 @@ fn is_dot_command_head(head: &str) -> bool {
 fn prescan_temperature_options_with_abort(
     lines: &[&str],
     state: &mut ParseState,
+    allow_non_semicolon_comments: bool,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     let mut continuation = String::new();
@@ -3064,7 +3103,10 @@ fn prescan_temperature_options_with_abort(
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
         line_num += 1;
-        let stripped = strip_inline_semicolon_comment(line);
+        let stripped = strip_inline_semicolon_comment_with_non_semicolon_comments(
+            line,
+            allow_non_semicolon_comments,
+        );
         let trimmed = stripped.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
@@ -3196,6 +3238,7 @@ fn process_line_gated(
 /// is ignored here — `parse_options_command` emits the warning for it.
 fn prescan_random_seed_with_abort(
     lines: &[&str],
+    allow_non_semicolon_comments: bool,
     abort: &dyn AbortSignal,
 ) -> Result<Option<u64>, ParseWithAbortError> {
     let mut seed = None;
@@ -3206,7 +3249,10 @@ fn prescan_random_seed_with_abort(
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
         line_num += 1;
-        let stripped = strip_inline_semicolon_comment(line);
+        let stripped = strip_inline_semicolon_comment_with_non_semicolon_comments(
+            line,
+            allow_non_semicolon_comments,
+        );
         let trimmed = stripped.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
