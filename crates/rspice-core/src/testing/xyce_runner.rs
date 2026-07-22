@@ -50761,6 +50761,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if max_frequency <= 100.0
                         && Self::netlist_device_is_native_legacy_bjt(netlist, &element.name) => {}
                 ElementKind::Bjt { .. }
+                    if max_frequency <= 100.0e6 + 1.0e-6
+                        && Self::netlist_device_is_native_static_ac_legacy_npn_bjt(
+                            netlist,
+                            &element.name,
+                        ) => {}
+                ElementKind::Bjt { .. }
                     if Self::netlist_element_is_native_static_ac_exact_bf_is_pnp(
                         netlist, element,
                     ) => {}
@@ -50773,7 +50779,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and broader native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and validated native legacy NPN sweeps through 100 MHz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -56657,6 +56663,29 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         })
     }
 
+    fn netlist_device_is_native_static_ac_legacy_npn_bjt(
+        netlist: &Netlist,
+        instance_name: &str,
+    ) -> bool {
+        if Self::elements_device_is_native_static_ac_legacy_npn_bjt(
+            &netlist.elements,
+            &netlist.models,
+            &[],
+            instance_name,
+        ) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_device_is_native_static_ac_legacy_npn_bjt(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+                instance_name,
+            )
+        })
+    }
+
     fn elements_device_is_native_legacy_bjt(
         elements: &[crate::netlist::Element],
         models: &[crate::netlist::ModelDef],
@@ -56676,6 +56705,25 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         })
     }
 
+    fn elements_device_is_native_static_ac_legacy_npn_bjt(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+        instance_name: &str,
+    ) -> bool {
+        elements.iter().any(|element| {
+            if !Self::device_instance_names_match(&element.name, instance_name) {
+                return false;
+            }
+            let ElementKind::Bjt { model, .. } = &element.kind else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(Self::model_is_native_static_ac_legacy_npn_bjt)
+        })
+    }
+
     fn model_is_native_legacy_bjt(model: &crate::netlist::ModelDef) -> bool {
         if !matches!(
             model.model_type.to_ascii_uppercase().as_str(),
@@ -56685,6 +56733,35 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         Self::numeric_param_value(&model.params, "LEVEL")
             .is_none_or(|level| level.is_finite() && (level - 1.0).abs() <= 1.0e-9)
+    }
+
+    fn model_is_native_static_ac_legacy_npn_bjt(model: &crate::netlist::ModelDef) -> bool {
+        model.model_type.eq_ignore_ascii_case("NPN")
+            && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model.params.len() == 6
+            && model.params.iter().all(|(name, value)| {
+                value.is_finite()
+                    && match name.to_ascii_uppercase().as_str() {
+                        "IS" | "BF" | "VAF" | "RB" | "CJC" | "TF" => *value >= 0.0,
+                        _ => false,
+                    }
+            })
+            && ["IS", "BF", "VAF", "RB", "CJC", "TF"].iter().all(|name| {
+                model
+                    .params
+                    .iter()
+                    .filter(|(param, _)| param.eq_ignore_ascii_case(name))
+                    .count()
+                    == 1
+            })
+            && Self::numeric_param_value(&model.params, "IS").is_some_and(|value| value > 0.0)
+            && Self::numeric_param_value(&model.params, "BF").is_some_and(|value| value > 0.0)
+            && Self::numeric_param_value(&model.params, "VAF").is_some_and(|value| value > 0.0)
     }
 
     fn model_is_native_legacy_diode(model: &crate::netlist::ModelDef) -> bool {
@@ -85328,6 +85405,30 @@ Q1 c b 0 QN
             validate(&source("IS=8e-16 BF=250", "IS=8e-16").replace("PNP", "NPN")).is_err(),
             "NPN BF/IS hierarchy above the validated 20 kHz envelope remains unsupported"
         );
+    }
+
+    #[test]
+    fn static_ac_contract_admits_validated_legacy_bjt_through_100mhz() {
+        let source = "legacy BJT AC fixture\n\
+                      VCC 7 0 12\n\
+                      VEE 8 0 -12\n\
+                      VIN 1 0 AC 1\n\
+                      RS1 1 2 1k\n\
+                      RS2 6 0 1k\n\
+                      Q1 3 2 4 MOD1\n\
+                      Q2 5 6 4 MOD1\n\
+                      RC1 7 3 10k\n\
+                      RC2 7 5 10k\n\
+                      RE 4 8 10k\n\
+                      .MODEL MOD1 NPN BF=50 VAF=50 IS=1e-12 RB=100 CJC=.5PF TF=.6NS\n\
+                      .AC DEC 10 1 100MEG\n\
+                      .PRINT AC V(5)\n\
+                      .END\n";
+        let netlist = Netlist::parse(source).expect("legacy BJT AC fixture parses");
+        let ac = XyceTestRunner::single_ac_analysis(&netlist)
+            .expect("legacy BJT AC fixture has one analysis");
+        XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+            .expect("validated legacy BJT AC envelope admits 100 MHz");
     }
 
     #[test]
