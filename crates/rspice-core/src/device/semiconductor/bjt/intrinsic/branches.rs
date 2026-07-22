@@ -97,15 +97,24 @@ impl Bjt {
         let vrbi = vbx - vbi;
         let qb = linearized.qb.max(1e-12);
         let scale = vrbi / rb;
-        let dqb_dvbi = linearized.dqb_dvbe + linearized.dqb_dvbc;
-        let dqb_dvci = -linearized.dqb_dvbc;
-        let dqb_dvei = -linearized.dqb_dvbe;
 
         branch.current = scale * qb;
         branch.d_internal[IDX_VBX] = qb / rb;
-        branch.d_internal[IDX_VBI] = -qb / rb + scale * dqb_dvbi;
-        branch.d_internal[IDX_VCI] = scale * dqb_dvci;
-        branch.d_internal[IDX_VEI] = scale * dqb_dvei;
+        branch.d_internal[IDX_VBI] = -qb / rb;
+        // Xyce's legacy GP load evaluates the bias-dependent base
+        // resistance conductance at the current operating point, then holds
+        // that conductance fixed in the Newton Jacobian (N_DEV_BJT.C:
+        // diBrdvCp/diBrdvEp are zero).  Do not feed dQB/dV back into the
+        // legacy base-resistance branch; the compact-model junction
+        // derivatives already carry the complete GP charge dependence.
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
+            let dqb_dvbi = linearized.dqb_dvbe + linearized.dqb_dvbc;
+            let dqb_dvci = -linearized.dqb_dvbc;
+            let dqb_dvei = -linearized.dqb_dvbe;
+            branch.d_internal[IDX_VBI] += scale * dqb_dvbi;
+            branch.d_internal[IDX_VCI] = scale * dqb_dvci;
+            branch.d_internal[IDX_VEI] = scale * dqb_dvei;
+        }
         branch
     }
 
@@ -453,5 +462,44 @@ impl Bjt {
         // Use a small relative perturbation to keep Vrth-derivative finite
         // differences accurate for strongly temperature-sensitive currents.
         ((self.requested_temperature() + vrth).abs().max(1.0) * 1e-6).clamp(1e-7, 1e-3)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn legacy_gp_base_resistance_freezes_qb_jacobian_like_xyce() {
+        let legacy = Bjt::new_npn("legacy".to_string(), 1, 2, 3).with_params(&HashMap::from([
+            ("IS".to_string(), 1.0e-16),
+            ("BF".to_string(), 100.0),
+            ("BR".to_string(), 8.0),
+            ("RB".to_string(), 100.0),
+            ("RBM".to_string(), 4.0),
+            ("IKF".to_string(), 0.1),
+            ("IKR".to_string(), 0.02),
+        ]));
+        let legacy_eval = legacy.evaluate_state_fixed_temperature(
+            0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.5, 0.4, 0.0, 0.0, 0.0,
+        );
+        assert!(legacy_eval.linearized.qb.is_finite());
+        assert_eq!(legacy_eval.irbi.d_internal[IDX_VCI], 0.0);
+        assert_eq!(legacy_eval.irbi.d_internal[IDX_VEI], 0.0);
+
+        let vbic = Bjt::new_npn("vbic".to_string(), 1, 2, 3).with_params(&HashMap::from([
+            ("LEVEL".to_string(), 11.0),
+            ("IS".to_string(), 1.0e-16),
+            ("RBI".to_string(), 96.0),
+            ("VAF".to_string(), 10.0),
+            ("VAR".to_string(), 4.0),
+            ("IKF".to_string(), 0.1),
+        ]));
+        let vbic_eval = vbic.evaluate_state_fixed_temperature(
+            0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.7, 0.6, 0.0, 0.0, 0.0,
+        );
+        assert!(vbic_eval.irbi.d_internal[IDX_VCI].abs() > 0.0);
+        assert!(vbic_eval.irbi.d_internal[IDX_VEI].abs() > 0.0);
     }
 }
