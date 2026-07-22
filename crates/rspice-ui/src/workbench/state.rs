@@ -1605,6 +1605,11 @@ pub struct WorkbenchState {
     /// documents.
     #[serde(default)]
     pub report_authoring: ReportAuthoringState,
+    /// Runtime-only transaction and presentation state for the project-owned
+    /// device-model editor. Committed source and qualification records remain
+    /// in the project model-library domain.
+    #[serde(skip)]
+    pub model_editor: super::model_editor::ModelEditorState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -1699,6 +1704,7 @@ impl Default for WorkbenchState {
             specialist_tool_browser: SpecialistToolBrowserState::default(),
             visualization_studio: super::visualization_studio::VisualizationStudioState::default(),
             report_authoring: ReportAuthoringState::default(),
+            model_editor: super::model_editor::ModelEditorState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             capability_matrix: CapabilityMatrixState::default(),

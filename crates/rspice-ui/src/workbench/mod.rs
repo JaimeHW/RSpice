@@ -26,6 +26,7 @@ mod chrome;
 mod docks;
 mod jobs_manager;
 mod layout;
+pub mod model_editor;
 mod notification_center;
 mod preferences;
 mod preflight;
@@ -49,6 +50,10 @@ pub use availability::{
 };
 pub use capability_workflow::{
     CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
+};
+pub use model_editor::{
+    ModelDefinitionDelta, ModelEditorDraft, ModelEditorSection, ModelEditorState,
+    ModelFieldDiagnostic, ModelParameterDraft, ModelParameterKind, ModelValidationEvidence,
 };
 pub use navigation::{
     BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,

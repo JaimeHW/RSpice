@@ -16,12 +16,13 @@ use crate::product::ProjectId;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
-    DeviceModel, ModelLibrary, ModelLibraryManager, ModelSourceAuthority, ModelSourceContent,
-    ModelSourceEdge, ModelSourcePin, ProcessCorner as LibraryProcessCorner,
+    DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
+    ModelQualificationState, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
+    ModelSourcePin, ParameterDataType, ParameterValue, ProcessCorner as LibraryProcessCorner,
     first_unreachable_source, is_portable_absolute_path,
 };
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 7;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 8;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
@@ -29,6 +30,7 @@ const SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 3;
 const STABLE_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 4;
 const PLAN_CATALOG_SCHEMA_VERSION: u32 = 5;
 const RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION: u32 = 6;
+const MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 7;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -143,6 +145,10 @@ pub struct ProjectModelLibrary {
     #[serde(default)]
     pub source_edges: Vec<ModelSourceEdge>,
     pub models: HashMap<String, DeviceModel>,
+    #[serde(default)]
+    pub model_definition_metadata: HashMap<String, ModelDefinitionMetadata>,
+    #[serde(default)]
+    pub model_qualification: HashMap<String, ModelQualificationState>,
     pub corners: HashMap<String, LibraryProcessCorner>,
     pub selected_corner: Option<String>,
     pub version: String,
@@ -250,6 +256,14 @@ impl ProjectExecutionContext {
                         ModelSourceAuthority::BuiltIn
                     };
                 }
+                self.schema_version = MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION => {
+                // Schema 7 introduced explicit source authority but predated
+                // typed model-authoring and qualification records. Serde
+                // defaults preserve those projects as honest empty metadata;
+                // no schema, test, or release facts are inferred.
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -333,6 +347,8 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             source_contents: library.source_contents.clone(),
             source_edges: library.source_edges.clone(),
             models: library.models.clone(),
+            model_definition_metadata: library.model_definition_metadata.clone(),
+            model_qualification: library.model_qualification.clone(),
             corners: library.corners.clone(),
             selected_corner: library.selected_corner.clone(),
             version: library.version.clone(),
@@ -370,6 +386,8 @@ impl ProjectModelLibrary {
             source_contents: self.source_contents,
             source_edges: self.source_edges,
             models: self.models,
+            model_definition_metadata: self.model_definition_metadata,
+            model_qualification: self.model_qualification,
             corners: self.corners,
             selected_corner: self.selected_corner,
             version: self.version,
@@ -799,6 +817,91 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
             }
             validate_model_numbers(&context, model_key, model)?;
         }
+        validate_model_authoring_records(&context, library)?;
+    }
+    Ok(())
+}
+
+fn validate_model_authoring_records(
+    context: &str,
+    library: &ProjectModelLibrary,
+) -> Result<(), String> {
+    let mut metadata_names = HashSet::with_capacity(library.model_definition_metadata.len());
+    for (model_name, metadata) in &library.model_definition_metadata {
+        let canonical = model_name.to_ascii_lowercase();
+        if !metadata_names.insert(canonical) {
+            return Err(format!(
+                "{context}.model_definition_metadata contains duplicate case-insensitive model names"
+            ));
+        }
+        let model = library.models.get(model_name).ok_or_else(|| {
+            format!(
+                "{context}.model_definition_metadata['{model_name}'] has no exact model projection"
+            )
+        })?;
+        metadata.validate().map_err(|error| {
+            format!("{context}.model_definition_metadata['{model_name}'] is invalid: {error}")
+        })?;
+        if metadata.parameters.len() != model.parameters.len() + model.string_parameters.len() {
+            return Err(format!(
+                "{context}.model_definition_metadata['{model_name}'].parameters does not exactly cover the model source parameters"
+            ));
+        }
+        for parameter in &metadata.parameters {
+            match (&parameter.data_type, &parameter.value) {
+                (ParameterDataType::Numeric, ParameterValue::Numeric(value)) => {
+                    let observed = model
+                        .parameters
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(&parameter.name))
+                        .map(|(_, value)| *value);
+                    if observed.is_none_or(|observed| observed.to_bits() != value.get().to_bits()) {
+                        return Err(format!(
+                            "{context}.model_definition_metadata['{model_name}'].parameters['{}'] does not match the numeric model source value",
+                            parameter.name
+                        ));
+                    }
+                }
+                (ParameterDataType::String, ParameterValue::String(value)) => {
+                    let observed = model
+                        .string_parameters
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(&parameter.name))
+                        .map(|(_, value)| value);
+                    if observed != Some(value) {
+                        return Err(format!(
+                            "{context}.model_definition_metadata['{model_name}'].parameters['{}'] does not match the string model source value",
+                            parameter.name
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{context}.model_definition_metadata['{model_name}'].parameters['{}'] has inconsistent type and value",
+                        parameter.name
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut qualification_names = HashSet::with_capacity(library.model_qualification.len());
+    for (model_name, qualification) in &library.model_qualification {
+        if !qualification_names.insert(model_name.to_ascii_lowercase()) {
+            return Err(format!(
+                "{context}.model_qualification contains duplicate case-insensitive model names"
+            ));
+        }
+        if !library.models.contains_key(model_name) {
+            return Err(format!(
+                "{context}.model_qualification['{model_name}'] has no exact model projection"
+            ));
+        }
+        qualification
+            .validate_for_model(model_name)
+            .map_err(|error| {
+                format!("{context}.model_qualification['{model_name}'] is invalid: {error}")
+            })?;
     }
     Ok(())
 }
@@ -1203,6 +1306,44 @@ mod tests {
     }
 
     #[test]
+    fn schema_seven_migrates_without_inventing_model_authoring_records() {
+        let mut manager = ModelLibraryManager::new();
+        manager.add_library(ModelLibrary::new("legacy-catalog"));
+        let context = context_from_state(&SimSetupState::new(), &manager)
+            .expect("baseline context validates");
+        let mut value = serde_json::to_value(context).expect("context serializes");
+        value["schema_version"] = serde_json::json!(MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION);
+        for library in value["model_libraries"]
+            .as_array_mut()
+            .expect("libraries are an array")
+        {
+            library
+                .as_object_mut()
+                .expect("library is an object")
+                .remove("model_definition_metadata");
+            library
+                .as_object_mut()
+                .expect("library is an object")
+                .remove("model_qualification");
+        }
+
+        let mut restored: ProjectExecutionContext =
+            serde_json::from_value(value).expect("schema seven remains readable");
+        restored
+            .migrate_to_current(project_id())
+            .expect("schema seven migrates");
+
+        assert_eq!(
+            restored.schema_version,
+            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+        );
+        assert!(restored.model_libraries.iter().all(|library| {
+            library.model_definition_metadata.is_empty() && library.model_qualification.is_empty()
+        }));
+        restored.validate().expect("migrated context validates");
+    }
+
+    #[test]
     fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
         let definition = crate::state::model_library::ProjectModelDefinition {
             name: "owned_nch".to_owned(),
@@ -1238,6 +1379,12 @@ mod tests {
             .expect("library restored");
         assert_eq!(library.source_authority, expected_authority);
         assert_eq!(library.source_contents[0].bytes, expected_bytes);
+        let metadata = library
+            .model_definition_metadata
+            .get("owned_nch")
+            .expect("typed model metadata restored");
+        assert_eq!(metadata.parameters.len(), 3);
+        metadata.validate().expect("restored metadata validates");
         restored_manager
             .seal_execution_sources()
             .expect("desktop execution consumes retained project bytes");
@@ -1637,6 +1784,8 @@ mod tests {
                 source_contents: Vec::new(),
                 source_edges: Vec::new(),
                 models: HashMap::new(),
+                model_definition_metadata: HashMap::new(),
+                model_qualification: HashMap::new(),
                 corners: HashMap::new(),
                 selected_corner: None,
                 version: String::new(),
@@ -1709,6 +1858,8 @@ mod tests {
                 source_contents: Vec::new(),
                 source_edges,
                 models: HashMap::new(),
+                model_definition_metadata: HashMap::new(),
+                model_qualification: HashMap::new(),
                 corners: HashMap::new(),
                 selected_corner: None,
                 version: String::new(),

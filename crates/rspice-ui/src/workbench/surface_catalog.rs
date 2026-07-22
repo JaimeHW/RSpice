@@ -211,6 +211,7 @@ macro_rules! define_surface_catalog {
                 match self {
                     Self::VisualizationStudio => Some(Workspace::Results),
                     Self::DesignManagement => Some(Workspace::Design),
+                    Self::ModelEditor => Some(Workspace::Models),
                     _ => self.workspace(),
                 }
             }

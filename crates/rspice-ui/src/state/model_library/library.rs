@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::{DeviceModel, ModelType, ProcessCorner};
+use super::{
+    DeviceModel, ModelDefinitionMetadata, ModelQualificationState, ModelType, ProcessCorner,
+};
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
 /// Ownership and execution policy for a model library's source material.
@@ -193,6 +195,14 @@ pub struct ModelLibrary {
     pub source_edges: Vec<ModelSourceEdge>,
     /// Device models
     pub models: HashMap<String, DeviceModel>,
+    /// Project-owned typed authoring metadata keyed by exact model name.
+    /// External and built-in libraries may omit it; its absence is displayed
+    /// honestly rather than synthesized into qualification claims.
+    #[serde(default)]
+    pub model_definition_metadata: HashMap<String, ModelDefinitionMetadata>,
+    /// Versioned qualification and release records keyed by exact model name.
+    #[serde(default)]
+    pub model_qualification: HashMap<String, ModelQualificationState>,
     /// Process corners
     pub corners: HashMap<String, ProcessCorner>,
     /// Currently selected corner

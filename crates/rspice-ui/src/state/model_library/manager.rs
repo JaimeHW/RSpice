@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
 use super::{
-    DeviceModel, ModelLevel, ModelLibrary, ModelSourceAuthority, ModelSourceContent,
-    ModelSourceEdge, ModelSourcePin, ModelType, ProcessCorner, ProjectModelDefinition,
+    DeviceModel, FiniteF64, ModelDefinitionMetadata, ModelLevel, ModelLibrary,
+    ModelQualificationState, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
+    ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
+    ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
     first_unreachable_source,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
@@ -624,6 +626,8 @@ impl ModelLibraryManager {
         library.source_contents = source_contents;
         library.source_edges = source_edges;
         library.models.clear();
+        library.model_definition_metadata.clear();
+        library.model_qualification.clear();
         library.corners.clear();
         library.selected_corner = None;
 
@@ -837,6 +841,50 @@ impl ModelLibraryManager {
         })
     }
 
+    /// Create one complete project-owned model revision. The base card,
+    /// process sections, typed schema, statistical definition, and temperature
+    /// laws are validated and published with one source identity or not at
+    /// all.
+    pub fn create_project_model_revision(
+        &mut self,
+        library_name: &str,
+        definition: &ProjectModelRevisionDefinition,
+        qualification: &ModelQualificationState,
+    ) -> Result<ProjectModelCommit, String> {
+        validate_project_library_name(library_name)?;
+        if let Some(existing) = self
+            .libraries
+            .keys()
+            .find(|existing| existing.eq_ignore_ascii_case(library_name))
+        {
+            return Err(format!(
+                "Model library '{library_name}' conflicts with existing library '{existing}'"
+            ));
+        }
+
+        let source_id = ModelSourceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let root = super::project_owned_source_path(source_id);
+        let after = Self::build_project_model_revision_library(
+            library_name,
+            None,
+            source_id,
+            revision,
+            root,
+            definition,
+            qualification,
+        )?;
+        let model_name = definition.base.name.clone();
+        self.libraries
+            .insert(library_name.to_owned(), after.clone());
+        Ok(ProjectModelCommit {
+            library_name: library_name.to_owned(),
+            model_name,
+            before: None,
+            after,
+        })
+    }
+
     /// Replace one editable project model using optimistic source-revision
     /// guards. External, built-in, multi-card, and stale sources fail closed.
     pub fn replace_project_model(
@@ -894,6 +942,112 @@ impl ModelLibraryManager {
             return Err("Model candidate has no source changes to save".to_owned());
         }
         let model_name = definition.name.clone();
+        self.libraries
+            .insert(library_name.to_owned(), after.clone());
+        Ok(ProjectModelCommit {
+            library_name: library_name.to_owned(),
+            model_name,
+            before: Some(before),
+            after,
+        })
+    }
+
+    /// Replace one complete project-owned model revision using optimistic
+    /// source-revision guards. Validation and canonical source parsing finish
+    /// before the live manager is mutated.
+    pub fn replace_project_model_revision(
+        &mut self,
+        library_name: &str,
+        expected_source_id: ModelSourceId,
+        expected_revision: ObjectRevision,
+        definition: &ProjectModelRevisionDefinition,
+        qualification: &ModelQualificationState,
+    ) -> Result<ProjectModelCommit, String> {
+        let before = self
+            .libraries
+            .get(library_name)
+            .cloned()
+            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            ..
+        } = before.source_authority
+        else {
+            return Err(format!(
+                "Model library '{library_name}' is not project-owned; create an editable project copy before changing it"
+            ));
+        };
+        if source_id != expected_source_id || revision != expected_revision {
+            return Err(format!(
+                "Model library '{library_name}' changed after this candidate was opened; reload or compare before saving"
+            ));
+        }
+        if before.source_closure.len() != 1
+            || before.source_contents.len() != 1
+            || !before.source_edges.is_empty()
+        {
+            return Err(format!(
+                "Model library '{library_name}' is not a complete editable project-model revision"
+            ));
+        }
+        let previous_model_name = before.models.keys().next().ok_or_else(|| {
+            format!("Project-owned model library '{library_name}' has no model projection")
+        })?;
+        if before.models.len() != 1
+            || !before
+                .model_definition_metadata
+                .contains_key(previous_model_name)
+        {
+            return Err(format!(
+                "Model library '{library_name}' does not have one coherent editable definition"
+            ));
+        }
+        let display_name = before
+            .model_definition_metadata
+            .get(previous_model_name)
+            .and_then(|metadata| metadata.sections.first())
+            .and_then(|section| section.model_files.first())
+            .map_or_else(
+                || format!("{library_name}.model"),
+                |identity| identity.display_name.clone(),
+            );
+        let current_identity_candidate = definition
+            .clone()
+            .bind_project_source_identity(source_id, revision, display_name)
+            .map_err(|error| format!("Project model revision is invalid: {error}"))?;
+        let current_identity_source = current_identity_candidate
+            .canonical_source()
+            .map_err(|error| format!("Project model source is invalid: {error}"))?;
+        if before.source_contents[0].bytes == current_identity_source.into_bytes()
+            && before.model_definition_metadata.get(previous_model_name)
+                == Some(&current_identity_candidate.metadata)
+            && before
+                .model_qualification
+                .get(previous_model_name)
+                .cloned()
+                .unwrap_or_default()
+                == *qualification
+        {
+            return Err("Model candidate has no semantic changes to save".to_owned());
+        }
+
+        let next_revision = revision
+            .next()
+            .map_err(|error| format!("Cannot revise model library '{library_name}': {error}"))?;
+        let root = before.root_path.clone().ok_or_else(|| {
+            format!("Project-owned model library '{library_name}' has no source identity")
+        })?;
+        let after = Self::build_project_model_revision_library(
+            library_name,
+            Some(&before),
+            source_id,
+            next_revision,
+            root,
+            definition,
+            qualification,
+        )?;
+        let model_name = definition.base.name.clone();
         self.libraries
             .insert(library_name.to_owned(), after.clone());
         Ok(ProjectModelCommit {
@@ -986,6 +1140,9 @@ impl ModelLibraryManager {
         );
 
         let mut library = ModelLibrary::new(library_name);
+        let previous_model_name = previous
+            .and_then(|library| library.models.keys().next())
+            .cloned();
         if let Some(previous) = previous {
             library.pdk_name = previous.pdk_name.clone();
             library.technology_node = previous.technology_node.clone();
@@ -1007,8 +1164,160 @@ impl ModelLibraryManager {
         library
             .models
             .insert(device_model.name.clone(), device_model);
+        let previous_metadata = previous_model_name.as_deref().and_then(|model_name| {
+            previous.and_then(|library| library.model_definition_metadata.get(model_name))
+        });
+        let metadata = reconcile_project_model_metadata(definition, previous_metadata)?;
+        library
+            .model_definition_metadata
+            .insert(definition.name.clone(), metadata);
+        if let Some(previous) = previous
+            && let Some(previous_model_name) = previous_model_name.as_deref()
+            && let Some(qualification) = previous.model_qualification.get(previous_model_name)
+        {
+            if previous_model_name != definition.name && *qualification != Default::default() {
+                return Err(
+                    "A qualified model cannot be renamed without an explicit release-lineage migration"
+                        .to_owned(),
+                );
+            }
+            if previous_model_name == definition.name {
+                library
+                    .model_qualification
+                    .insert(definition.name.clone(), qualification.clone());
+            }
+        }
         library.corners.clear();
         library.selected_corner = None;
+        library.version = revision.get().to_string();
+        Ok(library)
+    }
+
+    fn build_project_model_revision_library(
+        library_name: &str,
+        previous: Option<&ModelLibrary>,
+        source_id: ModelSourceId,
+        revision: ObjectRevision,
+        root: PathBuf,
+        definition: &ProjectModelRevisionDefinition,
+        qualification: &ModelQualificationState,
+    ) -> Result<ModelLibrary, String> {
+        qualification
+            .validate_for_model(&definition.base.name)
+            .map_err(|error| format!("Project model qualification is invalid: {error}"))?;
+        let bound = definition
+            .clone()
+            .bind_project_source_identity(source_id, revision, format!("{library_name}.model"))
+            .map_err(|error| format!("Project model revision is invalid: {error}"))?;
+        let source = bound
+            .canonical_source()
+            .map_err(|error| format!("Project model source is invalid: {error}"))?;
+        bound
+            .verify_source_round_trip(&source)
+            .map_err(|error| format!("Project model source is invalid: {error}"))?;
+        let identity = bound
+            .project_source_identity()
+            .map_err(|error| format!("Project model source identity is invalid: {error}"))?
+            .ok_or_else(|| "Project model source identity was not bound".to_owned())?;
+        let bytes = source.into_bytes();
+
+        let mut parser =
+            rspice_core::library::LibParser::new(root.parent().unwrap_or_else(|| Path::new("/")));
+        let parsed = parser.parse_string(
+            rspice_core::netlist::decode_source_bytes(&bytes)
+                .map_err(|error| format!("Project model source cannot be decoded: {error}"))?
+                .as_str(),
+        );
+        if !parsed.is_ok() || parsed.top_level_models.len() != 1 {
+            let details = parsed
+                .errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(if details.is_empty() {
+                "Project model source did not produce one top-level model".to_owned()
+            } else {
+                format!("Project model source could not be projected: {details}")
+            });
+        }
+
+        let mut device_model = Self::convert_parsed_model(&parsed.top_level_models[0], &root);
+        device_model.spice_type = Some(bound.base.spice_type.to_ascii_uppercase());
+        device_model.description = bound.base.description.clone();
+        device_model.source_line = Some(
+            bound
+                .base
+                .description
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count()
+                + 1,
+        );
+
+        let previous_model_name = previous
+            .and_then(|library| library.models.keys().next())
+            .cloned();
+        let mut library = ModelLibrary::new(library_name);
+        if let Some(previous) = previous {
+            library.pdk_name = previous.pdk_name.clone();
+            library.technology_node = previous.technology_node.clone();
+            library.expanded = previous.expanded;
+        }
+        library.root_path = Some(root.clone());
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            digest: identity.content_digest,
+        };
+        library.source_closure = vec![ModelSourcePin {
+            path: root.clone(),
+            digest: identity.content_digest,
+        }];
+        library.source_contents = vec![ModelSourceContent {
+            path: root.clone(),
+            bytes,
+        }];
+        library.source_edges.clear();
+        library.models.clear();
+        library.models.insert(bound.base.name.clone(), device_model);
+        library.model_definition_metadata.clear();
+        library
+            .model_definition_metadata
+            .insert(bound.base.name.clone(), bound.metadata.clone());
+        library.model_qualification.clear();
+        if let Some(previous_model_name) = previous_model_name.as_deref() {
+            if previous_model_name != bound.base.name && *qualification != Default::default() {
+                return Err(
+                    "A qualified model cannot be renamed without an explicit release-lineage migration"
+                        .to_owned(),
+                );
+            }
+        }
+        if *qualification != Default::default() {
+            library
+                .model_qualification
+                .insert(bound.base.name.clone(), qualification.clone());
+        }
+
+        library.corners.clear();
+        let selected_corner = bound
+            .metadata
+            .sections
+            .iter()
+            .find(|section| section.name.eq_ignore_ascii_case("tt"))
+            .or_else(|| bound.metadata.sections.first())
+            .map(|section| section.name.clone());
+        for section in &bound.metadata.sections {
+            let mut corner = ProcessCorner::new(&section.name);
+            corner.description = format!("Project model section {}", section.name);
+            corner.nmos_corner = section.name.to_ascii_lowercase();
+            corner.pmos_corner = section.name.to_ascii_lowercase();
+            corner.file_path = Some(root.clone());
+            corner.is_default = selected_corner.as_deref() == Some(section.name.as_str());
+            library.corners.insert(section.name.clone(), corner);
+        }
+        library.selected_corner = selected_corner;
         library.version = revision.get().to_string();
         Ok(library)
     }
@@ -1555,6 +1864,88 @@ fn validate_project_library_name(name: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn reconcile_project_model_metadata(
+    definition: &ProjectModelDefinition,
+    previous: Option<&ModelDefinitionMetadata>,
+) -> Result<ModelDefinitionMetadata, String> {
+    let mut metadata = previous.cloned().unwrap_or_default();
+    if !metadata.sections.is_empty() {
+        return Err(
+            "A sectioned model must be changed through the complete project-model revision transaction"
+                .to_owned(),
+        );
+    }
+    let previous_parameters = metadata.parameters;
+    let mut parameters = Vec::with_capacity(
+        definition.numeric_parameters.len() + definition.string_parameters.len(),
+    );
+    for (name, value) in &definition.numeric_parameters {
+        let mut parameter = previous_parameters
+            .iter()
+            .find(|parameter| parameter.name.eq_ignore_ascii_case(name))
+            .cloned()
+            .unwrap_or_else(|| ParameterDefinition {
+                name: name.clone(),
+                data_type: ParameterDataType::Numeric,
+                value: ParameterValue::Numeric(
+                    FiniteF64::new(*value).expect("project definitions reject non-finite values"),
+                ),
+                unit: None,
+                bounds: None,
+                source: ParameterSource::Declared {
+                    source: "project model source".to_owned(),
+                },
+                description: format!("Project-owned {name} model parameter"),
+            });
+        if parameter.data_type != ParameterDataType::Numeric {
+            return Err(format!(
+                "Model parameter '{name}' cannot change from string to numeric without an explicit schema migration"
+            ));
+        }
+        parameter.name = name.clone();
+        parameter.value = ParameterValue::Numeric(
+            FiniteF64::new(*value).expect("project definitions reject non-finite values"),
+        );
+        parameters.push(parameter);
+    }
+    for (name, value) in &definition.string_parameters {
+        let mut parameter = previous_parameters
+            .iter()
+            .find(|parameter| parameter.name.eq_ignore_ascii_case(name))
+            .cloned()
+            .unwrap_or_else(|| ParameterDefinition {
+                name: name.clone(),
+                data_type: ParameterDataType::String,
+                value: ParameterValue::String(value.clone()),
+                unit: None,
+                bounds: None,
+                source: ParameterSource::Declared {
+                    source: "project model source".to_owned(),
+                },
+                description: format!("Project-owned {name} model parameter"),
+            });
+        if parameter.data_type != ParameterDataType::String {
+            return Err(format!(
+                "Model parameter '{name}' cannot change from numeric to string without an explicit schema migration"
+            ));
+        }
+        parameter.name = name.clone();
+        parameter.value = ParameterValue::String(value.clone());
+        parameters.push(parameter);
+    }
+    parameters.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    metadata.parameters = parameters;
+    metadata
+        .validate()
+        .map_err(|error| format!("Project model metadata is invalid: {error}"))?;
+    Ok(metadata)
 }
 
 fn verify_project_model_round_trip(
@@ -2259,6 +2650,90 @@ mod tests {
         assert_eq!(
             manager.get_library("owned_models").unwrap().source_contents[0].bytes,
             original
+        );
+    }
+
+    fn sectioned_project_revision(vth0: f64) -> ProjectModelRevisionDefinition {
+        let base = project_definition(vth0, "r1");
+        let metadata = reconcile_project_model_metadata(&base, None)
+            .expect("synthesize typed project metadata");
+        let mut definition = ProjectModelRevisionDefinition::new(base, metadata);
+        definition
+            .metadata
+            .sections
+            .push(crate::state::model_library::ModelSectionDefinition {
+                name: "TT".to_owned(),
+                parent: None,
+                overrides: BTreeMap::from([(
+                    "vth0".to_owned(),
+                    ParameterValue::Numeric(FiniteF64::new(0.49).expect("finite fixture")),
+                )]),
+                model_files: Vec::new(),
+                qualification: crate::state::model_library::ModelSectionQualification::Unqualified,
+            });
+        definition
+    }
+
+    #[test]
+    fn complete_project_revision_publishes_sections_and_executes_selected_corner() {
+        let mut manager = ModelLibraryManager::new();
+        let created = manager
+            .create_project_model_revision(
+                "owned_sections",
+                &sectioned_project_revision(0.48),
+                &ModelQualificationState::default(),
+            )
+            .expect("create complete model revision");
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            digest,
+        } = created.after.source_authority
+        else {
+            panic!("complete revision must be project-owned")
+        };
+        assert_eq!(revision, ObjectRevision::INITIAL);
+        assert_eq!(created.after.selected_corner.as_deref(), Some("TT"));
+        assert_eq!(created.after.corners.len(), 1);
+        let metadata = &created.after.model_definition_metadata["owned_nch"];
+        assert_eq!(metadata.sections[0].model_files.len(), 1);
+        assert_eq!(metadata.sections[0].model_files[0].revision, 1);
+        assert_eq!(
+            metadata.sections[0].model_files[0].content_digest,
+            digest.to_string()
+        );
+
+        let cards = manager
+            .reference_process_model_cards(crate::simulation::dialog::corner::ProcessCorner::TT)
+            .expect("materialize retained TT section")
+            .join("\n");
+        assert!(cards.contains("VTH0=0.49"), "{cards}");
+
+        let mut metadata_only =
+            ProjectModelRevisionDefinition::new(project_definition(0.48, "r1"), metadata.clone());
+        metadata_only.metadata.parameters[0].unit = Some("dimensionless".to_owned());
+        let replaced = manager
+            .replace_project_model_revision(
+                "owned_sections",
+                source_id,
+                revision,
+                &metadata_only,
+                &ModelQualificationState::default(),
+            )
+            .expect("metadata-only change creates a complete revision");
+        assert_eq!(
+            replaced.after.project_source_revision(),
+            Some(ObjectRevision::new(2).expect("second revision"))
+        );
+        assert_eq!(
+            replaced.after.source_contents[0].bytes,
+            created.after.source_contents[0].bytes
+        );
+        assert_eq!(
+            replaced.after.model_definition_metadata["owned_nch"].parameters[0]
+                .unit
+                .as_deref(),
+            Some("dimensionless")
         );
     }
 
