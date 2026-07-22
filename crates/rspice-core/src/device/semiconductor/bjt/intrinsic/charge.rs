@@ -457,10 +457,30 @@ impl Bjt {
         } else {
             1.0
         };
-        let ibe_normal = self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
-            + self.diode_current_with_is(self.iben, vbe_eff, self.nen);
-        let dibe_normal_dvbe = self.diode_conductance_with_is(self.ibei, vbe_eff, self.nei)
-            + self.diode_conductance_with_is(self.iben, vbe_eff, self.nen);
+        // Legacy GP defines the ideal base current from the same forward
+        // junction current used by transport (`I_BE / BF`).  Reusing the
+        // transport branch preserves the model's NF, temperature scaling,
+        // and junction GMIN semantics.  `IBEI` is a VBIC base-current
+        // parameter; using it as the legacy ideal branch would silently
+        // change the exponential whenever NF != 1 (and diverges from both
+        // Xyce's BJTload and ngspice's bjtload).
+        let legacy_model = self.charge_model == BjtChargeModel::LegacyGummelPoon;
+        let (ibe_normal, dibe_normal_dvbe) = if legacy_model {
+            let ideal_scale = 1.0 / self.bf.max(1e-18);
+            (
+                transport.ifi * ideal_scale
+                    + self.diode_current_with_is(self.iben, vbe_eff, self.nen),
+                transport.gfi * ideal_scale
+                    + self.diode_conductance_with_is(self.iben, vbe_eff, self.nen),
+            )
+        } else {
+            (
+                self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
+                    + self.diode_current_with_is(self.iben, vbe_eff, self.nen),
+                self.diode_conductance_with_is(self.ibei, vbe_eff, self.nei)
+                    + self.diode_conductance_with_is(self.iben, vbe_eff, self.nen),
+            )
+        };
         let ibex_normal = if self.charge_model == BjtChargeModel::Vbic {
             (1.0 - wbe)
                 * (self.diode_current_with_is(self.ibei, vbex_eff, self.nei)
@@ -479,30 +499,27 @@ impl Bjt {
         let dibe_intrinsic_breakdown_dvbe = wbe * dibe_breakdown_dvbe;
         let ibex_breakdown = (1.0 - wbe) * ibe_breakdown;
         let dibex_breakdown_dvbe = (1.0 - wbe) * dibe_breakdown_dvbe;
-        let legacy_ideal_be_scale = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
-            1.0 / self.bf.max(1e-18)
-        } else {
-            0.0
-        };
-        let legacy_ideal_bc_scale = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+        let legacy_reverse_base_scale = if legacy_model {
             1.0 / self.br.max(1e-18)
         } else {
             0.0
         };
-        let direct_be_gmin = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
-            legacy_ideal_be_scale * gmin
-        } else {
-            gmin
-        };
-        let direct_bc_gmin = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
-            legacy_ideal_bc_scale * gmin
-        } else {
-            gmin
-        };
+        // `transport.ifi` already contains the forward-junction GMIN and was
+        // divided by BF above for legacy GP.  Adding another parallel here
+        // would double-stamp that conductance.
+        let direct_be_gmin = if legacy_model { 0.0 } else { gmin };
+        // Legacy GP's reverse junction current already includes its GMIN
+        // parallel in `transport.iri`; the Xyce/Spice base and collector
+        // currents divide that complete I_BC branch by BR. VBIC keeps its
+        // independent direct junction GMIN path.
+        let direct_bc_gmin = if legacy_model { 0.0 } else { gmin };
         let ib_be = wbe * ibe_normal + ibe_intrinsic_breakdown + direct_be_gmin * vbe_eff;
         let dibe_dvbe = wbe * dibe_normal_dvbe + dibe_intrinsic_breakdown_dvbe + direct_be_gmin;
-        let ibc = bc.ibc + direct_bc_gmin * vbc_eff;
-        let dibc_dvbc = bc.dibc_dvbc_eff + direct_bc_gmin;
+        let reverse_base_current = legacy_reverse_base_scale * transport.iri;
+        let reverse_base_dvbc = legacy_reverse_base_scale * transport.gri;
+        let ibc = bc.ibc + reverse_base_current + direct_bc_gmin * vbc_eff;
+        let dibc_dvbe = bc.dibc_dvbe_eff;
+        let dibc_dvbc = bc.dibc_dvbc_eff + reverse_base_dvbc + direct_bc_gmin;
         let iciei = transport.itzf - transport.itzr;
         let diciei_dvbe = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;
         let diciei_dvbc = transport.ditzf_dvbc_eff - transport.ditzr_dvbc_eff;
@@ -523,10 +540,10 @@ impl Bjt {
             // (collector to emitter) and the opposing B-C junction branch.
             ic: p * (iciei - ibc),
             ib: p * (ib_be + ibc),
-            dic_dvbe: diciei_dvbe - bc.dibc_dvbe_eff,
+            dic_dvbe: diciei_dvbe - dibc_dvbe,
             dic_dvbc: diciei_dvbc - dibc_dvbc,
             dic_dvrth: 0.0,
-            dib_dvbe: dibe_dvbe + bc.dibc_dvbe_eff,
+            dib_dvbe: dibe_dvbe + dibc_dvbe,
             dib_dvbc: dibc_dvbc,
             dib_dvrth: 0.0,
             qb: transport.qb,

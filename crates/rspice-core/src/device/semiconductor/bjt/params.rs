@@ -10,6 +10,9 @@ impl Bjt {
         self.is = self.is_nominal;
         self.bf = 100.0;
         self.br = 1.0;
+        self.bf_nominal = self.bf;
+        self.br_nominal = self.br;
+        self.beta_exp = 0.0;
         self.nf_nominal = 1.0;
         self.nr_nominal = 1.0;
         self.nf = 1.0;
@@ -104,6 +107,9 @@ impl Bjt {
         self.substrate_topology = BjtSubstrateTopology::default_for_type(self.bjt_type);
         self.is_nominal = 1e-16;
         self.is = self.is_nominal;
+        self.bf_nominal = self.bf;
+        self.br_nominal = self.br;
+        self.beta_exp = 0.0;
         self.nf_nominal = 1.0;
         self.nr_nominal = 1.0;
         self.nf = 1.0;
@@ -286,6 +292,21 @@ impl Bjt {
     }
 
     #[inline]
+    fn legacy_temp_scaled_current(
+        nominal: Value,
+        factlog: Value,
+        beta_scale: Value,
+        emission_coeff: Value,
+    ) -> Value {
+        if nominal <= 0.0 {
+            return 0.0;
+        }
+
+        let emission = emission_coeff.max(1e-12);
+        nominal * (factlog / emission).clamp(-80.0, 80.0).exp() / beta_scale.max(1e-18)
+    }
+
+    #[inline]
     pub(super) fn vbic_temp_scaled_resistance(
         nominal: Value,
         r_t: Value,
@@ -405,8 +426,16 @@ impl Bjt {
         let vt = self.thermal_voltage_at(temp);
         let ratio = (temp / tnom).max(1e-12);
         let delta_t = temp - tnom;
-        let is_temp =
-            Self::vbic_temp_scaled_current(self.is_nominal, ratio, vt, self.xis, self.ea, self.nf);
+        let beta_scale = ratio.powf(self.beta_exp);
+        let legacy_model = self.charge_model == BjtChargeModel::LegacyGummelPoon;
+        let legacy_factlog =
+            ((ratio - 1.0) * self.ea / vt.max(1e-18) + self.xis * ratio.ln()).clamp(-80.0, 80.0);
+        let legacy_is_factor = legacy_factlog.exp();
+        let is_temp = if legacy_model {
+            self.is_nominal * legacy_is_factor
+        } else {
+            Self::vbic_temp_scaled_current(self.is_nominal, ratio, vt, self.xis, self.ea, self.nf)
+        };
         let scale = self.instance_scale();
         let isrr_temp = Self::vbic_temp_scaled_current(
             self.isrr_nominal,
@@ -419,38 +448,74 @@ impl Bjt {
         let gamm_ratio_term = ratio.powf(self.xis);
         let gamm_energy_term = (-self.ea * (1.0 - ratio) / vt.max(1e-18)).clamp(-80.0, 80.0);
         let gamm_temp = self.gamm_nominal * gamm_ratio_term * gamm_energy_term.exp();
-        let ibei_temp = Self::vbic_temp_scaled_current(
-            self.ibei_nominal,
-            ratio,
-            vt,
-            self.xii,
-            self.eaie,
-            self.nei,
-        );
-        let iben_temp = Self::vbic_temp_scaled_current(
-            self.iben_nominal,
-            ratio,
-            vt,
-            self.xin,
-            self.eane,
-            self.nen,
-        );
-        let ibci_temp = Self::vbic_temp_scaled_current(
-            self.ibci_nominal,
-            ratio,
-            vt,
-            self.xii,
-            self.eaic,
-            self.nci,
-        );
-        let ibcn_temp = Self::vbic_temp_scaled_current(
-            self.ibcn_nominal,
-            ratio,
-            vt,
-            self.xin,
-            self.eanc,
-            self.ncn,
-        );
+        let ibei_temp = if legacy_model {
+            Self::legacy_temp_scaled_current(
+                self.ibei_nominal,
+                legacy_factlog,
+                beta_scale,
+                self.nei,
+            )
+        } else {
+            Self::vbic_temp_scaled_current(
+                self.ibei_nominal,
+                ratio,
+                vt,
+                self.xii,
+                self.eaie,
+                self.nei,
+            )
+        };
+        let iben_temp = if legacy_model {
+            Self::legacy_temp_scaled_current(
+                self.iben_nominal,
+                legacy_factlog,
+                beta_scale,
+                self.nen,
+            )
+        } else {
+            Self::vbic_temp_scaled_current(
+                self.iben_nominal,
+                ratio,
+                vt,
+                self.xin,
+                self.eane,
+                self.nen,
+            )
+        };
+        let ibci_temp = if legacy_model {
+            Self::legacy_temp_scaled_current(
+                self.ibci_nominal,
+                legacy_factlog,
+                beta_scale,
+                self.nci,
+            )
+        } else {
+            Self::vbic_temp_scaled_current(
+                self.ibci_nominal,
+                ratio,
+                vt,
+                self.xii,
+                self.eaic,
+                self.nci,
+            )
+        };
+        let ibcn_temp = if legacy_model {
+            Self::legacy_temp_scaled_current(
+                self.ibcn_nominal,
+                legacy_factlog,
+                beta_scale,
+                self.ncn,
+            )
+        } else {
+            Self::vbic_temp_scaled_current(
+                self.ibcn_nominal,
+                ratio,
+                vt,
+                self.xin,
+                self.eanc,
+                self.ncn,
+            )
+        };
         let isp_temp = Self::vbic_temp_scaled_current(
             self.isp_nominal,
             ratio,
@@ -519,6 +584,8 @@ impl Bjt {
 
         self.vt = vt;
         self.temperature = temp;
+        self.bf = (self.bf_nominal * beta_scale).max(1e-18);
+        self.br = (self.br_nominal * beta_scale).max(1e-18);
         self.is = (is_temp * scale).max(1e-30);
         self.nf = nf_temp.max(1e-12);
         self.nr = nr_temp.max(1e-12);
@@ -606,6 +673,9 @@ impl Bjt {
     /// temperature-scaled model quantities.
     pub(crate) fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_compatibility = enabled;
+        if enabled && !self.tnom_given {
+            self.tnom = 300.0;
+        }
     }
 
     /// Set optional substrate node (0 for ground/unconnected).
@@ -634,7 +704,6 @@ impl Bjt {
         let mut has_rb = false;
         let mut has_rc = false;
         let mut has_ibei = false;
-        let mut has_ibci = false;
         let mut has_rth = false;
         let mut legacy_rb: Option<Value> = None;
         let mut legacy_rbm: Option<Value> = None;
@@ -654,9 +723,11 @@ impl Bjt {
         }
         if let Some(&v) = params.get("BF") {
             self.bf = v;
+            self.bf_nominal = v;
         }
         if let Some(&v) = params.get("BR") {
             self.br = v;
+            self.br_nominal = v;
         }
         if let Some(&v) = params.get("SUBS")
             && v.is_finite()
@@ -693,6 +764,15 @@ impl Bjt {
         }
         if let Some(&v) = params.get("RBM") {
             legacy_rbm = Some(v.max(0.0));
+        }
+        if let Some(v) = params
+            .get("XTB")
+            .copied()
+            .or_else(|| params.get("TB").copied())
+            .or_else(|| params.get("TCB").copied())
+            && v.is_finite()
+        {
+            self.beta_exp = v;
         }
         if let Some(&v) = params.get("RC") {
             self.rcx = v.max(0.0);
@@ -865,6 +945,7 @@ impl Bjt {
             && v > 0.0
         {
             self.tnom = if v > 200.0 { v } else { v + 273.15 };
+            self.tnom_given = true;
         }
         if let Some(v) = params
             .get("KF")
@@ -1293,7 +1374,6 @@ impl Bjt {
         }
         if let Some(&v) = params.get("IBCI") {
             self.ibci_nominal = v.max(0.0);
-            has_ibci = true;
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
             && let Some(&v) = params.get("ISC")
@@ -1376,9 +1456,6 @@ impl Bjt {
         }
         if !has_ibei && self.charge_model == BjtChargeModel::LegacyGummelPoon {
             self.ibei_nominal = self.is_nominal / self.bf.max(1e-18);
-        }
-        if !has_ibci && self.charge_model == BjtChargeModel::LegacyGummelPoon {
-            self.ibci_nominal = self.is_nominal / self.br.max(1e-18);
         }
         if self.charge_model == BjtChargeModel::Vbic && has_rth {
             // ngspice VBIC setup semantics:

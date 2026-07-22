@@ -546,6 +546,12 @@ pub struct Bjt {
     pub bf: Value,
     /// Reverse current gain (BR)
     pub br: Value,
+    /// Nominal forward current gain before temperature scaling.
+    bf_nominal: Value,
+    /// Nominal reverse current gain before temperature scaling.
+    br_nominal: Value,
+    /// Forward/reverse beta temperature exponent (`XTB`/`TB`/`TCB`).
+    beta_exp: Value,
     /// Forward emission coefficient (NF)
     pub nf: Value,
     /// Reverse emission coefficient (NR)
@@ -554,6 +560,9 @@ pub struct Bjt {
     pub vt: Value,
     /// Nominal model temperature (K)
     pub tnom: Value,
+    /// Whether the model card explicitly supplied TNOM. Xyce's legacy BJT
+    /// default is 300 K; the ordinary SPICE default remains 27 C.
+    tnom_given: bool,
     /// Requested ambient/device temperature before self-heating (K)
     ambient_temperature: Value,
     /// Active device temperature (K)
@@ -1017,13 +1026,17 @@ impl Bjt {
             vbic_mna_promoted: false,
 
             // Default parameters (2N2222-like for NPN)
-            is: 1e-14,          // Saturation current
-            bf: 200.0,          // Forward current gain
-            br: 1.0,            // Reverse current gain
+            is: 1e-14, // Saturation current
+            bf: 200.0, // Forward current gain
+            br: 1.0,   // Reverse current gain
+            bf_nominal: 200.0,
+            br_nominal: 1.0,
+            beta_exp: 0.0,
             nf: 1.0,            // Forward emission coefficient
             nr: 1.0,            // Reverse emission coefficient
             vt: 0.025851999786, // Thermal voltage at 300K
             tnom: crate::analysis::temperature::T_NOMINAL,
+            tnom_given: false,
             ambient_temperature: crate::analysis::temperature::T_NOMINAL,
             temperature: crate::analysis::temperature::T_NOMINAL,
             xyce_compatibility: false,
