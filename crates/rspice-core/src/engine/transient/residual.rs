@@ -13,12 +13,6 @@ use super::*;
 /// mutated when a step is accepted) and dropped before the commit walks.
 pub(super) struct TransientSystemContext<'a> {
     pub(super) coeff: &'a CompanionCoefficients,
-    /// Xyce's OneStep order-2 residual uses a backward-Euler Q difference
-    /// together with a trapezoid-weighted static F term.  The accepted
-    /// previous static residual is carried separately because it is not part
-    /// of the reactive companion histories.
-    pub(super) xyce_one_step_order2: bool,
-    pub(super) xyce_static_history: Option<&'a [Value]>,
     pub(super) bsim4_trnqs_coeff: &'a CompanionCoefficients,
     pub(super) bjt_history: &'a BjtTransientHistory,
     pub(super) jfet_history: &'a JfetTransientHistory,
@@ -141,29 +135,6 @@ impl Engine {
             .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.update_transient_rhs(rhs, time);
 
-        // Xyce's OneStep order-2 residual scales the complete static DAE
-        // contribution by one half.  The reactive Q contribution is stamped
-        // below with an order-1 (backward-Euler) companion instead.
-        if ctx.xyce_one_step_order2 {
-            for value in matrix.values_mut() {
-                *value *= 0.5;
-            }
-            for value in rhs.iter_mut() {
-                *value *= 0.5;
-            }
-        }
-
-        let companion_coeff = if ctx.xyce_one_step_order2 {
-            CompanionCoefficients::backward_euler()
-        } else {
-            *ctx.coeff
-        };
-        let bsim4_companion_coeff = if ctx.xyce_one_step_order2 {
-            companion_coeff
-        } else {
-            *ctx.bsim4_trnqs_coeff
-        };
-
         circuit.refresh_jiles_atherton_inductances(solution);
         circuit.set_b3soi_operating_point_mode(false);
         circuit.set_xyce_memristor_operating_point_mode(false);
@@ -186,19 +157,19 @@ impl Engine {
 
         circuit
             .capacitors
-            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+            .stamp_transient_companion(matrix, rhs, dt, ctx.coeff, num_nodes);
         circuit
             .inductors
-            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
-        circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
-        circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
+            .stamp_transient_companion(matrix, rhs, dt, ctx.coeff, num_nodes);
+        circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, ctx.coeff);
+        circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, ctx.coeff);
 
         Self::stamp_bjt_transient_companions(
             circuit,
             matrix,
             rhs,
             solution,
-            &companion_coeff,
+            ctx.coeff,
             dt,
             ctx.bjt_history,
             vbic_snapshot_cache,
@@ -211,7 +182,7 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
+            ctx.coeff,
             dt,
             ctx.jfet_history,
             ctx.suppress_gate_charge,
@@ -221,7 +192,7 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
+            ctx.coeff,
             dt,
             ctx.diode_history,
             ctx.diode_companion_slots,
@@ -231,7 +202,7 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
+            ctx.coeff,
             dt,
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
@@ -242,7 +213,7 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
+            ctx.coeff,
             dt,
             ctx.vdmos_history,
             ctx.vdmos_companion_slots,
@@ -253,7 +224,7 @@ impl Engine {
                 matrix,
                 rhs,
                 solution,
-                &companion_coeff,
+                ctx.coeff,
                 dt,
                 ctx.b3soi_history,
             );
@@ -263,7 +234,7 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
+            ctx.coeff,
             dt,
             ctx.bsim3_history,
         );
@@ -272,8 +243,8 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
-            &bsim4_companion_coeff,
+            ctx.coeff,
+            ctx.bsim4_trnqs_coeff,
             dt,
             ctx.bsim4_history,
         );
@@ -282,7 +253,7 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
+            ctx.coeff,
             dt,
             ctx.ekv26_history,
         );
@@ -295,18 +266,7 @@ impl Engine {
             dt,
             ctx.coupled_tline_refs,
         );
-        let generic_switch_snapshot = ctx
-            .xyce_one_step_order2
-            .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
         circuit.stamp_generic_switches(matrix, rhs, time);
-        if let Some((before_values, before_rhs)) = generic_switch_snapshot {
-            for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
-                *value = before + 0.5 * (*value - before);
-            }
-            for (value, before) in rhs.iter_mut().zip(before_rhs) {
-                *value = before + 0.5 * (*value - before);
-            }
-        }
 
         if circuit.has_nonlinear_devices() {
             #[cfg(feature = "veriloga")]
@@ -315,7 +275,7 @@ impl Engine {
                     .prepare_veriloga_timepoint(
                         time,
                         dt,
-                        &companion_coeff,
+                        ctx.coeff,
                         ctx.analysis_initial_step,
                         ctx.analysis_final_step,
                     )
@@ -326,14 +286,11 @@ impl Engine {
                 circuit.prepare_generated_veriloga_timepoint(
                     time,
                     dt,
-                    &companion_coeff,
+                    ctx.coeff,
                     ctx.analysis_initial_step,
                     ctx.analysis_final_step,
                 );
             }
-            let static_nonlinear_snapshot = ctx
-                .xyce_one_step_order2
-                .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
             if evaluation_mode
                 == crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe
             {
@@ -353,91 +310,14 @@ impl Engine {
                 crate::xspice::AnalysisType::Transient,
                 evaluation_mode,
             );
-            if let Some((before_values, before_rhs)) = static_nonlinear_snapshot {
-                for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
-                    *value = before + 0.5 * (*value - before);
-                }
-                for (value, before) in rhs.iter_mut().zip(before_rhs) {
-                    *value = before + 0.5 * (*value - before);
-                }
-            }
         } else {
-            let static_behavioral_snapshot = ctx
-                .xyce_one_step_order2
-                .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
             circuit.stamp_behavioral_sources(matrix, rhs, solution, time);
-            if let Some((before_values, before_rhs)) = static_behavioral_snapshot {
-                for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
-                    *value = before + 0.5 * (*value - before);
-                }
-                for (value, before) in rhs.iter_mut().zip(before_rhs) {
-                    *value = before + 0.5 * (*value - before);
-                }
-            }
         }
 
         if circuit.has_xspice_devices() {
             circuit.stamp_xspice_transient_trial(matrix, rhs, time, dt, solution);
         }
-        if ctx.xyce_one_step_order2 {
-            if let Some(history) = ctx.xyce_static_history {
-                debug_assert_eq!(history.len(), rhs.len());
-                for (rhs_value, previous_residual) in rhs.iter_mut().zip(history) {
-                    // The assembled system is A*x = b, while OneStep adds
-                    // +0.5*(F_prev-B_prev) to its residual A*x-b.
-                    *rhs_value -= 0.5 * previous_residual;
-                }
-            }
-        }
         Ok(())
-    }
-
-    /// Capture the accepted physical static residual F(x)-B(t) used by
-    /// Xyce's OneStep order-2 history term.  The transient companion matrix
-    /// is deliberately omitted: it is represented by the per-device Q
-    /// histories and is reassembled with the attempted step size.
-    pub(super) fn capture_xyce_static_residual(
-        &self,
-        circuit: &mut crate::circuit::Circuit,
-        matrix: &mut crate::solver::StaticMatrix,
-        solution: &[Value],
-        time: Value,
-        baseline_diag_gmin: Value,
-    ) -> Result<Vec<Value>, SimulationError> {
-        circuit.update_nonlinear(solution);
-        circuit.update_bjt_static_linearizations(solution);
-        circuit.update_b3soi_static_linearizations(solution);
-        circuit.update_jfet_static_linearizations(solution);
-
-        let num_nodes = circuit.num_nodes();
-        matrix.with_probe_values(|probe, probe_rhs| {
-            Self::stamp_nodal_gmin(circuit, probe, baseline_diag_gmin.max(0.0));
-            circuit.stamp_transient_linear_direct(probe, probe_rhs);
-            circuit
-                .voltage_sources
-                .update_transient_rhs(probe_rhs, time, |br_ordinal| num_nodes + br_ordinal);
-            circuit
-                .current_sources
-                .update_transient_rhs(probe_rhs, time);
-            circuit.stamp_generic_switches(probe, probe_rhs, time);
-            if circuit.has_nonlinear_devices() {
-                circuit
-                    .try_stamp_static_probe_nonlinear(probe, probe_rhs, solution)
-                    .map_err(SimulationError::Circuit)?;
-                circuit.stamp_behavioral_static_probe(
-                    probe,
-                    probe_rhs,
-                    solution,
-                    time,
-                    crate::xspice::AnalysisType::Transient,
-                );
-            } else {
-                circuit.stamp_behavioral_sources(probe, probe_rhs, solution, time);
-            }
-            probe
-                .residual_vector(solution, probe_rhs)
-                .map_err(|error| SimulationError::Circuit(error.to_string()))
-        })
     }
 
     /// Restamp the full system at `solution` and test the true nonlinear
@@ -665,8 +545,6 @@ Q1 C B E 0 QN
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
             coeff: &coeff,
-            xyce_one_step_order2: false,
-            xyce_static_history: None,
             bsim4_trnqs_coeff: &coeff,
             bjt_history: &bjt_history,
             jfet_history: &jfet_history,
@@ -1103,8 +981,6 @@ Q1 C B E 0 QN
             let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
                 coeff: &coeff,
-                xyce_one_step_order2: false,
-                xyce_static_history: None,
                 bsim4_trnqs_coeff: &coeff,
                 bjt_history: &bjt_history,
                 jfet_history: &jfet_history,
