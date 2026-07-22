@@ -2211,7 +2211,9 @@ fn axes_section(ui: &mut Ui, app: &mut RSpiceApp) {
                                 VisualizationAutoscale::ExactExtrema => {
                                     app.state.ui.results.viewer == ResultViewer::Waves
                                 }
-                                VisualizationAutoscale::SpecificationBounds => false,
+                                VisualizationAutoscale::SpecificationBounds => {
+                                    specification_bound_fit(&app.state).is_some()
+                                }
                             };
                             ui.add_enabled_ui(configured, |ui| {
                                 ui.selectable_value(
@@ -4464,10 +4466,21 @@ fn fit_active_view(app: &mut RSpiceApp) {
             return;
         }
         VisualizationAutoscale::SpecificationBounds => {
-            app.state.push_user_message(ConsoleMessage::warning(
-                "Specification-bound fitting is unavailable because no quantity-mapped axis limit is configured.",
-            ));
-            return;
+            if viewer != ResultViewer::Waves {
+                app.state.push_user_message(ConsoleMessage::warning(
+                    "Specification-bound fitting is available only for the waveform renderer.",
+                ));
+                return;
+            }
+            let Some((x, y)) = specification_bound_fit(&app.state) else {
+                app.state.push_user_message(ConsoleMessage::warning(
+                    "Specification-bound fitting requires a visible waveform whose exact quantity name matches a configured project specification.",
+                ));
+                return;
+            };
+            let view = app.state.ui.results.plot_view_mut(viewer, strip);
+            view.x = Some(x);
+            view.y = Some(y);
         }
     }
     app.state.workbench.visualization_studio.zoom = 1.0;
@@ -4479,6 +4492,68 @@ fn nondegenerate_range(minimum: f64, maximum: f64) -> (f64, f64) {
     }
     let padding = (minimum.abs() * 1.0e-9).max(1.0e-12);
     (minimum - padding, maximum + padding)
+}
+
+/// Resolve an exact waveform-to-specification binding and return the finite
+/// coordinate envelope needed to make both the selected data and every
+/// applicable limit visible. Matching is deliberately limited to the stable,
+/// case-insensitive measurement/quantity name contract; fuzzy labels or unit
+/// coercion could silently apply an unrelated engineering limit.
+fn specification_bound_fit(state: &AppState) -> Option<((f64, f64), (f64, f64))> {
+    if state.ui.results.viewer != ResultViewer::Waves {
+        return None;
+    }
+    let analysis = state.simulation.active_analysis()?;
+    let mut x_min = f64::INFINITY;
+    let mut x_max = f64::NEG_INFINITY;
+    let mut y_min = f64::INFINITY;
+    let mut y_max = f64::NEG_INFINITY;
+    let mut matched_bound = false;
+
+    for waveform in analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| waveform.visible)
+    {
+        let matching_specs = state.workspace.specs.iter().filter(|spec| {
+            spec.measurement.eq_ignore_ascii_case(&waveform.name)
+                && (spec.min.is_some() || spec.max.is_some())
+        });
+        for spec in matching_specs {
+            if let Some(minimum) = spec.min.filter(|value| value.is_finite()) {
+                matched_bound = true;
+                y_min = y_min.min(minimum);
+                y_max = y_max.max(minimum);
+            }
+            if let Some(maximum) = spec.max.filter(|value| value.is_finite()) {
+                matched_bound = true;
+                y_min = y_min.min(maximum);
+                y_max = y_max.max(maximum);
+            }
+        }
+        for &x in waveform.x.iter() {
+            if x.is_finite() {
+                x_min = x_min.min(x);
+                x_max = x_max.max(x);
+            }
+        }
+        for &y in waveform.y.iter() {
+            if y.is_finite() {
+                y_min = y_min.min(y);
+                y_max = y_max.max(y);
+            }
+        }
+    }
+
+    (matched_bound
+        && x_min.is_finite()
+        && x_max.is_finite()
+        && y_min.is_finite()
+        && y_max.is_finite())
+    .then_some((
+        nondegenerate_range(x_min, x_max),
+        nondegenerate_range(y_min, y_max),
+    ))
 }
 
 fn zoom_active(app: &mut RSpiceApp, factor: f32) {
@@ -6792,7 +6867,7 @@ fn numeric_policy(
 #[cfg(test)]
 mod integrity_scan_tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry, WaveformData};
 
     fn app_with_exact_source() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
@@ -6811,6 +6886,46 @@ mod integrity_scan_tests {
         app.state.simulation.runs = vec![run];
         assert!(app.state.simulation.select_run(0));
         app
+    }
+
+    #[test]
+    fn specification_bound_fit_requires_an_exact_visible_quantity_binding() {
+        let mut app = app_with_exact_source();
+        app.state.workspace.specs.push(SpecEntry {
+            measurement: "v(OUT)".to_owned(),
+            min: Some(-2.0),
+            max: Some(5.0),
+            unit: "V".to_owned(),
+        });
+
+        assert_eq!(
+            specification_bound_fit(&app.state),
+            Some(((0.0, 20.0), (-2.0, 5.0)))
+        );
+
+        app.state.workspace.specs[0].measurement = "V(unrelated)".to_owned();
+        assert_eq!(specification_bound_fit(&app.state), None);
+    }
+
+    #[test]
+    fn specification_bound_autoscale_commits_the_exact_data_and_limit_envelope() {
+        let mut app = app_with_exact_source();
+        app.state.workspace.specs.push(SpecEntry {
+            measurement: "V(out)".to_owned(),
+            min: Some(-2.0),
+            max: Some(5.0),
+            unit: "V".to_owned(),
+        });
+        app.state.workbench.visualization_studio.autoscale =
+            VisualizationAutoscale::SpecificationBounds;
+        app.state.workbench.visualization_studio.zoom = 3.0;
+
+        fit_active_view(&mut app);
+
+        let view = app.state.ui.results.plot_view(ResultViewer::Waves, 0);
+        assert_eq!(view.x, Some((0.0, 20.0)));
+        assert_eq!(view.y, Some((-2.0, 5.0)));
+        assert_eq!(app.state.workbench.visualization_studio.zoom, 1.0);
     }
 
     #[test]
