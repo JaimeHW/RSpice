@@ -482,6 +482,19 @@ impl MultiWindingTransformer {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
+        self.stamp_transient_companion_with_static_scale(dt, coeff, matrix, 1.0);
+    }
+
+    /// Stamp the transformer companion with a separate scale for the
+    /// algebraic winding-incidence terms. The inductive matrix and its history
+    /// remain full-weight Q contributions under Xyce OneStep.
+    pub fn stamp_transient_companion_with_static_scale(
+        &self,
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        matrix: &mut impl MatrixStamper,
+        static_scale: Value,
+    ) {
         let n = self.num_windings;
         let (r_matrix, v_eq) = self.companion_matrix(dt, coeff);
 
@@ -489,16 +502,16 @@ impl MultiWindingTransformer {
             let branch_i = self.branches[i].expect("Branch index must be set");
             let (pos_i, neg_i) = self.nodes[i];
 
-            matrix.stamp(branch_i, pos_i, 1.0);
-            matrix.stamp(branch_i, neg_i, -1.0);
+            matrix.stamp(branch_i, pos_i, static_scale);
+            matrix.stamp(branch_i, neg_i, -static_scale);
 
             for j in 0..n {
                 let branch_j = self.branches[j].expect("Branch index must be set");
                 matrix.stamp(branch_i, branch_j, -r_matrix[i][j]);
             }
 
-            matrix.stamp(pos_i, branch_i, 1.0);
-            matrix.stamp(neg_i, branch_i, -1.0);
+            matrix.stamp(pos_i, branch_i, static_scale);
+            matrix.stamp(neg_i, branch_i, -static_scale);
             // Branch rows demand -v_eq; see companion_matrix.
             matrix.stamp_rhs(branch_i, -v_eq[i]);
         }

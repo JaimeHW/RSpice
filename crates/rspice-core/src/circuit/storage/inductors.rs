@@ -231,6 +231,23 @@ impl Inductors {
         coeff: &CompanionCoefficients,
         num_nodes: usize,
     ) {
+        self.stamp_transient_companion_with_static_scale(matrix, rhs, dt, coeff, num_nodes, 1.0);
+    }
+
+    /// Stamp the inductor companion with an independent scale for its
+    /// algebraic branch-incidence term. Xyce OneStep keeps the derivative
+    /// (`Q`) companion at full weight while averaging the static (`F`) branch
+    /// equation with the previously accepted residual.
+    #[inline]
+    pub fn stamp_transient_companion_with_static_scale(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+        static_scale: Value,
+    ) {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
@@ -253,12 +270,12 @@ impl Inductors {
             // stamping +v_eq flips the history feedback sign and the companion
             // recursion diverges on any L in transient.
             if np > 0 {
-                matrix.add(br - 1, np - 1, 1.0);
-                matrix.add(np - 1, br - 1, 1.0);
+                matrix.add(br - 1, np - 1, static_scale);
+                matrix.add(np - 1, br - 1, static_scale);
             }
             if nn > 0 {
-                matrix.add(br - 1, nn - 1, -1.0);
-                matrix.add(nn - 1, br - 1, -1.0);
+                matrix.add(br - 1, nn - 1, -static_scale);
+                matrix.add(nn - 1, br - 1, -static_scale);
             }
             matrix.add(br - 1, br - 1, -r_eq);
             rhs[br - 1] = -v_eq;

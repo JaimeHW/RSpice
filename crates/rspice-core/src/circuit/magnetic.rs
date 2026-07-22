@@ -59,11 +59,30 @@ impl CircuitData {
         dt: Value,
         coeff: &CompanionCoefficients,
     ) {
+        self.stamp_multi_winding_transformers_transient_with_static_scale(
+            matrix, rhs, dt, coeff, 1.0,
+        );
+    }
+
+    /// Stamp multi-winding transformer companions with a separate scale for
+    /// their algebraic winding-incidence terms. Xyce OneStep averages only
+    /// that static F contribution; the inductive Q matrix stays full weight.
+    pub fn stamp_multi_winding_transformers_transient_with_static_scale(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        static_scale: Value,
+    ) {
         let mut stamper = StaticMatrixStamper { matrix, rhs };
         for binding in &self.multi_winding_transformers {
-            binding
-                .device
-                .stamp_transient_companion(dt, coeff, &mut stamper, &mut []);
+            binding.device.stamp_transient_companion_with_static_scale(
+                dt,
+                coeff,
+                &mut stamper,
+                static_scale,
+            );
         }
     }
 

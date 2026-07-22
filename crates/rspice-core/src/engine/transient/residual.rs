@@ -187,11 +187,38 @@ impl Engine {
         circuit
             .capacitors
             .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
-        circuit
-            .inductors
-            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        if ctx.xyce_one_step_order2 {
+            circuit
+                .inductors
+                .stamp_transient_companion_with_static_scale(
+                    matrix,
+                    rhs,
+                    dt,
+                    &companion_coeff,
+                    num_nodes,
+                    0.5,
+                );
+        } else {
+            circuit.inductors.stamp_transient_companion(
+                matrix,
+                rhs,
+                dt,
+                &companion_coeff,
+                num_nodes,
+            );
+        }
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
-        circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
+        if ctx.xyce_one_step_order2 {
+            circuit.stamp_multi_winding_transformers_transient_with_static_scale(
+                matrix,
+                rhs,
+                dt,
+                &companion_coeff,
+                0.5,
+            );
+        } else {
+            circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
+        }
 
         Self::stamp_bjt_transient_companions(
             circuit,
