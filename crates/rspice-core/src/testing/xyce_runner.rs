@@ -50833,15 +50833,82 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         &netlist.params,
                     )?;
                 }
+                ElementKind::Diode { .. } => {
+                    Self::validate_static_step_diode_contract(netlist, &element.name)?;
+                }
                 _ => {
                     return Err(format!(
-                        "native .STEP .PRINT TRAN comparison currently supports static R/L/C passives, coupled inductors, independent DC/PULSE/SIN/PWL/PAT sources, and solution-independent behavioral sources; element '{}' requires a broader stepped transient oracle contract",
+                        "native .STEP .PRINT TRAN comparison currently supports static R/L/C passives, coupled inductors, native Level=2 temperature-breakdown diodes, independent DC/PULSE/SIN/PWL/PAT sources, and solution-independent behavioral sources; element '{}' requires a broader stepped transient oracle contract",
                         element.name
                     ));
                 }
             }
         }
         Ok(())
+    }
+
+    fn validate_static_step_diode_contract(
+        netlist: &Netlist,
+        element_name: &str,
+    ) -> Result<(), String> {
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| Self::device_instance_names_match(&element.name, element_name))
+            .ok_or_else(|| format!("diode '{}' not found", element_name))?;
+        let ElementKind::Diode {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return Err(format!("element '{}' is not a diode", element_name));
+        };
+
+        if element.nodes.len() != 2 {
+            return Err(format!(
+                "native .STEP .PRINT TRAN comparison requires diode '{}' to have exactly two terminals",
+                element_name
+            ));
+        }
+        if !deferred_params.is_empty() {
+            return Err(format!(
+                "native .STEP .PRINT TRAN comparison does not support unresolved diode instance parameters on '{}'",
+                element_name
+            ));
+        }
+        for (name, value) in instance_params {
+            if !Self::native_xyce_level2_diode_instance_param(name, *value) {
+                return Err(format!(
+                    "native .STEP .PRINT TRAN comparison does not support diode '{}' instance parameter {}={} in the native Level=2 temperature-breakdown envelope",
+                    element_name, name, value
+                ));
+            }
+        }
+
+        let model_def = Self::find_unique_model_in(&netlist.models, model).ok_or_else(|| {
+            format!(
+                "native .STEP .PRINT TRAN comparison requires diode '{}' to reference one unique model '{}', but none or multiple matching models were found",
+                element_name, model
+            )
+        })?;
+        if !Self::model_is_native_xyce_level2_tbv_diode(model_def) {
+            return Err(format!(
+                "native .STEP .PRINT TRAN comparison requires diode '{}' model '{}' to be a finite numeric Xyce/HSPICE LEVEL=2 D model with TBV1/TBV2 in the native subset",
+                element_name, model
+            ));
+        }
+        Ok(())
+    }
+
+    fn native_xyce_level2_diode_instance_param(name: &str, value: Value) -> bool {
+        value.is_finite()
+            && match name.to_ascii_uppercase().as_str() {
+                "AREA" | "M" | "MULT" => value > 0.0,
+                "PJ" => value >= 0.0,
+                "TEMP" | "DTEMP" => value > -273.15,
+                _ => false,
+            }
     }
 
     fn validate_static_step_resistor_contract(
@@ -51157,6 +51224,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_exact_is_diode(netlist, element)
             });
+        let has_qualified_tbv_diode = purpose.validates_absolute_device_contract()
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_native_absolute_transient_tbv_diode(netlist, element)
+            });
         let has_qualified_level9_bsim3 = purpose.admits_default_level9_bsim3()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
@@ -51165,6 +51236,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_level1_mos
             || has_qualified_ekv26
             || has_qualified_diode
+            || has_qualified_tbv_diode
             || has_qualified_level9_bsim3)
             && !Self::native_transient_uses_standard_startup(netlist)
         {
@@ -51363,6 +51435,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             netlist, element,
                         ) => {}
                 ElementKind::Diode { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_native_absolute_transient_tbv_diode(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Diode { .. }
                     if matches!(
                         purpose,
                         XyceStaticTranPlanPurpose::RelationalFamily
@@ -51375,7 +51452,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, and classic MOSFET models, exact IS-only diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, and classic MOSFET models, exact IS-only and validated Level=2 TBV diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -51990,6 +52067,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
+        if normalized.eq_ignore_ascii_case("TEMP") || normalized.eq_ignore_ascii_case("TEMPER") {
+            return Ok(());
+        }
         if let Some((element_name, parameter)) =
             Self::parse_device_operating_point_probe(normalized)
             && parameter.eq_ignore_ascii_case("R")
@@ -53739,6 +53819,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     ) -> Result<f64, String> {
         if normalized == "time" {
             return Ok(time);
+        }
+        if normalized.eq_ignore_ascii_case("TEMP") || normalized.eq_ignore_ascii_case("TEMPER") {
+            return Ok(Self::netlist_temperature_c(netlist));
         }
 
         if let Some((element_name, parameter)) =
@@ -55660,6 +55743,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             "FC" | "FCS" => (0.0..1.0).contains(&value),
             "XTI" => true,
             "TNOM" => value > -273.15,
+            "TBV1" | "TBV2" => true,
             _ => false,
         }
     }
@@ -56097,6 +56181,47 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     ) -> bool {
         netlist.options.gmin.is_none()
             && Self::netlist_element_is_native_exact_is_diode(netlist, element)
+    }
+
+    fn netlist_element_is_native_absolute_transient_tbv_diode(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        netlist.options.gmin.is_none()
+            && Self::netlist_element_is_native_xyce_level2_tbv_diode(netlist, element)
+    }
+
+    fn netlist_element_is_native_xyce_level2_tbv_diode(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Diode {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 2
+            && deferred_params.is_empty()
+            && instance_params
+                .iter()
+                .all(|(name, value)| Self::native_xyce_level2_diode_instance_param(name, *value))
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_xyce_level2_tbv_diode)
+    }
+
+    fn model_is_native_xyce_level2_tbv_diode(model: &crate::netlist::ModelDef) -> bool {
+        matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "D" | "DIODE"
+        ) && (Self::numeric_param_value(&model.params, "LEVEL")
+            .is_some_and(|level| (level - 2.0).abs() <= 1.0e-9))
+            && model.params.iter().any(|(name, _)| {
+                name.eq_ignore_ascii_case("TBV1") || name.eq_ignore_ascii_case("TBV2")
+            })
+            && Self::model_is_native_relational_legacy_diode(model)
     }
 
     fn netlist_is_native_exact_is_diode_xyce_verify_envelope(netlist: &Netlist) -> bool {
@@ -56653,6 +56778,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 | "XTI"
                 | "EG"
                 | "TNOM"
+                | "TBV1"
+                | "TBV2"
         )
     }
 
@@ -85519,6 +85646,13 @@ Q1 c b 0 QN
             "RSH", 0.0
         ));
 
+        assert!(XyceTestRunner::native_relational_diode_model_param(
+            "TBV1", -1.0e-4
+        ));
+        assert!(XyceTestRunner::native_relational_diode_model_param(
+            "TBV2", 5.0e-8
+        ));
+
         let invalid_geometry = Netlist::parse(
             "\
 invalid relational MOS3 effective geometry
@@ -85537,6 +85671,106 @@ M1 d g 0 0 NM L=1u W=10u
                 .is_err(),
             "a clamped one-picometer effective channel must remain outside the relational contract"
         );
+    }
+
+    #[test]
+    fn static_step_contract_admits_xyce_level2_tbv_diode() {
+        let netlist = XyceTestRunner::parse_xyce_netlist(
+            "\
+level 2 diode with temperature-dependent breakdown
+V1 1 0 PULSE(7.5 10 1m 1 1 3 6)
+R1 1 2 1k
+D1 0 2 DMOD
+.MODEL DMOD D(LEVEL=2 IS=1E-14 RS=0 N=1 TT=0 CJO=1P VJ=1 M=.5 EG=1.11 XTI=3 KF=0 AF=1 FC=.5 BV=7.255 IBV=.001 TBV1=.00013 TBV2=-5e-8)
+.TRAN 0 1 0 100m
+.STEP TEMP LIST -55 25 72
+.PRINT TRAN V(2) TEMP
+.END
+",
+            Path::new("level2_tbv.cir"),
+        )
+        .expect("Level=2 TBV diode deck parses");
+
+        XyceTestRunner::validate_static_step_tran_contract(&netlist)
+            .expect("native stepped transient contract admits Level=2 TBV diode");
+        let diode = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("D1"))
+            .expect("D1 element");
+        assert!(
+            XyceTestRunner::netlist_element_is_native_absolute_transient_tbv_diode(&netlist, diode)
+        );
+    }
+
+    #[test]
+    fn static_step_contract_rejects_unresolved_or_unknown_tbv_diode_parameters() {
+        let unknown_instance = XyceTestRunner::parse_xyce_netlist(
+            "\
+unknown diode instance parameter
+V1 1 0 8
+D1 1 0 DMOD FOO=1
+.MODEL DMOD D(LEVEL=2 BV=7 IBV=1m TBV1=1e-4)
+.TRAN 1n 1u
+.STEP TEMP LIST 25 50
+.PRINT TRAN V(1) TEMP
+.END
+",
+            Path::new("unknown_instance_tbv.cir"),
+        )
+        .expect("unknown instance parameter deck parses");
+        assert!(XyceTestRunner::validate_static_step_tran_contract(&unknown_instance).is_err());
+
+        let unresolved_model = XyceTestRunner::parse_xyce_netlist(
+            "\
+unresolved diode model parameter
+V1 1 0 8
+D1 1 0 DMOD
+.MODEL DMOD D(LEVEL=2 BV=7 IBV=1m TBV1={V(1)})
+.TRAN 1n 1u
+.STEP TEMP LIST 25 50
+.PRINT TRAN V(1) TEMP
+.END
+",
+            Path::new("unresolved_model_tbv.cir"),
+        )
+        .expect("unresolved model parameter deck parses");
+        assert!(XyceTestRunner::validate_static_step_tran_contract(&unresolved_model).is_err());
+    }
+
+    #[test]
+    fn transient_temp_probes_validate_and_follow_active_netlist_temperature() {
+        let netlist = Netlist::parse(
+            "\
+global transient temperature probe
+.OPTIONS TEMP=42
+V1 1 0 1
+R1 1 0 1
+.TRAN 1n 1u
+.END
+",
+        )
+        .expect("global temperature probe fixture parses");
+        let result = TransientResult {
+            time: vec![0.0],
+            voltages: vec![vec![1.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+
+        for probe in ["TEMP", "TEMPER"] {
+            XyceTestRunner::validate_tran_probe(probe, &netlist)
+                .unwrap_or_else(|error| panic!("{probe} must validate: {error}"));
+            let value = XyceTestRunner::evaluate_tran_probe(probe, &netlist, &result, 0.0)
+                .unwrap_or_else(|error| panic!("{probe} must evaluate: {error}"));
+            assert_eq!(value, 42.0, "{probe} follows active netlist temperature");
+        }
     }
 
     #[test]
