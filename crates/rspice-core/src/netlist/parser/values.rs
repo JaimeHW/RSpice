@@ -1636,12 +1636,16 @@ fn punctuation_node_name(token: &crate::netlist::lexer::Token) -> Option<String>
     let name = match token.kind {
         TokenKind::Plus => "+",
         TokenKind::Minus => "-",
+        TokenKind::Star => "*",
         TokenKind::Slash => "/",
         TokenKind::AtSign => "@",
         TokenKind::Tilde => "~",
         TokenKind::LBracket => "[",
         TokenKind::RBracket => "]",
-        TokenKind::Other(':')
+        TokenKind::Other('#')
+        | TokenKind::Other('%')
+        | TokenKind::Other('.')
+        | TokenKind::Other(':')
         | TokenKind::Other('`')
         | TokenKind::Other('!')
         | TokenKind::Other('$')

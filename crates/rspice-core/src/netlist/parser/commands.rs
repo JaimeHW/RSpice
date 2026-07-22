@@ -4207,11 +4207,11 @@ fn parse_dc_sweep_spec(
     params: &ParamContext,
 ) -> Result<(String, crate::netlist::DcSweepSpec), ParseError> {
     skip_commas(stream);
-    let first = expect_ident(stream, line_num)?;
+    let first = expect_element_name(stream, line_num)?;
     let first_upper = first.to_ascii_uppercase();
 
     if is_dc_sweep_type(&first_upper) {
-        let source = expect_ident(stream, line_num)?;
+        let source = expect_element_name(stream, line_num)?;
         let spec = parse_dc_sweep_spec_after_type(stream, line_num, params, &first_upper)?;
         return Ok((source, spec));
     }
@@ -4815,4 +4815,38 @@ mod tests {
 
         assert!(*uic);
     }
+
+    #[test]
+    fn dc_sweep_accepts_contiguous_punctuation_rich_source_names() {
+        let netlist = Netlist::parse(
+            "punctuation-rich dc source\n\
+             v1` 1` 0 1\n\
+             r1` 1` 0 1\n\
+             .dc v1` 1 1 1\n\
+             .print dc v(1`)\n\
+             .end\n",
+        )
+        .expect("DC source names may contain Xyce DEV punctuation");
+        let Some(crate::netlist::AnalysisCommand::Dc { source, .. }) = netlist.analyses.first()
+        else {
+            panic!("expected DC analysis");
+        };
+        assert_eq!(source, "V1`");
+    }
+
+    #[test]
+    fn dc_sweep_punctuation_family_cards_parse_without_consuming_values() {
+        for source in [
+            "v1`", "v1~", "v1!", "v1@", "v1#", "v1$", "v1%", "v1^", "v1&", "v1*", "v1-", "v1_",
+            "v1+", "v1[", "v1]", "v1|", "v1\\", "v1<", "v1>", "v1.", "v1/",
+        ] {
+            let deck = format!(
+                "punctuation-rich dc source\n{source} 1 0 1\nR1 1 0 1\n.DC {source} 1 1 1\n.end\n"
+            );
+            Netlist::parse(&deck).unwrap_or_else(|error| {
+                panic!("{source} must preserve the following DC values: {error}")
+            });
+        }
+    }
+
 }
