@@ -20325,6 +20325,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         };
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
+        if sensitivity.is_some() && !steps.is_empty() {
+            return Err(
+                ".STEP combined with AC sensitivity output is not implemented in the native Xyce oracle"
+                    .to_string(),
+            );
+        }
         if ac.data_points().is_some() && !steps.is_empty() {
             return Err(
                 ".STEP combined with .AC DATA is not implemented in the native Xyce oracle"
@@ -84596,6 +84602,28 @@ Q1 c b 0 QN
         let columns = XyceTestRunner::xyce_ac_sensitivity_reference_columns(sensitivity);
         assert_eq!(columns.len(), 48);
         assert_eq!(columns.first().map(String::as_str), Some("FREQ"));
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_step_plan_fails_closed_before_ignoring_side_output() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Output/AC-SENS/ac-sens-step-csv.cir";
+        let deck = XyceDeck {
+            path: root.join(relative),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let error = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+            .static_ac_plan_for_deck(&deck)
+            .expect_err("stepped sensitivity must not silently omit its side oracle");
+        assert!(
+            error.contains(".STEP combined with AC sensitivity output"),
+            "{error}"
+        );
     }
 
     #[test]
