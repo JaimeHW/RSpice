@@ -696,6 +696,11 @@ fn parse_pulse_spec(
 ) -> Result<SourceSpec, ParseError> {
     // Consume opening paren if present
     let has_paren = stream.consume(&TokenKind::LParen);
+    // Xyce accepts a redundant grouping layer around the numeric argument
+    // list (for example, PULSE((V1 V2 TD TR TF PW PER))).  Keep both closing
+    // delimiters paired so the outer source-spec parser sees the following
+    // AC/DC/transient annotations at the correct level.
+    let nested_paren = has_paren && stream.consume(&TokenKind::LParen);
 
     let v1 = source_value_or_default(stream, line_num, params, "PULSE", "V1", has_paren, 0.0)?;
     let v2 = source_value_or_default(stream, line_num, params, "PULSE", "V2", has_paren, 1.0)?;
@@ -712,6 +717,9 @@ fn parse_pulse_spec(
         source_value_or_default(stream, line_num, params, "PULSE", "PHASE", has_paren, 0.0)?;
 
     close_source_args(stream, line_num, "PULSE", has_paren)?;
+    if nested_paren {
+        close_source_args(stream, line_num, "PULSE", has_paren)?;
+    }
 
     Ok(SourceSpec::Pulse {
         v1,
@@ -1457,4 +1465,40 @@ fn parse_exp_spec(
         td2,
         tau2,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pulse_accepts_xyce_redundant_argument_grouping() {
+        let source = parse_source_spec_text(
+            "PULSE((0 5 10n 0.1n 0.1n 15n 30n))",
+            1,
+            &ParamContext::new(),
+        )
+        .expect("Xyce-style redundant PULSE grouping parses");
+
+        let SourceSpec::Pulse {
+            v1,
+            v2,
+            delay,
+            rise,
+            fall,
+            width,
+            period,
+            ..
+        } = source
+        else {
+            panic!("expected PULSE source specification");
+        };
+        assert_eq!(v1, 0.0);
+        assert_eq!(v2, 5.0);
+        assert!((delay - 10e-9).abs() < 1e-20);
+        assert!((rise - 0.1e-9).abs() < 1e-20);
+        assert!((fall - 0.1e-9).abs() < 1e-20);
+        assert!((width - 15e-9).abs() < 1e-20);
+        assert!((period - 30e-9).abs() < 1e-20);
+    }
 }
