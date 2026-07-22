@@ -673,9 +673,6 @@ impl Bjt {
     /// temperature-scaled model quantities.
     pub(crate) fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_compatibility = enabled;
-        if enabled && !self.tnom_given {
-            self.tnom = 300.0;
-        }
     }
 
     /// Set optional substrate node (0 for ground/unconnected).
@@ -945,7 +942,6 @@ impl Bjt {
             && v > 0.0
         {
             self.tnom = if v > 200.0 { v } else { v + 273.15 };
-            self.tnom_given = true;
         }
         if let Some(v) = params
             .get("KF")

@@ -560,9 +560,6 @@ pub struct Bjt {
     pub vt: Value,
     /// Nominal model temperature (K)
     pub tnom: Value,
-    /// Whether the model card explicitly supplied TNOM. Xyce's legacy BJT
-    /// default is 300 K; the ordinary SPICE default remains 27 C.
-    tnom_given: bool,
     /// Requested ambient/device temperature before self-heating (K)
     ambient_temperature: Value,
     /// Active device temperature (K)
@@ -1036,7 +1033,6 @@ impl Bjt {
             nr: 1.0,            // Reverse emission coefficient
             vt: 0.025851999786, // Thermal voltage at 300K
             tnom: crate::analysis::temperature::T_NOMINAL,
-            tnom_given: false,
             ambient_temperature: crate::analysis::temperature::T_NOMINAL,
             temperature: crate::analysis::temperature::T_NOMINAL,
             xyce_compatibility: false,
