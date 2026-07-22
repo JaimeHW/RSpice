@@ -52959,9 +52959,45 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             Ok(1.0)
         };
         let context = Self::print_eval_context(netlist, None, None);
-        Self::evaluate_print_expression_with_probe_calls(expression, context, &mut call_value)
-            .map_err(|err| format!("unsupported .PRINT DC expression '{{{expression}}}': {err}"))?;
-        Ok(())
+        match Self::evaluate_print_expression_with_probe_calls(
+            expression,
+            context.clone(),
+            &mut call_value,
+        ) {
+            Ok(_) => Ok(()),
+            Err(err) if err.eq_ignore_ascii_case("division by zero") => {
+                // Probe calls are replaced with placeholders while the static
+                // contract is validated.  Giving every call the same value is
+                // useful for catching malformed constant arithmetic, but it
+                // can create a zero denominator for a valid expression such
+                // as `(V(a)-V(b))/(V(c)-V(d))`.  Retry only that specific
+                // arithmetic failure with stable, distinct values per probe.
+                // Every retry still validates each probe through
+                // `validate_atomic_dc_probe`, so unresolved or unsupported
+                // probes cannot be hidden by the retry.
+                let mut probe_values = BTreeMap::<String, Value>::new();
+                let mut distinct_call_value = |call: &str| {
+                    let normalized = Self::normalize_probe(call);
+                    Self::validate_atomic_dc_probe(&normalized, call, netlist)?;
+                    let candidate = 1.0 + probe_values.len() as Value;
+                    let value = *probe_values.entry(normalized).or_insert(candidate);
+                    Ok(value)
+                };
+                match Self::evaluate_print_expression_with_probe_calls(
+                    expression,
+                    context,
+                    &mut distinct_call_value,
+                ) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(format!(
+                        "unsupported .PRINT DC expression '{{{expression}}}': {err}"
+                    )),
+                }
+            }
+            Err(err) => Err(format!(
+                "unsupported .PRINT DC expression '{{{expression}}}': {err}"
+            )),
+        }
     }
 
     fn evaluate_dc_probe_expression(
@@ -85526,6 +85562,38 @@ M1 d g 0 0 NM L=1u W=10u
         .expect("device-parameter expression evaluates");
 
         assert!((value - 6.0e-3).abs() < 1.0e-15, "value {value}");
+    }
+
+    #[test]
+    fn dc_probe_validation_retries_dynamic_denominators_with_distinct_probes() {
+        let netlist = Netlist::default();
+
+        XyceTestRunner::validate_dc_probe("{V(a)/(V(b)-V(c))}", &netlist)
+            .expect("distinct runtime probes must not be rejected by equal placeholders");
+    }
+
+    #[test]
+    fn dc_probe_validation_keeps_constant_division_by_zero_rejected() {
+        let netlist = Netlist::default();
+        let error = XyceTestRunner::validate_dc_probe("{V(a)/(1-1)}", &netlist)
+            .expect_err("constant zero denominator must remain invalid");
+
+        assert!(
+            error.contains("Division by zero"),
+            "unexpected validation error: {error}"
+        );
+    }
+
+    #[test]
+    fn dc_probe_validation_keeps_unsupported_dynamic_probes_rejected() {
+        let netlist = Netlist::default();
+        let error = XyceTestRunner::validate_dc_probe("{V(a)/(I(unknown)-V(c))}", &netlist)
+            .expect_err("unsupported branch probes must remain invalid");
+
+        assert!(
+            error.contains("unknown") || error.contains("unsupported"),
+            "unexpected validation error: {error}"
+        );
     }
 
     #[test]
