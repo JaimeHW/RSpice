@@ -150,17 +150,16 @@ impl Engine {
             && current_step < 0.75 * previous_step
     }
 
-    /// Retain the order-1 companion for state representations that are not
-    /// yet decomposed into OneStep's separate static-F and dynamic-Q loads.
-    ///
-    /// IC capacitors use an operating-point-only branch unknown, inductors and
-    /// transformers carry algebraic branch-incidence terms inside their
-    /// companions, transmission lines own delayed-wave histories, and
-    /// stateful switches/JFETs combine state updates with their transient
-    /// loads. The established order-one companion is the canonical path for
-    /// these representations until each has an explicit OneStep split.
+    /// Xyce IC capacitors use an operating-point-only branch unknown. Their
+    /// transient lead current is reconstructed by the time integrator from
+    /// the capacitor charge history, rather than being solved as an MNA
+    /// branch. RSpice keeps that current in the IC branch unknown, so the two
+    /// representations cannot be combined with OneStep's order-2 split
+    /// (which deliberately separates the static F and dynamic dQ/dt terms).
+    /// Retain the order-1 companion for every circuit containing an IC branch
+    /// until the solver has a single canonical representation for this state.
     #[inline]
-    fn xyce_one_step_requires_order_one_for_stateful_devices(
+    fn xyce_one_step_requires_order_one_for_ic_branch(
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
         circuit
@@ -168,15 +167,6 @@ impl Engine {
             .ic_branch_indices
             .iter()
             .any(Option::is_some)
-            || !circuit.inductors.is_empty()
-            || !circuit.coupled_inductor_pairs.is_empty()
-            || !circuit.multi_winding_transformers.is_empty()
-            || !circuit.tlines.is_empty()
-            || !circuit.coupled_tlines.is_empty()
-            || !circuit.vswitches.is_empty()
-            || !circuit.iswitches.is_empty()
-            || !circuit.generic_switches.is_empty()
-            || !circuit.jfets.is_empty()
     }
 
     fn derived_transient_branch_currents(
@@ -2358,7 +2348,9 @@ impl Engine {
                 )
             };
             let xyce_one_step_order2 = self.config.spice_dialect == SpiceDialect::Xyce
-                && !Self::xyce_one_step_requires_order_one_for_stateful_devices(&circuit)
+                && !Self::xyce_one_step_requires_order_one_for_ic_branch(&circuit)
+                && circuit.tlines.is_empty()
+                && circuit.coupled_tlines.is_empty()
                 && step_trap_order == 2
                 && matches!(
                     current_method,
@@ -3732,7 +3724,7 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
-                    if xyce_one_step_order2 {
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
                         xyce_static_history = Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
@@ -4659,7 +4651,7 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
-                    if xyce_one_step_order2 {
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
                         xyce_static_history = Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
@@ -4922,7 +4914,7 @@ impl Engine {
             }
 
             solution.clone_from(&new_solution);
-            if xyce_one_step_order2 {
+            if self.config.spice_dialect == SpiceDialect::Xyce {
                 xyce_static_history = Some(self.capture_xyce_static_residual(
                     &mut circuit,
                     &mut matrix,
