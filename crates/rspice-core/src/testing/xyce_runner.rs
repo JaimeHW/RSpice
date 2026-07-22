@@ -22231,9 +22231,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let print = Self::single_dc_print_request(source)?;
         for probe in &print.probes {
             let normalized = Self::normalize_probe(probe);
-            if normalized.contains('*') || normalized.starts_with("w(") {
+            if normalized.contains('*') {
                 return Err(format!(
-                    "wrapper-origin plain static DC contract does not cover wildcard or power-style probe '{probe}'"
+                    "wrapper-origin plain static DC contract does not cover wildcard probe '{probe}'"
                 ));
             }
         }
@@ -22269,16 +22269,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
 
-        match dc_count {
-            1 => Ok(()),
-            0 => Err(
-                "wrapper-origin plain static DC contract requires exactly one .DC statement, found none"
+        if dc_count == 0 {
+            return Err(
+                "wrapper-origin plain static DC contract requires at least one .DC statement, found none"
                     .to_string(),
-            ),
-            _ => Err(format!(
-                "wrapper-origin plain static DC contract requires exactly one .DC statement, found {dc_count}"
-            )),
-        }?;
+            );
+        }
 
         if subckt_count > 1 {
             return Err(format!(
@@ -22305,7 +22301,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .to_ascii_uppercase();
         if matches!(
             normalized.as_str(),
-            "NMOS" | "PMOS" | "D" | "DIODE" | "R" | "RES" | "RESISTOR"
+            "NMOS" | "PMOS" | "NPN" | "PNP" | "LPNP" | "D" | "DIODE" | "R" | "RES" | "RESISTOR"
         ) {
             return Ok(());
         }
@@ -22318,10 +22314,20 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         for model in &netlist.models {
             if !matches!(
                 model.model_type.to_ascii_uppercase().as_str(),
-                "NMOS" | "PMOS" | "D" | "DIODE" | "R" | "RES" | "RESISTOR"
+                "NMOS" | "PMOS" | "NPN" | "PNP" | "LPNP" | "D" | "DIODE" | "R" | "RES" | "RESISTOR"
             ) {
                 return Err(format!(
                     "wrapper-origin plain static DC contract does not yet cover parsed model type {}",
+                    model.model_type
+                ));
+            }
+            if matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "NPN" | "PNP" | "LPNP"
+            ) && !Self::model_is_native_legacy_bjt(model)
+            {
+                return Err(format!(
+                    "wrapper-origin plain static DC contract does not yet cover advanced BJT model type {}",
                     model.model_type
                 ));
             }
@@ -26728,16 +26734,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             };
         }
 
-        let engine = self.create_dc_engine();
-        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
-            &netlist,
-            &plan.dc.source,
-            &plan.dc.primary_spec(),
-            plan.dc.sweep2.as_ref(),
-            &abort,
-        ) {
-            Ok(results) => results,
+        let batches = match self.run_static_dc_result_batches(&netlist, &plan.dc, start) {
+            Ok(batches) => batches,
             Err(SimulationError::Aborted) => {
                 return self.failure_result(
                     deck,
@@ -26770,13 +26768,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         };
 
         let mismatches = if let Some(reference) = &reference {
-            match self.compare_dc_prn_reference(
+            match self.compare_dc_prn_reference_batches(
                 reference,
                 &plan.print,
-                &netlist,
                 &plan.source,
                 &plan.dc,
-                &results,
+                &batches,
             ) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
@@ -26792,6 +26789,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         } else {
             Vec::new()
         };
+
+        let results = batches
+            .iter()
+            .flat_map(|batch| batch.results.iter().cloned())
+            .collect::<Vec<_>>();
 
         if mismatches.is_empty()
             && (!plan.measurement_reference_paths.is_empty()
@@ -26859,10 +26861,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if mismatches.is_empty()
             && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplot)
         {
-            let batches = [XyceDcResultBatch {
-                netlist: netlist.clone(),
-                results: results.clone(),
-            }];
             let side_mismatches =
                 match self.compare_gnuplot_splot_side_output_batches(&plan, &batches) {
                     Ok(mismatches) => mismatches,
@@ -26893,10 +26891,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if mismatches.is_empty()
             && !matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplot)
         {
-            let batches = [XyceDcResultBatch {
-                netlist: netlist.clone(),
-                results: results.clone(),
-            }];
             let side_mismatches =
                 match self.compare_prn_compatible_side_output_batches(&plan, &batches) {
                     Ok(mismatches) => mismatches,
@@ -49873,9 +49867,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         dc: &XyceDcSweep,
         print: &XycePrintRequest,
     ) -> Result<(), String> {
-        Self::validate_dc_sweep_source(netlist, &dc.source)?;
-        if let Some(sweep2) = &dc.sweep2 {
-            Self::validate_dc_sweep_source(netlist, &sweep2.source)?;
+        let dimensions = Self::dc_sweep_dimensions(netlist);
+        if dimensions.is_empty() {
+            Self::validate_dc_sweep_source(netlist, &dc.source)?;
+            if let Some(sweep2) = &dc.sweep2 {
+                Self::validate_dc_sweep_source(netlist, &sweep2.source)?;
+            }
+        } else {
+            for dimension in &dimensions {
+                Self::validate_dc_sweep_source(netlist, &dimension.source)?;
+            }
         }
 
         for probe in &print.probes {
@@ -57571,7 +57572,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .collect())
     }
 
-    fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
+    fn dc_sweep_dimensions(netlist: &Netlist) -> Vec<XyceDcSweepDimension> {
         let mut dimensions = Vec::new();
         for analysis in &netlist.analyses {
             let AnalysisCommand::Dc {
@@ -57603,6 +57604,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 });
             }
         }
+        dimensions
+    }
+
+    fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
+        let mut dimensions = Self::dc_sweep_dimensions(netlist);
 
         if dimensions.is_empty() {
             if netlist
@@ -57614,25 +57620,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
             return Err("deck has no .DC or .OP analysis for static .PRINT DC output".to_string());
         }
-        if dimensions.len() > 2 {
-            return Err(format!(
-                "deck has {} .DC sweep dimensions; native Xyce static adapter currently supports one or two",
-                dimensions.len()
-            ));
-        }
 
         for (index, dimension) in dimensions.iter().enumerate() {
             if dimension.spec().points().is_empty() {
                 if index == 0 {
                     return Err("deck has invalid .DC sweep bounds".to_string());
                 }
-                return Err("deck has invalid secondary .DC sweep bounds".to_string());
+                return Err(format!(
+                    "deck has invalid .DC sweep bounds for dimension {}",
+                    index + 1
+                ));
             }
         }
 
         let primary = dimensions.remove(0);
         let sweep2 = dimensions
-            .pop()
+            .first()
+            .cloned()
             .map(XyceDcSweepDimension::into_second_sweep);
         Ok(XyceDcSweep {
             source: primary.source,
@@ -57642,6 +57646,192 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             mode: primary.mode,
             sweep2,
         })
+    }
+
+    fn apply_static_dc_dimension(
+        netlist: &mut Netlist,
+        dimension: &XyceDcSweepDimension,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "DC sweep dimension '{}' produced a non-finite value {value}",
+                dimension.source
+            )));
+        }
+
+        if Self::is_temperature_name(&dimension.source) {
+            netlist.options.temp = Some(value);
+            netlist.params.set("TEMP", value);
+            netlist.params.set("TEMPER", value);
+            netlist
+                .params
+                .set("VT", Self::thermal_voltage_celsius(value));
+            return Ok(());
+        }
+
+        if Self::scalar_parameter_sweep_source_is_supported(netlist, &dimension.source) {
+            let had_source_text = netlist.source_text.is_some();
+            let (updated, bindings) = Engine::create_perturbed_netlist_multi(
+                netlist,
+                &[(dimension.source.clone(), value)],
+            )?;
+            if had_source_text && bindings == 0 {
+                return Err(SimulationError::Circuit(format!(
+                    "DC sweep parameter '{}' is not bound to any netlist expression",
+                    dimension.source
+                )));
+            }
+            *netlist = updated;
+            return Ok(());
+        }
+
+        let element = netlist
+            .elements
+            .iter_mut()
+            .find(|element| Self::device_instance_names_match(&element.name, &dimension.source))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "DC sweep source '{}' was not found in the netlist",
+                    dimension.source
+                ))
+            })?;
+        match &mut element.kind {
+            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                *spec = spec.clone().with_dc_value(value);
+                // A direct source override is represented in the AST rather than
+                // reparsed from the authored source, so later parameter sweeps
+                // must retain the override instead of reconstructing the source.
+                netlist.source_text = None;
+                netlist.source_path = None;
+                Ok(())
+            }
+            _ => Err(SimulationError::Circuit(format!(
+                "DC sweep source '{}' is not an independent source",
+                dimension.source
+            ))),
+        }
+    }
+
+    fn run_static_dc_result_batches(
+        &self,
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        start: Instant,
+    ) -> Result<Vec<XyceDcResultBatch>, SimulationError> {
+        let engine = self.create_dc_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let dimensions = Self::dc_sweep_dimensions(netlist);
+        if dimensions.len() <= 2 {
+            let results = engine.run_dc_sweep2_spec_with_report_and_abort(
+                netlist,
+                &dc.source,
+                &dc.primary_spec(),
+                dc.sweep2.as_ref(),
+                &abort,
+            )?;
+            return Ok(vec![XyceDcResultBatch {
+                netlist: netlist.clone(),
+                results,
+            }]);
+        }
+
+        let primary_points =
+            crate::engine::bounded_dc_sweep_points(&engine, &dimensions[0].spec(), &abort)?;
+        let secondary_points =
+            crate::engine::bounded_dc_sweep_points(&engine, &dimensions[1].spec(), &abort)?;
+        if primary_points.is_empty() || secondary_points.is_empty() {
+            return Err(SimulationError::Circuit(
+                "DC sweep has no points in its first two dimensions".to_string(),
+            ));
+        }
+
+        let mut outer_points = Vec::with_capacity(dimensions.len() - 2);
+        let mut batch_count = 1usize;
+        for dimension in &dimensions[2..] {
+            let points =
+                crate::engine::bounded_dc_sweep_points(&engine, &dimension.spec(), &abort)?;
+            if points.is_empty() {
+                return Err(SimulationError::Circuit(format!(
+                    "DC sweep dimension '{}' has no points",
+                    dimension.source
+                )));
+            }
+            batch_count = batch_count.saturating_mul(points.len());
+            outer_points.push(points);
+        }
+
+        let inner_count = primary_points.len().saturating_mul(secondary_points.len());
+        engine.ensure_analysis_points(batch_count.saturating_mul(inner_count))?;
+        engine.ensure_batch_runs(batch_count)?;
+
+        let mut indices = vec![0usize; outer_points.len()];
+        let mut batches = Vec::with_capacity(batch_count);
+        loop {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+
+            let mut swept = netlist.clone();
+            // Xyce declares the first sweep dimension as the fastest-changing
+            // coordinate.  The first two remain the engine's inner/secondary
+            // sweep; additional dimensions are materialized as outer batches
+            // in declaration order, with dimension three changing fastest.
+            for (dimension, (points, index)) in dimensions[2..]
+                .iter()
+                .zip(outer_points.iter().zip(indices.iter().copied()))
+                .filter(|(dimension, _)| {
+                    !Self::is_temperature_name(&dimension.source)
+                        && !Self::scalar_parameter_sweep_source_is_supported(
+                            netlist,
+                            &dimension.source,
+                        )
+                })
+            {
+                Self::apply_static_dc_dimension(&mut swept, dimension, points[index])?;
+            }
+            for (dimension, (points, index)) in dimensions[2..]
+                .iter()
+                .zip(outer_points.iter().zip(indices.iter().copied()))
+                .filter(|(dimension, _)| {
+                    Self::is_temperature_name(&dimension.source)
+                        || Self::scalar_parameter_sweep_source_is_supported(
+                            netlist,
+                            &dimension.source,
+                        )
+                })
+            {
+                Self::apply_static_dc_dimension(&mut swept, dimension, points[index])?;
+            }
+
+            let secondary = dimensions[1].clone().into_second_sweep();
+            let results = engine.run_dc_sweep2_spec_with_report_and_abort(
+                &swept,
+                &dimensions[0].source,
+                &dimensions[0].spec(),
+                Some(&secondary),
+                &abort,
+            )?;
+            batches.push(XyceDcResultBatch {
+                netlist: swept,
+                results,
+            });
+
+            let mut position = 0usize;
+            while position < indices.len() {
+                indices[position] += 1;
+                if indices[position] < outer_points[position].len() {
+                    break;
+                }
+                indices[position] = 0;
+                position += 1;
+            }
+            if position == indices.len() {
+                break;
+            }
+        }
+
+        Ok(batches)
     }
 
     fn synthetic_op_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {

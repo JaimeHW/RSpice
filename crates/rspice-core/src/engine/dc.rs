@@ -16,7 +16,7 @@ use crate::{CircuitData, Netlist, Value};
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 const DC_SWEEP_RESULT_PREALLOC_LIMIT: usize = 4096;
 
-fn bounded_dc_sweep_points(
+pub(crate) fn bounded_dc_sweep_points(
     engine: &Engine,
     spec: &crate::netlist::DcSweepSpec,
     abort: &dyn AbortSignal,

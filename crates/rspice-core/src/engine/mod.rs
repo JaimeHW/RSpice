@@ -67,6 +67,7 @@ pub use config_resolver::{
 };
 pub use core::Engine;
 pub use dc::DcSweepPointResult;
+pub(crate) use dc::bounded_dc_sweep_points;
 pub use error::{
     SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
