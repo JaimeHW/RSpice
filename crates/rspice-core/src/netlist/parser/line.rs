@@ -227,7 +227,7 @@ pub(super) fn process_line(
             return Ok(());
         };
 
-        if !end_name.is_empty() {
+        if state.enforce_subckt_end_names && !end_name.is_empty() {
             let end_name = end_name.join("");
             if !end_name.eq_ignore_ascii_case(&open_frame.def.name)
                 && !end_name.eq_ignore_ascii_case(&open_frame.qualified_name)
@@ -855,6 +855,7 @@ mod tests {
     fn process_line_ignores_unmatched_ends_like_xyce() {
         let mut state = ParseState::new();
         state.allow_unmatched_subckt_ends = true;
+        state.enforce_subckt_end_names = false;
         process_line(
             ".ENDS redundant",
             2,
@@ -865,5 +866,56 @@ mod tests {
 
         assert!(state.subckt_stack.is_empty());
         assert!(state.elements.is_empty());
+    }
+
+    #[test]
+    fn process_line_ignores_mismatched_ends_name_like_xyce() {
+        let mut state = ParseState::new();
+        state.allow_unmatched_subckt_ends = true;
+        state.enforce_subckt_end_names = false;
+        process_line(
+            ".SUBCKT rlclump 1 2",
+            2,
+            &NetlistSourceLocation::in_memory(2),
+            &mut state,
+        )
+        .expect("Xyce subcircuit declaration parses");
+        process_line(
+            ".ENDS lump",
+            3,
+            &NetlistSourceLocation::in_memory(3),
+            &mut state,
+        )
+        .expect("Xyce closes the current subcircuit without name matching");
+
+        assert!(state.subckt_stack.is_empty());
+        assert_eq!(state.subcircuits.len(), 1);
+        assert_eq!(state.subcircuits[0].name, "rlclump");
+    }
+
+    #[test]
+    fn process_line_rejects_mismatched_ends_name_in_strict_dialect() {
+        let mut state = ParseState::new();
+        process_line(
+            ".SUBCKT rlclump 1 2",
+            2,
+            &NetlistSourceLocation::in_memory(2),
+            &mut state,
+        )
+        .expect("subcircuit declaration parses");
+        let error = process_line(
+            ".ENDS lump",
+            3,
+            &NetlistSourceLocation::in_memory(3),
+            &mut state,
+        )
+        .expect_err("strict dialect rejects a mismatched .ENDS name");
+
+        assert!(matches!(
+            error,
+            ParseError::Syntax { message, .. }
+                if message.contains("does not match open .SUBCKT `rlclump`")
+        ));
+        assert_eq!(state.subckt_stack.len(), 1);
     }
 }

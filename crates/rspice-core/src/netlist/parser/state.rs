@@ -89,6 +89,9 @@ pub(super) struct ParseState {
     /// Xyce warns and ignores an unmatched top-level `.ENDS`; other dialects
     /// retain the strict parser error for this malformed subcircuit card.
     pub(super) allow_unmatched_subckt_ends: bool,
+    /// Xyce closes the current subcircuit on `.ENDS` without validating an
+    /// optional terminator name; other dialects retain strict name matching.
+    pub(super) enforce_subckt_end_names: bool,
     pub(super) subckt_stack: Vec<SubcktFrame>,
     /// Open `.if`/`.elseif`/`.else` blocks, innermost last.
     pub(super) conditional_stack: Vec<ConditionalFrame>,
@@ -122,6 +125,7 @@ impl ParseState {
             options: super::SimulationOptions::default(),
             diagnostics: Vec::new(),
             allow_unmatched_subckt_ends: false,
+            enforce_subckt_end_names: true,
             subckt_stack: Vec::new(),
             conditional_stack: Vec::new(),
             mutual_inductor_records: Vec::new(),
