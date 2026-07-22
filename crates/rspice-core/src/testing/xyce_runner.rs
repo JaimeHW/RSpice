@@ -4121,12 +4121,19 @@ struct XyceStaticAcPlan {
 #[derive(Debug, Clone)]
 struct XyceStaticAcSensitivityPlan {
     reference_path: PathBuf,
+    reference_format: XyceAcSensitivityReferenceFormat,
     print: XycePrintRequest,
     objectives: Vec<XyceAcSensitivityObjective>,
     parameters: Vec<String>,
     direct: bool,
     adjoint: bool,
     no_index: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAcSensitivityReferenceFormat {
+    Prn,
+    Csv,
 }
 
 #[derive(Debug, Clone)]
@@ -20510,13 +20517,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string(),
             );
         }
-        let no_index = print_output
-            .format
-            .as_deref()
-            .is_some_and(|format| format.eq_ignore_ascii_case("NOINDEX"));
-        if print_output.format.as_deref().is_some_and(|format| {
-            !format.eq_ignore_ascii_case("STD") && !format.eq_ignore_ascii_case("NOINDEX")
-        }) {
+        let print_format = print_output.format.as_deref().unwrap_or("STD");
+        let reference_format = if print_format.eq_ignore_ascii_case("CSV") {
+            XyceAcSensitivityReferenceFormat::Csv
+        } else {
+            XyceAcSensitivityReferenceFormat::Prn
+        };
+        let no_index = reference_format == XyceAcSensitivityReferenceFormat::Csv
+            || print_format.eq_ignore_ascii_case("NOINDEX");
+        if !print_format.eq_ignore_ascii_case("STD")
+            && !print_format.eq_ignore_ascii_case("NOINDEX")
+            && !print_format.eq_ignore_ascii_case("CSV")
+        {
             return Err(format!(
                 "native Xyce AC sensitivity contract does not cover .PRINT SENS FORMAT={}",
                 print_output.format.as_deref().unwrap_or_default()
@@ -20568,18 +20580,27 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string()
             })?)?;
         let (direct, adjoint) = Self::parse_xyce_sensitivity_flags(source)?;
+        let reference_extension = match reference_format {
+            XyceAcSensitivityReferenceFormat::Prn => "FD.SENS.prn",
+            XyceAcSensitivityReferenceFormat::Csv => "FD.SENS.csv",
+        };
         let reference_path = self
-            .static_output_reference_path(deck_path, "FD.SENS.prn")
+            .static_output_reference_path(deck_path, reference_extension)
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
         if !reference_path.is_file() {
             return Err(format!(
-                "no checked-in static AC sensitivity oracle at {}",
+                "no checked-in static AC sensitivity {} oracle at {}",
+                match reference_format {
+                    XyceAcSensitivityReferenceFormat::Prn => "PRN",
+                    XyceAcSensitivityReferenceFormat::Csv => "CSV",
+                },
                 self.display_path(&reference_path)
             ));
         }
 
         Ok(Some(XyceStaticAcSensitivityPlan {
             reference_path,
+            reference_format,
             print: XycePrintRequest {
                 probes: print_output.probes,
             },
@@ -45864,10 +45885,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         source: &str,
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
-        let reference = if Self::source_requests_ac_print_headerless(source) {
-            Self::parse_headerless_ac_sensitivity_prn_file(plan)?
-        } else {
-            Self::parse_prn_file(&plan.reference_path)?
+        let reference = match plan.reference_format {
+            XyceAcSensitivityReferenceFormat::Prn => {
+                if Self::source_requests_ac_print_headerless(source) {
+                    Self::parse_headerless_ac_sensitivity_prn_file(plan)?
+                } else {
+                    Self::parse_prn_file(&plan.reference_path)?
+                }
+            }
+            XyceAcSensitivityReferenceFormat::Csv => Self::parse_csv_file(&plan.reference_path)?,
         };
         let leading_columns = usize::from(!plan.no_index) + 1;
         let frequency_column = usize::from(!plan.no_index);
@@ -84536,6 +84562,40 @@ Q1 c b 0 QN
                 .iter()
                 .any(|column| column.eq_ignore_ascii_case("Index"))
         );
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_csv_plan_uses_csv_oracle_schema() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Output/AC-SENS/ac-sens-csv.cir";
+        let deck = XyceDeck {
+            path: root.join(relative),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = runner
+            .static_ac_plan_for_deck(&deck)
+            .expect("CSV sensitivity plan is supported");
+        let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+        assert_eq!(
+            sensitivity.reference_format,
+            XyceAcSensitivityReferenceFormat::Csv
+        );
+        assert!(sensitivity.no_index);
+        assert!(
+            sensitivity
+                .reference_path
+                .to_string_lossy()
+                .ends_with("FD.SENS.csv")
+        );
+        let columns = XyceTestRunner::xyce_ac_sensitivity_reference_columns(sensitivity);
+        assert_eq!(columns.len(), 48);
+        assert_eq!(columns.first().map(String::as_str), Some("FREQ"));
     }
 
     #[test]
