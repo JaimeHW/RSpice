@@ -514,6 +514,12 @@ pub(super) fn parse_model_params(
                     }
                     _ => numeric_params.push((name, 1.0)),
                 }
+            } else if let Some(value) = try_signed_model_value(stream, params) {
+                // Xyce and SPICE-compatible model cards also permit the
+                // positional `NAME VALUE` form (for example, `BF 20`).
+                // Consume only a value-like token here so bare model flags
+                // retain their established numeric-one representation.
+                numeric_params.push((name, value));
             } else {
                 numeric_params.push((name, 1.0));
             }
@@ -1929,5 +1935,40 @@ pub(super) fn lex_to_parse_error(e: LexError, line_num: usize) -> ParseError {
     ParseError::Syntax {
         line: line_num,
         message: e.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Netlist;
+
+    #[test]
+    fn model_accepts_positional_numeric_parameters_and_bare_flags() {
+        let netlist = Netlist::parse(
+            "positional model parameters\n\
+             .model Q1 NPN BF 20 RB 100 TF .1NS CJC 2PF FLAG\n\
+             .end\n",
+        )
+        .expect("positional model values parse");
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("Q1"))
+            .expect("Q1 model was parsed");
+
+        let value = |name: &str| {
+            model
+                .params
+                .iter()
+                .find(|(parameter, _)| parameter.eq_ignore_ascii_case(name))
+                .map(|(_, value)| *value)
+                .unwrap_or_else(|| panic!("missing model parameter {name}"))
+        };
+
+        assert_eq!(value("BF"), 20.0);
+        assert_eq!(value("RB"), 100.0);
+        assert!((value("TF") - 0.1e-9).abs() < 1e-20);
+        assert!((value("CJC") - 2e-12).abs() < 1e-20);
+        assert_eq!(value("FLAG"), 1.0);
     }
 }
