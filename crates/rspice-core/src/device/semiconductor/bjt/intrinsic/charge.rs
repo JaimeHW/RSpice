@@ -179,41 +179,6 @@ impl Bjt {
         }
     }
 
-    #[inline]
-    pub(crate) fn legacy_charge_branch_voltages(
-        &self,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-    ) -> (Value, Value, Value) {
-        let static_internal = if self.cache_matches_external_biases(vc, vb, ve, vs) {
-            self.internal_state_vector()
-        } else {
-            let internal = self.dynamic_internal_state_seed(vc, vb, ve, vs);
-            let mut static_internal = [0.0; INTERNAL_DIM];
-            static_internal.copy_from_slice(&internal[..INTERNAL_DIM]);
-            static_internal
-        };
-        let external = [vc, vb, ve, vs];
-        let terminal_voltage = |terminal: (Option<usize>, Option<usize>)| -> Value {
-            if let Some(idx) = terminal.0 {
-                static_internal[idx]
-            } else if let Some(idx) = terminal.1 {
-                external[idx]
-            } else {
-                0.0
-            }
-        };
-        let substrate_connection = self.legacy_charge_substrate_connection_terminal();
-        let substrate_terminal = self.legacy_charge_substrate_terminal();
-        (
-            static_internal[IDX_VBI] - static_internal[IDX_VEI],
-            static_internal[IDX_VBI] - static_internal[IDX_VCI],
-            terminal_voltage(substrate_connection) - terminal_voltage(substrate_terminal),
-        )
-    }
-
     pub(in crate::device::semiconductor::bjt) fn vbic_transport_charge_state(
         &self,
         vbe_eff: Value,

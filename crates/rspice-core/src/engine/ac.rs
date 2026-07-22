@@ -1150,19 +1150,15 @@ impl Engine {
         Some(x)
     }
 
-    fn stamp_vbic_bjt_dynamic_ac(
+    fn stamp_bjt_dynamic_ac(
         matrix: &mut ComplexMatrix,
         bjt: &crate::device::Bjt,
         op_voltages: &[Value],
         omega: Value,
         include_delay_branches: bool,
     ) {
-        if !bjt.uses_vbic_dynamic_charges() {
-            return;
-        }
-
         if bjt.vbic_mna_promoted() {
-            // Promoted VBIC: the internal states are matrix unknowns, so each
+            // Promoted BJT: the internal states are matrix unknowns, so each
             // charge branch stamps jw*C directly on its own nodes alongside
             // the promoted static real part - no dense Schur reduction.
             let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(op_voltages);
@@ -1472,42 +1468,6 @@ impl Engine {
             }
         }
 
-        // BJT base-emitter and base-collector depletion/diffusion capacitances.
-        for bjt in &circuit.bjts.devices {
-            if bjt.uses_vbic_dynamic_charges() {
-                continue;
-            }
-            let vc = Self::ac_node_voltage(op_voltages, bjt.node_collector);
-            let vb = Self::ac_node_voltage(op_voltages, bjt.node_base);
-            let ve = Self::ac_node_voltage(op_voltages, bjt.node_emitter);
-            let vs = Self::ac_node_voltage(op_voltages, bjt.node_substrate);
-            let (legacy_vbe, legacy_vbc, legacy_vcs) =
-                bjt.legacy_charge_branch_voltages(vc, vb, ve, vs);
-            let charges = bjt.legacy_transient_charge_state(legacy_vbe, legacy_vbc, legacy_vcs);
-            let cbe = charges.capbe;
-            let cbc = charges.capbc;
-
-            if cbe.is_finite() && cbe > 0.0 {
-                Self::stamp_imag_two_terminal(matrix, bjt.node_base, bjt.node_emitter, omega * cbe);
-            }
-            if cbc.is_finite() && cbc > 0.0 {
-                Self::stamp_imag_two_terminal(
-                    matrix,
-                    bjt.node_base,
-                    bjt.node_collector,
-                    omega * cbc,
-                );
-            }
-            if charges.capcs.is_finite() && charges.capcs > 0.0 {
-                Self::stamp_imag_two_terminal(
-                    matrix,
-                    bjt.node_collector,
-                    bjt.node_substrate,
-                    omega * charges.capcs,
-                );
-            }
-        }
-
         // JFET gate-source and gate-drain depletion capacitances.
         for jfet in &circuit.jfets {
             let vd = Self::ac_node_voltage(op_voltages, jfet.drain);
@@ -1721,7 +1681,7 @@ impl Engine {
             Self::stamp_nonlinear_small_signal_real(ac_matrix, circuit, op_voltages, frequency_hz)?;
             if include_vbic_dynamic_stamp {
                 for bjt in &circuit.bjts.devices {
-                    Self::stamp_vbic_bjt_dynamic_ac(
+                    Self::stamp_bjt_dynamic_ac(
                         ac_matrix,
                         bjt,
                         op_voltages,
