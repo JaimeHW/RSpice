@@ -9,8 +9,8 @@
 //! the removed platform harness.
 
 use crate::abort_signal::AbortSignal;
-use crate::analysis::AcResult;
 use crate::analysis::ac::ac_sweep_frequencies;
+use crate::analysis::{AcResult, AcSensitivityOutput};
 use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     StepPlanLimits, TransientResult, XyceTraInterpolation, extract_ac_value, extract_dc_value,
@@ -4110,11 +4110,37 @@ struct XyceStaticAcPlan {
     print: Option<XycePrintRequest>,
     primary_ac_file: Option<String>,
     primary_ac_ic_file: Option<String>,
+    sensitivity: Option<XyceStaticAcSensitivityPlan>,
     output_override: bool,
     ac: XyceAcAnalysis,
     frequency_bound: bool,
     steps: Vec<StepCommand>,
     contract: XyceStaticAcContract,
+}
+
+#[derive(Debug, Clone)]
+struct XyceStaticAcSensitivityPlan {
+    reference_path: PathBuf,
+    print: XycePrintRequest,
+    objectives: Vec<XyceAcSensitivityObjective>,
+    parameters: Vec<String>,
+    direct: bool,
+    adjoint: bool,
+}
+
+#[derive(Debug, Clone)]
+struct XyceAcSensitivityObjective {
+    authored_name: String,
+    spec: XyceAcSensitivityObjectiveSpec,
+}
+
+#[derive(Debug, Clone)]
+enum XyceAcSensitivityObjectiveSpec {
+    Voltage {
+        positive: String,
+        negative: Option<String>,
+    },
+    BranchCurrent(String),
 }
 
 #[derive(Debug, Clone)]
@@ -20231,6 +20257,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if requires_wrapper {
             Self::validate_native_static_fd_ac_wrapper_contract(&source, output_override)?;
         }
+        let sensitivity =
+            self.static_ac_sensitivity_plan_for_source(&source, &deck.path, output_override)?;
+        let engine_source = if sensitivity.is_some() {
+            Self::source_without_xyce_sensitivity_directives(&source)
+        } else {
+            source.clone()
+        };
 
         let primary_ac_output = if output_override {
             Self::output_override_print_output_request(&source, "AC")?
@@ -20249,9 +20282,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             );
         }
 
-        let (netlist, frequency_bound) = match Self::parse_xyce_netlist(&source, &deck.path) {
+        let (netlist, frequency_bound) = match Self::parse_xyce_netlist(&engine_source, &deck.path)
+        {
             Ok(netlist) if Self::parsed_netlist_has_ac_frequency_dependent_global(&netlist) => {
-                let frequency_bound_source = Self::source_with_ac_frequency_bindings(&source, 1.0);
+                let frequency_bound_source =
+                    Self::source_with_ac_frequency_bindings(&engine_source, 1.0);
                 let netlist = Self::parse_xyce_netlist(&frequency_bound_source, &deck.path)
                     .map_err(|retry_err| {
                         format!(
@@ -20261,8 +20296,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 (netlist, true)
             }
             Ok(netlist) => (netlist, false),
-            Err(err) if Self::parse_error_is_unbound_ac_frequency_dependency(&source, &err) => {
-                let frequency_bound_source = Self::source_with_ac_frequency_bindings(&source, 1.0);
+            Err(err)
+                if Self::parse_error_is_unbound_ac_frequency_dependency(&engine_source, &err) =>
+            {
+                let frequency_bound_source =
+                    Self::source_with_ac_frequency_bindings(&engine_source, 1.0);
                 let netlist = Self::parse_xyce_netlist(&frequency_bound_source, &deck.path)
                     .map_err(|retry_err| {
                         format!(
@@ -20395,12 +20433,372 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             print,
             primary_ac_file,
             primary_ac_ic_file,
+            sensitivity,
             output_override,
             ac,
             frequency_bound,
             steps,
             contract,
         })
+    }
+
+    fn static_ac_sensitivity_plan_for_source(
+        &self,
+        source: &str,
+        deck_path: &Path,
+        output_override: bool,
+    ) -> Result<Option<XyceStaticAcSensitivityPlan>, String> {
+        let sensitivity_lines = Self::logical_netlist_lines(source)
+            .into_iter()
+            .filter(|line| {
+                Self::strip_netlist_comment(line)
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|command| command.eq_ignore_ascii_case(".SENS"))
+            })
+            .collect::<Vec<_>>();
+        let print_requests = Self::print_output_requests(source, "SENS")?;
+        if sensitivity_lines.is_empty() {
+            if print_requests.is_empty() {
+                return Ok(None);
+            }
+            return Err(
+                "wrapper-origin .PRINT SENS output requires one Xyce .SENS OBJVARS/PARAM directive"
+                    .to_string(),
+            );
+        }
+        if output_override {
+            return Err(
+                "frequency-domain output override does not yet cover Xyce .SENS side output"
+                    .to_string(),
+            );
+        }
+        if sensitivity_lines.len() != 1 {
+            return Err(
+                "native Xyce AC sensitivity contract requires exactly one .SENS directive"
+                    .to_string(),
+            );
+        }
+        if print_requests.len() != 1 {
+            return Err(
+                "native Xyce AC sensitivity contract requires exactly one .PRINT SENS statement"
+                    .to_string(),
+            );
+        }
+        let print_output = print_requests
+            .into_iter()
+            .next()
+            .expect("one .PRINT SENS request");
+        if print_output.file.is_some() {
+            return Err(
+                "native Xyce AC sensitivity contract does not cover FILE= .PRINT SENS side output"
+                    .to_string(),
+            );
+        }
+        if print_output
+            .format
+            .as_deref()
+            .is_some_and(|format| !format.eq_ignore_ascii_case("STD"))
+        {
+            return Err(format!(
+                "native Xyce AC sensitivity contract does not cover .PRINT SENS FORMAT={}",
+                print_output.format.as_deref().unwrap_or_default()
+            ));
+        }
+
+        let tokens = Self::split_print_fields(&sensitivity_lines[0])?;
+        let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut objvars = None;
+        let mut parameters = None;
+        let mut index = 1usize;
+        while index < token_refs.len() {
+            let Some((raw_key, raw_value, consumed)) =
+                Self::print_option_assignment(&token_refs, index)
+            else {
+                return Err(format!(
+                    "Xyce .SENS directive contains an unsupported field '{}'",
+                    token_refs[index]
+                ));
+            };
+            let key = raw_key.trim().to_ascii_lowercase();
+            let value = raw_value.trim();
+            if value.is_empty() {
+                return Err(format!("Xyce .SENS {key} assignment is missing a value"));
+            }
+            let destination = match key.as_str() {
+                "objvars" => &mut objvars,
+                "param" | "params" => &mut parameters,
+                _ => {
+                    return Err(format!(
+                        "native Xyce AC sensitivity contract does not cover .SENS field '{raw_key}'"
+                    ));
+                }
+            };
+            if destination.is_some() {
+                return Err(format!("Xyce .SENS contains duplicate {key} assignments"));
+            }
+            *destination = Some(value.to_string());
+            index += consumed;
+        }
+
+        let objectives =
+            Self::parse_xyce_sensitivity_objectives(objvars.as_deref().ok_or_else(|| {
+                "Xyce .SENS directive must provide OBJVARS=<output>[,<output>...]".to_string()
+            })?)?;
+        let parameters =
+            Self::parse_xyce_sensitivity_parameters(parameters.as_deref().ok_or_else(|| {
+                "Xyce .SENS directive must provide PARAM=<device:param>[,<device:param>...]"
+                    .to_string()
+            })?)?;
+        let (direct, adjoint) = Self::parse_xyce_sensitivity_flags(source)?;
+        let reference_path = self
+            .static_output_reference_path(deck_path, "FD.SENS.prn")
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static AC sensitivity oracle at {}",
+                self.display_path(&reference_path)
+            ));
+        }
+
+        Ok(Some(XyceStaticAcSensitivityPlan {
+            reference_path,
+            print: XycePrintRequest {
+                probes: print_output.probes,
+            },
+            objectives,
+            parameters,
+            direct,
+            adjoint,
+        }))
+    }
+
+    fn parse_xyce_sensitivity_objectives(
+        value: &str,
+    ) -> Result<Vec<XyceAcSensitivityObjective>, String> {
+        let mut objectives = Vec::new();
+        for raw in Self::split_xyce_sensitivity_list(value)? {
+            let authored_name = raw.trim();
+            if authored_name.is_empty() {
+                return Err("Xyce .SENS OBJVARS contains an empty objective".to_string());
+            }
+            let normalized = Self::normalize_probe(authored_name);
+            let spec = if let Some(inner) = normalized
+                .strip_prefix("v(")
+                .and_then(|inner| inner.strip_suffix(')'))
+            {
+                let (positive, negative) = if let Some((positive, negative)) = inner.split_once(',')
+                {
+                    (positive.trim(), Some(negative.trim()))
+                } else {
+                    (inner.trim(), None)
+                };
+                if positive.is_empty() || negative.is_some_and(str::is_empty) {
+                    return Err(format!(
+                        "Xyce .SENS voltage objective '{authored_name}' has an empty node"
+                    ));
+                }
+                XyceAcSensitivityObjectiveSpec::Voltage {
+                    positive: positive.to_string(),
+                    negative: negative.map(str::to_string),
+                }
+            } else if let Some(element) = normalized
+                .strip_prefix("i(")
+                .and_then(|inner| inner.strip_suffix(')'))
+            {
+                if element.is_empty() {
+                    return Err(format!(
+                        "Xyce .SENS current objective '{authored_name}' has an empty element"
+                    ));
+                }
+                XyceAcSensitivityObjectiveSpec::BranchCurrent(element.to_string())
+            } else {
+                if normalized.is_empty() || normalized.contains(['(', ')']) {
+                    return Err(format!(
+                        "Xyce .SENS OBJVARS objective '{authored_name}' is not a node or probe"
+                    ));
+                }
+                XyceAcSensitivityObjectiveSpec::Voltage {
+                    positive: normalized.clone(),
+                    negative: None,
+                }
+            };
+            if objectives
+                .iter()
+                .any(|existing: &XyceAcSensitivityObjective| {
+                    existing.authored_name.eq_ignore_ascii_case(authored_name)
+                })
+            {
+                return Err(format!(
+                    "Xyce .SENS OBJVARS contains duplicate objective '{authored_name}'"
+                ));
+            }
+            objectives.push(XyceAcSensitivityObjective {
+                authored_name: authored_name.to_string(),
+                spec,
+            });
+        }
+        if objectives.is_empty() {
+            return Err("Xyce .SENS OBJVARS contains no objectives".to_string());
+        }
+        Ok(objectives)
+    }
+
+    fn parse_xyce_sensitivity_parameters(value: &str) -> Result<Vec<String>, String> {
+        let mut parameters = Vec::new();
+        for raw in Self::split_xyce_sensitivity_list(value)? {
+            let parameter = raw.trim();
+            if parameter.is_empty() {
+                return Err("Xyce .SENS PARAM contains an empty parameter".to_string());
+            }
+            if parameter.contains(['(', ')', '{', '}', '=']) {
+                return Err(format!(
+                    "Xyce .SENS PARAM contains malformed parameter '{parameter}'"
+                ));
+            }
+            if parameters
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(parameter))
+            {
+                return Err(format!(
+                    "Xyce .SENS PARAM contains duplicate parameter '{parameter}'"
+                ));
+            }
+            parameters.push(parameter.to_string());
+        }
+        if parameters.is_empty() {
+            return Err("Xyce .SENS PARAM contains no parameters".to_string());
+        }
+        Ok(parameters)
+    }
+
+    fn split_xyce_sensitivity_list(value: &str) -> Result<Vec<&str>, String> {
+        let mut fields = Vec::new();
+        let mut start = 0usize;
+        let mut parentheses = 0usize;
+        let mut braces = 0usize;
+        for (index, character) in value.char_indices() {
+            match character {
+                '(' => parentheses = parentheses.saturating_add(1),
+                ')' => {
+                    parentheses = parentheses.checked_sub(1).ok_or_else(|| {
+                        format!("Xyce .SENS list has an unmatched ')' in '{value}'")
+                    })?;
+                }
+                '{' => braces = braces.saturating_add(1),
+                '}' => {
+                    braces = braces.checked_sub(1).ok_or_else(|| {
+                        format!("Xyce .SENS list has an unmatched '}}' in '{value}'")
+                    })?;
+                }
+                ',' if parentheses == 0 && braces == 0 => {
+                    fields.push(&value[start..index]);
+                    start = index + character.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        if parentheses != 0 || braces != 0 {
+            return Err(format!(
+                "Xyce .SENS list has unbalanced grouping in '{value}'"
+            ));
+        }
+        fields.push(&value[start..]);
+        Ok(fields)
+    }
+
+    fn parse_xyce_sensitivity_flags(source: &str) -> Result<(bool, bool), String> {
+        let mut direct = None;
+        let mut adjoint = None;
+        for line in Self::logical_netlist_lines(source) {
+            let tokens = Self::split_grouped_whitespace_fields(&line, ".OPTIONS statement")?;
+            let Some(command) = tokens.first() else {
+                continue;
+            };
+            if !command.eq_ignore_ascii_case(".options") {
+                continue;
+            }
+            let Some(sensitivity_index) = tokens
+                .iter()
+                .position(|token| token.eq_ignore_ascii_case("sensitivity"))
+            else {
+                continue;
+            };
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            let mut index = sensitivity_index + 1;
+            while index < token_refs.len() {
+                let Some((raw_key, raw_value, consumed)) =
+                    Self::print_option_assignment(&token_refs, index)
+                else {
+                    index += 1;
+                    continue;
+                };
+                let key = raw_key.trim().to_ascii_lowercase();
+                if !matches!(key.as_str(), "direct" | "adjoint") {
+                    index += consumed;
+                    continue;
+                }
+                let value = crate::netlist::lexer::parse_spice_value(raw_value.trim()).map_err(
+                    |error| {
+                        format!(
+                            "Xyce .OPTIONS SENSITIVITY {key} must be numeric: {raw_value}: {error}"
+                        )
+                    },
+                )?;
+                if !value.is_finite() || (value != 0.0 && value != 1.0) {
+                    return Err(format!(
+                        "Xyce .OPTIONS SENSITIVITY {key} must be exactly 0 or 1, got {value}"
+                    ));
+                }
+                let destination = if key == "direct" {
+                    &mut direct
+                } else {
+                    &mut adjoint
+                };
+                if destination.is_some() {
+                    return Err(format!(
+                        "Xyce .OPTIONS SENSITIVITY contains duplicate {key}"
+                    ));
+                }
+                *destination = Some(value == 1.0);
+                index += consumed;
+            }
+        }
+        let direct = direct.ok_or_else(|| {
+            "native Xyce AC sensitivity contract requires explicit DIRECT=0|1".to_string()
+        })?;
+        let adjoint = adjoint.ok_or_else(|| {
+            "native Xyce AC sensitivity contract requires explicit ADJOINT=0|1".to_string()
+        })?;
+        if !direct && !adjoint {
+            return Err(
+                "native Xyce AC sensitivity contract requires DIRECT or ADJOINT output".to_string(),
+            );
+        }
+        Ok((direct, adjoint))
+    }
+
+    fn source_without_xyce_sensitivity_directives(source: &str) -> String {
+        let mut output = String::new();
+        let mut skipping = false;
+        for line in source.lines() {
+            let trimmed = Self::strip_netlist_comment(line).trim_start();
+            if trimmed
+                .split_whitespace()
+                .next()
+                .is_some_and(|command| command.eq_ignore_ascii_case(".sens"))
+            {
+                skipping = true;
+                continue;
+            }
+            if skipping && trimmed.starts_with('+') {
+                continue;
+            }
+            skipping = false;
+            output.push_str(line);
+            output.push('\n');
+        }
+        output
     }
 
     fn relational_ac_plan_for_path(&self, path: &Path) -> Result<XyceRelationalAcPlan, String> {
@@ -22551,6 +22949,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
                 };
                 if !analysis.eq_ignore_ascii_case("AC") {
+                    if analysis.eq_ignore_ascii_case("SENS") {
+                        continue;
+                    }
                     if analysis.eq_ignore_ascii_case("AC_IC") {
                         if !has_op_analysis {
                             continue;
@@ -22631,6 +23032,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 } else {
                     primary_ac_print_count += 1;
                 }
+                continue;
+            }
+            if command.eq_ignore_ascii_case(".sens") {
                 continue;
             }
             if Self::is_extra_wrapper_ac_output_analysis_command(command) {
@@ -23791,12 +24195,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         let frequency_bound_source;
+        let engine_source = if plan.sensitivity.is_some() {
+            Self::source_without_xyce_sensitivity_directives(&plan.source)
+        } else {
+            plan.source.clone()
+        };
         let parse_source = if plan.frequency_bound {
             frequency_bound_source =
-                Self::source_with_ac_frequency_bindings(&plan.source, frequencies[0]);
+                Self::source_with_ac_frequency_bindings(&engine_source, frequencies[0]);
             frequency_bound_source.as_str()
         } else {
-            plan.source.as_str()
+            engine_source.as_str()
         };
         let netlist = match Self::parse_xyce_netlist(parse_source, &plan.deck_path) {
             Ok(netlist) => netlist,
@@ -24006,6 +24415,37 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         };
         if mismatches.is_empty() {
+            if let Some(sensitivity_plan) = plan.sensitivity.as_ref() {
+                let sensitivity_mismatches = match self.compare_ac_sensitivity_prn_reference(
+                    sensitivity_plan,
+                    &netlist,
+                    &plan.source,
+                    &results,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("AC sensitivity reference comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+                if !sensitivity_mismatches.is_empty() {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "{} Xyce AC sensitivity reference mismatch(es)",
+                            sensitivity_mismatches.len()
+                        ),
+                        sensitivity_mismatches,
+                    );
+                }
+            }
             if !plan.measurement_reference_paths.is_empty()
                 || !plan.continuous_measurement_reference_paths.is_empty()
             {
@@ -45290,6 +45730,422 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         self.compare_ac_prn_reference_with_step(reference, print, netlist, source, results, None)
+    }
+
+    fn compare_ac_sensitivity_prn_reference(
+        &self,
+        plan: &XyceStaticAcSensitivityPlan,
+        netlist: &Netlist,
+        source: &str,
+        results: &[AcResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let reference = Self::parse_prn_file(&plan.reference_path)?;
+        if reference.columns.len() < 3 {
+            return Err(
+                "AC sensitivity oracle must contain Index, FREQ, and data columns".to_string(),
+            );
+        }
+        if !reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            || !reference
+                .columns
+                .get(1)
+                .is_some_and(|column| Self::is_ac_frequency_reference_column(column))
+        {
+            return Err("AC sensitivity oracle must begin with Index FREQ columns".to_string());
+        }
+        if reference.rows.len() != results.len() {
+            return Err(format!(
+                "AC sensitivity oracle has {} rows, but the simulation produced {} frequency points",
+                reference.rows.len(),
+                results.len()
+            ));
+        }
+
+        let generated_offset = reference
+            .columns
+            .iter()
+            .enumerate()
+            .skip(2)
+            .find_map(|(index, column)| {
+                Self::is_ac_sensitivity_generated_column(column).then_some(index)
+            })
+            .ok_or_else(|| {
+                "AC sensitivity oracle has no generated objective/sensitivity columns".to_string()
+            })?;
+        if generated_offset == 2 {
+            return Err(
+                "AC sensitivity oracle has no ordinary .PRINT SENS data columns".to_string(),
+            );
+        }
+        let base_reference = XycePrnTable {
+            columns: reference.columns[..generated_offset].to_vec(),
+            rows: reference.rows.clone(),
+        };
+        let base_columns = Self::reference_ac_data_columns(&base_reference, &plan.print, 2)?;
+        let phase_output_radians = Self::source_requests_ac_phase_output_radians(source);
+        let base_comp_columns = base_columns
+            .iter()
+            .map(|column| XyceReferenceColumn::Probe {
+                name: column.probe_name().to_string(),
+            })
+            .collect::<Vec<_>>();
+        let base_tolerances = self.comp_tolerances(source, &base_comp_columns)?;
+
+        let mut generated_indices = BTreeMap::new();
+        for (index, column) in reference.columns.iter().enumerate().skip(generated_offset) {
+            let normalized = Self::normalize_probe(column);
+            if generated_indices
+                .insert(normalized.clone(), index)
+                .is_some()
+            {
+                return Err(format!(
+                    "AC sensitivity oracle contains duplicate generated column '{column}'"
+                ));
+            }
+            if !Self::is_ac_sensitivity_generated_column(column) {
+                return Err(format!(
+                    "AC sensitivity oracle contains unsupported generated column '{column}'"
+                ));
+            }
+        }
+
+        let frequencies = results
+            .iter()
+            .map(|result| result.frequency)
+            .collect::<Vec<_>>();
+        let engine = self.create_xyce_engine();
+        let mut sensitivity_results = Vec::with_capacity(plan.objectives.len());
+        let mut expected_generated_columns = BTreeSet::new();
+        for objective in &plan.objectives {
+            let output = Self::xyce_sensitivity_output_from_spec(&objective.spec, &results[0])?;
+            let objective_probe = Self::xyce_sensitivity_objective_probe(&objective.spec);
+            for component in ["re", "im", "mag", "ph"] {
+                expected_generated_columns.insert(Self::xyce_sensitivity_column_name(
+                    component,
+                    &objective_probe,
+                    None,
+                    None,
+                ));
+            }
+            for parameter in &plan.parameters {
+                if plan.direct {
+                    for component in ["re", "im", "mag", "ph"] {
+                        expected_generated_columns.insert(Self::xyce_sensitivity_column_name(
+                            component,
+                            &objective_probe,
+                            Some(parameter),
+                            Some("dir"),
+                        ));
+                    }
+                }
+                if plan.adjoint {
+                    for component in ["re", "im", "mag", "ph"] {
+                        expected_generated_columns.insert(Self::xyce_sensitivity_column_name(
+                            component,
+                            &objective_probe,
+                            Some(parameter),
+                            Some("adj"),
+                        ));
+                    }
+                }
+            }
+            let sensitivity = engine
+                .run_sensitivity_ac_complete(&netlist, output, &frequencies, &plan.parameters)
+                .map_err(|error| error.to_string())?;
+            if sensitivity.frequencies.len() != frequencies.len()
+                || sensitivity.output_values.len() != frequencies.len()
+            {
+                return Err(format!(
+                    "AC sensitivity objective '{}' returned an invalid frequency trace shape",
+                    objective.authored_name
+                ));
+            }
+            sensitivity_results.push(sensitivity);
+        }
+        if generated_indices.len() != expected_generated_columns.len() {
+            return Err(format!(
+                "AC sensitivity oracle has {} generated columns, expected {} for the declared objectives/parameters",
+                generated_indices.len(),
+                expected_generated_columns.len()
+            ));
+        }
+        for expected in &expected_generated_columns {
+            if !generated_indices.contains_key(expected) {
+                return Err(format!(
+                    "AC sensitivity oracle is missing generated column '{expected}'"
+                ));
+            }
+        }
+
+        let mut mismatches = Vec::new();
+        for (row_index, (row, result)) in reference.rows.iter().zip(results).enumerate() {
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "AC sensitivity oracle row {row_index} has {} values, expected {}",
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            let expected_index = row[0];
+            if (expected_index - row_index as Value).abs() > self.config.absolute_tolerance {
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: "Index".to_string(),
+                    expected: expected_index,
+                    actual: row_index as Value,
+                    relative_error: 1.0,
+                });
+            }
+            if let Some(relative_error) = self.value_mismatch(
+                row[1],
+                result.frequency,
+                XyceComparisonTolerance::from_config(&self.config),
+            ) {
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: reference.columns[1].clone(),
+                    expected: row[1],
+                    actual: result.frequency,
+                    relative_error,
+                });
+            }
+            for (column_index, column) in base_columns.iter().enumerate() {
+                let expected = row[column_index + 2];
+                let actual = Self::evaluate_ac_reference_column(
+                    column,
+                    netlist,
+                    result,
+                    phase_output_radians,
+                )?;
+                let normalized = Self::normalize_probe(column.probe_name());
+                let tolerance = base_tolerances
+                    .get(&normalized)
+                    .copied()
+                    .unwrap_or_else(|| self.default_comparison_tolerance(&normalized));
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: reference.columns[column_index + 2].clone(),
+                        expected,
+                        actual,
+                        relative_error,
+                    });
+                }
+            }
+
+            for (objective, sensitivity) in plan.objectives.iter().zip(&sensitivity_results) {
+                let objective_probe = Self::xyce_sensitivity_objective_probe(&objective.spec);
+                let output = sensitivity.output_values[row_index];
+                for component in ["re", "im", "mag", "ph"] {
+                    let key =
+                        Self::xyce_sensitivity_column_name(component, &objective_probe, None, None);
+                    let expected = row[*generated_indices
+                        .get(&key)
+                        .expect("validated nominal sensitivity column")];
+                    let actual = Self::xyce_sensitivity_value(
+                        component,
+                        output,
+                        row_index,
+                        None,
+                        phase_output_radians,
+                    );
+                    Self::record_sensitivity_mismatch(
+                        self,
+                        &mut mismatches,
+                        row_index,
+                        &reference.columns[*generated_indices
+                            .get(&key)
+                            .expect("validated nominal sensitivity column")],
+                        expected,
+                        actual,
+                    );
+                }
+                for parameter in &plan.parameters {
+                    let trace = sensitivity
+                        .sensitivities
+                        .iter()
+                        .find(|trace| Self::xyce_sensitivity_trace_matches(trace, parameter))
+                        .ok_or_else(|| {
+                            format!(
+                                "AC sensitivity objective '{}' produced no trace for parameter '{parameter}'",
+                                objective.authored_name
+                            )
+                        })?;
+                    for mode in [plan.direct.then_some("dir"), plan.adjoint.then_some("adj")]
+                        .into_iter()
+                        .flatten()
+                    {
+                        for component in ["re", "im", "mag", "ph"] {
+                            let key = Self::xyce_sensitivity_column_name(
+                                component,
+                                &objective_probe,
+                                Some(parameter),
+                                Some(mode),
+                            );
+                            let column_index = *generated_indices
+                                .get(&key)
+                                .expect("validated derivative sensitivity column");
+                            let expected = row[column_index];
+                            let actual = Self::xyce_sensitivity_value(
+                                component,
+                                output,
+                                row_index,
+                                Some(trace),
+                                phase_output_radians,
+                            );
+                            Self::record_sensitivity_mismatch(
+                                self,
+                                &mut mismatches,
+                                row_index,
+                                &reference.columns[column_index],
+                                expected,
+                                actual,
+                            );
+                        }
+                    }
+                }
+            }
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                return Ok(mismatches);
+            }
+        }
+        Ok(mismatches)
+    }
+
+    fn is_ac_sensitivity_generated_column(column: &str) -> bool {
+        let normalized = Self::normalize_probe(column);
+        [
+            "re({", "im({", "mag({", "ph({", "d_re({", "d_im({", "d_mag({", "d_ph({",
+        ]
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix))
+    }
+
+    fn xyce_sensitivity_output_from_spec(
+        spec: &XyceAcSensitivityObjectiveSpec,
+        result: &AcResult,
+    ) -> Result<AcSensitivityOutput, String> {
+        let node_index = |node: &str| {
+            if node.eq_ignore_ascii_case("0") {
+                return Ok(0usize);
+            }
+            result
+                .node_names
+                .iter()
+                .position(|name| Self::normalize_probe(name) == node)
+                .map(|index| index + 1)
+                .ok_or_else(|| {
+                    format!("AC sensitivity objective node '{node}' is not in the solved circuit")
+                })
+        };
+        match spec {
+            XyceAcSensitivityObjectiveSpec::Voltage { positive, negative } => {
+                let positive = node_index(positive)?;
+                let negative = negative.as_deref().map(node_index).transpose()?;
+                if positive == 0 {
+                    return Err("AC sensitivity objective voltage must not be ground".to_string());
+                }
+                if negative == Some(positive) {
+                    return Err("AC sensitivity objective voltage nodes must differ".to_string());
+                }
+                Ok(AcSensitivityOutput::Voltage { positive, negative })
+            }
+            XyceAcSensitivityObjectiveSpec::BranchCurrent(element) => {
+                Ok(AcSensitivityOutput::BranchCurrent(element.clone()))
+            }
+        }
+    }
+
+    fn xyce_sensitivity_objective_probe(spec: &XyceAcSensitivityObjectiveSpec) -> String {
+        match spec {
+            XyceAcSensitivityObjectiveSpec::Voltage { positive, negative } => negative
+                .as_deref()
+                .map(|negative| format!("v({positive},{negative})"))
+                .unwrap_or_else(|| format!("v({positive})")),
+            XyceAcSensitivityObjectiveSpec::BranchCurrent(element) => format!("i({element})"),
+        }
+    }
+
+    fn xyce_sensitivity_column_name(
+        component: &str,
+        objective_probe: &str,
+        parameter: Option<&str>,
+        mode: Option<&str>,
+    ) -> String {
+        let objective = format!("{{{objective_probe}}}");
+        match (parameter, mode) {
+            (Some(parameter), Some(mode)) => {
+                Self::normalize_probe(&format!("d_{component}({objective})/d_{parameter}_{mode}"))
+            }
+            (None, None) => Self::normalize_probe(&format!("{component}({objective})")),
+            _ => unreachable!("sensitivity column parameter/mode must be paired"),
+        }
+    }
+
+    fn xyce_sensitivity_trace_matches(
+        trace: &crate::analysis::AcSensitivity,
+        parameter: &str,
+    ) -> bool {
+        trace.vector_name.eq_ignore_ascii_case(parameter)
+            || format!("{}:{}", trace.element, trace.parameter).eq_ignore_ascii_case(parameter)
+    }
+
+    fn xyce_sensitivity_value(
+        component: &str,
+        output: Complex64,
+        row_index: usize,
+        trace: Option<&crate::analysis::AcSensitivity>,
+        phase_output_radians: bool,
+    ) -> Value {
+        let value = trace.map_or(output, |trace| {
+            // The sensitivity trace stores the complex derivative in
+            // `absolute`; the other fields are derivatives of magnitude and
+            // phase and are selected below.
+            trace.absolute[row_index]
+        });
+        if let Some(trace) = trace {
+            return match component {
+                "re" => trace.absolute[row_index].re,
+                "im" => trace.absolute[row_index].im,
+                "mag" => trace.magnitude[row_index],
+                "ph" if phase_output_radians => trace.phase[row_index],
+                "ph" => trace.phase[row_index].to_degrees(),
+                _ => 0.0,
+            };
+        }
+        match component {
+            "re" => value.re,
+            "im" => value.im,
+            "mag" => value.norm(),
+            "ph" if phase_output_radians => value.arg(),
+            "ph" => value.arg().to_degrees(),
+            _ => 0.0,
+        }
+    }
+
+    fn record_sensitivity_mismatch(
+        &self,
+        mismatches: &mut Vec<XyceValueMismatch>,
+        row: usize,
+        probe: &str,
+        expected: Value,
+        actual: Value,
+    ) {
+        let normalized = Self::normalize_probe(probe);
+        let tolerance = self.default_comparison_tolerance(&normalized);
+        if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+            mismatches.push(XyceValueMismatch {
+                row,
+                probe: probe.to_string(),
+                expected,
+                actual,
+                relative_error,
+            });
+        }
     }
 
     fn noise_reference_signal_probe(column: &XyceAcReferenceColumn) -> Result<String, String> {
@@ -83314,6 +84170,55 @@ Q1 c b 0 QN
         let error = XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(source, false)
             .expect_err(".LIN must not be silently ignored by the static AC output contract");
         assert!(error.contains(".LIN") || error.contains(".lin"), "{error}");
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_parser_accepts_objvars_and_rejects_ambiguous_fields() {
+        let objectives = XyceTestRunner::parse_xyce_sensitivity_objectives("b, V(c,0), I(V1)")
+            .expect("Xyce OBJVARS forms are parsed structurally");
+        assert_eq!(objectives.len(), 3);
+        assert!(matches!(
+            &objectives[0].spec,
+            XyceAcSensitivityObjectiveSpec::Voltage {
+                positive,
+                negative: None
+            } if positive == "b"
+        ));
+        assert!(matches!(
+            &objectives[1].spec,
+            XyceAcSensitivityObjectiveSpec::Voltage {
+                positive,
+                negative
+            } if positive == "c" && negative.as_deref() == Some("0")
+        ));
+        assert!(matches!(
+            &objectives[2].spec,
+            XyceAcSensitivityObjectiveSpec::BranchCurrent(element) if element == "v1"
+        ));
+
+        let error = XyceTestRunner::parse_xyce_sensitivity_objectives("b,,c")
+            .expect_err("empty objective fields must fail closed");
+        assert!(error.contains("empty objective"), "{error}");
+
+        let error = XyceTestRunner::parse_xyce_sensitivity_parameters("R1:R,R1:R")
+            .expect_err("duplicate sensitivity parameters must fail closed");
+        assert!(error.contains("duplicate parameter"), "{error}");
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_engine_source_removes_only_sens_cards() {
+        let source = "fixture\n\
+                       V1 out 0 AC 1\n\
+                       .SENS OBJVARS=out PARAM=R1:R\n\
+                       + continuation\n\
+                       R1 out 0 1k\n\
+                       .PRINT AC V(out)\n\
+                       .END\n";
+        let stripped = XyceTestRunner::source_without_xyce_sensitivity_directives(source);
+        assert!(!stripped.to_ascii_lowercase().contains(".sens"));
+        assert!(stripped.contains("R1 out 0 1k"));
+        assert!(stripped.contains(".PRINT AC V(out)"));
+        assert!(XyceTestRunner::parse_xyce_netlist(&stripped, Path::new("fixture.cir")).is_ok());
     }
 
     #[test]
