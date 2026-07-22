@@ -4128,6 +4128,20 @@ struct XyceStaticAcSensitivityPlan {
     direct: bool,
     adjoint: bool,
     no_index: bool,
+    /// Additional `.PRINT SENS FILE=...` destinations.  Xyce creates one
+    /// sensitivity table per destination, while the numerical sensitivities
+    /// are shared; each side output therefore reuses the canonical solve but
+    /// has its own probe schema and checked-in oracle.
+    side_outputs: Vec<XyceStaticAcSensitivitySideOutput>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceStaticAcSensitivitySideOutput {
+    file: String,
+    reference_path: PathBuf,
+    reference_format: XyceAcSensitivityReferenceFormat,
+    print: XycePrintRequest,
+    no_index: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20325,12 +20339,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         };
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        if sensitivity.is_some() && !steps.is_empty() {
-            return Err(
-                ".STEP combined with AC sensitivity output is not implemented in the native Xyce oracle"
-                    .to_string(),
-            );
-        }
         if ac.data_points().is_some() && !steps.is_empty() {
             return Err(
                 ".STEP combined with .AC DATA is not implemented in the native Xyce oracle"
@@ -20485,7 +20493,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .is_some_and(|command| command.eq_ignore_ascii_case(".SENS"))
             })
             .collect::<Vec<_>>();
-        let print_requests = Self::print_output_requests(source, "SENS")?;
+        let print_requests = Self::aggregate_print_output_requests(
+            Self::print_output_requests(source, "SENS")?,
+            "SENS",
+        )?;
         if sensitivity_lines.is_empty() {
             if print_requests.is_empty() {
                 return Ok(None);
@@ -20507,39 +20518,38 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string(),
             );
         }
-        if print_requests.len() != 1 {
+        let primary_requests = print_requests
+            .iter()
+            .filter(|request| request.file.is_none())
+            .cloned()
+            .collect::<Vec<_>>();
+        if primary_requests.len() > 1 {
             return Err(
-                "native Xyce AC sensitivity contract requires exactly one .PRINT SENS statement"
+                "native Xyce AC sensitivity contract requires at most one primary .PRINT SENS statement"
                     .to_string(),
             );
         }
-        let print_output = print_requests
-            .into_iter()
-            .next()
-            .expect("one .PRINT SENS request");
-        if print_output.file.is_some() {
+        let side_requests = print_requests
+            .iter()
+            .filter(|request| request.file.is_some())
+            .cloned()
+            .collect::<Vec<_>>();
+        if primary_requests.is_empty() && side_requests.is_empty() {
             return Err(
-                "native Xyce AC sensitivity contract does not cover FILE= .PRINT SENS side output"
+                "native Xyce AC sensitivity contract requires one .PRINT SENS output destination"
                     .to_string(),
             );
         }
-        let print_format = print_output.format.as_deref().unwrap_or("STD");
-        let reference_format = if print_format.eq_ignore_ascii_case("CSV") {
-            XyceAcSensitivityReferenceFormat::Csv
-        } else {
-            XyceAcSensitivityReferenceFormat::Prn
-        };
-        let no_index = reference_format == XyceAcSensitivityReferenceFormat::Csv
-            || print_format.eq_ignore_ascii_case("NOINDEX");
-        if !print_format.eq_ignore_ascii_case("STD")
-            && !print_format.eq_ignore_ascii_case("NOINDEX")
-            && !print_format.eq_ignore_ascii_case("CSV")
-        {
-            return Err(format!(
-                "native Xyce AC sensitivity contract does not cover .PRINT SENS FORMAT={}",
-                print_output.format.as_deref().unwrap_or_default()
-            ));
-        }
+        // Xyce permits FILE= sensitivity outputs without a primary destination.
+        // In that form, the first side table supplies the canonical schema and
+        // every additional destination must be comparable to that same solve.
+        let canonical_request = primary_requests
+            .first()
+            .cloned()
+            .or_else(|| side_requests.first().cloned())
+            .expect("one primary or side .PRINT SENS request");
+        let (reference_format, no_index) =
+            Self::ac_sensitivity_output_schema(canonical_request.format.as_deref())?;
 
         let tokens = Self::split_print_fields(&sensitivity_lines[0])?;
         let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
@@ -20604,18 +20614,101 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         }
 
+        let mut side_outputs = Vec::new();
+        for request in side_requests {
+            let file = request
+                .file
+                .clone()
+                .expect("side sensitivity output has FILE= set");
+            let (side_reference_format, side_no_index) =
+                Self::ac_sensitivity_output_schema(request.format.as_deref())?;
+            let candidate = Self::side_output_reference_candidate(&reference_path, &file)?;
+            let side_reference_path = if candidate.is_file() {
+                candidate
+            } else if side_reference_format == XyceAcSensitivityReferenceFormat::Prn
+                && !side_no_index
+            {
+                // Xyce's AC sensitivity outputter falls back to standard PRN
+                // for RAW/PROBE/Touchstone/GNUPLOT/SPLOT and unknown formats.
+                // Those destinations therefore share the canonical FD.SENS.prn
+                // table when no separately checked-in artifact exists.
+                reference_path.clone()
+            } else {
+                return Err(format!(
+                    "missing checked-in static AC sensitivity side-output oracle {}",
+                    self.display_path(&candidate)
+                ));
+            };
+            if side_reference_path == reference_path
+                && (side_reference_format != reference_format || side_no_index != no_index)
+            {
+                return Err(format!(
+                    "AC sensitivity side output '{}' falls back to a schema incompatible with the canonical FD.SENS oracle",
+                    file
+                ));
+            }
+            side_outputs.push(XyceStaticAcSensitivitySideOutput {
+                file,
+                reference_path: side_reference_path,
+                reference_format: side_reference_format,
+                print: XycePrintRequest {
+                    probes: request.probes,
+                },
+                no_index: side_no_index,
+            });
+        }
+
         Ok(Some(XyceStaticAcSensitivityPlan {
             reference_path,
             reference_format,
             print: XycePrintRequest {
-                probes: print_output.probes,
+                probes: canonical_request.probes,
             },
             objectives,
             parameters,
             direct,
             adjoint,
             no_index,
+            side_outputs,
         }))
+    }
+
+    /// Return the schema emitted by Xyce's AC sensitivity outputter for a
+    /// `.PRINT SENS FORMAT=` value.  Xyce only has native AC sensitivity
+    /// writers for STD, CSV, and TECPLOT; RAW/PROBE/Touchstone/Dakota and
+    /// unrecognized PRN-like formats deliberately fall back to standard PRN.
+    /// TECPLOT is kept fail-closed here until a native table parser exists.
+    fn ac_sensitivity_output_schema(
+        format: Option<&str>,
+    ) -> Result<(XyceAcSensitivityReferenceFormat, bool), String> {
+        let normalized = format.unwrap_or("STD").trim();
+        if normalized.eq_ignore_ascii_case("CSV") {
+            return Ok((XyceAcSensitivityReferenceFormat::Csv, true));
+        }
+        if normalized.eq_ignore_ascii_case("NOINDEX") {
+            return Ok((XyceAcSensitivityReferenceFormat::Prn, true));
+        }
+        if normalized.eq_ignore_ascii_case("STD") {
+            return Ok((XyceAcSensitivityReferenceFormat::Prn, false));
+        }
+        if matches!(
+            normalized.to_ascii_lowercase().as_str(),
+            "raw"
+                | "raw_ascii"
+                | "probe"
+                | "dakota"
+                | "touchstone"
+                | "touchstone2"
+                | "ts1"
+                | "ts2"
+                | "gnuplot"
+                | "splot"
+        ) {
+            return Ok((XyceAcSensitivityReferenceFormat::Prn, false));
+        }
+        Err(format!(
+            "native Xyce AC sensitivity contract does not cover .PRINT SENS FORMAT={normalized}"
+        ))
     }
 
     fn parse_xyce_sensitivity_objectives(
@@ -24314,12 +24407,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     Vec::new(),
                 );
             };
-            if !plan.steps.is_empty() || plan.ac.data_points().is_some() || plan.frequency_bound {
+            if !plan.steps.is_empty() {
+                return self.run_static_step_ac_sensitivity_plan(
+                    deck,
+                    plan,
+                    netlist,
+                    frequencies,
+                    start,
+                );
+            }
+            if plan.ac.data_points().is_some() || plan.frequency_bound {
                 return self.expected_unsupported_result(
                     deck,
                     start,
                     "unsupported_xyce_contract",
-                    "measurement-only or stepped AC sensitivity comparison currently requires an ordinary, unstepped frequency sweep",
+                    "measurement-only AC sensitivity comparison currently requires an ordinary, unstepped frequency sweep",
                 );
             }
             let engine = self.create_xyce_engine();
@@ -24345,7 +24447,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     );
                 }
             };
-            let mismatches = match self.compare_ac_sensitivity_prn_reference(
+            let mismatches = match self.compare_ac_sensitivity_outputs(
                 sensitivity_plan,
                 &netlist,
                 &plan.source,
@@ -24574,7 +24676,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         };
         if mismatches.is_empty() {
             if let Some(sensitivity_plan) = plan.sensitivity.as_ref() {
-                let sensitivity_mismatches = match self.compare_ac_sensitivity_prn_reference(
+                let sensitivity_mismatches = match self.compare_ac_sensitivity_outputs(
                     sensitivity_plan,
                     &netlist,
                     &plan.source,
@@ -25821,6 +25923,140 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    fn run_static_step_ac_sensitivity_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticAcPlan,
+        netlist: Netlist,
+        frequencies: Vec<Value>,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(true);
+        let Some(sensitivity_plan) = plan.sensitivity.as_ref() else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "stepped AC sensitivity plan has no sensitivity output contract".to_string(),
+                Vec::new(),
+            );
+        };
+        if plan.ac.data_points().is_some() || plan.frequency_bound {
+            return self.expected_unsupported_result(
+                deck,
+                start,
+                "unsupported_xyce_contract",
+                "stepped AC sensitivity comparison requires an ordinary frequency sweep",
+            );
+        }
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let expansion_engine = self.create_xyce_engine();
+        let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+            &expansion_engine,
+            &netlist,
+            &plan.steps,
+            xyce_step_plan_limits(),
+            &abort,
+        ) {
+            Ok(runs) => runs,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        ".STEP expansion exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!(
+                        "RSpice runtime does not yet support this .STEP AC sensitivity deck: {err}"
+                    ),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(".STEP expansion error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let engine = self.create_xyce_engine();
+        let mut batches = Vec::with_capacity(step_runs.len());
+        for (step_index, run) in step_runs.iter().enumerate() {
+            let results = match engine.run_ac(&run.netlist, &frequencies) {
+                Ok(results) => results,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this .STEP AC sensitivity deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation error in AC sensitivity step {}: {err}",
+                            step_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            batches.push(XyceAcResultBatch {
+                netlist: run.netlist.clone(),
+                results,
+            });
+        }
+
+        let mismatches = match self.compare_step_ac_sensitivity_outputs(
+            sensitivity_plan,
+            &plan.source,
+            frequencies.len(),
+            &batches,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("AC stepped sensitivity reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce stepped AC sensitivity mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
     fn run_static_step_ac_plan(
         &self,
         deck: &XyceDeck,
@@ -25943,18 +26179,42 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         );
                     }
                 };
-            if side_mismatches.is_empty() {
+            let sensitivity_mismatches = if let Some(sensitivity_plan) = plan.sensitivity.as_ref() {
+                match self.compare_step_ac_sensitivity_outputs(
+                    sensitivity_plan,
+                    &plan.source,
+                    frequencies.len(),
+                    &batches,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("AC stepped sensitivity reference comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            if side_mismatches.is_empty() && sensitivity_mismatches.is_empty() {
                 self.passed_result(deck, start, contract)
             } else {
+                let mut all_mismatches = side_mismatches;
+                all_mismatches.extend(sensitivity_mismatches);
+                all_mismatches.truncate(self.config.max_mismatches);
                 self.failure_result(
                     deck,
                     start,
                     contract,
                     format!(
-                        "{} Xyce stepped AC side-output mismatch(es)",
-                        side_mismatches.len()
+                        "{} Xyce stepped AC output mismatch(es)",
+                        all_mismatches.len()
                     ),
-                    side_mismatches,
+                    all_mismatches,
                 )
             }
         } else {
@@ -45880,6 +46140,137 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         self.compare_ac_prn_reference_with_step(reference, print, netlist, source, results, None)
     }
 
+    fn compare_ac_sensitivity_outputs(
+        &self,
+        plan: &XyceStaticAcSensitivityPlan,
+        netlist: &Netlist,
+        source: &str,
+        results: &[AcResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let mut all_mismatches =
+            self.compare_ac_sensitivity_prn_reference(plan, netlist, source, results)?;
+        for side in &plan.side_outputs {
+            let side_plan = XyceStaticAcSensitivityPlan {
+                reference_path: side.reference_path.clone(),
+                reference_format: side.reference_format,
+                print: side.print.clone(),
+                objectives: plan.objectives.clone(),
+                parameters: plan.parameters.clone(),
+                direct: plan.direct,
+                adjoint: plan.adjoint,
+                no_index: side.no_index,
+                side_outputs: Vec::new(),
+            };
+            let mut mismatches =
+                self.compare_ac_sensitivity_prn_reference(&side_plan, netlist, source, results)?;
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{}:{}", side.file, mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
+    }
+
+    fn compare_step_ac_sensitivity_outputs(
+        &self,
+        plan: &XyceStaticAcSensitivityPlan,
+        source: &str,
+        points_per_step: usize,
+        batches: &[XyceAcResultBatch],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if points_per_step == 0 {
+            return Err("AC sensitivity step comparison has no frequency points".to_string());
+        }
+        let total_rows = batches
+            .len()
+            .checked_mul(points_per_step)
+            .ok_or_else(|| "AC sensitivity step row count overflow".to_string())?;
+
+        let mut outputs = Vec::with_capacity(1 + plan.side_outputs.len());
+        outputs.push((None, plan.clone()));
+        for side in &plan.side_outputs {
+            outputs.push((
+                Some(side.file.clone()),
+                XyceStaticAcSensitivityPlan {
+                    reference_path: side.reference_path.clone(),
+                    reference_format: side.reference_format,
+                    print: side.print.clone(),
+                    objectives: plan.objectives.clone(),
+                    parameters: plan.parameters.clone(),
+                    direct: plan.direct,
+                    adjoint: plan.adjoint,
+                    no_index: side.no_index,
+                    side_outputs: Vec::new(),
+                },
+            ));
+        }
+
+        let mut all_mismatches = Vec::new();
+        for (file, output) in outputs {
+            let reference = match output.reference_format {
+                XyceAcSensitivityReferenceFormat::Prn => {
+                    if Self::source_requests_ac_print_headerless(source) {
+                        Self::parse_headerless_ac_sensitivity_prn_file(&output)?
+                    } else {
+                        Self::parse_prn_file(&output.reference_path)?
+                    }
+                }
+                XyceAcSensitivityReferenceFormat::Csv => {
+                    Self::parse_csv_file(&output.reference_path)?
+                }
+            };
+            if reference.rows.len() != total_rows {
+                return Err(format!(
+                    "AC sensitivity oracle {} has {} rows, but stepped simulation produced {} rows",
+                    output.reference_path.display(),
+                    reference.rows.len(),
+                    total_rows
+                ));
+            }
+            let mut row_offset = 0usize;
+            for (step_index, batch) in batches.iter().enumerate() {
+                if batch.results.len() != points_per_step {
+                    return Err(format!(
+                        "AC sensitivity step {} produced {} frequency points, expected {}",
+                        step_index,
+                        batch.results.len(),
+                        points_per_step
+                    ));
+                }
+                let rows = reference.rows[row_offset..row_offset + points_per_step].to_vec();
+                let step_reference = XycePrnTable {
+                    columns: reference.columns.clone(),
+                    rows,
+                };
+                let mut mismatches = self.compare_ac_sensitivity_table_reference(
+                    &output,
+                    &batch.netlist,
+                    source,
+                    &batch.results,
+                    &step_reference,
+                    Some(step_index),
+                )?;
+                for mismatch in &mut mismatches {
+                    mismatch.row += row_offset;
+                    if let Some(file) = file.as_ref() {
+                        mismatch.probe = format!("{file}:{}", mismatch.probe);
+                    }
+                }
+                all_mismatches.extend(mismatches);
+                row_offset += points_per_step;
+                if all_mismatches.len() >= self.config.max_mismatches {
+                    all_mismatches.truncate(self.config.max_mismatches);
+                    return Ok(all_mismatches);
+                }
+            }
+        }
+        Ok(all_mismatches)
+    }
+
     fn compare_ac_sensitivity_prn_reference(
         &self,
         plan: &XyceStaticAcSensitivityPlan,
@@ -45897,10 +46288,34 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
             XyceAcSensitivityReferenceFormat::Csv => Self::parse_csv_file(&plan.reference_path)?,
         };
-        let leading_columns = usize::from(!plan.no_index) + 1;
-        let frequency_column = usize::from(!plan.no_index);
+        self.compare_ac_sensitivity_table_reference(
+            plan, netlist, source, results, &reference, None,
+        )
+    }
+
+    fn compare_ac_sensitivity_table_reference(
+        &self,
+        plan: &XyceStaticAcSensitivityPlan,
+        netlist: &Netlist,
+        source: &str,
+        results: &[AcResult],
+        reference: &XycePrnTable,
+        expected_stepnum: Option<usize>,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let has_stepnum_column = reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("STEPNUM"));
+        let index_column = usize::from(has_stepnum_column);
+        let frequency_column = index_column + usize::from(!plan.no_index);
+        let leading_columns = frequency_column + 1;
         if reference.columns.len() < leading_columns + 2 {
-            return Err(if plan.no_index {
+            return Err(if has_stepnum_column && plan.no_index {
+                "AC sensitivity oracle must contain STEPNUM, FREQ, and data columns".to_string()
+            } else if has_stepnum_column {
+                "AC sensitivity oracle must contain STEPNUM, Index, FREQ, and data columns"
+                    .to_string()
+            } else if plan.no_index {
                 "AC sensitivity oracle must contain FREQ and data columns".to_string()
             } else {
                 "AC sensitivity oracle must contain Index, FREQ, and data columns".to_string()
@@ -45909,12 +46324,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let valid_leading_columns = if plan.no_index {
             reference
                 .columns
-                .first()
+                .get(index_column)
                 .is_some_and(|column| Self::is_ac_frequency_reference_column(column))
         } else {
             reference
                 .columns
-                .first()
+                .get(index_column)
                 .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
                 && reference
                     .columns
@@ -45922,7 +46337,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .is_some_and(|column| Self::is_ac_frequency_reference_column(column))
         };
         if !valid_leading_columns {
-            return Err(if plan.no_index {
+            return Err(if has_stepnum_column && plan.no_index {
+                "AC sensitivity NOINDEX oracle must begin with STEPNUM FREQ".to_string()
+            } else if has_stepnum_column {
+                "AC sensitivity oracle must begin with STEPNUM Index FREQ columns".to_string()
+            } else if plan.no_index {
                 "AC sensitivity NOINDEX oracle must begin with FREQ".to_string()
             } else {
                 "AC sensitivity oracle must begin with Index FREQ columns".to_string()
@@ -46062,8 +46481,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     reference.columns.len()
                 ));
             }
+            if has_stepnum_column {
+                let expected = row[0];
+                let actual = expected_stepnum.map_or(0.0, |step| step as Value);
+                if (expected - actual).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "STEPNUM".to_string(),
+                        expected,
+                        actual,
+                        relative_error: 1.0,
+                    });
+                }
+            }
             if !plan.no_index {
-                let expected_index = row[0];
+                let expected_index = row[index_column];
                 if (expected_index - row_index as Value).abs() > self.config.absolute_tolerance {
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
@@ -84960,25 +85392,56 @@ Q1 c b 0 QN
     }
 
     #[test]
-    fn xyce_ac_sensitivity_step_plan_fails_closed_before_ignoring_side_output() {
+    fn xyce_ac_sensitivity_step_plan_preserves_side_outputs() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(Path::parent)
             .expect("workspace root")
             .join("tests/xyce");
-        let relative = "Netlists/Output/AC-SENS/ac-sens-step-csv.cir";
+        let relative = "Netlists/Output/AC-SENS/ac-sens-step-gnuplot.cir";
         let deck = XyceDeck {
             path: root.join(relative),
             relative_path: relative.to_string(),
             section: XyceDeckSection::Netlists,
         };
-        let error = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+        let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
             .static_ac_plan_for_deck(&deck)
-            .expect_err("stepped sensitivity must not silently omit its side oracle");
+            .expect("stepped sensitivity plan must preserve all destinations");
+        assert_eq!(plan.steps.len(), 1);
+        let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+        assert_eq!(sensitivity.side_outputs.len(), 1);
         assert!(
-            error.contains(".STEP combined with AC sensitivity output"),
-            "{error}"
+            sensitivity.side_outputs[0]
+                .file
+                .ends_with(".FD.SENS.splot.prn")
         );
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_plan_accepts_xyce_fallback_side_formats() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Output/AC-SENS/ac-sens-formats-default-to-prn.cir";
+        let deck = XyceDeck {
+            path: root.join(relative),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+            .static_ac_plan_for_deck(&deck)
+            .expect("fallback-format sensitivity plan is supported");
+        let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+        assert_eq!(sensitivity.side_outputs.len(), 4);
+        assert!(
+            sensitivity
+                .side_outputs
+                .iter()
+                .all(|side| side.reference_path == sensitivity.reference_path)
+        );
+        assert!(sensitivity.side_outputs.iter().all(|side| !side.no_index));
     }
 
     #[test]
