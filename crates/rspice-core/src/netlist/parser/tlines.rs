@@ -28,7 +28,7 @@ pub(super) fn parse_coupling(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
 
     // Collect inductor names until we hit a number (the coefficient)
     let mut inductors = Vec::new();
@@ -97,7 +97,7 @@ pub(super) fn parse_vswitch(
     line_num: usize,
     elements: &mut Vec<Element>,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
     if looks_like_xyce_generic_switch_control(stream) {
@@ -202,7 +202,7 @@ pub(super) fn parse_iswitch(
     line_num: usize,
     elements: &mut Vec<Element>,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
     let control_element = expect_ident(stream, line_num)?;
@@ -255,7 +255,7 @@ pub(super) fn parse_transmission_line(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let port1_pos = expect_node(stream, line_num)?;
     let port1_neg = expect_node(stream, line_num)?;
     let port2_pos = expect_node(stream, line_num)?;

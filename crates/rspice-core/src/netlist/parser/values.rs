@@ -1475,6 +1475,80 @@ pub(super) fn expect_ident(
     }
 }
 
+/// Consume an element-head name using Xyce's contiguous DEV token grammar.
+///
+/// The lexer intentionally keeps punctuation as separate tokens because those
+/// characters are operators or delimiters in other parser contexts.  Xyce
+/// nevertheless permits them inside a device name (for example `R+`), so the
+/// element head is the one place where adjacent DEV fragments are reassembled.
+/// Whitespace remains a hard boundary: a punctuation token after a separated
+/// identifier is the next field, not part of the name.
+pub(super) fn expect_element_name(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    skip_commas(stream);
+
+    let first = stream.peek().clone();
+    let TokenKind::Ident(head) = &first.kind else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected element name, found {:?}", first.kind),
+        });
+    };
+    if !head
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic())
+        || !head.chars().all(is_xyce_dev_name_char)
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Invalid Xyce element name '{}'", first.lexeme),
+        });
+    }
+
+    let mut name = head.clone();
+    let mut end = first.span.end;
+    stream.advance();
+    while stream.peek().span.start == end {
+        let token = stream.peek().clone();
+        let Some(fragment) = xyce_dev_name_fragment(&token) else {
+            break;
+        };
+        name.push_str(&fragment);
+        end = token.span.end;
+        stream.advance();
+    }
+
+    Ok(name)
+}
+
+fn xyce_dev_name_fragment(token: &Token) -> Option<String> {
+    let fragment = match &token.kind {
+        TokenKind::Ident(value) => value.clone(),
+        TokenKind::Number(_) => token.lexeme.to_ascii_uppercase(),
+        TokenKind::Plus => "+".to_string(),
+        TokenKind::Minus => "-".to_string(),
+        TokenKind::Star => "*".to_string(),
+        TokenKind::Slash => "/".to_string(),
+        TokenKind::AtSign => "@".to_string(),
+        TokenKind::Tilde => "~".to_string(),
+        TokenKind::LBracket => "[".to_string(),
+        TokenKind::RBracket => "]".to_string(),
+        TokenKind::Other(character) => character.to_string(),
+        _ => return None,
+    };
+    fragment
+        .chars()
+        .all(is_xyce_dev_name_char)
+        .then_some(fragment)
+}
+
+fn is_xyce_dev_name_char(character: char) -> bool {
+    crate::netlist::lexer::is_xyce_device_name_char(character)
+}
+
 pub(super) fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
     skip_commas(stream);
 

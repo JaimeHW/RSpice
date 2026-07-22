@@ -11,7 +11,7 @@ pub(super) fn parse_resistor(
     diagnostics: &mut Vec<ParseDiagnostic>,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -606,7 +606,7 @@ pub(super) fn parse_capacitor(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -655,7 +655,7 @@ pub(super) fn parse_inductor(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -707,7 +707,7 @@ pub(super) fn parse_voltage_source(
     params: &ParamContext,
     defer_source_spec: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -766,7 +766,7 @@ pub(super) fn parse_current_source(
     params: &ParamContext,
     defer_source_spec: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -3404,7 +3404,7 @@ pub(super) fn parse_diode(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let anode = expect_node(stream, line_num)?;
     let cathode = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
@@ -3528,7 +3528,7 @@ pub(super) fn parse_bjt(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let collector = expect_node(stream, line_num)?;
     let base = expect_node(stream, line_num)?;
     let emitter = expect_node(stream, line_num)?;
@@ -3749,7 +3749,7 @@ pub(super) fn parse_mosfet(
     _diagnostics: &mut Vec<ParseDiagnostic>,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
@@ -4016,7 +4016,7 @@ pub(super) fn parse_jfet(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
@@ -4047,7 +4047,7 @@ pub(super) fn parse_mesfet(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
@@ -4166,7 +4166,7 @@ pub(super) fn parse_lossless_tline(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let port1_pos = expect_node(stream, line_num)?;
     let port1_neg = expect_node(stream, line_num)?;
     let port2_pos = expect_node(stream, line_num)?;
@@ -4204,7 +4204,7 @@ pub(super) fn parse_lossy_tline(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     if name.eq_ignore_ascii_case("YMEMRISTOR") {
         return parse_xyce_memristor(stream, line_num, elements, params, defer_simple_param_refs);
     }
@@ -4258,7 +4258,7 @@ fn parse_xyce_memristor(
     params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let instance_name = expect_ident(stream, line_num)?;
+    let instance_name = expect_element_name(stream, line_num)?;
     // Xyce exposes keyword-style devices through a type-qualified namespace
     // (`I(YMEMRISTOR!MR1)`, `N(YMEMRISTOR!MR1_X)`). Store that canonical
     // identity directly so every downstream symbol consumer sees one name.
@@ -4356,7 +4356,7 @@ pub(super) fn parse_coupled_tlines(
         return parse_xyce_port(stream, line_num, elements, params);
     }
 
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
 
     // Coupled lines have more nodes - collect them all
     let mut nodes = Vec::new();
@@ -4426,7 +4426,7 @@ fn parse_xyce_port(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -4961,7 +4961,7 @@ fn parse_voltage_controlled_source(
     is_voltage_output: bool,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -5247,7 +5247,7 @@ fn parse_current_controlled_source(
     is_voltage_output: bool,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
@@ -5441,7 +5441,7 @@ pub(super) fn parse_behavioral(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 

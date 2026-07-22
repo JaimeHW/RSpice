@@ -116,43 +116,7 @@ fn expect_xspice_instance_name(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<String, ParseError> {
-    skip_commas(stream);
-
-    let first = stream.peek().clone();
-    let TokenKind::Ident(head) = first.kind else {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!("Expected identifier, found {:?}", first.kind),
-        });
-    };
-
-    let mut name = head;
-    let mut end = first.span.end;
-    stream.advance();
-
-    while stream.peek().span.start == end {
-        let token = stream.peek().clone();
-        let fragment = match &token.kind {
-            TokenKind::Ident(s) => Some(s.clone()),
-            TokenKind::Number(_) => Some(token.lexeme.to_ascii_uppercase()),
-            TokenKind::Plus => Some("+".to_string()),
-            TokenKind::Minus => Some("-".to_string()),
-            TokenKind::Star => Some("*".to_string()),
-            TokenKind::Slash => Some("/".to_string()),
-            TokenKind::AtSign => Some("@".to_string()),
-            TokenKind::Tilde => Some("~".to_string()),
-            TokenKind::Other(c) => Some(c.to_string()),
-            _ => None,
-        };
-        let Some(fragment) = fragment else {
-            break;
-        };
-        name.push_str(&fragment);
-        end = token.span.end;
-        stream.advance();
-    }
-
-    Ok(name)
+    expect_element_name(stream, line_num)
 }
 
 pub(super) fn process_line(
@@ -816,5 +780,21 @@ mod tests {
             state.element_names.contains_canonical("__RSPICE_P1_Z0"),
             "synthesized RF-port termination name is registered from the same append batch"
         );
+    }
+
+    #[test]
+    fn process_line_reassembles_contiguous_xyce_device_name_punctuation() {
+        let mut state = ParseState::new();
+        process_line(
+            "R+ IN 0 1",
+            2,
+            &NetlistSourceLocation::in_memory(2),
+            &mut state,
+        )
+        .expect("punctuation-rich resistor name parses");
+
+        assert_eq!(state.elements.len(), 1);
+        assert_eq!(state.elements[0].name, "R+");
+        assert!(state.element_names.contains_canonical("R+"));
     }
 }

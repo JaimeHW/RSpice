@@ -546,6 +546,41 @@ fn is_other_token_char(c: char) -> bool {
     !c.is_whitespace() && !c.is_control()
 }
 
+/// Return whether a character is legal inside an Xyce DEV token.
+///
+/// Xyce permits punctuation-rich element names while reserving commas,
+/// grouping delimiters, and assignment markers for the surrounding grammar.
+/// The element-head parser and noise contribution probes share this exact
+/// whitelist so a device identity remains stable across parsing and analysis.
+pub fn is_xyce_device_name_char(character: char) -> bool {
+    character.is_ascii_alphanumeric()
+        || matches!(
+            character,
+            '_' | ':'
+                | '$'
+                | '-'
+                | '`'
+                | '~'
+                | '!'
+                | '@'
+                | '#'
+                | '%'
+                | '&'
+                | '+'
+                | '|'
+                | '<'
+                | '>'
+                | '?'
+                | '.'
+                | '\\'
+                | '/'
+                | '^'
+                | '*'
+                | '['
+                | ']'
+        )
+}
+
 /// Parse SPICE engineering suffix and return (multiplier, chars_consumed)
 fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
     if chars.is_empty() {

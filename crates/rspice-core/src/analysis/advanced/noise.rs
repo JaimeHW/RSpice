@@ -1077,11 +1077,16 @@ impl NoiseContributionProbe {
         if !(1..=2).contains(&arguments.len()) {
             return Err(NoiseContributionProbeError::InvalidArity(arguments.len()));
         }
-        if arguments.iter().any(|argument| {
+        if arguments.iter().enumerate().any(|(index, argument)| {
             argument.is_empty()
-                || !argument.chars().all(|ch| {
-                    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$' | ':' | '#')
-                })
+                || (index == 0
+                    && !argument
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_ascii_alphabetic()))
+                || !argument
+                    .chars()
+                    .all(crate::netlist::lexer::is_xyce_device_name_char)
         }) {
             return Err(NoiseContributionProbeError::InvalidSyntax(
                 trimmed.to_string(),
@@ -1547,6 +1552,10 @@ mod summary_tests {
                 device: "R1".to_string(),
                 mechanism: None,
             })
+        );
+        assert_eq!(
+            NoiseContributionProbe::parse("DNO(R+)").map(|probe| probe.device),
+            Ok("R+".to_string())
         );
         assert_eq!(
             NoiseContributionProbe::parse("DNO()"),
