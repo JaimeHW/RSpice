@@ -432,6 +432,7 @@ fn parse_netlist_impl(
     // First line is the title
     let title = lines[0].to_string();
     let mut state = ParseState::new();
+    state.allow_unmatched_subckt_ends = options.expression_dialect == ExpressionDialect::Xyce;
     for line in preprocess.replace_ground_extra_lines {
         let origin = root_physical_origin(source_schedule.as_ref(), lines.len(), line);
         state.diagnostics.push(ParseDiagnostic::warning_at(

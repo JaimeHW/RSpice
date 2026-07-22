@@ -213,10 +213,18 @@ pub(super) fn process_line(
         let end_name = fields.collect::<Vec<_>>();
 
         let Some(open_frame) = state.subckt_stack.last() else {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: ".ENDS without matching .SUBCKT".to_string(),
-            });
+            if !state.allow_unmatched_subckt_ends {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".ENDS without matching .SUBCKT".to_string(),
+                });
+            }
+            // Xyce treats an unmatched .ENDS as a warning and ignores the
+            // card.  Keep parsing the surrounding top-level circuit so
+            // legacy decks that contain redundant terminators retain their
+            // canonical Xyce behavior.
+            log::warn!("line {line_num}: Subcircuit .ENDS without .SUBCKT, ignoring");
+            return Ok(());
         };
 
         if !end_name.is_empty() {
@@ -841,5 +849,21 @@ mod tests {
         assert_eq!(state.elements.len(), 1);
         assert_eq!(state.elements[0].name, "R+");
         assert!(state.element_names.contains_canonical("R+"));
+    }
+
+    #[test]
+    fn process_line_ignores_unmatched_ends_like_xyce() {
+        let mut state = ParseState::new();
+        state.allow_unmatched_subckt_ends = true;
+        process_line(
+            ".ENDS redundant",
+            2,
+            &NetlistSourceLocation::in_memory(2),
+            &mut state,
+        )
+        .expect("Xyce ignores an unmatched .ENDS card");
+
+        assert!(state.subckt_stack.is_empty());
+        assert!(state.elements.is_empty());
     }
 }
