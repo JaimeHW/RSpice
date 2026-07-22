@@ -19812,6 +19812,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
             });
         }
+        // Xyce's LEVEL=18 VDMOS implementation records accepted breakpoints
+        // on an adaptive grid, while the native UCCM implementation may
+        // choose different breakpoints for the same circuit.  Admit only the
+        // strict, fully numeric IRF130-shaped Level=18 envelope to the
+        // Release 7.10 integrated-RMS verifier; all other VDMOS decks remain
+        // fail-closed under the ordinary pointwise/native contract.
+        if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
+            && !requires_wrapper
+            && plan.contract == XyceStaticTranContract::PlainStatic
+            && !plan.output_override
+            && !plan.timeint_conststep
+            && plan.steps.is_empty()
+            && plan.wrapper_tolerance.is_none()
+            && plan.reference_path.is_file()
+            && !Self::source_has_comp_directive(&plan.source)
+            && Self::native_transient_uses_standard_startup(netlist)
+            && netlist.diagnostics.is_empty()
+            && Self::netlist_is_native_absolute_transient_vdmos_level18(netlist)
+            && Self::validate_native_transient_contract_for_purpose(
+                netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+            )
+            .is_ok()
+        {
+            let scientific_precision =
+                Self::xyce_verify_step_tran_scientific_precision(&plan.source)?;
+            return Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision,
+            });
+        }
         if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
             || requires_wrapper
             || plan.contract != XyceStaticTranContract::PlainStatic
@@ -51236,6 +51266,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_tbv_diode(netlist, element)
             });
+        let has_qualified_vdmos = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_absolute_transient_vdmos_level18(netlist);
         let has_qualified_minimum_diode = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_minimum_diode(netlist, element)
@@ -51249,6 +51281,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_ekv26
             || has_qualified_diode
             || has_qualified_tbv_diode
+            || has_qualified_vdmos
             || has_qualified_minimum_diode
             || has_qualified_level9_bsim3)
             && !Self::native_transient_uses_standard_startup(netlist)
@@ -51418,6 +51451,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         && Self::netlist_element_is_native_transient_ekv26(netlist, element) => {}
                 ElementKind::Mosfet { .. }
                     if purpose.validates_absolute_device_contract()
+                        && Self::netlist_is_native_absolute_transient_vdmos_level18(netlist)
+                        && Self::netlist_element_is_native_absolute_transient_vdmos_level18(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Mosfet { .. }
+                    if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_transient_level1_mosfet(
                             netlist, element,
                         ) => {}
@@ -51470,7 +51509,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, and classic MOSFET models, exact IS-only, validated Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, and classic MOSFET models, exact IS-only, validated Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -55933,7 +55972,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         element.nodes.len() == 4
             && !compact_syntax
             && deferred_params.is_empty()
-            && Self::native_absolute_transient_level9_bsim3_instance_params(instance_params)
+            && Self::native_absolute_transient_w_l_instance_params(instance_params)
             && Self::find_unique_model_in(&netlist.models, model)
                 .is_some_and(Self::model_is_native_absolute_transient_level9_bsim3)
     }
@@ -55999,7 +56038,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
-    fn native_absolute_transient_level9_bsim3_instance_params(params: &[(String, Value)]) -> bool {
+    fn native_absolute_transient_w_l_instance_params(params: &[(String, Value)]) -> bool {
         if params.len() != 2
             || !params.iter().all(|(name, value)| {
                 value.is_finite()
@@ -56035,6 +56074,97 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 if name.eq_ignore_ascii_case("LEVEL")
                     && level.is_finite()
                     && level.to_bits() == 9.0f64.to_bits())
+    }
+
+    fn netlist_is_native_absolute_transient_vdmos_level18(netlist: &Netlist) -> bool {
+        if netlist.options.gmin.is_some()
+            || !netlist.subcircuits.is_empty()
+            || netlist.models.len() != 1
+        {
+            return false;
+        }
+
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.len() != 1
+            || netlist.elements.iter().any(|element| {
+                matches!(
+                    element.kind,
+                    ElementKind::Bjt { .. }
+                        | ElementKind::Diode { .. }
+                        | ElementKind::Jfet { .. }
+                        | ElementKind::XyceMemristor { .. }
+                        | ElementKind::Subcircuit { .. }
+                )
+            })
+        {
+            return false;
+        }
+
+        Self::netlist_element_is_native_absolute_transient_vdmos_level18(netlist, mosfets[0])
+    }
+
+    fn netlist_element_is_native_absolute_transient_vdmos_level18(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        netlist.options.gmin.is_none()
+            && element.nodes.len() == 4
+            && !compact_syntax
+            && deferred_params.is_empty()
+            && Self::native_absolute_transient_w_l_instance_params(instance_params)
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_absolute_transient_vdmos_level18)
+    }
+
+    fn model_is_native_absolute_transient_vdmos_level18(model: &crate::netlist::ModelDef) -> bool {
+        if !model.model_type.eq_ignore_ascii_case("NMOS")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || model.params.len() != 13
+        {
+            return false;
+        }
+
+        let mut names = BTreeSet::new();
+        model.params.iter().all(|(name, value)| {
+            let normalized = name.to_ascii_uppercase();
+            let domain_ok = match normalized.as_str() {
+                "LEVEL" => value.to_bits() == 18.0f64.to_bits(),
+                // CV/CVE are Xyce's charge-model selectors.  The native
+                // UCCM path implements the canonical selector pair only.
+                "CV" | "CVE" => value.to_bits() == 1.0f64.to_bits(),
+                "VTO" => value.is_finite() && *value > 0.0,
+                "RD" | "RS" | "LAMBDA" | "SIGMA0" => value.is_finite() && *value >= 0.0,
+                // The native Level=18 implementation consumes these physical
+                // quantities directly and requires finite positive values.
+                "UO" | "VMAX" | "TOX" => value.is_finite() && *value > 0.0,
+                "DELTA" => value.is_finite() && *value >= 0.0,
+                // Xyce's Level=18 M parameter is accepted only at the
+                // canonical value used by the native UCCM envelope; other
+                // values alter the compact model's knee behavior.
+                "M" => value.to_bits() == 3.0f64.to_bits(),
+                _ => false,
+            };
+            domain_ok && names.insert(normalized)
+        }) && names.len() == 13
     }
 
     fn netlist_element_is_native_scoped_model_relational_bjt(
@@ -85884,6 +86014,115 @@ D1 out 0 DMODA
                     .expect("D1 element"),
             )
         );
+    }
+
+    #[test]
+    fn absolute_transient_contract_admits_canonical_vdmos_level18_integrated_rms() {
+        let source = "\
+IRF130 transient oracle
+VD 3 1 0.5
+VS 2 0 0
+VG 4 0 10 pulse(0 10 300ns 50ns 50ns 400ns 1000ns)
+VID 0 1 DC 0
+M1 3 4 2 0 IRF130 W=0.386 L=2.5u
+.MODEL IRF130 NMOS LEVEL=18
++ CV=1
++ CVE=1
++ VTO=3.5
++ RD=0
++ RS=0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+.TRAN 0.5n 1u 0u 2n
+.PRINT TRAN precision=10 width=19 V(3) V(4) {I(VID)+0.5}
+.options timeint reltol=1.0e-2 abstol=1.0e-7
+.END
+";
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("vdmos_level18.cir"))
+            .expect("canonical VDMOS LEVEL=18 deck parses");
+        assert!(
+            XyceTestRunner::netlist_is_native_absolute_transient_vdmos_level18(&netlist),
+            "the canonical numeric LEVEL=18 envelope is eligible"
+        );
+        let mosfet = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 element");
+        assert!(
+            XyceTestRunner::netlist_element_is_native_absolute_transient_vdmos_level18(
+                &netlist, mosfet
+            )
+        );
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("canonical VDMOS LEVEL=18 deck is in the absolute transient envelope");
+
+        let plan = XyceStaticTranPlan {
+            deck_path: PathBuf::from("vdmos_level18.cir"),
+            reference_path: std::env::current_exe().expect("test executable is an existing file"),
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: vec![
+                    "V(3)".to_string(),
+                    "V(4)".to_string(),
+                    "{I(VID)+0.5}".to_string(),
+                ],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 0.5e-9,
+                stop: 1.0e-6,
+                start: Some(0.0),
+                max_step: Some(2.0e-9),
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::PlainStatic,
+            wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+        };
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("canonical VDMOS selector evaluates"),
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: 10,
+            }
+        );
+
+        for invalid in [
+            source.replace("+ M=3", "+ M=4"),
+            source.replace("+ CVE=1", "+ CVE=0"),
+            source.replace("+ TOX=50nm", "+ UNKNOWN=1\n+ TOX=50nm"),
+            source.replace("+ UO=230", "+ UO=230\n+ UO=231"),
+            source.replace(
+                "M1 3 4 2 0 IRF130 W=0.386 L=2.5u",
+                "M1 3 4 2 IRF130 W=0.386 L=2.5u",
+            ),
+            source.replace(".options timeint", ".options gmin=1e-12 timeint"),
+        ] {
+            let invalid_netlist = XyceTestRunner::parse_xyce_netlist(
+                &invalid,
+                Path::new("invalid_vdmos_level18.cir"),
+            )
+            .expect("invalid VDMOS fixture remains structurally parseable");
+            assert!(
+                !XyceTestRunner::netlist_is_native_absolute_transient_vdmos_level18(
+                    &invalid_netlist
+                ),
+                "invalid VDMOS variation must remain outside the integrated-RMS envelope"
+            );
+        }
     }
 
     #[test]
