@@ -20275,9 +20275,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         } else {
             Self::canonical_print_output_request(&source, "AC_IC", requires_wrapper)?
         };
-        if primary_ac_output.is_none() && primary_ac_ic_output.is_none() {
+        if primary_ac_output.is_none() && primary_ac_ic_output.is_none() && sensitivity.is_none() {
             return Err(
-                "deck has no primary .PRINT AC or .PRINT AC_IC statement with static columns"
+                "deck has no primary .PRINT AC, .PRINT AC_IC, or qualified .PRINT SENS statement"
                     .to_string(),
             );
         }
@@ -20377,7 +20377,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 let reference_path = self
                     .static_output_reference_path(&deck.path, contract.reference_extension())
                     .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-                if !reference_path.is_file()
+                let reference_exists = reference_path.is_file();
+                if !reference_exists
+                    && sensitivity.is_none()
                     && measurement_reference_paths.is_empty()
                     && continuous_measurement_reference_paths.is_empty()
                 {
@@ -20391,12 +20393,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     probes: print_output.probes,
                 };
                 Self::validate_static_ac_contract(&netlist, &ac, &print)?;
-                (
-                    contract,
-                    reference_path.is_file().then_some(reference_path),
-                    Some(print),
-                    primary_ac_file,
-                )
+                let reference_path = reference_exists.then_some(reference_path);
+                let print = if sensitivity.is_some() && !reference_exists {
+                    None
+                } else {
+                    Some(print)
+                };
+                (contract, reference_path, print, primary_ac_file)
             } else if let Some(print_output) = primary_ac_ic_output {
                 if !steps.is_empty() {
                     return Err(
@@ -20419,6 +20422,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     ));
                 }
                 (contract, None, None, None)
+            } else if sensitivity.is_some() {
+                (
+                    if requires_wrapper {
+                        XyceStaticAcContract::WrapperStatic
+                    } else {
+                        XyceStaticAcContract::PlainStatic
+                    },
+                    None,
+                    None,
+                    None,
+                )
             } else {
                 unreachable!("AC output request presence was checked before parsing");
             };
@@ -24219,6 +24233,80 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 );
             }
         };
+
+        if plan.reference_path.is_none() && plan.print.is_none() && plan.sensitivity.is_some() {
+            let Some(sensitivity_plan) = plan.sensitivity.as_ref() else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    "AC plan has neither a primary output nor a sensitivity request".to_string(),
+                    Vec::new(),
+                );
+            };
+            if !plan.steps.is_empty() || plan.ac.data_points().is_some() || plan.frequency_bound {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_contract",
+                    "measurement-only or stepped AC sensitivity comparison currently requires an ordinary, unstepped frequency sweep",
+                );
+            }
+            let engine = self.create_xyce_engine();
+            let results = match engine.run_ac(&netlist, &frequencies) {
+                Ok(results) => results,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support this static AC sensitivity deck: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mismatches = match self.compare_ac_sensitivity_prn_reference(
+                sensitivity_plan,
+                &netlist,
+                &plan.source,
+                &results,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("AC sensitivity reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            return if mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce AC sensitivity reference mismatch(es)",
+                        mismatches.len()
+                    ),
+                    mismatches,
+                )
+            };
+        }
 
         if plan.reference_path.is_none() && plan.print.is_some() {
             if !plan.steps.is_empty() {
@@ -84219,6 +84307,30 @@ Q1 c b 0 QN
         assert!(stripped.contains("R1 out 0 1k"));
         assert!(stripped.contains(".PRINT AC V(out)"));
         assert!(XyceTestRunner::parse_xyce_netlist(&stripped, Path::new("fixture.cir")).is_ok());
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_plan_accepts_missing_primary_oracle() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Output/AC-SENS/ac-sens-raw-override-ascii.cir";
+        let deck = XyceDeck {
+            path: root.join(relative),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+
+        let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+            .static_ac_plan_for_deck(&deck)
+            .expect("sensitivity-only AC oracle plan is supported");
+
+        assert!(plan.reference_path.is_none());
+        assert!(plan.print.is_none());
+        assert!(plan.sensitivity.is_some());
+        assert_eq!(plan.contract, XyceStaticAcContract::WrapperStatic);
     }
 
     #[test]
