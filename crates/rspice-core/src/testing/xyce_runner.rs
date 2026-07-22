@@ -34376,7 +34376,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         tran: &XyceTranAnalysis,
     ) -> Result<Value, String> {
         let solver_max_step = Self::transient_oracle_solver_max_step(tran);
-        let source_step = Self::source_transient_max_step(netlist, tran)
+        // A lossless transmission line already contributes its propagation
+        // delay as an accepted-time breakpoint.  Capping the global ceiling
+        // to an arbitrary number of samples across a source edge (for
+        // example, 200 samples across a 100-ps PULSE edge) turns a perfectly
+        // ordinary delayed-wave simulation into hundreds of thousands of
+        // Newton solves.  Let the line's adaptive companion and breakpoint
+        // handling resolve that edge instead; ordinary source-only decks keep
+        // the conservative source-resolution ceiling below.
+        let has_transmission_line = netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::TransmissionLine { .. }));
+        let source_step = (!has_transmission_line)
+            .then(|| Self::source_transient_max_step(netlist, tran))
+            .flatten()
             .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
         let max_step = [Some(solver_max_step), source_step]
             .into_iter()
@@ -51272,6 +51286,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_minimum_diode(netlist, element)
             });
+        let has_qualified_legacy_diode = purpose.validates_absolute_device_contract()
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_native_absolute_transient_legacy_diode(netlist, element)
+            });
         let has_qualified_level9_bsim3 = purpose.admits_default_level9_bsim3()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
@@ -51283,6 +51301,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_tbv_diode
             || has_qualified_vdmos
             || has_qualified_minimum_diode
+            || has_qualified_legacy_diode
             || has_qualified_level9_bsim3)
             && !Self::native_transient_uses_standard_startup(netlist)
         {
@@ -51497,6 +51516,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             netlist, element,
                         ) => {}
                 ElementKind::Diode { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_native_absolute_transient_legacy_diode(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Diode { .. }
                     if matches!(
                         purpose,
                         XyceStaticTranPlanPurpose::RelationalFamily
@@ -51509,7 +51533,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, and classic MOSFET models, exact IS-only, validated Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, and classic MOSFET models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -56362,6 +56386,84 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && deferred_params.is_empty()
             && Self::find_unique_model_in(&netlist.models, model)
                 .is_some_and(Self::model_is_native_relational_legacy_diode)
+    }
+
+    fn netlist_element_is_native_absolute_transient_legacy_diode(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        if netlist.options.gmin.is_some() {
+            return false;
+        }
+        let ElementKind::Diode {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 2
+            && instance_params.iter().all(|(name, value)| {
+                Self::native_absolute_transient_legacy_diode_instance_param(name, *value)
+            })
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_absolute_transient_legacy_diode)
+    }
+
+    fn native_absolute_transient_legacy_diode_instance_param(name: &str, value: Value) -> bool {
+        value.is_finite()
+            && match name.to_ascii_uppercase().as_str() {
+                "AREA" | "M" | "MULT" => value > 0.0,
+                "PJ" => value >= 0.0,
+                "TEMP" | "DTEMP" => value > -273.15,
+                _ => false,
+            }
+    }
+
+    fn model_is_native_absolute_transient_legacy_diode(model: &crate::netlist::ModelDef) -> bool {
+        if !Self::model_is_native_legacy_diode(model)
+            || !model.real_vector_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || !model.string_params.is_empty()
+        {
+            return false;
+        }
+
+        // Keep the absolute envelope disjoint from the narrower IS-only
+        // diode contract.  The legacy Xyce path admitted here is the
+        // parameterized rectifier evaluator (N/RS are its required model
+        // selectors); an IS-only card remains covered by its exact contract.
+        let has_ideality = model
+            .params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("N"));
+        let has_series_resistance = model
+            .params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("RS"));
+        if !has_ideality || !has_series_resistance {
+            return false;
+        }
+
+        // The handwritten legacy evaluator consumes only this scalar subset.
+        // Xyce's legacy model parser intentionally ignores unknown scalar
+        // parameters, including values obtained by evaluating expressions
+        // (BUG_45_SON exercises that behavior).  Permit those ignored values
+        // only when they cannot alias a native parameter or the LEVEL selector
+        // itself.
+        model.params.iter().all(|(name, value)| {
+            if Self::xyce_level2_native_diode_param(name) {
+                Self::native_relational_diode_model_param(name, *value)
+            } else {
+                value.is_finite()
+            }
+        }) && model.expr_params.iter().all(|(name, _)| {
+            !name.eq_ignore_ascii_case("LEVEL") && !Self::xyce_level2_native_diode_param(name)
+        })
     }
 
     fn netlist_element_is_native_xyce_level2_tbv_diode(
@@ -75696,6 +75798,25 @@ R2 b 0 3
                 .expect("static resistor parameter evaluates for AC output"),
             2.0
         );
+    }
+
+    #[test]
+    fn native_legacy_diode_contract_accepts_ignored_expression_parameters() {
+        let source = "BUG45-compatible diode\n\
+V1 1 0 5\n\
+D1 1 0 DLEG\n\
+.MODEL DLEG D(IS=4E-10 N=1.48 RS=.105 BOGOPARAM={1+2})\n\
+.TRAN 1n 2n\n\
+.PRINT TRAN V(1)\n\
+.END\n";
+        let netlist = XyceTestRunner::parse_xyce_netlist(
+            source,
+            Path::new("native_legacy_diode_contract.cir"),
+        )
+        .expect("legacy diode fixture parses");
+
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("ignored legacy-diode expression parameters remain oracle-qualified");
     }
 
     #[test]
