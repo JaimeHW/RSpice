@@ -10,9 +10,10 @@ mod kind;
 mod model;
 
 pub use config::{
-    AcDraft, AnalysisDraft, DcMismatchDraft, DistoDraft, FrequencySweepDraft, HbNoiseDraft,
-    NetworkPortDraft, NoiseDraft, PeriodicNetworkDraft, QpssDraft, QuasiPeriodicAcDraft,
-    QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft, TransientNoiseDraft,
+    AcDraft, AnalysisDependencyRepairContext, AnalysisDraft, DcMismatchDraft, DistoDraft,
+    FrequencySweepDraft, HbNoiseDraft, NetworkPortDraft, NoiseDraft, PeriodicNetworkDraft,
+    QpssDraft, QuasiPeriodicAcDraft, QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft,
+    TransientNoiseDraft,
 };
 pub use kind::{AnalysisAvailability, AnalysisCategory, AnalysisKind};
 pub use model::{

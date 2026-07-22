@@ -9,8 +9,8 @@ use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, 
 use crate::common::RSpiceApp;
 use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::simulation::plan::{
-    AnalysisDependency, AnalysisDraft, AnalysisKind, AnalysisLifecycleCommand,
-    AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
+    AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
+    AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
 };
 use crate::simulation::{SavedOutputSemanticStatus, SavedOutputStorageEstimate};
 use crate::ui::icons::Icon;
@@ -77,6 +77,7 @@ struct SelectedAnalysis {
     position: usize,
     plan_length: usize,
     issues: Vec<AnalysisPlanIssue>,
+    contextual_dependency_error: Option<String>,
     repair_label: Option<String>,
 }
 
@@ -90,10 +91,27 @@ struct DependencyCandidate {
 struct EnvelopeSourceCatalog {
     source_digest: ContentDigest,
     names: Vec<String>,
+    netlist_source: Option<String>,
     diagnostic: Option<String>,
 }
 
 impl EnvelopeSourceCatalog {
+    fn dependency_repair_context(&self) -> AnalysisDependencyRepairContext {
+        if let Some(diagnostic) = &self.diagnostic {
+            return AnalysisDependencyRepairContext::periodic_sources_unavailable(format!(
+                "the exact elaborated periodic-source catalog is unavailable: {diagnostic}"
+            ));
+        }
+        let Some(source) = &self.netlist_source else {
+            return AnalysisDependencyRepairContext::periodic_sources_unavailable(
+                "the exact elaborated periodic-source source is unavailable",
+            );
+        };
+        AnalysisDependencyRepairContext::exact_periodic_sources(source.clone()).unwrap_or_else(
+            |error| AnalysisDependencyRepairContext::periodic_sources_unavailable(error),
+        )
+    }
+
     fn selection_error(&self, requested: &[String]) -> Option<String> {
         if requested.is_empty() {
             return None;
@@ -122,6 +140,7 @@ impl EnvelopeSourceCatalog {
         })
     }
 
+    #[cfg(test)]
     fn exact_periodic_selection_error(&self, requested: &[String]) -> Option<String> {
         if let Some(error) = self.selection_error(requested) {
             return Some(error.replace("modulation source", "periodic tone source"));
@@ -2447,8 +2466,7 @@ fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
 }
 
 fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
-    let source = app.state.simulation.netlist_content.as_str();
-    let source_digest = crate::workbench::netlist_document::source_content_digest(source);
+    let source_digest = envelope_source_catalog_input_digest(app);
     let cache_id = egui::Id::new("simulation-envelope-source-catalog");
     if let Some(cached) = ui
         .ctx()
@@ -2458,23 +2476,132 @@ fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
         return cached;
     }
 
-    let (names, diagnostic) = match rspice_core::Netlist::parse(source) {
-        Ok(netlist) => match rspice_core::Engine::new(rspice_core::SimulationConfig::default())
-            .transient_source_names(&netlist)
-        {
-            Ok(names) => (names, None),
-            Err(error) => (Vec::new(), Some(error.to_string())),
-        },
-        Err(error) => (Vec::new(), Some(error.to_string())),
-    };
-    let catalog = EnvelopeSourceCatalog {
-        source_digest,
-        names,
-        diagnostic,
-    };
+    let catalog = build_envelope_source_catalog_with_digest(app, source_digest);
     ui.ctx()
         .data_mut(|data| data.insert_temp(cache_id, catalog.clone()));
     catalog
+}
+
+fn build_envelope_source_catalog(app: &RSpiceApp) -> EnvelopeSourceCatalog {
+    build_envelope_source_catalog_with_digest(app, envelope_source_catalog_input_digest(app))
+}
+
+fn envelope_source_catalog_input_digest(app: &RSpiceApp) -> ContentDigest {
+    let plan_identity = app.state.sim_setup.analysis_plan.as_ref().map_or_else(
+        || "none".to_owned(),
+        |plan| format!("{}:{}", plan.id(), plan.revision().get()),
+    );
+    let model_library_identity = serde_json::to_string(&app.state.model_library_manager)
+        .unwrap_or_else(|error| format!("model-library-serialization-error:{error}"));
+    let material = format!(
+        "{}\0{}\0{}\0{}\0{:?}\0{}\0{}",
+        app.state.design_execution_epoch,
+        app.state.workspace.project.revision().get(),
+        app.state.workspace.simulation_root_reference().key(),
+        plan_identity,
+        app.state.sim_setup.reference_pvt.process,
+        app.state.sim_setup.options.to_spice_options(),
+        model_library_identity,
+    );
+    crate::workbench::netlist_document::source_content_digest(&material)
+}
+
+fn build_envelope_source_catalog_with_digest(
+    app: &RSpiceApp,
+    source_digest: ContentDigest,
+) -> EnvelopeSourceCatalog {
+    let catalog = (|| -> Result<(Vec<String>, String), String> {
+        let projection = app
+            .state
+            .workspace
+            .configuration_execution_projection(
+                &app.state.library_manager,
+                &app.state.workspace.active_view,
+                &app.state.schematic,
+            )
+            .map_err(|error| error.to_string())?;
+        let root_reference = projection.root().clone();
+        let root_schematic = projection
+            .root_schematic()
+            .ok_or_else(|| "the configured simulation root is not materialized".to_owned())?;
+        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+            &app.state.library_manager,
+            &projection,
+        );
+        let plan = app.state.sim_setup.stable_analysis_plan()?;
+        let payload = app
+            .state
+            .workspace
+            .active_plan_data(plan.id())
+            .ok_or_else(|| {
+                format!(
+                    "simulation plan {} has no plan-owned configuration payload",
+                    plan.id()
+                )
+            })?;
+        let analysis_instances = plan
+            .instances()
+            .iter()
+            .filter(|instance| instance.enabled())
+            .map(crate::simulation::plan::AnalysisInstance::id)
+            .collect::<Vec<_>>();
+        let generated =
+            crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
+                root_schematic,
+                &[],
+                &hierarchy,
+                &payload.design_variables,
+                crate::simulation::netlist_gen::DesignVariableNetlistContext {
+                    active_cell: &root_reference,
+                    analysis_instances: &analysis_instances,
+                },
+            );
+        if !generated.errors.is_empty() {
+            return Err(generated.errors.join("; "));
+        }
+        let source = app
+            .state
+            .workspace
+            .bind_generated_netlist_provenance(generated.netlist);
+        let sealed_models = app
+            .state
+            .model_library_manager
+            .seal_execution_sources()
+            .map_err(|error| format!("could not seal configured model sources: {error}"))?;
+        let model_cards = sealed_models
+            .reference_process_model_cards(app.state.sim_setup.reference_pvt.process)
+            .map_err(|error| format!("could not bind reference process models: {error}"))?;
+        let source = crate::simulation::controller::SimulationController::apply_reference_model_bindings_to_netlist(
+            &source,
+            &model_cards,
+        );
+        let source = crate::simulation::controller::SimulationController::apply_simulation_options_to_netlist(
+            &source,
+            &app.state.sim_setup.options,
+        );
+        let (source, _) =
+            crate::simulation::controller::prepared_run::expand_generated_dependencies(
+                &source,
+                root_schematic.current_file.as_deref(),
+                &app.state.model_library_manager,
+            )
+            .map_err(|error| error.to_string())?;
+        let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
+        let names = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .transient_source_names(&netlist)
+            .map_err(|error| error.to_string())?;
+        Ok((names, source))
+    })();
+    let (names, netlist_source, diagnostic) = match catalog {
+        Ok((names, source)) => (names, Some(source), None),
+        Err(error) => (Vec::new(), None, Some(error)),
+    };
+    EnvelopeSourceCatalog {
+        source_digest,
+        names,
+        netlist_source,
+        diagnostic,
+    }
 }
 
 fn analysis_editor(
@@ -2483,7 +2610,8 @@ fn analysis_editor(
     viewport_width: f32,
     scroll_content_origin_y: f32,
 ) {
-    let selected = match selected_analysis(app) {
+    let dependency_sources = envelope_source_catalog(ui, app);
+    let selected = match selected_analysis(app, &dependency_sources) {
         Ok(Some(selected)) => selected,
         Ok(None) => {
             app.state.workbench.simulation_surface_editor_anchor_y = None;
@@ -2522,8 +2650,8 @@ fn analysis_editor(
     let serialized_before = serde_json::to_vec(&draft);
     let mut action = None;
     let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
-        .then(|| envelope_source_catalog(ui, app));
-    let validation_error = analysis_validation_error(app, &draft, envelope_sources.as_ref());
+        .then_some(&dependency_sources);
+    let validation_error = analysis_validation_error(app, &draft, envelope_sources);
 
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
@@ -2540,7 +2668,7 @@ fn analysis_editor(
             viewport_width <= 760.0,
             &mut action,
         );
-        analysis_form_body(ui, app, &mut draft, envelope_sources.as_ref())
+        analysis_form_body(ui, app, &mut draft, envelope_sources)
     });
     let form_anchor_y = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
@@ -2642,7 +2770,10 @@ fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis, validation_err
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
-    let (status, color) = if selected.issues.is_empty() && validation_error.is_none() {
+    let (status, color) = if selected.issues.is_empty()
+        && selected.contextual_dependency_error.is_none()
+        && validation_error.is_none()
+    {
         (
             availability_label(selected.kind),
             if availability_label(selected.kind) == "Production" {
@@ -2826,6 +2957,8 @@ fn analysis_contract(
                         "Dependency graph blocked",
                         format_plan_issue(issue),
                     )
+                } else if let Some(error) = &selected.contextual_dependency_error {
+                    (t.color.err, "Dependency graph blocked", error.clone())
                 } else {
                     (
                         t.color.ok,
@@ -2937,10 +3070,10 @@ fn analysis_validation_error(
                 .to_config()
                 .ok()
                 .and_then(|config| catalog.selection_error(&config.modulation_sources)),
-            (AnalysisDraft::Pss(setup), Some(catalog)) => setup
-                .to_config()
-                .ok()
-                .and_then(|config| catalog.exact_periodic_selection_error(&config.tone_sources)),
+            (AnalysisDraft::Pss(setup), Some(catalog)) => catalog
+                .dependency_repair_context()
+                .validate_pss_sources(setup)
+                .err(),
             _ => None,
         })
 }
@@ -3824,7 +3957,10 @@ fn resolve_active_analysis_instance(app: &mut RSpiceApp) -> Result<(), String> {
     Ok(())
 }
 
-fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String> {
+fn selected_analysis(
+    app: &RSpiceApp,
+    dependency_sources: &EnvelopeSourceCatalog,
+) -> Result<Option<SelectedAnalysis>, String> {
     let Some(id) = app.state.workbench.active_analysis_instance else {
         return Ok(None);
     };
@@ -3854,6 +3990,9 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
         .filter_map(|closure_id| plan.instance(*closure_id))
         .flat_map(|instance| instance.dependencies().iter().copied())
         .collect();
+    let contextual_dependency_error =
+        contextual_dependency_error(plan, id, &closure_ids, dependency_sources);
+    let repair_context = dependency_sources.dependency_repair_context();
     let prerequisite_roles = instance.prerequisite_roles().to_vec();
     let prerequisite_candidates = prerequisite_roles
         .iter()
@@ -3863,10 +4002,11 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
                 .enumerate()
                 .filter(|(_, candidate)| {
                     candidate.enabled()
-                        && plan.dependency_candidate_is_compatible(
+                        && plan.dependency_candidate_is_compatible_with_context(
                             id,
                             *prerequisite,
                             candidate.id(),
+                            &repair_context,
                         )
                 })
                 .map(|(candidate_position, candidate)| DependencyCandidate {
@@ -3882,7 +4022,23 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
             (*prerequisite, candidates)
         })
         .collect();
-    let repair_label = dependency_repair_cta(plan, &issues, &dependency_closure);
+    let proposed_repair_label =
+        dependency_repair_cta_with_context(plan, &issues, &dependency_closure, &repair_context)
+            .or_else(|| {
+                contextual_dependency_error
+                    .is_some()
+                    .then(|| "Repair PSS prerequisite".to_owned())
+            });
+    // The visible quick action must be executable for the selected root, not
+    // merely for the first transitive issue used to describe it. Preview the
+    // exact transactional repair against the same circuit context and omit an
+    // action that would fail closed.
+    let repair_label = proposed_repair_label.filter(|_| {
+        let mut preview = plan.clone();
+        preview
+            .repair_dependencies_with_context(id, &repair_context)
+            .is_ok()
+    });
     Ok(Some(SelectedAnalysis {
         id,
         kind: instance.kind(),
@@ -3894,8 +4050,35 @@ fn selected_analysis(app: &RSpiceApp) -> Result<Option<SelectedAnalysis>, String
         position,
         plan_length: plan.instances().len(),
         issues,
+        contextual_dependency_error,
         repair_label,
     }))
+}
+
+fn contextual_dependency_error(
+    plan: &crate::simulation::plan::SimulationPlan,
+    root: AnalysisInstanceId,
+    closure_ids: &HashSet<AnalysisInstanceId>,
+    dependency_sources: &EnvelopeSourceCatalog,
+) -> Option<String> {
+    plan.instances()
+        .iter()
+        .filter(|instance| instance.id() != root && closure_ids.contains(&instance.id()))
+        .find_map(|instance| {
+            let AnalysisDraft::Pss(draft) = instance.draft() else {
+                return None;
+            };
+            dependency_sources
+                .dependency_repair_context()
+                .validate_pss_sources(draft)
+                .err()
+                .map(|error| {
+                    format!(
+                        "PSS prerequisite instance {} does not match the active circuit: {error}",
+                        instance.id()
+                    )
+                })
+        })
 }
 
 fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: AnalysisDraft) {
@@ -3932,6 +4115,7 @@ fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) {
         record_failure(app, "Insert", reason);
         return;
     }
+    let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
@@ -3939,7 +4123,7 @@ fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) {
                     .instance(id)
                     .is_some_and(|instance| !instance.prerequisite_roles().is_empty());
                 let bind_receipt = has_prerequisites.then(|| {
-                    plan.auto_bind_dependencies(id)
+                    plan.auto_bind_dependencies_with_context(id, &repair_context)
                         .map_err(|error| error.to_string())
                 });
                 Ok((id, insert_receipt, bind_receipt))
@@ -4023,9 +4207,10 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
             }
         }
         AnalysisAction::BindDependencies => {
+            let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
             let result = match app.state.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
-                    .auto_bind_dependencies(id)
+                    .auto_bind_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
@@ -4056,9 +4241,10 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
             }
         }
         AnalysisAction::RepairDependencies => {
+            let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
             let result = match app.state.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
-                    .repair_dependencies(id)
+                    .repair_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
@@ -4099,6 +4285,7 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
 }
 
 fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
+    let envelope_sources = build_envelope_source_catalog(app);
     let result = (|| {
         let plan = app.state.sim_setup.stable_analysis_plan()?;
         let instance = plan
@@ -4117,10 +4304,8 @@ fn validate_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
             .iter()
             .filter(|candidate| closure_ids.contains(&candidate.id()))
         {
-            if let Some(error) = app
-                .state
-                .sim_setup
-                .analysis_draft_validation_error(closure_instance.draft())
+            if let Some(error) =
+                analysis_validation_error(app, closure_instance.draft(), Some(&envelope_sources))
             {
                 return Err(format!(
                     "{} instance {}: {error}",
@@ -4339,10 +4524,11 @@ const fn dependency_issue_is_repairable(issue: &AnalysisPlanIssue) -> bool {
     )
 }
 
-fn dependency_repair_cta(
+fn dependency_repair_cta_with_context(
     plan: &crate::simulation::plan::SimulationPlan,
     issues: &[AnalysisPlanIssue],
     dependencies: &[AnalysisDependency],
+    repair_context: &AnalysisDependencyRepairContext,
 ) -> Option<String> {
     let prerequisite_for_target = |dependent, target| {
         plan.instance(dependent)
@@ -4402,7 +4588,11 @@ fn dependency_repair_cta(
     let complete_closure_is_repairable = |dependent| {
         plan.instance(dependent).is_some_and(|instance| {
             instance.prerequisite_roles().iter().all(|prerequisite| {
-                plan.dependency_prerequisite_is_repairable(dependent, *prerequisite)
+                plan.dependency_prerequisite_is_repairable_with_context(
+                    dependent,
+                    *prerequisite,
+                    repair_context,
+                )
             })
         })
     };
@@ -4417,7 +4607,11 @@ fn dependency_repair_cta(
                 }
                 _ => repair_role(issue).is_some_and(|(dependent, prerequisite)| {
                     complete_closure_is_repairable(dependent)
-                        && plan.dependency_prerequisite_is_repairable(dependent, prerequisite)
+                        && plan.dependency_prerequisite_is_repairable_with_context(
+                            dependent,
+                            prerequisite,
+                            repair_context,
+                        )
                 }),
             }
     })?;
@@ -4425,30 +4619,36 @@ fn dependency_repair_cta(
         AnalysisPlanIssue::MissingPrerequisite {
             dependent,
             prerequisite,
-        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
+        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite, repair_context),
         AnalysisPlanIssue::UnexpectedDependencyRole { prerequisite, .. } => {
             format!("Remove unexpected {} binding", prerequisite.label())
         }
         AnalysisPlanIssue::DuplicateDependencyRole { prerequisite, .. } => {
             format!("Resolve duplicate {} binding", prerequisite.label())
         }
-        AnalysisPlanIssue::SelfDependency { dependent } => {
-            prerequisite_for_target(*dependent, *dependent).map_or_else(
-                || "Replace self prerequisite".to_owned(),
-                |prerequisite| compatible_dependency_repair_label(plan, *dependent, prerequisite),
-            )
-        }
-        AnalysisPlanIssue::DanglingDependency { dependent, target } => {
-            prerequisite_for_target(*dependent, *target).map_or_else(
-                || "Replace missing prerequisite".to_owned(),
-                |prerequisite| compatible_dependency_repair_label(plan, *dependent, prerequisite),
-            )
-        }
+        AnalysisPlanIssue::SelfDependency { dependent } => prerequisite_for_target(
+            *dependent, *dependent,
+        )
+        .map_or_else(
+            || "Replace self prerequisite".to_owned(),
+            |prerequisite| {
+                compatible_dependency_repair_label(plan, *dependent, prerequisite, repair_context)
+            },
+        ),
+        AnalysisPlanIssue::DanglingDependency { dependent, target } => prerequisite_for_target(
+            *dependent, *target,
+        )
+        .map_or_else(
+            || "Replace missing prerequisite".to_owned(),
+            |prerequisite| {
+                compatible_dependency_repair_label(plan, *dependent, prerequisite, repair_context)
+            },
+        ),
         AnalysisPlanIssue::WrongDependencyKind {
             dependent,
             prerequisite,
             ..
-        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
+        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite, repair_context),
         AnalysisPlanIssue::DisabledDependency { dependent, target } => {
             let also_needs_move = issues.iter().any(|candidate| {
                 matches!(
@@ -4486,15 +4686,29 @@ fn dependency_repair_cta(
             dependent,
             prerequisite,
             ..
-        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
+        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite, repair_context),
         _ => unreachable!("repairable dependency issue must have a contextual action"),
     })
+}
+
+#[cfg(test)]
+fn dependency_repair_cta(
+    plan: &crate::simulation::plan::SimulationPlan,
+    issues: &[AnalysisPlanIssue],
+    dependencies: &[AnalysisDependency],
+) -> Option<String> {
+    let context = AnalysisDependencyRepairContext::exact_periodic_sources(
+        "periodic fixture\nVIN_DIFF in 0 SIN(0 1 1k)\nR1 in 0 1k\n.end\n",
+    )
+    .expect("test periodic-source fixture is exact");
+    dependency_repair_cta_with_context(plan, issues, dependencies, &context)
 }
 
 fn compatible_dependency_repair_label(
     plan: &crate::simulation::plan::SimulationPlan,
     dependent: AnalysisInstanceId,
     prerequisite: AnalysisKind,
+    repair_context: &AnalysisDependencyRepairContext,
 ) -> String {
     let qualifier = if prerequisite == AnalysisKind::Transient
         && plan
@@ -4516,20 +4730,40 @@ fn compatible_dependency_repair_label(
     let after = &plan.instances()[position + 1..];
     if before.iter().rev().any(|candidate| {
         candidate.enabled()
-            && plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+            && plan.dependency_candidate_is_compatible_with_context(
+                dependent,
+                prerequisite,
+                candidate.id(),
+                repair_context,
+            )
     }) {
         format!("Bind {qualifier}{}", prerequisite.label())
     } else if before.iter().rev().any(|candidate| {
-        plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+        plan.dependency_candidate_is_compatible_with_context(
+            dependent,
+            prerequisite,
+            candidate.id(),
+            repair_context,
+        )
     }) {
         format!("Enable {qualifier}{}", prerequisite.label())
     } else if after.iter().any(|candidate| {
         candidate.enabled()
-            && plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+            && plan.dependency_candidate_is_compatible_with_context(
+                dependent,
+                prerequisite,
+                candidate.id(),
+                repair_context,
+            )
     }) {
         format!("Move {qualifier}{} earlier", prerequisite.label())
     } else if after.iter().any(|candidate| {
-        plan.dependency_candidate_is_compatible(dependent, prerequisite, candidate.id())
+        plan.dependency_candidate_is_compatible_with_context(
+            dependent,
+            prerequisite,
+            candidate.id(),
+            repair_context,
+        )
     }) {
         format!(
             "Enable and move {qualifier}{} earlier",
@@ -4754,6 +4988,7 @@ mod tests {
         let catalog = EnvelopeSourceCatalog {
             source_digest: ContentDigest::from_bytes([0x33; 32]),
             names: vec!["Xdrv.VMOD".to_owned(), "VPULSE".to_owned()],
+            netlist_source: None,
             diagnostic: None,
         };
         assert_eq!(catalog.selection_error(&["xDRV.vmod".to_owned()]), None);
@@ -4764,10 +4999,45 @@ mod tests {
     }
 
     #[test]
+    fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_document() {
+        let mut app = RSpiceApp::test_instance();
+        crate::common::examples::load_example("CMOS Inverter", &mut app.state.schematic);
+        app.state.simulation.netlist_content =
+            "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
+
+        let catalog = build_envelope_source_catalog(&app);
+
+        assert_eq!(catalog.diagnostic, None);
+        assert!(catalog.names.iter().any(|name| name == "VIN"));
+        assert!(!catalog.names.iter().any(|name| name == "VSTALE"));
+    }
+
+    #[test]
+    fn dependency_source_cache_ignores_document_switches_and_tracks_design_commits() {
+        let mut app = RSpiceApp::test_instance();
+        let original = envelope_source_catalog_input_digest(&app);
+        app.state.simulation.netlist_content = "unrelated editor document".to_owned();
+        assert_eq!(envelope_source_catalog_input_digest(&app), original);
+
+        app.state.design_execution_epoch = app.state.design_execution_epoch.wrapping_add(1);
+        assert_ne!(envelope_source_catalog_input_digest(&app), original);
+
+        let mut app = RSpiceApp::test_instance();
+        let original = envelope_source_catalog_input_digest(&app);
+        app.state.sim_setup.options.reltol *= 0.5;
+        assert_ne!(
+            envelope_source_catalog_input_digest(&app),
+            original,
+            "prepared-source option changes invalidate the catalog"
+        );
+    }
+
+    #[test]
     fn pss_source_catalog_requires_the_complete_exact_tone_set() {
         let catalog = EnvelopeSourceCatalog {
             source_digest: ContentDigest::from_bytes([0x34; 32]),
             names: vec!["VCLK".to_owned(), "Xdrv.VLO".to_owned()],
+            netlist_source: None,
             diagnostic: None,
         };
         assert_eq!(
@@ -5215,6 +5485,9 @@ mod tests {
         let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
         plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
             .expect("PSS binds OP");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.bind_dependency(pac, AnalysisKind::Pss, pss)
+            .expect("PAC binds PSS");
         plan.edit(pss, |draft| {
             let AnalysisDraft::Pss(pss) = draft else {
                 panic!("expected PSS draft");
@@ -5222,9 +5495,6 @@ mod tests {
             pss.fund_freq = "unfinished-expression(".to_owned();
         })
         .expect("invalid editable PSS draft is retained");
-        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
-        plan.bind_dependency(pac, AnalysisKind::Pss, pss)
-            .expect("PAC binds PSS");
 
         let mut app = RSpiceApp::test_instance();
         app.state.sim_setup.analysis_plan = Some(plan);
@@ -5260,7 +5530,13 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.sim_setup.analysis_plan = Some(plan);
         app.state.workbench.active_analysis_instance = Some(ac);
-        let selected = selected_analysis(&app)
+        let dependency_sources = EnvelopeSourceCatalog {
+            source_digest: ContentDigest::from_bytes([7; 32]),
+            names: vec!["VIN_DIFF".to_owned()],
+            netlist_source: None,
+            diagnostic: None,
+        };
+        let selected = selected_analysis(&app, &dependency_sources)
             .expect("selection resolves")
             .expect("analysis is selected");
         let candidates = selected
@@ -5273,6 +5549,62 @@ mod tests {
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].id, first_op);
         assert_eq!(candidates[1].id, second_op);
+    }
+
+    #[test]
+    fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable_repair() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
+            .expect("PSS binds OP");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.bind_dependency(pac, AnalysisKind::Pss, pss)
+            .expect("PAC binds PSS");
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.sim_setup.analysis_plan = Some(plan);
+        app.state.workbench.active_analysis_instance = Some(pac);
+
+        let exact_sources = EnvelopeSourceCatalog {
+            source_digest: ContentDigest::from_bytes([8; 32]),
+            names: vec!["VLO".to_owned(), "VRF".to_owned()],
+            netlist_source: Some(
+                "periodic fixture\nVLO lo 0 SIN(0 1 1k)\nVRF rf 0 SIN(0 1 2k)\nR1 lo 0 1k\nR2 rf 0 1k\n.end\n"
+                    .to_owned(),
+            ),
+            diagnostic: None,
+        };
+        let selected = selected_analysis(&app, &exact_sources)
+            .expect("selection resolves")
+            .expect("PAC remains selected");
+        assert!(
+            selected
+                .contextual_dependency_error
+                .as_deref()
+                .is_some_and(|error| error.contains("active circuit"))
+        );
+        assert_eq!(
+            selected.repair_label.as_deref(),
+            Some("Repair PSS prerequisite")
+        );
+
+        let unavailable_sources = EnvelopeSourceCatalog {
+            source_digest: ContentDigest::from_bytes([9; 32]),
+            names: Vec::new(),
+            netlist_source: None,
+            diagnostic: Some("netlist elaboration failed".to_owned()),
+        };
+        let selected = selected_analysis(&app, &unavailable_sources)
+            .expect("selection resolves fail-closed")
+            .expect("PAC remains selected");
+        assert!(selected.contextual_dependency_error.is_some());
+        assert_eq!(
+            selected.repair_label, None,
+            "a quick action must be hidden when the selected root cannot be repaired"
+        );
     }
 
     #[test]

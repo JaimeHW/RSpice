@@ -12,11 +12,13 @@ use serde::{Deserialize, Serialize};
 use super::canonical::CanonicalWriter;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::simulation::dependency_contract::{
-    FourierTransientRequirement, TransientCapability, validate_fourier_transient_contract,
+    FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
+    validate_fourier_transient_contract, validate_periodic_state_contract,
 };
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::multi_run::PssMethod;
 use crate::simulation::results::SimulationResult;
+use crate::simulation::runner::SpecExecutionOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::simulation) enum ExecutionArtifactKind {
@@ -112,8 +114,21 @@ impl PreparedDependencyBinding {
     }
 }
 
+#[cfg(test)]
 pub(in crate::simulation) fn validate_prepared_dependency_contract(
     consumer: &AnalysisSpec,
+    producer: &AnalysisSpec,
+) -> Result<(), ExecutionArtifactError> {
+    validate_prepared_dependency_contract_with_options(
+        consumer,
+        &SpecExecutionOptions::default(),
+        producer,
+    )
+}
+
+pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
+    consumer: &AnalysisSpec,
+    consumer_options: &SpecExecutionOptions,
     producer: &AnalysisSpec,
 ) -> Result<(), ExecutionArtifactError> {
     if matches!(
@@ -140,15 +155,35 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract(
         consumer,
         AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise | AnalysisSpec::Pstb
     ) {
+        let require_autonomous = matches!(consumer, AnalysisSpec::Pnoise)
+            && consumer_options.pnoise.as_ref().is_some_and(|config| {
+                config.noise_ref == crate::services::simulation_runner::PnoiseReference::Phase
+            });
         return match producer {
             AnalysisSpec::Pss {
                 method: PssMethod::Shooting,
+                oscillator_mode,
                 ..
-            } => Ok(()),
-            AnalysisSpec::Pss { .. } => Err(ExecutionArtifactError::ContractMismatch(format!(
-                "{} requires a shooting-PSS periodic-state artifact; harmonic-balance PSS does not retain the shooting state and monodromy contract",
-                consumer.run_type().display_name()
-            ))),
+            } => validate_periodic_state_contract(
+                consumer.run_type().display_name(),
+                PeriodicStateCapability {
+                    shooting: true,
+                    autonomous: *oscillator_mode,
+                },
+                require_autonomous,
+            )
+            .map_err(ExecutionArtifactError::ContractMismatch),
+            AnalysisSpec::Pss {
+                oscillator_mode, ..
+            } => validate_periodic_state_contract(
+                consumer.run_type().display_name(),
+                PeriodicStateCapability {
+                    shooting: false,
+                    autonomous: *oscillator_mode,
+                },
+                require_autonomous,
+            )
+            .map_err(ExecutionArtifactError::ContractMismatch),
             _ => Err(ExecutionArtifactError::ContractMismatch(format!(
                 "{} cannot consume a typed artifact produced by {}",
                 consumer.run_type().display_name(),
@@ -562,11 +597,15 @@ impl PeriodicStateArtifact {
                 config.num_harmonics, config.tolerance
             )));
         }
-        if require_autonomous && !config.is_autonomous() {
-            return Err(ExecutionArtifactError::ContractMismatch(format!(
-                "{consumer} oscillator analysis requires an autonomous producer PSS state"
-            )));
-        }
+        validate_periodic_state_contract(
+            consumer,
+            PeriodicStateCapability {
+                shooting: true,
+                autonomous: config.is_autonomous(),
+            },
+            require_autonomous,
+        )
+        .map_err(ExecutionArtifactError::ContractMismatch)?;
         Ok(())
     }
 
@@ -2185,6 +2224,40 @@ mod tests {
             .expect_err("HB PSS must not fabricate a shooting-state artifact");
             assert!(error.to_string().contains("shooting-PSS"));
         }
+    }
+
+    #[test]
+    fn prepared_phase_pnoise_requires_an_autonomous_pss_artifact() {
+        let mut pnoise = crate::services::simulation_runner::PnoiseRunConfig::default();
+        pnoise.noise_ref = crate::services::simulation_runner::PnoiseReference::Phase;
+        let options = SpecExecutionOptions {
+            pnoise: Some(pnoise),
+            ..SpecExecutionOptions::default()
+        };
+
+        let driven = pss_spec(PssMethod::Shooting);
+        let error = validate_prepared_dependency_contract_with_options(
+            &AnalysisSpec::Pnoise,
+            &options,
+            &driven,
+        )
+        .expect_err("phase PNOISE must reject a driven periodic-state artifact");
+        assert!(error.to_string().contains("autonomous"));
+
+        let mut autonomous = pss_spec(PssMethod::Shooting);
+        let AnalysisSpec::Pss {
+            oscillator_mode, ..
+        } = &mut autonomous
+        else {
+            unreachable!()
+        };
+        *oscillator_mode = true;
+        validate_prepared_dependency_contract_with_options(
+            &AnalysisSpec::Pnoise,
+            &options,
+            &autonomous,
+        )
+        .expect("phase PNOISE accepts an autonomous shooting-PSS artifact");
     }
 
     #[test]

@@ -4,6 +4,36 @@
 //! a dependency accepted by quick repair cannot later fail for a different
 //! interpretation of its sampling or time-window requirements.
 
+/// Execution-relevant capability published by a PSS prerequisite.
+///
+/// Keep this deliberately independent of both dialog state and prepared
+/// `AnalysisSpec` so the editable plan and immutable execution boundary use
+/// the same compatibility predicate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::simulation) struct PeriodicStateCapability {
+    pub shooting: bool,
+    pub autonomous: bool,
+}
+
+/// Validate the execution contract shared by PAC, PXF, PNOISE, and PSTB.
+pub(in crate::simulation) fn validate_periodic_state_contract(
+    consumer: &str,
+    capability: PeriodicStateCapability,
+    require_autonomous: bool,
+) -> Result<(), String> {
+    if !capability.shooting {
+        return Err(format!(
+            "{consumer} requires a shooting-PSS periodic-state artifact; harmonic-balance PSS does not retain the shooting state and monodromy contract"
+        ));
+    }
+    if require_autonomous && !capability.autonomous {
+        return Err(format!(
+            "{consumer} phase-noise analysis requires an autonomous producer PSS state"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(in crate::simulation) struct FourierTransientRequirement {
     pub start_time: f64,
@@ -144,5 +174,32 @@ mod tests {
             ..compatible
         };
         assert!(validate_fourier_transient_contract(requirement, short).is_err());
+    }
+
+    #[test]
+    fn periodic_contract_rejects_hb_and_driven_phase_noise_producers() {
+        let driven_shooting = PeriodicStateCapability {
+            shooting: true,
+            autonomous: false,
+        };
+        validate_periodic_state_contract("PAC", driven_shooting, false)
+            .expect("PAC accepts a driven shooting state");
+        assert!(
+            validate_periodic_state_contract(
+                "PAC",
+                PeriodicStateCapability {
+                    shooting: false,
+                    autonomous: false,
+                },
+                false,
+            )
+            .unwrap_err()
+            .contains("shooting-PSS")
+        );
+        assert!(
+            validate_periodic_state_contract("PNOISE", driven_shooting, true)
+                .unwrap_err()
+                .contains("autonomous")
+        );
     }
 }

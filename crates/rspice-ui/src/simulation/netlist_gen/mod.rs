@@ -859,6 +859,59 @@ mod tests {
     }
 
     #[test]
+    fn transient_source_formatter_uses_the_typed_property_contract() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+
+        let mut voltage_pulse =
+            Component::new(1, ComponentType::VoltageSourcePulse, Point::origin())
+                .with_name_value("VPULSE", "0.2");
+        voltage_pulse.params = "v2=1.8 td=3n tr=4n tf=5n pw=6n per=7n".to_owned();
+        assert_eq!(
+            generator.format_source_value(&voltage_pulse),
+            "PULSE(0.2 1.8 3n 4n 5n 6n 7n)"
+        );
+
+        let mut current_pulse =
+            Component::new(2, ComponentType::CurrentSourcePulse, Point::origin())
+                .with_name_value("IPULSE", "2m");
+        current_pulse.params = "i2=5m td=8n tr=9n tf=10n pw=11n per=12n".to_owned();
+        assert_eq!(
+            generator.format_source_value(&current_pulse),
+            "PULSE(2m 5m 8n 9n 10n 11n 12n)"
+        );
+
+        let mut current_sin = Component::new(3, ComponentType::CurrentSourceSin, Point::origin())
+            .with_name_value("ISIN", "3m");
+        current_sin.params = "ia=4m freq=5Meg td=6n theta=7 phase=8".to_owned();
+        assert_eq!(
+            generator.format_source_value(&current_sin),
+            "SIN(3m 4m 5Meg 6n 7 8)"
+        );
+
+        let mut current_exp = Component::new(4, ComponentType::CurrentSourceExp, Point::origin())
+            .with_name_value("IEXP", "1m");
+        current_exp.params = "i2=9m td1=1u tau1=2u td2=3u tau2=4u".to_owned();
+        assert_eq!(
+            generator.format_source_value(&current_exp),
+            "EXP(1m 9m 1u 2u 3u 4u)"
+        );
+    }
+
+    #[test]
+    fn transient_source_formatter_preserves_legacy_waveform_literals_once() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+        let pulse = Component::new(1, ComponentType::VoltageSourcePulse, Point::origin())
+            .with_name_value("VIN", "pulse(0 1.8 0 1n 1n 5n 10n)");
+
+        assert_eq!(
+            generator.format_source_value(&pulse),
+            "pulse(0 1.8 0 1n 1n 5n 10n)"
+        );
+    }
+
+    #[test]
     fn design_notes_never_change_generated_spice_or_connectivity() {
         let mut baseline = SchematicState::default();
         crate::common::examples::load_example("RC Lowpass Filter", &mut baseline);

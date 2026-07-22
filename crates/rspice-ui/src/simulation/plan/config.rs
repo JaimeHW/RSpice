@@ -5,13 +5,15 @@ use crate::simulation::config::{
     AcSweepType, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };
 use crate::simulation::dependency_contract::{
-    FourierTransientRequirement, TransientCapability, validate_fourier_transient_contract,
+    FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
+    validate_fourier_transient_contract, validate_periodic_state_contract,
 };
 use crate::simulation::dialog::{
     CornerDialogState, EnvelopeDialogState, FourierDialogState, HbDialogState, McDialogState,
-    OpDialogState, OptimizationDialogState, PacDialogState, PnoiseDialogState, PssDialogState,
-    PstbDialogState, PxfDialogState, PzDialogState, ReliabilityDialogState, SensDialogState,
-    SoaDialogState, SpDialogState, StbDialogState, TempDialogState, XfDialogState,
+    NoiseReferenceType, OpDialogState, OptimizationDialogState, PacDialogState, PnoiseDialogState,
+    PssDialogState, PssSolverMethod, PstbDialogState, PxfDialogState, PzDialogState,
+    ReliabilityDialogState, SensDialogState, SoaDialogState, SpDialogState, StbDialogState,
+    TempDialogState, XfDialogState,
 };
 use crate::simulation::spice_value::parse_spice_value_checked;
 
@@ -805,6 +807,133 @@ pub(super) enum DependencyConfigurationIssue {
     Incompatible(String),
 }
 
+/// Circuit-derived inputs required to synthesize or reuse prerequisites whose
+/// configuration depends on elaborated source identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisDependencyRepairContext {
+    periodic_sources: Result<ExactPeriodicSourceContract, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExactPeriodicSourceContract {
+    names: Vec<String>,
+    netlist_source: String,
+}
+
+impl AnalysisDependencyRepairContext {
+    /// Context for callers that cannot authenticate the circuit source set.
+    #[must_use]
+    pub fn periodic_sources_unavailable(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let detail = detail.trim();
+        Self {
+            periodic_sources: Err(if detail.is_empty() {
+                "the exact elaborated periodic-source catalog is unavailable".to_owned()
+            } else {
+                detail.to_owned()
+            }),
+        }
+    }
+
+    /// Authenticate and retain the exact elaborated source contract used by
+    /// PSS. Keeping the executable source with the discovered identities lets
+    /// repair validate waveform periodicity and commensurability against the
+    /// candidate fundamental before committing a lifecycle transaction.
+    ///
+    /// An empty, successfully elaborated catalog is authoritative: it can
+    /// validate an autonomous PSS with no driven tones. It must remain
+    /// distinct from an unavailable catalog, because only the latter prevents
+    /// safe reuse of an existing oscillator prerequisite.
+    pub fn exact_periodic_sources(netlist_source: impl Into<String>) -> Result<Self, String> {
+        let netlist_source = netlist_source.into();
+        let netlist = rspice_core::Netlist::parse(&netlist_source)
+            .map_err(|error| format!("the periodic-source circuit could not be parsed: {error}"))?;
+        let names = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .transient_source_names(&netlist)
+            .map_err(|error| {
+                format!("the periodic-source circuit could not be elaborated: {error}")
+            })?;
+        Ok(Self {
+            periodic_sources: Ok(ExactPeriodicSourceContract {
+                names,
+                netlist_source,
+            }),
+        })
+    }
+
+    fn periodic_sources(&self) -> Result<&[String], String> {
+        self.periodic_sources
+            .as_ref()
+            .map(|contract| contract.names.as_slice())
+            .map_err(|detail| detail.clone())
+    }
+
+    pub(super) fn availability_error(&self) -> Option<&str> {
+        self.periodic_sources.as_ref().err().map(String::as_str)
+    }
+
+    pub(crate) fn validate_pss_sources(&self, draft: &PssDialogState) -> Result<(), String> {
+        let config = draft
+            .to_config()
+            .map_err(|detail| format!("PSS configuration is invalid: {detail}"))?;
+        self.validate_periodic_source_selection(&config.tone_sources)?;
+        let contract = self
+            .periodic_sources
+            .as_ref()
+            .map_err(|detail| detail.clone())?;
+        let netlist = rspice_core::Netlist::parse(&contract.netlist_source).map_err(|error| {
+            format!("the authenticated periodic-source circuit is no longer parseable: {error}")
+        })?;
+        rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+            .validate_periodic_source_contract(&netlist, &config.tone_sources, config.fund_freq)
+            .map_err(|error| format!("PSS periodic-source contract is invalid: {error}"))
+    }
+
+    fn validate_periodic_source_selection(&self, selected: &[String]) -> Result<(), String> {
+        let expected = self.periodic_sources()?;
+        let missing = selected
+            .iter()
+            .filter(|requested| {
+                !expected
+                    .iter()
+                    .any(|available| available.eq_ignore_ascii_case(requested))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let omitted = expected
+            .iter()
+            .filter(|available| {
+                !selected
+                    .iter()
+                    .any(|requested| requested.eq_ignore_ascii_case(available))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() || !omitted.is_empty() {
+            let mut details = Vec::new();
+            if !missing.is_empty() {
+                details.push(format!("unknown: {}", missing.join(", ")));
+            }
+            if !omitted.is_empty() {
+                details.push(format!("omitted: {}", omitted.join(", ")));
+            }
+            return Err(format!(
+                "PSS tones do not match the exact elaborated periodic-source catalog ({})",
+                details.join("; ")
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for AnalysisDependencyRepairContext {
+    fn default() -> Self {
+        Self::periodic_sources_unavailable(
+            "the exact elaborated periodic-source catalog is unavailable",
+        )
+    }
+}
+
 impl DependencyConfigurationIssue {
     pub(super) fn detail(&self) -> &str {
         match self {
@@ -819,6 +948,38 @@ pub(super) fn dependency_configuration_issue(
     dependent: &AnalysisDraft,
     prerequisite: &AnalysisDraft,
 ) -> Option<DependencyConfigurationIssue> {
+    if matches!(
+        dependent,
+        AnalysisDraft::Pac(_)
+            | AnalysisDraft::Pnoise(_)
+            | AnalysisDraft::Pxf(_)
+            | AnalysisDraft::Pstb(_)
+    ) && let AnalysisDraft::Pss(pss) = prerequisite
+    {
+        let (consumer, require_autonomous) = match periodic_state_requirement(dependent) {
+            Ok(requirement) => requirement,
+            Err(detail) => return Some(DependencyConfigurationIssue::InvalidDependent(detail)),
+        };
+        let pss = match pss.to_config() {
+            Ok(pss) => pss,
+            Err(detail) => {
+                return Some(DependencyConfigurationIssue::InvalidPrerequisite(format!(
+                    "PSS configuration is invalid: {detail}"
+                )));
+            }
+        };
+        return validate_periodic_state_contract(
+            consumer,
+            PeriodicStateCapability {
+                shooting: pss.method == PssSolverMethod::Shooting,
+                autonomous: pss.osc_mode,
+            },
+            require_autonomous,
+        )
+        .err()
+        .map(DependencyConfigurationIssue::Incompatible);
+    }
+
     let (AnalysisDraft::Fourier(fourier), AnalysisDraft::Transient(transient)) =
         (dependent, prerequisite)
     else {
@@ -848,6 +1009,7 @@ pub(super) fn dependency_configuration_issue(
 pub(super) fn prerequisite_draft_for(
     dependent: &AnalysisDraft,
     prerequisite: AnalysisKind,
+    context: &AnalysisDependencyRepairContext,
 ) -> Result<AnalysisDraft, String> {
     if prerequisite == AnalysisKind::Transient
         && let AnalysisDraft::Fourier(fourier) = dependent
@@ -866,7 +1028,66 @@ pub(super) fn prerequisite_draft_for(
             uic: false,
         }));
     }
+    if prerequisite == AnalysisKind::Pss {
+        if matches!(
+            dependent,
+            AnalysisDraft::Pac(_)
+                | AnalysisDraft::Pnoise(_)
+                | AnalysisDraft::Pxf(_)
+                | AnalysisDraft::Pstb(_)
+        ) {
+            periodic_state_requirement(dependent)?;
+        }
+        let sources = context.periodic_sources()?;
+        let mut draft = PssDialogState::default();
+        draft.tone_sources = sources.join(", ");
+        context.validate_pss_sources(&draft)?;
+        let draft = AnalysisDraft::Pss(draft);
+        if let Some(issue) = dependency_configuration_issue(dependent, &draft) {
+            return Err(issue.detail().to_owned());
+        }
+        return Ok(draft);
+    }
     Ok(AnalysisDraft::for_kind(prerequisite))
+}
+
+pub(super) fn dependency_candidate_context_issue(
+    prerequisite: AnalysisKind,
+    candidate: &AnalysisDraft,
+    context: &AnalysisDependencyRepairContext,
+) -> Option<String> {
+    if prerequisite != AnalysisKind::Pss {
+        return None;
+    }
+    let AnalysisDraft::Pss(pss) = candidate else {
+        return Some("the prerequisite does not contain a PSS draft".to_owned());
+    };
+    context.validate_pss_sources(pss).err()
+}
+
+fn periodic_state_requirement(dependent: &AnalysisDraft) -> Result<(&'static str, bool), String> {
+    match dependent {
+        AnalysisDraft::Pac(draft) => draft
+            .to_config()
+            .map(|_| ("PAC", false))
+            .map_err(|detail| format!("PAC configuration is invalid: {detail}")),
+        AnalysisDraft::Pxf(draft) => draft
+            .to_config()
+            .map(|_| ("PXF", false))
+            .map_err(|detail| format!("PXF configuration is invalid: {detail}")),
+        AnalysisDraft::Pstb(draft) => draft
+            .to_config()
+            .map(|_| ("PSTB", false))
+            .map_err(|detail| format!("PSTB configuration is invalid: {detail}")),
+        AnalysisDraft::Pnoise(draft) => draft
+            .to_config()
+            .map(|config| ("PNOISE", config.noise_ref == NoiseReferenceType::Phase))
+            .map_err(|detail| format!("PNOISE configuration is invalid: {detail}")),
+        _ => Err(format!(
+            "{} does not consume a PSS periodic-state prerequisite",
+            dependent.kind().label()
+        )),
+    }
 }
 
 fn parse_positive(text: &str, field: &str) -> Result<f64, String> {
@@ -1145,6 +1366,68 @@ mod tests {
             state.initial_periodic_solve_idx = selection;
             assert!(draft.prerequisite_roles().is_empty());
         }
+    }
+
+    #[test]
+    fn exact_periodic_source_context_distinguishes_empty_from_unavailable() {
+        let exact_empty = AnalysisDependencyRepairContext::exact_periodic_sources(
+            "autonomous fixture\nR1 out 0 1k\n.end\n",
+        )
+        .expect("an elaborated empty source set is authoritative");
+        let mut autonomous = PssDialogState::default();
+        autonomous.tone_sources.clear();
+        autonomous.osc_mode = true;
+        autonomous.osc_node = "out".to_owned();
+        exact_empty
+            .validate_pss_sources(&autonomous)
+            .expect("an autonomous PSS can use the exact empty driven-source set");
+
+        let unavailable = AnalysisDependencyRepairContext::default();
+        assert!(
+            unavailable
+                .validate_pss_sources(&autonomous)
+                .unwrap_err()
+                .contains("unavailable")
+        );
+    }
+
+    #[test]
+    fn exact_periodic_source_context_rejects_unknown_and_omitted_tones() {
+        let context = AnalysisDependencyRepairContext::exact_periodic_sources(
+            "periodic fixture\nVLO lo 0 SIN(0 1 1k)\nVRF rf 0 SIN(0 1 2k)\nR1 lo 0 1k\nR2 rf 0 1k\n.end\n",
+        )
+        .expect("test source catalog is exact");
+        let mut pss = PssDialogState::default();
+        pss.tone_sources = "vlo, VSTALE".to_owned();
+
+        let error = context
+            .validate_pss_sources(&pss)
+            .expect_err("unknown and omitted tones fail closed");
+        assert!(error.contains("unknown: VSTALE"));
+        assert!(error.contains("omitted: VRF"));
+    }
+
+    #[test]
+    fn exact_periodic_source_context_rejects_nonperiodic_or_incommensurate_waveforms() {
+        let incommensurate = AnalysisDependencyRepairContext::exact_periodic_sources(
+            "periodic fixture\nV1 out 0 SIN(0 1 1.1k)\nR1 out 0 1k\n.end\n",
+        )
+        .expect("source identity elaborates");
+        let mut pss = PssDialogState::default();
+        pss.tone_sources = "V1".to_owned();
+        let error = incommensurate
+            .validate_pss_sources(&pss)
+            .expect_err("repair cannot commit an incommensurate PSS");
+        assert!(error.contains("not an integer multiple"));
+
+        let pwl = AnalysisDependencyRepairContext::exact_periodic_sources(
+            "periodic fixture\nV1 out 0 PWL(0 0 1u 1)\nR1 out 0 1k\n.end\n",
+        )
+        .expect("PWL source identity elaborates");
+        let error = pwl
+            .validate_pss_sources(&pss)
+            .expect_err("repair cannot claim an unauthenticated PWL period");
+        assert!(error.contains("uses PWL"));
     }
 
     #[test]

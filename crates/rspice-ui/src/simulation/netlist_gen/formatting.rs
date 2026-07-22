@@ -120,54 +120,128 @@ impl<'a> NetlistGenerator<'a> {
             ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc => {
                 format!("AC {}", if value.is_empty() { "1" } else { value })
             }
-            ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => {
+            ComponentType::VoltageSourcePulse => {
                 // PULSE(V1 V2 TD TR TF PW PER)
                 let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "PULSE")
+                {
+                    return literal;
+                }
                 let v1 = Self::get_param_owned(&params, "v1", value, "0");
                 let v2 = Self::get_param_owned(&params, "v2", "", "1");
                 let td = Self::get_param_owned(&params, "td", "", "0");
                 let tr = Self::get_param_owned(&params, "tr", "", "1n");
                 let tf = Self::get_param_owned(&params, "tf", "", "1n");
-                let pw = Self::get_param_owned(&params, "pw", "", "10n");
-                let per = Self::get_param_owned(&params, "period", "", "20n");
+                let pw = Self::get_param_owned(&params, "pw", "", "1u");
+                let per = Self::get_param_owned_with_aliases(&params, &["per", "period"], "", "2u");
                 format!("PULSE({} {} {} {} {} {} {})", v1, v2, td, tr, tf, pw, per)
             }
-            ComponentType::VoltageSourceSin | ComponentType::CurrentSourceSin => {
+            ComponentType::CurrentSourcePulse => {
+                // PULSE(I1 I2 TD TR TF PW PER)
+                let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "PULSE")
+                {
+                    return literal;
+                }
+                let i1 = Self::get_param_owned(&params, "i1", value, "0");
+                let i2 = Self::get_param_owned(&params, "i2", "", "1m");
+                let td = Self::get_param_owned(&params, "td", "", "0");
+                let tr = Self::get_param_owned(&params, "tr", "", "1n");
+                let tf = Self::get_param_owned(&params, "tf", "", "1n");
+                let pw = Self::get_param_owned(&params, "pw", "", "1u");
+                let per = Self::get_param_owned_with_aliases(&params, &["per", "period"], "", "2u");
+                format!("PULSE({} {} {} {} {} {} {})", i1, i2, td, tr, tf, pw, per)
+            }
+            ComponentType::VoltageSourceSin => {
                 // SIN(VO VA FREQ TD THETA PHASE)
                 let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "SIN")
+                {
+                    return literal;
+                }
                 let vo = Self::get_param_owned(&params, "vo", value, "0");
                 let va = Self::get_param_owned(&params, "va", "", "1");
-                let freq = Self::get_param_owned(&params, "freq", "", "1k");
+                let freq = Self::get_param_owned(&params, "freq", "", "1Meg");
                 let td = Self::get_param_owned(&params, "td", "", "0");
                 let theta = Self::get_param_owned(&params, "theta", "", "0");
                 let phase = Self::get_param_owned(&params, "phase", "", "0");
                 format!("SIN({} {} {} {} {} {})", vo, va, freq, td, theta, phase)
             }
+            ComponentType::CurrentSourceSin => {
+                // SIN(IO IA FREQ TD THETA PHASE)
+                let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "SIN")
+                {
+                    return literal;
+                }
+                let io = Self::get_param_owned(&params, "io", value, "0");
+                let ia = Self::get_param_owned(&params, "ia", "", "1m");
+                let freq = Self::get_param_owned(&params, "freq", "", "1Meg");
+                let td = Self::get_param_owned(&params, "td", "", "0");
+                let theta = Self::get_param_owned(&params, "theta", "", "0");
+                let phase = Self::get_param_owned(&params, "phase", "", "0");
+                format!("SIN({} {} {} {} {} {})", io, ia, freq, td, theta, phase)
+            }
             ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
                 // PWL(T1 V1 T2 V2 ...)
                 let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "PWL")
+                {
+                    return literal;
+                }
                 let pwl_data = Self::get_param_owned(&params, "pwl_data", value, "0 0 1n 1");
                 format!("PWL({})", pwl_data)
             }
-            ComponentType::VoltageSourceExp | ComponentType::CurrentSourceExp => {
+            ComponentType::VoltageSourceExp => {
                 // EXP(V1 V2 TD1 TAU1 TD2 TAU2)
                 let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "EXP")
+                {
+                    return literal;
+                }
                 let v1 = Self::get_param_owned(&params, "v1", value, "0");
                 let v2 = Self::get_param_owned(&params, "v2", "", "1");
                 let td1 = Self::get_param_owned(&params, "td1", "", "0");
-                let tau1 = Self::get_param_owned(&params, "tau1", "", "1n");
-                let td2 = Self::get_param_owned(&params, "td2", "", "10n");
-                let tau2 = Self::get_param_owned(&params, "tau2", "", "1n");
+                let tau1 = Self::get_param_owned(&params, "tau1", "", "1u");
+                let td2 = Self::get_param_owned(&params, "td2", "", "5u");
+                let tau2 = Self::get_param_owned(&params, "tau2", "", "1u");
                 format!("EXP({} {} {} {} {} {})", v1, v2, td1, tau1, td2, tau2)
+            }
+            ComponentType::CurrentSourceExp => {
+                // EXP(I1 I2 TD1 TAU1 TD2 TAU2)
+                let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "EXP")
+                {
+                    return literal;
+                }
+                let i1 = Self::get_param_owned(&params, "i1", value, "0");
+                let i2 = Self::get_param_owned(&params, "i2", "", "1m");
+                let td1 = Self::get_param_owned(&params, "td1", "", "0");
+                let tau1 = Self::get_param_owned(&params, "tau1", "", "1u");
+                let td2 = Self::get_param_owned(&params, "td2", "", "5u");
+                let tau2 = Self::get_param_owned(&params, "tau2", "", "1u");
+                format!("EXP({} {} {} {} {} {})", i1, i2, td1, tau1, td2, tau2)
             }
             ComponentType::VoltageSourceSffm => {
                 // SFFM(VO VA FC MDI FS)
                 let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "SFFM")
+                {
+                    return literal;
+                }
                 let vo = Self::get_param_owned(&params, "vo", value, "0");
                 let va = Self::get_param_owned(&params, "va", "", "1");
-                let fc = Self::get_param_owned(&params, "fc", "", "1k");
+                let fc = Self::get_param_owned(&params, "fc", "", "1Meg");
                 let mdi = Self::get_param_owned(&params, "mdi", "", "1");
-                let fs = Self::get_param_owned(&params, "fs", "", "10");
+                let fs = Self::get_param_owned(&params, "fs", "", "1k");
                 format!("SFFM({} {} {} {} {})", vo, va, fc, mdi, fs)
             }
             _ => {
@@ -197,6 +271,41 @@ impl<'a> NetlistGenerator<'a> {
         } else {
             default.to_string()
         }
+    }
+
+    fn get_param_owned_with_aliases(
+        params: &HashMap<String, String>,
+        keys: &[&str],
+        value_fallback: &str,
+        default: &str,
+    ) -> String {
+        for key in keys {
+            if let Some(value) = params.get(*key)
+                && !value.is_empty()
+            {
+                return value.clone();
+            }
+        }
+        if !value_fallback.is_empty() {
+            value_fallback.to_owned()
+        } else {
+            default.to_owned()
+        }
+    }
+
+    /// Accept the waveform literals emitted by older project/example data
+    /// without ever prefixing the function name a second time. Canonical
+    /// property-backed components store the first positional value in
+    /// `Component::value` and the remaining fields in `Component::params`.
+    fn legacy_waveform_literal(value: &str, waveform: &str) -> Option<String> {
+        let literal = value.trim();
+        if literal.contains(['\r', '\n']) || !literal.ends_with(')') {
+            return None;
+        }
+        let (name, _) = literal.split_once('(')?;
+        name.trim()
+            .eq_ignore_ascii_case(waveform)
+            .then(|| literal.to_owned())
     }
 
     /// Extract optional explicit model name and params string with model= removed.

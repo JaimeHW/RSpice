@@ -18,7 +18,7 @@ use crate::state::{
 use super::artifact::{
     ExecutionArtifactEnvelope, ExecutionArtifactError, ExecutionArtifactKind,
     PreparedDependencyBinding, ResolvedExecutionDependencies,
-    validate_prepared_dependency_contract,
+    validate_prepared_dependency_contract_with_options,
 };
 use super::canonical::{
     CanonicalWriter, analysis_config_digest, analysis_kind_tag, content_digest,
@@ -1002,8 +1002,12 @@ impl PreparedRunSnapshot {
                         ),
                     ));
                 }
-                validate_prepared_dependency_contract(&task.task.spec, &producer.task.spec)
-                    .map_err(|error| {
+                validate_prepared_dependency_contract_with_options(
+                    &task.task.spec,
+                    &task.task.spec_options,
+                    &producer.task.spec,
+                )
+                .map_err(|error| {
                         PreparationError::new(
                             PreparationStage::AnalysisPlan,
                             format!(

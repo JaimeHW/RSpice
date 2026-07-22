@@ -423,8 +423,9 @@ fn build_cmos_inverter(state: &mut SchematicState) {
     state.components.push(vdd);
 
     // Input pulse — vertical at R0: + (120,220), − (120,260).
-    let vin = Component::new(id, ComponentType::VoltageSourcePulse, Point::new(120, 240))
-        .with_name_value("VIN", "PULSE(0 1.8 0 1n 1n 5n 10n)");
+    let mut vin = Component::new(id, ComponentType::VoltageSourcePulse, Point::new(120, 240))
+        .with_name_value("VIN", "0");
+    vin.params = "v2=1.8 td=0 tr=1n tf=1n pw=5n per=10n".to_owned();
     id += 1;
     state.components.push(vin);
 

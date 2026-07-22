@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::product::{AnalysisInstanceId, ObjectRevision, RevisionError, RunId, SimulationPlanId};
 
 use super::config::{
-    DependencyConfigurationIssue, dependency_configuration_issue, prerequisite_draft_for,
+    AnalysisDependencyRepairContext, DependencyConfigurationIssue,
+    dependency_candidate_context_issue, dependency_configuration_issue, prerequisite_draft_for,
 };
 use super::{AnalysisDraft, AnalysisKind};
 
@@ -1265,6 +1266,25 @@ impl SimulationPlan {
             .is_ok_and(|compatible| compatible)
     }
 
+    /// Whether an exact target satisfies both the analysis execution contract
+    /// and circuit-derived prerequisite identity requirements.
+    #[must_use]
+    pub fn dependency_candidate_is_compatible_with_context(
+        &self,
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+        target: AnalysisInstanceId,
+        context: &AnalysisDependencyRepairContext,
+    ) -> bool {
+        let (Some(dependent), Some(target)) = (self.instance(dependent), self.instance(target))
+        else {
+            return false;
+        };
+        Self::dependency_candidate_compatibility(dependent, prerequisite, target)
+            .is_ok_and(|compatible| compatible)
+            && dependency_candidate_context_issue(prerequisite, &target.draft, context).is_none()
+    }
+
     /// Whether quick repair can synthesize a valid draft for this role from
     /// the dependent's current configuration.
     #[must_use]
@@ -1273,10 +1293,34 @@ impl SimulationPlan {
         dependent: AnalysisInstanceId,
         prerequisite: AnalysisKind,
     ) -> bool {
-        self.instance(dependent).is_some_and(|instance| {
-            instance.prerequisite_roles().contains(&prerequisite)
-                && prerequisite_draft_for(&instance.draft, prerequisite).is_ok()
-        })
+        self.dependency_prerequisite_is_repairable_with_context(
+            dependent,
+            prerequisite,
+            &AnalysisDependencyRepairContext::default(),
+        )
+    }
+
+    /// Whether quick repair can synthesize a valid prerequisite using exact
+    /// circuit-derived source identity where the role requires it.
+    #[must_use]
+    pub fn dependency_prerequisite_is_repairable_with_context(
+        &self,
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+        context: &AnalysisDependencyRepairContext,
+    ) -> bool {
+        let Some(instance) = self.instance(dependent) else {
+            return false;
+        };
+        instance.prerequisite_roles().contains(&prerequisite)
+            && (self.instances.iter().any(|candidate| {
+                self.dependency_candidate_is_compatible_with_context(
+                    dependent,
+                    prerequisite,
+                    candidate.id,
+                    context,
+                )
+            }) || prerequisite_draft_for(&instance.draft, prerequisite, context).is_ok())
     }
 
     fn dependency_candidate_compatibility(
@@ -2189,15 +2233,42 @@ impl SimulationPlan {
         &mut self,
         dependent: AnalysisInstanceId,
     ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
+        self.auto_bind_dependencies_with_context(
+            dependent,
+            &AnalysisDependencyRepairContext::default(),
+        )
+    }
+
+    /// Bind every role to the latest compatible earlier instance while also
+    /// enforcing circuit-derived prerequisite identity constraints.
+    pub fn auto_bind_dependencies_with_context(
+        &mut self,
+        dependent: AnalysisInstanceId,
+        context: &AnalysisDependencyRepairContext,
+    ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
         let dependent_instance = self
             .instance(dependent)
             .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
         let kind = dependent_instance.kind();
+        if dependent_instance
+            .prerequisite_roles()
+            .contains(&AnalysisKind::Pss)
+            && let Some(detail) = context.availability_error()
+        {
+            return Err(AnalysisPlanError::DependencyConfigurationInvalid {
+                dependent,
+                prerequisite: AnalysisKind::Pss,
+                detail: format!(
+                    "automatic binding requires the authenticated periodic-source circuit: {detail}"
+                ),
+            });
+        }
         let outcome = if dependent_instance.enabled() {
             AnalysisLifecycleState::Draft
         } else {
             AnalysisLifecycleState::Disabled
         };
+        let context = context.clone();
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Dependency,
             dependent,
@@ -2227,6 +2298,12 @@ impl SimulationPlan {
                                         instance,
                                     )
                                     .is_ok_and(|compatible| compatible)
+                                    && dependency_candidate_context_issue(
+                                        prerequisite,
+                                        &instance.draft,
+                                        &context,
+                                    )
+                                    .is_none()
                             })
                             .map(|target| AnalysisDependency::new(prerequisite, target.id))
                     })
@@ -2258,6 +2335,19 @@ impl SimulationPlan {
         &mut self,
         dependent: AnalysisInstanceId,
     ) -> Result<(AnalysisDependencyRepair, AnalysisLifecycleReceipt), AnalysisPlanError> {
+        self.repair_dependencies_with_context(
+            dependent,
+            &AnalysisDependencyRepairContext::default(),
+        )
+    }
+
+    /// Repair a complete prerequisite closure using an authenticated circuit
+    /// context for any synthesized or reused circuit-specific prerequisite.
+    pub fn repair_dependencies_with_context(
+        &mut self,
+        dependent: AnalysisInstanceId,
+        context: &AnalysisDependencyRepairContext,
+    ) -> Result<(AnalysisDependencyRepair, AnalysisLifecycleReceipt), AnalysisPlanError> {
         let dependent_instance = self
             .instance(dependent)
             .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
@@ -2267,6 +2357,7 @@ impl SimulationPlan {
         } else {
             AnalysisLifecycleState::Disabled
         };
+        let context = context.clone();
         self.transact(
             AnalysisLifecycleCommand::Dependency,
             dependent,
@@ -2286,6 +2377,7 @@ impl SimulationPlan {
                     revision,
                     &mut repair,
                     &mut visiting,
+                    &context,
                 )?;
                 repair.sort_in_final_order(&candidate.instances);
                 Ok(repair)
@@ -2299,6 +2391,7 @@ impl SimulationPlan {
         revision: ObjectRevision,
         repair: &mut AnalysisDependencyRepair,
         visiting: &mut Vec<AnalysisInstanceId>,
+        context: &AnalysisDependencyRepairContext,
     ) -> Result<(), AnalysisPlanError> {
         if let Some(cycle_start) = visiting.iter().position(|id| *id == dependent) {
             let mut members = visiting[cycle_start..].to_vec();
@@ -2334,8 +2427,8 @@ impl SimulationPlan {
         }
 
         for prerequisite in prerequisites {
-            let target = self.repair_target(dependent, prerequisite, revision, repair)?;
-            self.repair_dependency_closure(target, revision, repair, visiting)?;
+            let target = self.repair_target(dependent, prerequisite, revision, repair, context)?;
+            self.repair_dependency_closure(target, revision, repair, visiting, context)?;
             self.move_dependency_closure_before(target, dependent, revision, repair)?;
 
             let dependent_index = self.index_of(dependent)?;
@@ -2374,6 +2467,7 @@ impl SimulationPlan {
         prerequisite: AnalysisKind,
         revision: ObjectRevision,
         repair: &mut AnalysisDependencyRepair,
+        context: &AnalysisDependencyRepairContext,
     ) -> Result<AnalysisInstanceId, AnalysisPlanError> {
         let dependent_index = self.index_of(dependent)?;
         let dependent_draft = self.instances[dependent_index].draft.clone();
@@ -2381,6 +2475,8 @@ impl SimulationPlan {
             let dependent_instance = &self.instances[dependent_index];
             Self::dependency_candidate_compatibility(dependent_instance, prerequisite, candidate)
                 .is_ok_and(|compatible| compatible)
+                && dependency_candidate_context_issue(prerequisite, &candidate.draft, context)
+                    .is_none()
         };
         let explicit_target = self.instances[dependent_index]
             .dependencies
@@ -2420,13 +2516,11 @@ impl SimulationPlan {
             Some(target) => target,
             None => {
                 let target = self.fresh_identity();
-                let draft =
-                    prerequisite_draft_for(&dependent_draft, prerequisite).map_err(|detail| {
-                        AnalysisPlanError::DependencyConfigurationInvalid {
-                            dependent,
-                            prerequisite,
-                            detail,
-                        }
+                let draft = prerequisite_draft_for(&dependent_draft, prerequisite, context)
+                    .map_err(|detail| AnalysisPlanError::DependencyConfigurationInvalid {
+                        dependent,
+                        prerequisite,
+                        detail,
                     })?;
                 self.instances.insert(
                     dependent_index,
@@ -2572,6 +2666,13 @@ mod tests {
 
     fn snapshot(plan: &SimulationPlan) -> String {
         serde_json::to_string(plan).expect("plan serializes")
+    }
+
+    fn exact_periodic_context() -> AnalysisDependencyRepairContext {
+        AnalysisDependencyRepairContext::exact_periodic_sources(
+            "periodic fixture\nVLO lo 0 SIN(0 1 1k)\nVRF rf 0 SIN(0 1 2k)\nR1 lo 0 1k\nR2 rf 0 1k\n.end\n",
+        )
+        .expect("test periodic-source fixture is exact")
     }
 
     fn configure_high_frequency_fourier(plan: &mut SimulationPlan, id: AnalysisInstanceId) {
@@ -3235,7 +3336,7 @@ mod tests {
             let mut plan = SimulationPlan::empty();
             let (dependent, _) = plan.insert(kind).expect("dependent inserts");
             let (repair, receipt) = plan
-                .repair_dependencies(dependent)
+                .repair_dependencies_with_context(dependent, &exact_periodic_context())
                 .unwrap_or_else(|error| panic!("{} prerequisite repair failed: {error}", kind));
 
             assert_eq!(repair.dependent(), dependent, "{kind}");
@@ -3279,6 +3380,201 @@ mod tests {
             plan.freeze()
                 .unwrap_or_else(|error| panic!("{kind} repaired plan did not freeze: {error}"));
         }
+    }
+
+    #[test]
+    fn periodic_consumers_reject_legacy_hb_pss_and_phase_noise_requires_autonomous_pss() {
+        let mut plan = SimulationPlan::empty();
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(pss) = draft else {
+                panic!("expected PSS draft");
+            };
+            pss.method_idx = 1;
+        })
+        .expect("legacy PSS state remains editable");
+        assert!(matches!(
+            plan.bind_dependency(pac, AnalysisKind::Pss, pss),
+            Err(AnalysisPlanError::DependencyConfigurationInvalid { detail, .. })
+                if detail.contains("HB-PSS")
+        ));
+
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(pss) = draft else {
+                panic!("expected PSS draft");
+            };
+            pss.method_idx = 0;
+            pss.osc_mode = false;
+            pss.osc_node.clear();
+        })
+        .expect("shooting PSS state edits");
+        let (pnoise, _) = plan.insert(AnalysisKind::Pnoise).expect("PNOISE inserts");
+        plan.edit(pnoise, |draft| {
+            let AnalysisDraft::Pnoise(pnoise) = draft else {
+                panic!("expected PNOISE draft");
+            };
+            pnoise.noise_ref_idx = 2;
+        })
+        .expect("phase-noise state edits");
+        assert!(matches!(
+            plan.bind_dependency(pnoise, AnalysisKind::Pss, pss),
+            Err(AnalysisPlanError::DependencyConfigurationInvalid { detail, .. })
+                if detail.contains("autonomous")
+        ));
+
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(pss) = draft else {
+                panic!("expected PSS draft");
+            };
+            pss.osc_mode = true;
+            pss.osc_node = "out".to_owned();
+        })
+        .expect("autonomous PSS state edits");
+        plan.bind_dependency(pnoise, AnalysisKind::Pss, pss)
+            .expect("phase noise accepts an autonomous shooting PSS");
+    }
+
+    #[test]
+    fn periodic_repair_requires_exact_sources_and_rolls_back_without_them() {
+        let mut plan = SimulationPlan::empty();
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        let before = snapshot(&plan);
+        assert!(matches!(
+            plan.repair_dependencies(pac),
+            Err(AnalysisPlanError::DependencyConfigurationInvalid { detail, .. })
+                if detail.contains("catalog is unavailable")
+        ));
+        assert_eq!(snapshot(&plan), before, "failed repair must be atomic");
+
+        let (repair, _) = plan
+            .repair_dependencies_with_context(pac, &exact_periodic_context())
+            .expect("exact circuit sources synthesize PSS");
+        let pss = repair
+            .inserted()
+            .iter()
+            .copied()
+            .find(|id| {
+                plan.instance(*id)
+                    .is_some_and(|instance| instance.kind() == AnalysisKind::Pss)
+            })
+            .expect("repair inserted PSS");
+        let AnalysisDraft::Pss(pss) = plan.instance(pss).unwrap().draft() else {
+            panic!("repair inserted PSS");
+        };
+        assert_eq!(pss.tone_sources, "VLO, VRF");
+    }
+
+    #[test]
+    fn periodic_auto_bind_is_atomic_when_the_source_contract_is_unavailable() {
+        let mut plan = SimulationPlan::empty();
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(pss) = draft else {
+                panic!("expected PSS draft");
+            };
+            pss.tone_sources = "VLO, VRF".to_owned();
+        })
+        .expect("PSS sources edit");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        plan.bind_dependency(pac, AnalysisKind::Pss, pss)
+            .expect("PSS binds before catalog loss");
+        let before = snapshot(&plan);
+
+        assert!(matches!(
+            plan.auto_bind_dependencies_with_context(
+                pac,
+                &AnalysisDependencyRepairContext::periodic_sources_unavailable(
+                    "source elaboration failed",
+                ),
+            ),
+            Err(AnalysisPlanError::DependencyConfigurationInvalid { detail, .. })
+                if detail.contains("source elaboration failed")
+        ));
+        assert_eq!(snapshot(&plan), before, "failed auto-bind must be atomic");
+    }
+
+    #[test]
+    fn periodic_repair_does_not_reuse_a_pss_with_unknown_or_omitted_sources() {
+        let mut plan = SimulationPlan::empty();
+        let (stale_pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        plan.edit(stale_pss, |draft| {
+            let AnalysisDraft::Pss(pss) = draft else {
+                panic!("expected PSS draft");
+            };
+            pss.tone_sources = "STALE_SOURCE".to_owned();
+        })
+        .expect("stale PSS source identity remains editable");
+        let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+        let context = exact_periodic_context();
+        assert!(!plan.dependency_candidate_is_compatible_with_context(
+            pac,
+            AnalysisKind::Pss,
+            stale_pss,
+            &context,
+        ));
+
+        let (repair, _) = plan
+            .repair_dependencies_with_context(pac, &context)
+            .expect("repair inserts a circuit-exact PSS");
+        let repaired_pss = repair
+            .inserted()
+            .iter()
+            .copied()
+            .find(|id| {
+                plan.instance(*id)
+                    .is_some_and(|instance| instance.kind() == AnalysisKind::Pss)
+            })
+            .expect("repair inserted PSS");
+        assert_ne!(repaired_pss, stale_pss);
+        assert_eq!(
+            plan.instance(pac).unwrap().dependencies()[0].target(),
+            repaired_pss
+        );
+        let AnalysisDraft::Pss(stale) = plan.instance(stale_pss).unwrap().draft() else {
+            panic!("stale instance remains PSS");
+        };
+        assert_eq!(stale.tone_sources, "STALE_SOURCE");
+    }
+
+    #[test]
+    fn periodic_repair_reuses_an_exact_autonomous_pss_without_driven_sources() {
+        let mut plan = SimulationPlan::empty();
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(pss) = draft else {
+                panic!("expected PSS draft");
+            };
+            pss.tone_sources.clear();
+            pss.osc_mode = true;
+            pss.osc_node = "out".to_owned();
+        })
+        .expect("autonomous PSS state edits");
+        let (pnoise, _) = plan.insert(AnalysisKind::Pnoise).expect("PNOISE inserts");
+        plan.edit(pnoise, |draft| {
+            let AnalysisDraft::Pnoise(pnoise) = draft else {
+                panic!("expected PNOISE draft");
+            };
+            pnoise.noise_ref_idx = 2;
+        })
+        .expect("phase-noise state edits");
+        let context = AnalysisDependencyRepairContext::exact_periodic_sources(
+            "autonomous fixture\nR1 out 0 1k\n.end\n",
+        )
+        .expect("an exact empty source catalog is authoritative");
+
+        let (repair, _) = plan
+            .repair_dependencies_with_context(pnoise, &context)
+            .expect("repair reuses the exact autonomous PSS");
+
+        assert!(repair.inserted().iter().all(|id| {
+            plan.instance(*id)
+                .is_some_and(|instance| instance.kind() != AnalysisKind::Pss)
+        }));
+        assert_eq!(
+            plan.instance(pnoise).unwrap().dependencies()[0].target(),
+            pss
+        );
     }
 
     #[test]

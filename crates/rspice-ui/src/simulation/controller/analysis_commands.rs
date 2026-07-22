@@ -272,7 +272,7 @@ impl SimulationController {
     }
 
     /// Inject non-default UI simulation options before `.end`.
-    pub(super) fn apply_simulation_options_to_netlist(
+    pub(crate) fn apply_simulation_options_to_netlist(
         netlist: &str,
         options: &crate::simulation::dialog::SimulationOptions,
     ) -> String {
@@ -303,7 +303,7 @@ impl SimulationController {
     /// Inject the exact model sources selected for the nominal/reference PVT
     /// point. The marker block lets the corner executor replace this binding
     /// per process without retaining or double-applying the reference models.
-    pub(super) fn apply_reference_model_bindings_to_netlist(
+    pub(crate) fn apply_reference_model_bindings_to_netlist(
         netlist: &str,
         model_cards: &[String],
     ) -> String {
