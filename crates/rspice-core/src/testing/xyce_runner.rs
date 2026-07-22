@@ -4126,6 +4126,7 @@ struct XyceStaticAcSensitivityPlan {
     parameters: Vec<String>,
     direct: bool,
     adjoint: bool,
+    no_index: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -20509,11 +20510,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string(),
             );
         }
-        if print_output
+        let no_index = print_output
             .format
             .as_deref()
-            .is_some_and(|format| !format.eq_ignore_ascii_case("STD"))
-        {
+            .is_some_and(|format| format.eq_ignore_ascii_case("NOINDEX"));
+        if print_output.format.as_deref().is_some_and(|format| {
+            !format.eq_ignore_ascii_case("STD") && !format.eq_ignore_ascii_case("NOINDEX")
+        }) {
             return Err(format!(
                 "native Xyce AC sensitivity contract does not cover .PRINT SENS FORMAT={}",
                 print_output.format.as_deref().unwrap_or_default()
@@ -20584,6 +20587,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             parameters,
             direct,
             adjoint,
+            no_index,
         }))
     }
 
@@ -22947,6 +22951,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut side_ac_print_formats = Vec::new();
         let mut primary_ac_ic_print_count = 0usize;
         let mut side_ac_ic_print_count = 0usize;
+        let mut sensitivity_print_count = 0usize;
         let has_op_analysis = Self::source_has_op_analysis(source);
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
@@ -22964,6 +22969,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 };
                 if !analysis.eq_ignore_ascii_case("AC") {
                     if analysis.eq_ignore_ascii_case("SENS") {
+                        sensitivity_print_count += 1;
                         continue;
                     }
                     if analysis.eq_ignore_ascii_case("AC_IC") {
@@ -23092,6 +23098,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if primary_ac_ic_print_count == 0
                 && side_ac_ic_print_count == 0
                 && side_ac_print_count == 0
+                && sensitivity_print_count == 0
             {
                 return Err(
                     "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC or .PRINT AC_IC statement"
@@ -45862,21 +45869,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         } else {
             Self::parse_prn_file(&plan.reference_path)?
         };
-        if reference.columns.len() < 3 {
-            return Err(
-                "AC sensitivity oracle must contain Index, FREQ, and data columns".to_string(),
-            );
+        let leading_columns = usize::from(!plan.no_index) + 1;
+        let frequency_column = usize::from(!plan.no_index);
+        if reference.columns.len() < leading_columns + 2 {
+            return Err(if plan.no_index {
+                "AC sensitivity oracle must contain FREQ and data columns".to_string()
+            } else {
+                "AC sensitivity oracle must contain Index, FREQ, and data columns".to_string()
+            });
         }
-        if !reference
-            .columns
-            .first()
-            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
-            || !reference
+        let valid_leading_columns = if plan.no_index {
+            reference
                 .columns
-                .get(1)
+                .first()
                 .is_some_and(|column| Self::is_ac_frequency_reference_column(column))
-        {
-            return Err("AC sensitivity oracle must begin with Index FREQ columns".to_string());
+        } else {
+            reference
+                .columns
+                .first()
+                .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+                && reference
+                    .columns
+                    .get(frequency_column)
+                    .is_some_and(|column| Self::is_ac_frequency_reference_column(column))
+        };
+        if !valid_leading_columns {
+            return Err(if plan.no_index {
+                "AC sensitivity NOINDEX oracle must begin with FREQ".to_string()
+            } else {
+                "AC sensitivity oracle must begin with Index FREQ columns".to_string()
+            });
         }
         if reference.rows.len() != results.len() {
             return Err(format!(
@@ -45890,14 +45912,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .columns
             .iter()
             .enumerate()
-            .skip(2)
+            .skip(leading_columns)
             .find_map(|(index, column)| {
                 Self::is_ac_sensitivity_generated_column(column).then_some(index)
             })
             .ok_or_else(|| {
                 "AC sensitivity oracle has no generated objective/sensitivity columns".to_string()
             })?;
-        if generated_offset == 2 {
+        if generated_offset == leading_columns {
             return Err(
                 "AC sensitivity oracle has no ordinary .PRINT SENS data columns".to_string(),
             );
@@ -45906,7 +45928,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             columns: reference.columns[..generated_offset].to_vec(),
             rows: reference.rows.clone(),
         };
-        let base_columns = Self::reference_ac_data_columns(&base_reference, &plan.print, 2)?;
+        let base_columns =
+            Self::reference_ac_data_columns(&base_reference, &plan.print, leading_columns)?;
         let phase_output_radians = Self::source_requests_ac_phase_output_radians(source);
         let base_comp_columns = base_columns
             .iter()
@@ -46011,31 +46034,33 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     reference.columns.len()
                 ));
             }
-            let expected_index = row[0];
-            if (expected_index - row_index as Value).abs() > self.config.absolute_tolerance {
-                mismatches.push(XyceValueMismatch {
-                    row: row_index,
-                    probe: "Index".to_string(),
-                    expected: expected_index,
-                    actual: row_index as Value,
-                    relative_error: 1.0,
-                });
+            if !plan.no_index {
+                let expected_index = row[0];
+                if (expected_index - row_index as Value).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "Index".to_string(),
+                        expected: expected_index,
+                        actual: row_index as Value,
+                        relative_error: 1.0,
+                    });
+                }
             }
             if let Some(relative_error) = self.value_mismatch(
-                row[1],
+                row[frequency_column],
                 result.frequency,
                 XyceComparisonTolerance::from_config(&self.config),
             ) {
                 mismatches.push(XyceValueMismatch {
                     row: row_index,
-                    probe: reference.columns[1].clone(),
-                    expected: row[1],
+                    probe: reference.columns[frequency_column].clone(),
+                    expected: row[frequency_column],
                     actual: result.frequency,
                     relative_error,
                 });
             }
             for (column_index, column) in base_columns.iter().enumerate() {
-                let expected = row[column_index + 2];
+                let expected = row[column_index + leading_columns];
                 let actual = Self::evaluate_ac_reference_column(
                     column,
                     netlist,
@@ -46050,7 +46075,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
-                        probe: reference.columns[column_index + 2].clone(),
+                        probe: reference.columns[column_index + leading_columns].clone(),
                         expected,
                         actual,
                         relative_error,
@@ -46188,7 +46213,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn xyce_ac_sensitivity_reference_columns(plan: &XyceStaticAcSensitivityPlan) -> Vec<String> {
-        let mut columns = vec!["Index".to_string(), "FREQ".to_string()];
+        let mut columns = Vec::new();
+        if !plan.no_index {
+            columns.push("Index".to_string());
+        }
+        columns.push("FREQ".to_string());
         columns.extend(plan.print.probes.iter().cloned());
         for objective in &plan.objectives {
             let objective_probe = Self::xyce_sensitivity_objective_probe(&objective.spec);
@@ -84477,6 +84506,35 @@ Q1 c b 0 QN
             columns
                 .iter()
                 .any(|column| column.eq_ignore_ascii_case("d_re({v(b)})/d_r1:r_adj"))
+        );
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_noindex_schema_omits_index_column() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Output/AC-SENS/ac-sens-prn-noindex.cir";
+        let deck = XyceDeck {
+            path: root.join(relative),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = runner
+            .static_ac_plan_for_deck(&deck)
+            .expect("NOINDEX sensitivity plan is supported");
+        let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+        assert!(sensitivity.no_index);
+        let columns = XyceTestRunner::xyce_ac_sensitivity_reference_columns(sensitivity);
+        assert_eq!(columns.len(), 48);
+        assert_eq!(columns.first().map(String::as_str), Some("FREQ"));
+        assert!(
+            !columns
+                .iter()
+                .any(|column| column.eq_ignore_ascii_case("Index"))
         );
     }
 
