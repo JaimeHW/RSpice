@@ -3022,7 +3022,7 @@ fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<Analysi
     requested
 }
 
-fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) {
+fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let tombstones = app
         .state
@@ -3045,11 +3045,12 @@ fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) {
         t.color.text_dim,
         detail_width,
     );
-    let height = if compact {
-        (detail_galley.size().y + 34.0).max(52.0)
-    } else {
-        (detail_galley.size().y + 12.0).max(36.0)
-    };
+    // The receipt is a status band, not an expanding log viewer. Its exact
+    // height is stable across short edit receipts and verbose insertion or
+    // dependency receipts so a form edit cannot change the scroll extent and
+    // move every field in a near-bottom viewport. The complete immutable
+    // receipt remains available through the hover text below.
+    let height = lifecycle_receipt_height(compact);
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     painter.rect_filled(rect, 0.0, t.color.bg_panel);
@@ -3088,7 +3089,11 @@ fn lifecycle_receipt_strip(ui: &mut Ui, app: &RSpiceApp) {
         egui::pos2(rect.left() + 9.0 + title_width + 8.0, rect.top() + 6.0)
     };
     painter.galley(detail_position, detail_galley, t.color.text_dim);
-    response.on_hover_text(detail);
+    response.on_hover_text(detail)
+}
+
+const fn lifecycle_receipt_height(compact: bool) -> f32 {
+    if compact { 64.0 } else { 40.0 }
 }
 
 fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
@@ -4710,6 +4715,38 @@ mod tests {
             )
             .expect("valid test provenance"),
         )
+    }
+
+    #[test]
+    fn lifecycle_receipt_height_is_stable_across_short_and_verbose_receipts() {
+        let render_height = |detail: &str, width: f32| {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut app = RSpiceApp::test_instance();
+            app.state.workbench.analysis_lifecycle_status = detail.to_owned();
+            let mut height = 0.0;
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 240.0))),
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ctx, |ui| {
+                            height = lifecycle_receipt_strip(ui, &app).rect.height();
+                        });
+                },
+            );
+            height
+        };
+        let short = "Edit committed.";
+        let verbose = "Receipt #42 committed for an immutable analysis instance. Dependency bindings were refreshed from enabled earlier instances. Prior datasets remain immutable and the complete diagnostic remains available for audit.";
+
+        assert_eq!(render_height(short, 960.0), 40.0);
+        assert_eq!(render_height(verbose, 960.0), 40.0);
+        assert_eq!(render_height(short, 560.0), 64.0);
+        assert_eq!(render_height(verbose, 560.0), 64.0);
     }
 
     #[test]
