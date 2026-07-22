@@ -115,6 +115,13 @@ impl Bjt {
         vbp: Value,
     ) -> BranchLinearization {
         let mut branch = BranchLinearization::default();
+        // VBIC's parasitic base-emitter branch does not exist in the legacy
+        // Gummel-Poon topology. Its unconditional CKTgmin parallel would
+        // otherwise connect the collapsed legacy base to the collector-side
+        // parasitic node and create a second reverse-junction leakage path.
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            return branch;
+        }
         // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbep
         // unconditionally, even when the parasitic diode currents are zero.
         let gmin = self.junction_gmin;
@@ -233,6 +240,15 @@ impl Bjt {
         vsi: Value,
     ) -> BranchLinearization {
         let mut branch = BranchLinearization::default();
+        // The substrate junction is a VBIC parasitic branch. Legacy
+        // Gummel-Poon BJT cards expose no substrate diode current; Xyce's
+        // legacy BJT load keeps the substrate lead current identically zero.
+        // Do not let the VBIC CKTgmin parallel leak through the collapsed
+        // three-terminal legacy topology, where it would double-count the
+        // collector/base reverse-junction GMIN and alter source currents.
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            return branch;
+        }
         // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbcp
         // unconditionally, even when the parasitic diode currents are zero.
         let gmin = self.junction_gmin;

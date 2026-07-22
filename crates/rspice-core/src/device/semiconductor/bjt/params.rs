@@ -22,6 +22,11 @@ impl Bjt {
         self.rb = 0.0;
         self.rbx = 0.0;
         self.rbi = 0.0;
+        // RBP is a VBIC parasitic base path. Legacy Gummel-Poon cards do not
+        // expose that branch; clear the constructor's VBIC default before
+        // applying any legacy model parameters.
+        self.rbp = 0.0;
+        self.rbp_nominal = 0.0;
         self.rbx_nominal = 0.0;
         self.rbi_nominal = 0.0;
         self.rc = 0.0;

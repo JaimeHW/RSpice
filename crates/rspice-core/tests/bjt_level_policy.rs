@@ -4,7 +4,7 @@
 //! but advanced BJT families without native implementations must not be
 //! silently evaluated as VBIC or legacy GP.
 
-use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{ElementKind, Netlist};
 
 const VBIC13_TEST_VBBE: f64 = 2.0;
@@ -157,6 +157,50 @@ fn assert_rel_close(label: &str, got: f64, expected: f64, rel_tol: f64) {
     assert!(
         rel <= rel_tol,
         "{label}: got {got:.9e}, expected {expected:.9e}, rel {rel:.3e} > {rel_tol:.3e}"
+    );
+}
+
+#[test]
+fn legacy_gummel_poon_does_not_stamp_vbic_parasitic_gmin_branches() {
+    let deck = "* legacy GP BJT GMIN topology\n\
+                VCC 4 0 5\n\
+                VIN 1 0 0\n\
+                RB 1 2 10K\n\
+                Q1 3 2 0 Q1\n\
+                RC 3 4 1K\n\
+                .MODEL Q1 NPN (BF=20 RB=100 TF=1e-10 CJC=2e-12)\n\
+                .OP\n\
+                .END\n";
+    let netlist = Netlist::parse(deck).expect("legacy GP regression deck parses");
+    let defaults = SimulationConfig::default();
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let config = SimulationConfig {
+        max_iterations: defaults.max_iterations.max(1200),
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        temperature: 300.15,
+        ..defaults
+    };
+    let result = Engine::new(config)
+        .run_dc_op(&netlist)
+        .expect("legacy GP regression deck converges");
+
+    assert_rel_close(
+        "legacy GP VIN startup current",
+        result
+            .branch_current_named("VIN")
+            .expect("VIN branch is retained"),
+        5.0001e-12,
+        1.0e-6,
+    );
+    assert_rel_close(
+        "legacy GP VCC startup current",
+        result
+            .branch_current_named("VCC")
+            .expect("VCC branch is retained"),
+        -1.0000e-11,
+        2.0e-3,
     );
 }
 
