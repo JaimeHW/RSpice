@@ -4240,7 +4240,7 @@ fn parse_dc_sweep_spec_after_type(
     match kind {
         "LIST" => {
             let mut values = Vec::new();
-            while let Some(value) = try_value(stream, params) {
+            while let Some(value) = try_signed_value(stream, params) {
                 values.push(value);
                 skip_commas(stream);
             }
@@ -4328,7 +4328,33 @@ pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::Netlist;
+    use crate::{Netlist, netlist::DcSweepMode};
+
+    #[test]
+    fn dc_list_accepts_signed_values_without_leading_zero() {
+        let netlist = Netlist::parse(
+            "signed dc list\n\
+             V1 out 0 0\n\
+             .dc V1 LIST -.05 +.5 -1.0\n\
+             .end\n",
+        )
+        .expect("signed .DC LIST values parse");
+
+        let [crate::netlist::AnalysisCommand::Dc { source, mode, .. }] =
+            netlist.analyses.as_slice()
+        else {
+            panic!("expected one .DC analysis, got {:?}", netlist.analyses);
+        };
+        assert_eq!(source, "V1");
+        assert!(matches!(
+            mode,
+            DcSweepMode::List(values)
+                if values
+                    .iter()
+                    .zip([-0.05, 0.5, -1.0])
+                    .all(|(actual, expected)| (actual - expected).abs() < 1e-15)
+        ));
+    }
 
     #[test]
     fn harmonic_balance_command_and_hbint_orders_parse() {

@@ -1724,16 +1724,9 @@ pub(super) fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Opti
     try_value_unsigned(stream, params)
 }
 
-/// Like [`try_value`] but also recombines a `Minus`/`Plus` sign token that the
-/// lexer split off from a magnitude written without a leading zero (e.g.
-/// `-.14`, `+.5`). Model-card parameters such as `VOFF=-.14` depend on this.
-///
-/// Restricted to model-parameter parsing: element/source/command parsers handle
-/// signs in their own layers, so applying it there could double-consume tokens.
-pub(super) fn try_signed_model_value(
-    stream: &mut TokenStream,
-    params: &ParamContext,
-) -> Option<Value> {
+/// Recombine a `Minus`/`Plus` sign token that the lexer split off from a
+/// magnitude written without a leading zero (e.g. `-.14`, `+.5`).
+pub(super) fn try_signed_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
     skip_commas(stream);
     let sign = match &stream.peek().kind {
         TokenKind::Plus => Some(1.0),
@@ -1749,6 +1742,15 @@ pub(super) fn try_signed_model_value(
         }
     }
     try_value_unsigned(stream, params)
+}
+
+/// Signed model-card values use the same token recombination as command-level
+/// value lists; retain this name at model call sites to document that context.
+pub(super) fn try_signed_model_value(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Option<Value> {
+    try_signed_value(stream, params)
 }
 
 #[inline]

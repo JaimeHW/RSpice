@@ -315,7 +315,7 @@ pub(super) fn parse_step_command(
     let sweep = if is_list {
         // Parse list of values
         let mut values = Vec::new();
-        while let Some(v) = try_value(stream, params) {
+        while let Some(v) = try_signed_value(stream, params) {
             values.push(v);
         }
         if values.is_empty() {
@@ -490,6 +490,35 @@ mod four_command_tests {
             .expect_err("invalid harmonic count must fail closed");
             assert!(error.to_string().contains("harmonic count"), "{error}");
         }
+    }
+}
+
+#[cfg(test)]
+mod step_command_tests {
+    use crate::netlist::{AnalysisCommand, Netlist, StepSweep};
+
+    #[test]
+    fn step_list_accepts_signed_values_without_leading_zero() {
+        let netlist = Netlist::parse(
+            "signed step list\n\
+             V1 out 0 0\n\
+             .step V1 LIST -.05 +.5 -1.0\n\
+             .end\n",
+        )
+        .expect("signed .STEP LIST values parse");
+
+        let [AnalysisCommand::Step(command)] = netlist.analyses.as_slice() else {
+            panic!("expected one .STEP analysis, got {:?}", netlist.analyses);
+        };
+        assert_eq!(command.name, "V1");
+        assert!(matches!(
+            &command.sweep,
+            StepSweep::List(values)
+                if values
+                    .iter()
+                    .zip([-0.05, 0.5, -1.0])
+                    .all(|(actual, expected)| (actual - expected).abs() < 1e-15)
+        ));
     }
 }
 
