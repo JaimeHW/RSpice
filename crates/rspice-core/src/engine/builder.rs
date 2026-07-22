@@ -3118,6 +3118,32 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn xyce_device_minimums_reach_legacy_diode_construction() {
+        let deck = "minimum diode defaults\n\
+            .options device minres=1 mincap=1n\n\
+            V1 in 0 1\n\
+            D1 in 0 D\n\
+            .model D D IS=1e-14\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("minimum diode deck parses");
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("minimum diode deck builds");
+        let [diode] = circuit.diodes.devices.as_slice() else {
+            panic!("expected one diode");
+        };
+        assert_eq!(diode.rs, 0.0);
+        assert_eq!(diode.cj0, 1.0e-9);
+        let rs_index = circuit
+            .resistors
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("D1.__rs"))
+            .expect("MINRES creates the diode series resistor");
+        assert_eq!(circuit.resistors.conductances[rs_index], 1.0);
+    }
+
     struct DiscardingStamper;
 
     impl crate::device::MatrixStamper for DiscardingStamper {
@@ -4568,7 +4594,7 @@ impl Engine {
                     };
 
                     // Look up model and apply parameters
-                    let rs_given;
+                    let (rs_given, cj0_given, sidewall_cj0_given);
                     if let Some(device_model) = find_model_def(netlist, model) {
                         ensure_model_type(
                             "Diode",
@@ -4590,11 +4616,23 @@ impl Engine {
                                 || !device_model.integer_vector_params.is_empty(),
                         )?;
                         rs_given = params_map.contains_key("RS");
+                        cj0_given = ["CJO", "CJ0", "CJ"]
+                            .iter()
+                            .any(|name| params_map.contains_key(*name));
+                        sidewall_cj0_given = ["CJSW", "CJP"]
+                            .iter()
+                            .any(|name| params_map.contains_key(*name));
                         diode = diode.with_model_params(&params_map);
                     } else if let Some(params_map) =
                         builtin_diode_model_map().get(&model.to_uppercase())
                     {
                         rs_given = params_map.contains_key("RS");
+                        cj0_given = ["CJO", "CJ0", "CJ"]
+                            .iter()
+                            .any(|name| params_map.contains_key(*name));
+                        sidewall_cj0_given = ["CJSW", "CJP"]
+                            .iter()
+                            .any(|name| params_map.contains_key(*name));
                         diode = diode.with_model_params(params_map);
                         log::debug!(
                             "Applied embedded diode fallback model '{}' to {}",
@@ -4607,6 +4645,25 @@ impl Engine {
                             element.name, model
                         )));
                     }
+
+                    diode.apply_xyce_device_minimums(
+                        netlist.options.device_min_resistance,
+                        netlist.options.device_min_capacitance,
+                        rs_given,
+                        cj0_given,
+                        sidewall_cj0_given,
+                    );
+                    // A positive global MINRES is a model-level default in
+                    // Xyce, so an omitted RS must follow the same explicit
+                    // internal-node path as an authored RS.  Keep RS=0
+                    // (authored or defaulted) inline because no resistor is
+                    // required for that value.
+                    let minres_applied = !rs_given
+                        && netlist
+                            .options
+                            .device_min_resistance
+                            .is_some_and(|value| value.is_finite() && value > 0.0);
+                    let rs_externalized = rs_given || minres_applied;
 
                     // Instance scaling: AREA and M/MULT both act as parallel
                     // junction multipliers for the lumped junction (ngspice
@@ -4649,9 +4706,9 @@ impl Engine {
                     // Series resistance participates in the solution as an
                     // explicit resistor between the anode and an internal
                     // node (the junction model itself never stamps RS). Only
-                    // externalized when the model card provides RS, keeping
-                    // decks without RS bit-identical to prior behavior.
-                    if rs_given && diode.rs.is_finite() && diode.rs > 0.0 {
+                    // externalized when the model card or MINRES provides RS,
+                    // keeping decks without either source bit-identical.
+                    if rs_externalized && diode.rs.is_finite() && diode.rs > 0.0 {
                         let aint_name = format!("{}.__aint", element.name);
                         let aint = circuit.get_or_create_node(&aint_name);
                         let rs_name = format!("{}.__rs", element.name);

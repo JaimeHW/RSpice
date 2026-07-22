@@ -2851,6 +2851,14 @@ pub struct SimulationOptions {
     /// Xyce `.options device zeroresistancetol=...`: resistance threshold
     /// used by topology supernode reduction.
     pub device_zero_resistance_tol: Option<Value>,
+    /// Xyce `.options device minres=...`: default parasitic resistance for
+    /// model parameters declared with the device `MIN_RES` default policy.
+    /// The value applies only when the model card omits that parameter.
+    pub device_min_resistance: Option<Value>,
+    /// Xyce `.options device mincap=...`: default junction capacitance for
+    /// model parameters declared with the device `MIN_CAP` default policy.
+    /// The value applies only when the model card omits that parameter.
+    pub device_min_capacitance: Option<Value>,
     /// Xyce `.options device b3soigminscaling=...`: when enabled, BSIMSOI3
     /// receives `GMIN * 1e-6` in its terminal GMIN branches. Xyce enables this
     /// by default and decks may set it to zero to request the full GMIN.
@@ -3012,6 +3020,12 @@ impl SimulationOptions {
         }
         if other.device_zero_resistance_tol.is_some() {
             self.device_zero_resistance_tol = other.device_zero_resistance_tol;
+        }
+        if other.device_min_resistance.is_some() {
+            self.device_min_resistance = other.device_min_resistance;
+        }
+        if other.device_min_capacitance.is_some() {
+            self.device_min_capacitance = other.device_min_capacitance;
         }
         if other.b3soi_gmin_scaling.is_some() {
             self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;

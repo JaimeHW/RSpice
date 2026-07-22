@@ -1133,6 +1133,22 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
+            (Some("DEVICE"), "MINRES" | "MIN_RES") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_min_resistance = Some(parse_non_negative_real_option(
+                    "DEVICE.MINRES",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("DEVICE"), "MINCAP" | "MIN_CAP") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_min_capacitance = Some(parse_non_negative_real_option(
+                    "DEVICE.MINCAP",
+                    value,
+                    line_num,
+                )?);
+            }
             (Some("DEVICE"), "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING") => {
                 options.b3soi_gmin_scaling =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -1158,6 +1174,16 @@ pub(super) fn parse_options_command(
                     value,
                     line_num,
                 )?);
+            }
+            (None, "MINRES" | "MIN_RES" | "DEVICE_MINRES" | "DEVICEMINRES") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_min_resistance =
+                    Some(parse_non_negative_real_option("MINRES", value, line_num)?);
+            }
+            (None, "MINCAP" | "MIN_CAP" | "DEVICE_MINCAP" | "DEVICE_MIN_CAP") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_min_capacitance =
+                    Some(parse_non_negative_real_option("MINCAP", value, line_num)?);
             }
             (None, "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING" | "DEVICE_B3SOIGMINSCALING") => {
                 options.b3soi_gmin_scaling =
@@ -4716,6 +4742,22 @@ mod tests {
         };
         merged.merge(&disabled.options);
         assert_eq!(merged.device_try_to_compact, Some(false));
+    }
+
+    #[test]
+    fn device_minimum_defaults_parse_and_merge() {
+        let netlist = Netlist::parse(&deck_with_options(".options device minres=1 mincap=1nf"))
+            .expect("scoped Xyce MINRES/MINCAP parse");
+        assert_eq!(netlist.options.device_min_resistance, Some(1.0));
+        assert_eq!(netlist.options.device_min_capacitance, Some(1.0e-9));
+
+        let mut merged = crate::netlist::SimulationOptions {
+            device_min_resistance: Some(2.0),
+            ..crate::netlist::SimulationOptions::default()
+        };
+        merged.merge(&netlist.options);
+        assert_eq!(merged.device_min_resistance, Some(1.0));
+        assert_eq!(merged.device_min_capacitance, Some(1.0e-9));
     }
 
     #[test]

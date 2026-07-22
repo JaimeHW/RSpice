@@ -35263,6 +35263,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             auto_bridge_param_names,
             topology_supernode,
             device_zero_resistance_tol,
+            device_min_resistance: _,
+            device_min_capacitance: _,
             b3soi_gmin_scaling,
             device_try_to_compact,
             hb_num_frequencies,
@@ -51234,6 +51236,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_tbv_diode(netlist, element)
             });
+        let has_qualified_minimum_diode = purpose.validates_absolute_device_contract()
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_native_absolute_transient_minimum_diode(netlist, element)
+            });
         let has_qualified_level9_bsim3 = purpose.admits_default_level9_bsim3()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
@@ -51243,6 +51249,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_ekv26
             || has_qualified_diode
             || has_qualified_tbv_diode
+            || has_qualified_minimum_diode
             || has_qualified_level9_bsim3)
             && !Self::native_transient_uses_standard_startup(netlist)
         {
@@ -51446,6 +51453,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             netlist, element,
                         ) => {}
                 ElementKind::Diode { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_native_absolute_transient_minimum_diode(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Diode { .. }
                     if matches!(
                         purpose,
                         XyceStaticTranPlanPurpose::RelationalFamily
@@ -51458,7 +51470,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, and classic MOSFET models, exact IS-only and validated Level=2 TBV diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, and classic MOSFET models, exact IS-only, validated Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -56195,6 +56207,31 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     ) -> bool {
         netlist.options.gmin.is_none()
             && Self::netlist_element_is_native_xyce_level2_tbv_diode(netlist, element)
+    }
+
+    fn netlist_element_is_native_absolute_transient_minimum_diode(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        if netlist.options.gmin.is_some()
+            || (netlist.options.device_min_resistance.is_none()
+                && netlist.options.device_min_capacitance.is_none())
+        {
+            return false;
+        }
+        let ElementKind::Diode {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 2
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_relational_legacy_diode)
     }
 
     fn netlist_element_is_native_xyce_level2_tbv_diode(
@@ -85801,6 +85838,51 @@ D1 0 2 DMOD
             .expect("D1 element");
         assert!(
             XyceTestRunner::netlist_element_is_native_absolute_transient_tbv_diode(&netlist, diode)
+        );
+    }
+
+    #[test]
+    fn absolute_transient_contract_admits_device_minimum_legacy_diode() {
+        let netlist = XyceTestRunner::parse_xyce_netlist(
+            "\
+minimum diode defaults
+.options device minres=1 mincap=1n
+V1 in 0 1
+R1 in out 20
+D1 out 0 DMODA
+.model DMODA D (IS=100FA)
+.tran 1n 10n
+.print tran V(out)
+.end
+",
+            Path::new("minimum_diode_defaults.cir"),
+        )
+        .expect("device minimum diode deck parses");
+        let diode = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("D1"))
+            .expect("D1 element");
+        assert!(
+            XyceTestRunner::netlist_element_is_native_absolute_transient_minimum_diode(
+                &netlist, diode
+            )
+        );
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("device minimum diode deck is in the absolute transient envelope");
+
+        let mut without_minimums = netlist.clone();
+        without_minimums.options.device_min_resistance = None;
+        without_minimums.options.device_min_capacitance = None;
+        assert!(
+            !XyceTestRunner::netlist_element_is_native_absolute_transient_minimum_diode(
+                &without_minimums,
+                without_minimums
+                    .elements
+                    .iter()
+                    .find(|element| element.name.eq_ignore_ascii_case("D1"))
+                    .expect("D1 element"),
+            )
         );
     }
 

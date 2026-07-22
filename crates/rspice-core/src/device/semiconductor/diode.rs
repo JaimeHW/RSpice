@@ -514,6 +514,36 @@ impl Diode {
         self
     }
 
+    /// Apply Xyce device-level minimum defaults to model parameters that were
+    /// omitted from a legacy diode card.
+    ///
+    /// Xyce marks `RS` as `MIN_RES` and `CJO`/`CJSW` as `MIN_CAP` in its
+    /// parameter metadata.  The global `MINRES`/`MINCAP` values therefore
+    /// replace only the model-card defaults; an explicitly authored zero (or
+    /// any other finite value) remains authoritative.
+    pub fn apply_xyce_device_minimums(
+        &mut self,
+        min_resistance: Option<Value>,
+        min_capacitance: Option<Value>,
+        rs_given: bool,
+        cj0_given: bool,
+        sidewall_cj0_given: bool,
+    ) {
+        if !rs_given {
+            if let Some(value) = min_resistance.filter(|value| value.is_finite() && *value >= 0.0) {
+                self.rs = value;
+            }
+        }
+        if let Some(value) = min_capacitance.filter(|value| value.is_finite() && *value >= 0.0) {
+            if !cj0_given {
+                self.cj0 = value;
+            }
+            if !sidewall_cj0_given {
+                self.sidewall_cj0 = value;
+            }
+        }
+    }
+
     pub(crate) fn remap_nodes(&mut self, old_node_id: NodeId) {
         fn remap_node_id(id: NodeId, old_id: NodeId) -> NodeId {
             if id == old_id {
@@ -1291,5 +1321,23 @@ mod tests {
             (actual - expected).abs() <= expected.abs() * 1.0e-12,
             "reverse breakdown current {actual:e} does not match Xyce exponential {expected:e}"
         );
+    }
+
+    #[test]
+    fn xyce_device_minimum_defaults_only_fill_omitted_model_parameters() {
+        let mut diode = Diode::spice_defaults("d1".to_string(), 1, 2);
+        diode.apply_xyce_device_minimums(Some(1.0), Some(1.0e-9), false, false, false);
+        assert_eq!(diode.rs, 1.0);
+        assert_eq!(diode.cj0, 1.0e-9);
+        assert_eq!(diode.sidewall_cj0, 1.0e-9);
+
+        let mut explicit = Diode::spice_defaults("d2".to_string(), 1, 2);
+        explicit.rs = 5.0;
+        explicit.cj0 = 2.0e-12;
+        explicit.sidewall_cj0 = 3.0e-12;
+        explicit.apply_xyce_device_minimums(Some(1.0), Some(1.0e-9), true, true, true);
+        assert_eq!(explicit.rs, 5.0);
+        assert_eq!(explicit.cj0, 2.0e-12);
+        assert_eq!(explicit.sidewall_cj0, 3.0e-12);
     }
 }
