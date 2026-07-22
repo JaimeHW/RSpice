@@ -45618,6 +45618,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         )?,
                     ),
                 };
+                let actual = Self::quantize_dc_print_value(source, probe, actual)?;
                 let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
                     .get(&normalized_probe)
@@ -45842,6 +45843,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             },
                         ),
                     };
+                    let actual = Self::quantize_dc_print_value(source, probe, actual)?;
                     let normalized_probe = Self::normalize_probe(probe);
                     let tolerance = comp_tolerances
                         .get(&normalized_probe)
@@ -58046,6 +58048,90 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
     fn dc_print_output_requests(source: &str) -> Result<Vec<XycePrintOutputRequest>, String> {
         Self::print_output_requests(source, "DC")
+    }
+
+    fn dc_print_precision_for_probe(source: &str, probe: &str) -> Result<Option<usize>, String> {
+        let target = Self::normalize_probe(probe);
+        let mut matched_precision = None;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if !command.eq_ignore_ascii_case(".print") {
+                continue;
+            }
+
+            let tokens = Self::split_print_fields(&trimmed)?;
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            if token_refs
+                .get(1)
+                .is_none_or(|analysis| !analysis.eq_ignore_ascii_case("DC"))
+            {
+                continue;
+            }
+
+            let mut precision = None;
+            let mut probes = Vec::new();
+            let mut index = 2usize;
+            while index < token_refs.len() {
+                if let Some((raw_key, raw_value, consumed)) =
+                    Self::print_option_assignment(&token_refs, index)
+                {
+                    if raw_key.trim().eq_ignore_ascii_case("precision") {
+                        let value = raw_value.trim().trim_matches(['"', '\'']);
+                        let parsed = value.parse::<usize>().map_err(|err| {
+                            format!(
+                                ".PRINT DC PRECISION must be a positive integer, got '{value}': {err}"
+                            )
+                        })?;
+                        if !(1..=XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION).contains(&parsed) {
+                            return Err(format!(
+                                ".PRINT DC PRECISION must be between 1 and {XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION}, got {parsed}"
+                            ));
+                        }
+                        precision = Some(parsed);
+                    }
+                    index += consumed;
+                    continue;
+                }
+                let normalized = token_refs[index].to_ascii_lowercase();
+                if Self::is_print_option_token(&normalized) {
+                    index += 1;
+                    continue;
+                }
+                probes.push(Self::canonicalize_single_quoted_print_probe(
+                    token_refs[index],
+                )?);
+                index += 1;
+            }
+
+            if probes
+                .iter()
+                .any(|candidate| Self::normalize_probe(candidate) == target)
+            {
+                let effective = precision.unwrap_or(XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION);
+                if let Some(existing) = matched_precision
+                    && existing != effective
+                {
+                    return Err(format!(
+                        ".PRINT DC probe '{probe}' has conflicting PRECISION values {existing} and {effective}"
+                    ));
+                }
+                matched_precision = Some(effective);
+            }
+        }
+        Ok(matched_precision)
+    }
+
+    fn quantize_dc_print_value(source: &str, probe: &str, value: Value) -> Result<Value, String> {
+        match Self::dc_print_precision_for_probe(source, probe)? {
+            Some(precision) => Self::xyce_prn_scientific_roundtrip(value, precision),
+            None => Ok(value),
+        }
     }
 
     fn deck_has_print_analysis(&self, deck: &XyceDeck, analysis: &str) -> bool {
@@ -72121,6 +72207,26 @@ R3 1 0 {RVAL}
                 .map(str::to_string)
                 .collect(),
             }]
+        );
+    }
+
+    #[test]
+    fn dc_print_precision_quantizes_only_matching_probe_columns() {
+        let source = ".PRINT DC WIDTH=6 PRECISION=1 V(1) {IC(Q1+)}\n";
+        assert_eq!(
+            XyceTestRunner::dc_print_precision_for_probe(source, "{IC(Q1+)}")
+                .expect("matching DC probe precision parses"),
+            Some(1)
+        );
+        assert_eq!(
+            XyceTestRunner::quantize_dc_print_value(source, "{IC(Q1+)}", -0.010568018981775439)
+                .expect("matching DC probe quantizes"),
+            -0.011
+        );
+        assert_eq!(
+            XyceTestRunner::dc_print_precision_for_probe(source, "V(2)")
+                .expect("unmatched DC probe has no local precision"),
+            None
         );
     }
 
