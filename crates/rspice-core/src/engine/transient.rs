@@ -129,6 +129,46 @@ impl Engine {
         points
     }
 
+    /// Xyce restores OneStep history and drops to order one after a rejected
+    /// adaptive attempt.  A locked verification grid contains only accepted
+    /// points, so the rejected attempt is not directly represented.  A sharp
+    /// contraction of an interior accepted interval is the observable trace
+    /// of that restart; preserve it by solving that interval with the same
+    /// order-one companion.  The final interval is excluded because stopping
+    /// exactly at TSTOP is an ordinary endpoint clip, not a rejected step.
+    #[inline]
+    fn locked_grid_requires_xyce_order_restart(grid: &[Value], cursor: usize) -> bool {
+        if cursor < 2 || cursor + 1 >= grid.len() {
+            return false;
+        }
+        let previous_step = grid[cursor - 1] - grid[cursor - 2];
+        let current_step = grid[cursor] - grid[cursor - 1];
+        previous_step.is_finite()
+            && previous_step > 0.0
+            && current_step.is_finite()
+            && current_step > 0.0
+            && current_step < 0.75 * previous_step
+    }
+
+    /// Xyce IC capacitors use an operating-point-only branch unknown. Their
+    /// transient lead current is reconstructed by the time integrator from
+    /// the capacitor charge history, rather than being solved as an MNA
+    /// branch. RSpice keeps that current in the IC branch unknown, so the two
+    /// representations cannot be combined with OneStep's order-2 split
+    /// (which deliberately separates the static F and dynamic dQ/dt terms).
+    /// Retain the order-1 companion for every circuit containing an IC branch
+    /// until the solver has a single canonical representation for this state.
+    #[inline]
+    fn xyce_one_step_requires_order_one_for_ic_branch(
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .any(Option::is_some)
+    }
+
     fn derived_transient_branch_currents(
         circuit: &crate::circuit::CircuitData,
         existing_branch_names: &[String],
@@ -1998,6 +2038,11 @@ impl Engine {
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
         );
 
+        // Xyce OneStep carries the accepted physical static residual into its
+        // next order-2 transient step.  The vector is refreshed only after an
+        // accepted point so rejected Newton attempts never contaminate it.
+        let mut xyce_static_history: Option<Vec<Value>> = None;
+
         // Main transient loop
         let mut retry_count = 0;
         let mut total_iterations = 0;
@@ -2275,6 +2320,9 @@ impl Engine {
             );
             let current_method = current_integration_method(&trapgear);
             let locked_edge_order_reset = locked_edge_order && breakpoints.at_breakpoint(t);
+            let locked_reference_order_restart = locked_grid.as_ref().is_some_and(|grid| {
+                Self::locked_grid_requires_xyce_order_restart(grid, locked_cursor)
+            });
             // Resume is a breakpoint-style integration restart. The checkpoint
             // supplies the accepted solution but deliberately omits nonlinear
             // charge histories and their timestep provenance, so the first real
@@ -2295,9 +2343,19 @@ impl Engine {
                     trap_order,
                     (at_breakpoint
                         && Self::breakpoint_landing_forces_order_one(self.config.spice_dialect))
-                        || locked_edge_order_reset,
+                        || locked_edge_order_reset
+                        || locked_reference_order_restart,
                 )
             };
+            let xyce_one_step_order2 = self.config.spice_dialect == SpiceDialect::Xyce
+                && !Self::xyce_one_step_requires_order_one_for_ic_branch(&circuit)
+                && circuit.tlines.is_empty()
+                && circuit.coupled_tlines.is_empty()
+                && step_trap_order == 2
+                && matches!(
+                    current_method,
+                    IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
+                );
             if xyce_lte_restart_first_step {
                 lte_estimator.seed_restart_timestep(dt);
             }
@@ -2501,6 +2559,8 @@ impl Engine {
                 let newton_stamp_start = crate::time_compat::Instant::now();
                 let transient_system_context = residual::TransientSystemContext {
                     coeff: &coeff,
+                    xyce_one_step_order2,
+                    xyce_static_history: xyce_static_history.as_deref(),
                     bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     bjt_history: &bjt_history,
                     jfet_history: &jfet_history,
@@ -2989,6 +3049,8 @@ impl Engine {
                                     dt,
                                     &residual::TransientSystemContext {
                                         coeff: &coeff,
+                                        xyce_one_step_order2,
+                                        xyce_static_history: xyce_static_history.as_deref(),
                                         bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                                         bjt_history: &bjt_history,
                                         jfet_history: &jfet_history,
@@ -3131,6 +3193,8 @@ impl Engine {
                         dt,
                         &residual::TransientSystemContext {
                             coeff: &coeff,
+                            xyce_one_step_order2,
+                            xyce_static_history: xyce_static_history.as_deref(),
                             bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             bjt_history: &bjt_history,
                             jfet_history: &jfet_history,
@@ -3660,6 +3724,15 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                        xyce_static_history = Some(self.capture_xyce_static_residual(
+                            &mut circuit,
+                            &mut matrix,
+                            &solution,
+                            t,
+                            transient_baseline_diag_gmin,
+                        )?);
+                    }
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                         log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
                     }
@@ -4578,6 +4651,15 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                        xyce_static_history = Some(self.capture_xyce_static_residual(
+                            &mut circuit,
+                            &mut matrix,
+                            &solution,
+                            t,
+                            transient_baseline_diag_gmin,
+                        )?);
+                    }
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                         log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
                     }
@@ -4832,6 +4914,15 @@ impl Engine {
             }
 
             solution.clone_from(&new_solution);
+            if self.config.spice_dialect == SpiceDialect::Xyce {
+                xyce_static_history = Some(self.capture_xyce_static_residual(
+                    &mut circuit,
+                    &mut matrix,
+                    &solution,
+                    t,
+                    transient_baseline_diag_gmin,
+                )?);
+            }
 
             if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                 eprintln!(
@@ -5321,6 +5412,16 @@ mod tests {
             Engine::step_trapezoidal_order(IntegrationMethod::Trapezoidal, 2, true),
             1
         );
+    }
+
+    #[test]
+    fn xyce_locked_grid_restart_detects_interior_interval_contraction() {
+        let grid = [2.0, 6.0, 14.0, 24.0, 30.0, 40.0];
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 0));
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 1));
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 2));
+        assert!(Engine::locked_grid_requires_xyce_order_restart(&grid, 4));
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 5));
     }
 
     #[test]
