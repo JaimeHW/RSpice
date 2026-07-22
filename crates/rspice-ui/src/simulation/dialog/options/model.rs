@@ -288,7 +288,7 @@ impl SimulationOptions {
             ));
         }
 
-        if self.temp < -273.15 {
+        if self.temp <= -273.15 {
             errors.push(ValidationError::InvalidTemperature("temp", self.temp));
         }
         if self.tnom < -273.15 {

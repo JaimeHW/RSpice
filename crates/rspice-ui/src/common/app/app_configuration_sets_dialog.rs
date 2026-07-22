@@ -335,6 +335,7 @@ impl RSpiceApp {
                 &mut self.state.dialogs.configuration_sets,
                 &self.state.workspace,
                 &self.state.library_manager,
+                &self.state.model_library_manager,
                 &self.state.schematic,
                 write_allowed,
             );
@@ -514,6 +515,7 @@ impl RSpiceApp {
         crate::simulation::controller::prepared_run::expand_generated_dependencies(
             &generated,
             root.current_file.as_deref(),
+            &self.state.model_library_manager,
         )
         .map_err(|error| {
             format!("Configuration cannot be published because source sealing failed: {error}")
@@ -639,6 +641,7 @@ fn configuration_body(
     dialog: &mut ConfigurationSetsDialogState,
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
+    model_libraries: &crate::state::ModelLibraryManager,
     active_schematic: &crate::state::SchematicState,
     write_allowed: bool,
 ) -> BodyAction {
@@ -655,6 +658,7 @@ fn configuration_body(
             dialog,
             workspace,
             libraries,
+            model_libraries,
             active_schematic,
             write_allowed,
         ),
@@ -678,6 +682,7 @@ fn configuration_body(
             dialog,
             workspace,
             libraries,
+            model_libraries,
             active_schematic,
             write_allowed,
         ),
@@ -689,14 +694,20 @@ fn manager_body(
     dialog: &mut ConfigurationSetsDialogState,
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
+    model_libraries: &crate::state::ModelLibraryManager,
     active_schematic: &crate::state::SchematicState,
     write_allowed: bool,
 ) -> BodyAction {
     let mut action = BodyAction::None;
     let t = Tokens::get(ui.ctx());
     let dirty = dialog.dirty(&workspace.configuration_sets);
-    let selected_receipt =
-        selected_configuration_receipt(dialog, workspace, libraries, active_schematic);
+    let selected_receipt = selected_configuration_receipt(
+        dialog,
+        workspace,
+        libraries,
+        model_libraries,
+        active_schematic,
+    );
     Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(10, 6))
@@ -860,12 +871,14 @@ fn selected_configuration_receipt(
     dialog: &mut ConfigurationSetsDialogState,
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
+    model_libraries: &crate::state::ModelLibraryManager,
     active_schematic: &crate::state::SchematicState,
 ) -> Option<ConfigurationReceiptView> {
     let id = dialog.selected_id?;
     let key = configuration_receipt_cache_key(
         workspace,
         libraries,
+        model_libraries,
         active_schematic,
         id,
         dialog.draft.as_ref(),
@@ -878,6 +891,7 @@ fn selected_configuration_receipt(
     let value = configuration_receipt(
         workspace,
         libraries,
+        model_libraries,
         active_schematic,
         id,
         dialog.draft.as_ref(),
@@ -892,6 +906,7 @@ fn selected_configuration_receipt(
 fn configuration_receipt_cache_key(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
+    model_libraries: &crate::state::ModelLibraryManager,
     active_schematic: &crate::state::SchematicState,
     id: ConfigurationSetId,
     draft: Option<&ConfigurationSetDefinition>,
@@ -910,6 +925,9 @@ fn configuration_receipt_cache_key(
     digest.update(workspace.active_view.key());
     digest.update(active_schematic.topology_version().to_le_bytes());
     digest.update(libraries.revision().to_le_bytes());
+    if let Ok(bytes) = serde_json::to_vec(model_libraries) {
+        digest.update(bytes);
+    }
     let mut buffer_versions = workspace
         .schematic_buffers
         .iter()
@@ -930,6 +948,7 @@ fn configuration_receipt_cache_key(
 fn configuration_receipt(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
+    model_libraries: &crate::state::ModelLibraryManager,
     active_schematic: &crate::state::SchematicState,
     id: ConfigurationSetId,
     draft: Option<&ConfigurationSetDefinition>,
@@ -983,7 +1002,8 @@ fn configuration_receipt(
         )
     };
     let (netlist_digest, diagnostic) = if resolution.is_valid() {
-        match configuration_netlist_digest(&projected, libraries, active_schematic) {
+        match configuration_netlist_digest(&projected, libraries, active_schematic, model_libraries)
+        {
             Ok(digest) => (digest, None),
             Err(error) => {
                 status = "generation blocked".to_owned();
@@ -1047,6 +1067,7 @@ fn configuration_netlist_digest(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     active_schematic: &crate::state::SchematicState,
+    model_libraries: &crate::state::ModelLibraryManager,
 ) -> Result<String, String> {
     let projection = workspace
         .configuration_execution_projection(libraries, &workspace.active_view, active_schematic)
@@ -1067,6 +1088,7 @@ fn configuration_netlist_digest(
     let (source, _) = crate::simulation::controller::prepared_run::expand_generated_dependencies(
         &source,
         root.current_file.as_deref(),
+        model_libraries,
     )
     .map_err(|error| error.to_string())?;
     let digest = Sha256::digest(source.as_bytes());
@@ -1428,6 +1450,7 @@ fn binding_body(
     dialog: &mut ConfigurationSetsDialogState,
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
+    model_libraries: &crate::state::ModelLibraryManager,
     active_schematic: &crate::state::SchematicState,
     write_allowed: bool,
 ) -> BodyAction {
@@ -1448,8 +1471,13 @@ fn binding_body(
             action = BodyAction::Select(id);
             return action;
         }
-        let receipt =
-            selected_configuration_receipt(dialog, workspace, libraries, active_schematic);
+        let receipt = selected_configuration_receipt(
+            dialog,
+            workspace,
+            libraries,
+            model_libraries,
+            active_schematic,
+        );
         if let Some(receipt) = receipt.as_ref() {
             property_row(ui, "Validation", &receipt.status);
         }

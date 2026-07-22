@@ -107,7 +107,7 @@ impl SimulationController {
                 .map(|dependency| dependency.target())
                 .collect();
 
-            let spec = match self.build_manifest_preview_spec(instance.draft()) {
+            let spec = match self.build_manifest_preview_spec(state, instance.draft()) {
                 Ok(Some(spec)) => spec,
                 Ok(None) => match self
                     .build_analysis_spec_for_index(&projected_state, instance.kind().legacy_index())
@@ -210,38 +210,70 @@ impl SimulationController {
                             task.source_revision(),
                             task.config_digest(),
                             matches!(task.queued_analysis().spec, AnalysisSpec::Transient { .. }),
+                            matches!(task.queued_analysis().spec, AnalysisSpec::Pss { .. }),
+                            matches!(
+                                task.queued_analysis().spec,
+                                AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
+                            ),
                         ),
                     )
                 })
                 .collect::<HashMap<_, _>>();
             for task in &mut queue {
-                if !matches!(task.queued_analysis().spec, AnalysisSpec::Fourier { .. }) {
+                let required_kind = match task.queued_analysis().spec {
+                    AnalysisSpec::Fourier { .. } => Some(
+                        crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory,
+                    ),
+                    AnalysisSpec::Pss {
+                        method: PssMethod::Shooting,
+                        ..
+                    } => Some(
+                        crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed,
+                    ),
+                    AnalysisSpec::Pac
+                    | AnalysisSpec::Pxf
+                    | AnalysisSpec::Pnoise
+                    | AnalysisSpec::Pstb => {
+                        Some(crate::simulation::execution::ExecutionArtifactKind::PeriodicState)
+                    }
+                    _ => None,
+                };
+                let Some(required_kind) = required_kind else {
                     continue;
-                }
-                let transient_producers = task
+                };
+                let producers = task
                     .dependencies()
                     .iter()
                     .filter_map(|dependency| {
                         producer_identities
                             .get(dependency)
-                            .filter(|(_, _, transient)| *transient)
-                            .map(|(revision, config_digest, _)| {
-                                PreparedDependencyBinding::transient_trajectory(
-                                    *dependency,
-                                    *revision,
-                                    *config_digest,
-                                )
+                            .filter(|(_, _, transient, pss, op)| match required_kind {
+                                crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => *transient,
+                                crate::simulation::execution::ExecutionArtifactKind::PeriodicState => *pss,
+                                crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => *op,
+                            })
+                            .map(|(revision, config_digest, _, _, _)| {
+                                match required_kind {
+                                    crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => PreparedDependencyBinding::transient_trajectory(*dependency, *revision, *config_digest),
+                                    crate::simulation::execution::ExecutionArtifactKind::PeriodicState => PreparedDependencyBinding::periodic_state(*dependency, *revision, *config_digest),
+                                    crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => PreparedDependencyBinding::dc_operating_point_seed(*dependency, *revision, *config_digest),
+                                }
                             })
                     })
                     .collect::<Vec<_>>();
-                if transient_producers.len() != 1 {
+                if producers.len() != 1 {
                     errors.push(format!(
-                        "{} must bind exactly one prepared Transient task, found {}",
+                        "{} must bind exactly one prepared {} task, found {}",
                         task.queued_analysis().spec.run_type().display_name(),
-                        transient_producers.len()
+                        match required_kind {
+                            crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => "Transient",
+                            crate::simulation::execution::ExecutionArtifactKind::PeriodicState => "shooting PSS",
+                            crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => "operating point",
+                        },
+                        producers.len()
                     ));
                 } else {
-                    task.set_dependency_bindings(transient_producers);
+                    task.set_dependency_bindings(producers);
                 }
             }
             if errors.is_empty() {
@@ -383,6 +415,73 @@ fn invalid_saved_output_reports(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
+        let mut state = AppState::default();
+        state.sim_setup.reference_pvt.temperature_celsius = -40.0;
+        state.sim_setup.noise.output = "singleton_must_not_leak".to_owned();
+        state.sim_setup.ac.points = "777".to_owned();
+        let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let (noise, _) = plan.insert(AnalysisKind::Noise).expect("noise inserts");
+        plan.edit(noise, |draft| {
+            let AnalysisDraft::Noise(draft) = draft else {
+                panic!("noise draft")
+            };
+            draft.output = "V(out,ref)".to_owned();
+            draft.input = "VSTIM".to_owned();
+            draft.sweep = crate::simulation::config::NoiseSweepType::ExplicitFrequencyList;
+            draft.explicit_frequencies = "1, 5, 25".to_owned();
+            draft.contribution_detail = crate::simulation::config::NoiseContributionDetail::Top20;
+            draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::Disabled;
+        })
+        .expect("noise edits");
+        plan.bind_dependency(noise, AnalysisKind::OperatingPoint, op)
+            .expect("noise binds OP");
+
+        let controller = SimulationController::new();
+        let frozen = controller
+            .build_analysis_plan(&state)
+            .expect("plan freezes");
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources()
+            .expect("model sources seal");
+        let tasks = controller
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .expect("noise plan compiles");
+        let task = tasks
+            .iter()
+            .find(|task| task.instance_id() == noise)
+            .expect("noise task");
+        assert!(matches!(
+            &task.queued_analysis().spec,
+            AnalysisSpec::Noise {
+                output_node,
+                reference_node,
+                input_source,
+                explicit_frequencies: Some(frequencies),
+                contribution_detail: crate::simulation::config::NoiseContributionDetail::Top20,
+                integration_mode: crate::simulation::config::NoiseIntegrationMode::Disabled,
+                temperature,
+                ..
+            } if output_node == "out"
+                && reference_node == "ref"
+                && input_source == "VSTIM"
+                && frequencies == &[1.0, 5.0, 25.0]
+                && (*temperature - 233.15).abs() < 1.0e-12
+        ));
+        let Some(AnalysisConfig::Noise(config)) = &task.queued_analysis().config else {
+            panic!("noise config retained")
+        };
+        assert_eq!(config.output_node, "out");
+        assert_eq!(config.input_source, "VSTIM");
+        assert_eq!(config.num_points, 3);
+        assert!((config.temperature_kelvin - 233.15).abs() < 1.0e-12);
+    }
 
     #[test]
     fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks() {

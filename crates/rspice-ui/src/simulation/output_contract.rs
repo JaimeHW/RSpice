@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::analysis::calculator::{self, CalcValue};
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId};
+use crate::simulation::config::NoiseSweepType;
 use crate::simulation::execution::{analysis_kind_tag, content_digest};
 use crate::simulation::multi_run::{AnalysisRunType, AnalysisSpec, FrequencySweep};
 use crate::state::{
@@ -170,6 +171,38 @@ impl PreparedSavedOutput {
             selection_grid,
             digest,
         }))
+    }
+
+    /// Recompile this immutable contract for a deterministically derived
+    /// analysis identity. PVT expansion happens after plan outputs have been
+    /// prepared, so copying the old digest or identity would make the
+    /// expanded task fail authentication (or, worse, retain data under the
+    /// wrong analysis). The reconstructed authored contract deliberately uses
+    /// `AllCompatibleAnalyses`: selection was already proven when the original
+    /// prepared contract was created, and every derived task has the same OP
+    /// run type.
+    pub(in crate::simulation) fn rebind_analysis(
+        &self,
+        analysis_id: AnalysisInstanceId,
+        spec: &AnalysisSpec,
+    ) -> Result<Self, String> {
+        let output = SavedOutput {
+            id: self.output_id,
+            revision: self.output_revision,
+            kind: self.kind,
+            name: self.name.clone(),
+            source_expression: self.source_expression.clone(),
+            compatible_analyses: SavedOutputCompatibility::AllCompatibleAnalyses,
+            save_policy: self.policy,
+            stored_precision: self.precision,
+            streaming: self.streaming,
+        };
+        Self::prepare(&output, analysis_id, spec)?.ok_or_else(|| {
+            format!(
+                "saved output '{}' is incompatible with derived analysis {analysis_id}",
+                self.name
+            )
+        })
     }
 
     pub(in crate::simulation) const fn output_id(&self) -> SavedOutputId {
@@ -469,7 +502,7 @@ fn deterministic_sample_count(
         return Ok(intervals as u64 + 1);
     }
     let count = match spec {
-        AnalysisSpec::DcOp => Some(1_usize),
+        AnalysisSpec::DcOp { .. } => Some(1_usize),
         AnalysisSpec::DcSweep {
             start,
             stop,
@@ -565,13 +598,20 @@ fn deterministic_sample_count(
             start_freq,
             stop_freq,
             points_per_decade,
+            sweep,
+            explicit_frequencies,
             ..
-        } => frequency_point_count(
-            *start_freq,
-            *stop_freq,
-            *points_per_decade,
-            FrequencySweep::Decade,
-        ),
+        } => explicit_frequencies.as_ref().map(Vec::len).or_else(|| {
+            let sweep = match sweep {
+                NoiseSweepType::Decade => FrequencySweep::Decade,
+                NoiseSweepType::Octave => FrequencySweep::Octave,
+                NoiseSweepType::Linear => FrequencySweep::Linear,
+                NoiseSweepType::ExplicitFrequencyList | NoiseSweepType::Unsupported(_) => {
+                    return None;
+                }
+            };
+            frequency_point_count(*start_freq, *stop_freq, *points_per_decade, sweep)
+        }),
         AnalysisSpec::Reliability { target_years, .. } => Some(target_years.len()),
         _ => None,
     };

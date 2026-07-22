@@ -69,6 +69,7 @@ impl SimulationController {
                 time,
                 waveforms,
                 measurements,
+                ..
             } => {
                 self.invalidate_transient_post_views(state);
                 self.prime_transient_fft_source_selection(state);

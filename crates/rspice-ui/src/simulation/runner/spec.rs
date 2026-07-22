@@ -34,13 +34,6 @@ pub(super) fn run_spec_request(
         .validate_for_spec(&spec)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
 
-    if matches!(spec, AnalysisSpec::Noise { .. }) {
-        return Err(SimulationError::InvalidConfig(
-            "AnalysisSpec::Noise cannot be executed through the spec runner without losing input source, reference node, sweep type, and temperature; use AnalysisConfig::Noise instead"
-                .to_string(),
-        ));
-    }
-
     if let Some(config) = config::analysis_config_from_spec(&spec) {
         return bridge.run_with_abort_and_source_path(&config, netlist, source_path, abort_flag);
     }
@@ -73,7 +66,14 @@ pub(super) fn run_spec_request(
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Stb { .. }
-        | AnalysisSpec::Pstb => frequency::run_frequency_spec(spec, options, netlist, abort_flag),
+        | AnalysisSpec::Pstb => frequency::run_frequency_spec(
+            spec,
+            options,
+            netlist,
+            source_path,
+            dependencies,
+            abort_flag,
+        ),
         AnalysisSpec::Qpss { .. }
         | AnalysisSpec::Hbsp { .. }
         | AnalysisSpec::Hbnoise { .. }
@@ -86,7 +86,8 @@ pub(super) fn run_spec_request(
             "{} execution is unavailable in this engine build; the request was rejected before dispatch",
             spec.run_type().display_name()
         ))),
-        AnalysisSpec::DcOp
+        AnalysisSpec::LegacyDcOp
+        | AnalysisSpec::DcOp { .. }
         | AnalysisSpec::DcSweep { .. }
         | AnalysisSpec::Transient { .. }
         | AnalysisSpec::Ac { .. }
@@ -141,7 +142,7 @@ fn config_backed_spec_fallback_error(spec: &AnalysisSpec) -> SimulationError {
 
 fn config_backed_spec_name(spec: &AnalysisSpec) -> &'static str {
     match spec {
-        AnalysisSpec::DcOp => "AnalysisSpec::DcOp",
+        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => "AnalysisSpec::DcOp",
         AnalysisSpec::DcSweep { .. } => "AnalysisSpec::DcSweep",
         AnalysisSpec::Transient { .. } => "AnalysisSpec::Transient",
         AnalysisSpec::Ac { .. } => "AnalysisSpec::Ac",
@@ -162,7 +163,7 @@ pub(super) fn misrouted_spec_error(runner: &str, spec: &AnalysisSpec) -> Simulat
 
 fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
     match spec {
-        AnalysisSpec::DcOp => "AnalysisSpec::DcOp",
+        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => "AnalysisSpec::DcOp",
         AnalysisSpec::DcSweep { .. } => "AnalysisSpec::DcSweep",
         AnalysisSpec::Transient { .. } => "AnalysisSpec::Transient",
         AnalysisSpec::Ac { .. } => "AnalysisSpec::Ac",
@@ -291,7 +292,7 @@ R1 out 0 {rload}\n\
     }
 
     #[test]
-    fn spec_noise_request_rejects_lossy_config_fallback() {
+    fn exact_noise_spec_executes_without_live_setup_fallback() {
         let netlist = "noise spec fallback\n\
 V1 in 0 AC 1\n\
 R1 in out 1k\n\
@@ -302,9 +303,16 @@ R2 out 0 1k\n\
             &EngineBridge::new(),
             AnalysisSpec::Noise {
                 output_node: "out".to_string(),
+                reference_node: "0".to_string(),
+                input_source: "V1".to_string(),
                 start_freq: 1.0,
                 stop_freq: 1.0e6,
                 points_per_decade: 10,
+                sweep: crate::simulation::config::NoiseSweepType::Decade,
+                explicit_frequencies: None,
+                data_table_name: None,
+                contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
+                integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
                 temperature: 350.0,
             },
             SpecExecutionOptions::default(),
@@ -314,13 +322,7 @@ R2 out 0 1k\n\
             &rspice_core::abort_signal::NoAbort,
         );
 
-        match result {
-            Err(SimulationError::InvalidConfig(message)) => {
-                assert!(message.contains("AnalysisSpec::Noise"));
-                assert!(message.contains("AnalysisConfig::Noise"));
-            }
-            other => panic!("expected invalid config for lossy noise spec fallback, got {other:?}"),
-        }
+        assert!(matches!(result, Ok(SimulationResult::Noise { .. })));
     }
 
     #[test]
@@ -401,9 +403,16 @@ R2 out 0 1k\n\
         let mut specs = config_backed_specs();
         specs.push(AnalysisSpec::Noise {
             output_node: "out".to_string(),
+            reference_node: "0".to_string(),
+            input_source: "V1".to_string(),
             start_freq: 1.0,
             stop_freq: 1.0e6,
             points_per_decade: 10,
+            sweep: crate::simulation::config::NoiseSweepType::Decade,
+            explicit_frequencies: None,
+            data_table_name: None,
+            contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
+            integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
             temperature: 300.0,
         });
 
@@ -430,7 +439,7 @@ R2 out 0 1k\n\
             (
                 "sweep",
                 sweeps::run_sweep_spec(
-                    AnalysisSpec::DcOp,
+                    AnalysisSpec::dc_op(),
                     SpecExecutionOptions::default(),
                     "",
                     None,
@@ -441,7 +450,7 @@ R2 out 0 1k\n\
             (
                 "device",
                 device::run_device_spec(
-                    AnalysisSpec::DcOp,
+                    AnalysisSpec::dc_op(),
                     "",
                     None,
                     &rspice_core::abort_signal::NoAbort,
@@ -451,7 +460,7 @@ R2 out 0 1k\n\
             (
                 "periodic",
                 periodic::run_periodic_spec(
-                    AnalysisSpec::DcOp,
+                    AnalysisSpec::dc_op(),
                     "",
                     None,
                     &ResolvedExecutionDependencies::default(),
@@ -462,9 +471,11 @@ R2 out 0 1k\n\
             (
                 "frequency",
                 frequency::run_frequency_spec(
-                    AnalysisSpec::DcOp,
+                    AnalysisSpec::dc_op(),
                     SpecExecutionOptions::default(),
                     "",
+                    None,
+                    &ResolvedExecutionDependencies::default(),
                     &rspice_core::abort_signal::NoAbort,
                 ),
                 "AnalysisSpec::DcOp",
@@ -504,15 +515,19 @@ R2 out 0 1k\n\
             ),
             (
                 "periodic",
-                AnalysisSpec::Pss {
-                    fundamental_freq: 1.0e6,
-                    num_harmonics: 3,
-                    tolerance: 1.0e-6,
-                    max_iterations: 50,
-                    method: crate::simulation::multi_run::PssMethod::Shooting,
-                    oscillator_mode: false,
-                    oscillator_node: None,
-                    save_harmonics: true,
+                AnalysisSpec::HarmonicBalance {
+                    tones: vec![crate::simulation::multi_run::HbToneSpec::new(1.0e6, 3)],
+                    reltol: 1.0e-6,
+                    abstol: 1.0e-12,
+                    max_iterations: 40,
+                    damping: 0.7,
+                    oversample: 4,
+                    collocation_points: Some(7),
+                    max_mixing_order: 3,
+                    use_krylov: false,
+                    gmres_restart: 12,
+                    source_stepping: false,
+                    verbose: false,
                 },
             ),
             (
@@ -635,7 +650,7 @@ R2 out 0 1k\n\
 
     fn config_backed_specs() -> Vec<AnalysisSpec> {
         vec![
-            AnalysisSpec::DcOp,
+            AnalysisSpec::dc_op(),
             AnalysisSpec::DcSweep {
                 source_name: "V1".to_string(),
                 start: 0.0,

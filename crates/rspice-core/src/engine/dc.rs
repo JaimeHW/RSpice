@@ -6,6 +6,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
+use super::core::DcOpStartup;
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::resource::{ResourceKind, ResourceLimitError};
@@ -347,6 +348,56 @@ impl Engine {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        self.run_dc_op_with_startup_report_and_abort(netlist, DcOpStartup::Automatic, abort)
+    }
+
+    /// Run an exact DC operating point with `.IC` node values held as hard
+    /// equality constraints throughout the nonlinear solve.
+    pub fn run_dc_op_forced_ic_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        self.run_dc_op_with_startup_report_and_abort(
+            netlist,
+            DcOpStartup::ForceInitialConditions,
+            abort,
+        )
+    }
+
+    /// Use a caller-retained complete MNA solution as the explicit seed. The
+    /// seed is accepted only when its exact dimension matches this circuit;
+    /// callers must additionally bind it to their immutable netlist identity.
+    pub fn run_dc_op_with_previous_solution_and_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        previous_solution: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        self.run_dc_op_with_startup_report_and_abort(
+            netlist,
+            DcOpStartup::PreviousSolution(previous_solution),
+            abort,
+        )
+    }
+
+    /// Run from the exact all-zero MNA seed, bypassing automatic startup
+    /// hints while retaining normal Newton convergence checks.
+    pub fn run_dc_op_from_zero_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        self.run_dc_op_with_startup_report_and_abort(netlist, DcOpStartup::Zero, abort)
+    }
+
+    fn run_dc_op_with_startup_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        startup: DcOpStartup<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -356,6 +407,12 @@ impl Engine {
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
 
         if circuit.num_nodes() == 0 {
+            if force_initial_conditions {
+                return Err(SimulationError::Circuit(
+                    "forced .IC operating point requires at least one valid .IC node voltage"
+                        .to_owned(),
+                ));
+            }
             let result = Self::build_empty_dc_result();
             let report = crate::circuit::DeviceOpReport::default();
             engine.ensure_result_values(dc_result_value_count(&result, &report))?;
@@ -370,16 +427,19 @@ impl Engine {
 
         let mut matrix = matrix;
 
-        let solution = engine.solve_dc_operating_point_with_abort(
+        let solution = engine.solve_dc_operating_point_with_startup_and_abort(
             netlist,
             &mut circuit,
             &mut matrix,
+            startup,
             abort,
         )?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let solution = if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+        let solution = if !force_initial_conditions
+            && (circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty())
+        {
             engine
                 .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &solution)
                 .unwrap_or(solution)
@@ -981,6 +1041,76 @@ mod tests {
         assert!(
             (actual - expected).abs() <= 1.0e-10,
             "expected V({node})={expected:.17e}, got {actual:.17e}"
+        );
+    }
+
+    #[test]
+    fn forced_ic_fails_closed_for_an_empty_circuit() {
+        let netlist = Netlist::parse("empty\n.op\n.end\n").expect("deck parses");
+        let error = Engine::default()
+            .run_dc_op_forced_ic_with_report_and_abort(&netlist, &NoAbort)
+            .expect_err("force .IC must require an applied node voltage");
+        assert!(
+            error
+                .to_string()
+                .contains("requires at least one valid .IC node voltage"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn resolved_engine_preserves_explicit_temperature_over_deck_options() {
+        let netlist = Netlist::parse(
+            "authoritative temperature\n\
+             V1 drive 0 1\n\
+             R1 drive out 1k TC1=0.01\n\
+             R2 out 0 1k\n\
+             .options temp=25 tnom=25 reltol=1e-2\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.temperature = 125.0 + 273.15;
+        config.tolerance = 1.0e-7;
+        let engine = Engine::try_new_with_resolved_config(config).unwrap();
+        let (result, _) = engine
+            .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
+            .expect("explicit-temperature OP solves");
+        assert_voltage(&result, "out", 1.0 / 3.0);
+    }
+
+    #[test]
+    fn forced_ic_is_a_hard_constraint_and_skips_unconstrained_polish() {
+        let netlist = Netlist::parse(
+            "forced startup\n\
+             V1 in 0 10\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .ic V(out)=2\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let (result, _) = Engine::default()
+            .run_dc_op_forced_ic_with_report_and_abort(&netlist, &NoAbort)
+            .expect("forced .IC solve succeeds");
+        assert_voltage(&result, "out", 2.0);
+    }
+
+    #[test]
+    fn previous_state_requires_the_complete_exact_mna_dimension() {
+        let netlist =
+            Netlist::parse("prior state\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n")
+                .expect("deck parses");
+        let error = Engine::default()
+            .run_dc_op_with_previous_solution_and_report_and_abort(&netlist, &[0.5], &NoAbort)
+            .expect_err("partial state must not be silently padded");
+        assert!(
+            error
+                .to_string()
+                .contains("incompatible with the current circuit"),
+            "unexpected error: {error}"
         );
     }
 

@@ -123,56 +123,48 @@ fn acknowledge_canonical_dependencies(
     }
     .ok_or_else(|| "The active source has no canonical document identity.".to_owned())?;
 
-    #[cfg(target_arch = "wasm32")]
-    if (!dependencies_belong_to_generated_base && !document.include_directives().is_empty())
-        || !sealed.is_empty()
-    {
+    use std::collections::HashSet;
+
+    let source_origin = match state.ui.netlist.active_document {
+        crate::workbench::netlist_document::ActiveNetlistDocument::Generated => {
+            state.schematic.current_file.as_deref()
+        }
+        crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource => {
+            state.workspace.netlist_source_path.as_deref()
+        }
+        crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+    };
+    let root = source_origin.map(dependency_root_path).transpose()?;
+    let root_directory = root
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let root_directives = if dependencies_belong_to_generated_base {
+        external_dependency_locators(document.generated_artifact().source())
+    } else {
+        document
+            .include_directives()
+            .iter()
+            .map(|include| include.locator().to_owned())
+            .collect()
+    };
+    if !root_directives.is_empty() && root.is_none() {
         return Err(
-            "External dependency closure cannot be sealed without an authorized browser source bundle."
-                .to_owned(),
-        );
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use std::collections::HashSet;
-
-        let root = state
-            .workspace
-            .netlist_source_path
-            .as_deref()
-            .map(absolute_dependency_path)
-            .transpose()?;
-        let root_directory = root
-            .as_deref()
-            .and_then(std::path::Path::parent)
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let root_directives = if dependencies_belong_to_generated_base {
-            external_dependency_locators(document.generated_artifact().source())
-        } else {
-            document
-                .include_directives()
-                .iter()
-                .map(|include| include.locator().to_owned())
-                .collect()
-        };
-        if !root_directives.is_empty() && root.is_none() {
-            return Err(
-                "External dependencies require a native source origin before their closure can be retained."
+                "External dependencies require an imported source origin before their closure can be retained."
                     .to_owned(),
             );
-        }
+    }
 
-        let mut dependencies = Vec::with_capacity(sealed.len());
-        let mut edges = HashSet::new();
-        let mut direct_cursor = 0usize;
-        for dependency in sealed {
-            let resolved = dependency.resolved_path();
-            let locator = dependency_locator(resolved, root_directory, dependency.source())?;
-            let owner = dependency.owner_path();
-            let source = dependency.source().as_bytes().to_vec();
-            if root.as_deref() == Some(owner) {
-                let index = root_directives
+    let mut dependencies = Vec::with_capacity(sealed.len());
+    let mut edges = HashSet::new();
+    let mut direct_cursor = 0usize;
+    for dependency in sealed {
+        let resolved = dependency.resolved_path();
+        let locator = dependency_locator(resolved, root_directory, dependency.source())?;
+        let owner = dependency.owner_path();
+        let source = dependency.source().as_bytes().to_vec();
+        if root.as_deref() == Some(owner) {
+            let index = root_directives
                     .iter()
                     .enumerate()
                     .skip(direct_cursor)
@@ -185,74 +177,73 @@ fn acknowledge_canonical_dependencies(
                             dependency.requested_path()
                         )
                     })?;
-                direct_cursor = index + 1;
-                if !edges.insert((None, index)) {
-                    continue;
-                }
-                let record =
-                    crate::workbench::code_workspace::DependencyMetadata::unresolved_direct_to(
-                        index,
-                        dependency.requested_path(),
-                        locator,
-                    )
-                    .and_then(|record| record.resolve_utf8(source))
-                    .map_err(|error| error.to_string())?;
-                dependencies.push(record);
-            } else {
-                let parent_source = sealed
-                    .iter()
-                    .find(|candidate| candidate.resolved_path() == owner)
-                    .map(rspice_core::netlist::ResolvedIncludeDependency::source)
-                    .ok_or_else(|| {
-                        format!(
-                            "Resolved dependency parent '{}' is absent from the sealed closure.",
-                            owner.display()
-                        )
-                    })?;
-                let index =
-                    external_dependency_index_at_line(parent_source, dependency.directive_line())?;
-                let parent = dependency_locator(owner, root_directory, parent_source)?;
-                let parent_key = parent.logical_identity().to_owned();
-                if !edges.insert((Some(parent_key), index)) {
-                    continue;
-                }
-                let record =
-                    crate::workbench::code_workspace::DependencyMetadata::unresolved_transitive_to(
-                        parent,
-                        index,
-                        dependency.requested_path(),
-                        locator,
-                    )
-                    .and_then(|record| record.resolve_utf8(source))
-                    .map_err(|error| error.to_string())?;
-                dependencies.push(record);
+            direct_cursor = index + 1;
+            if !edges.insert((None, index)) {
+                continue;
             }
-        }
-
-        if dependencies_belong_to_generated_base {
-            let backing = document.generated_artifact();
-            let next = crate::workbench::code_workspace::GeneratedArtifact::try_from_utf8(
-                backing.provenance().clone(),
-                backing.source_bytes().to_vec(),
-                dependencies,
-                backing.source_map().to_vec(),
-            )
-            .map_err(|error| error.to_string())?;
-            if !next.dependency_graph_is_sealed() {
-                return Err(
-                    "The retained generated-base dependency graph is not fully sealed.".to_owned(),
-                );
-            }
-            document
-                .update_generated_artifact(backing.content_digest(), next)
+            let record =
+                crate::workbench::code_workspace::DependencyMetadata::unresolved_direct_to(
+                    index,
+                    dependency.requested_path(),
+                    locator,
+                )
+                .and_then(|record| record.resolve_utf8(source))
                 .map_err(|error| error.to_string())?;
+            dependencies.push(record);
         } else {
-            document
-                .acknowledge_dependencies(document.content_digest(), dependencies)
-                .map_err(|error| error.to_string())?;
-            if !document.dependency_graph_is_sealed() {
-                return Err("The canonical dependency graph is not fully sealed.".to_owned());
+            let parent_source = sealed
+                .iter()
+                .find(|candidate| candidate.resolved_path() == owner)
+                .map(rspice_core::netlist::ResolvedIncludeDependency::source)
+                .ok_or_else(|| {
+                    format!(
+                        "Resolved dependency parent '{}' is absent from the sealed closure.",
+                        owner.display()
+                    )
+                })?;
+            let index =
+                external_dependency_index_at_line(parent_source, dependency.directive_line())?;
+            let parent = dependency_locator(owner, root_directory, parent_source)?;
+            let parent_key = parent.logical_identity().to_owned();
+            if !edges.insert((Some(parent_key), index)) {
+                continue;
             }
+            let record =
+                crate::workbench::code_workspace::DependencyMetadata::unresolved_transitive_to(
+                    parent,
+                    index,
+                    dependency.requested_path(),
+                    locator,
+                )
+                .and_then(|record| record.resolve_utf8(source))
+                .map_err(|error| error.to_string())?;
+            dependencies.push(record);
+        }
+    }
+
+    if dependencies_belong_to_generated_base {
+        let backing = document.generated_artifact();
+        let next = crate::workbench::code_workspace::GeneratedArtifact::try_from_utf8(
+            backing.provenance().clone(),
+            backing.source_bytes().to_vec(),
+            dependencies,
+            backing.source_map().to_vec(),
+        )
+        .map_err(|error| error.to_string())?;
+        if !next.dependency_graph_is_sealed() {
+            return Err(
+                "The retained generated-base dependency graph is not fully sealed.".to_owned(),
+            );
+        }
+        document
+            .update_generated_artifact(backing.content_digest(), next)
+            .map_err(|error| error.to_string())?;
+    } else {
+        document
+            .acknowledge_dependencies(document.content_digest(), dependencies)
+            .map_err(|error| error.to_string())?;
+        if !document.dependency_graph_is_sealed() {
+            return Err("The canonical dependency graph is not fully sealed.".to_owned());
         }
     }
 
@@ -264,16 +255,29 @@ fn acknowledge_canonical_dependencies(
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn absolute_dependency_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    let joined = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("Could not resolve dependency origin: {error}"))?
-            .join(path)
-    };
-    Ok(joined.canonicalize().unwrap_or(joined))
+fn dependency_root_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if crate::state::model_library::is_portable_absolute_path(path) {
+            return Ok(path.to_path_buf());
+        }
+        return Err(format!(
+            "Browser dependency origin must retain an absolute portable identity: {}",
+            path.display()
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let joined = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|error| format!("Could not resolve dependency origin: {error}"))?
+                .join(path)
+        };
+        Ok(joined.canonicalize().unwrap_or(joined))
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -299,7 +303,22 @@ fn dependency_locator(
         .map_err(|error| error.to_string())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
+fn dependency_locator(
+    path: &std::path::Path,
+    _root_directory: &std::path::Path,
+    _source: &str,
+) -> Result<crate::workbench::code_workspace::SourceLocator, String> {
+    let identity = path.to_string_lossy().replace('\\', "/");
+    let display = identity
+        .rsplit('/')
+        .find(|segment| !segment.is_empty())
+        .unwrap_or("dependency.sp")
+        .to_owned();
+    crate::workbench::code_workspace::SourceLocator::try_new(identity, display)
+        .map_err(|error| error.to_string())
+}
+
 fn external_dependency_index_at_line(source: &str, line: usize) -> Result<usize, String> {
     let mut index = 0usize;
     for (zero_line, raw) in source.lines().enumerate() {
@@ -319,7 +338,6 @@ fn external_dependency_index_at_line(source: &str, line: usize) -> Result<usize,
     ))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn external_dependency_locators(source: &str) -> Vec<String> {
     source
         .lines()

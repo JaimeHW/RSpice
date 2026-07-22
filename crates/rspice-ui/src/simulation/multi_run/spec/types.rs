@@ -1,3 +1,8 @@
+use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
+use crate::simulation::dialog::{
+    OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy, OpInitialGuess, OpNodeInitialization,
+    OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+};
 use crate::simulation::multi_run::FrequencySweep;
 use serde::{Deserialize, Serialize};
 
@@ -42,12 +47,24 @@ pub enum EnvelopeExtractionPath {
     Preview,
 }
 
-const fn default_pss_max_iterations() -> usize {
-    50
+fn default_pss_tone_sources() -> Vec<String> {
+    vec!["VIN_DIFF".to_owned()]
+}
+
+const fn default_pss_stabilization_cycles() -> usize {
+    20
+}
+
+const fn default_pss_shooting_points() -> usize {
+    512
 }
 
 const fn default_true() -> bool {
     true
+}
+
+fn default_noise_reference_node() -> String {
+    "0".to_owned()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -144,8 +161,29 @@ impl HbToneSpec {
 /// This removes hidden/default execution parameters from the run executor.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AnalysisSpec {
-    /// DC operating point
-    DcOp,
+    /// Compatibility representation written by plans before OP acquired its
+    /// typed eight-field payload. Current code never emits this variant and
+    /// executes it with the exact current default contract.
+    #[serde(rename = "DcOp")]
+    LegacyDcOp,
+    /// DC operating point with an exact solve and retention contract.
+    #[serde(rename = "DcOpConfigured")]
+    DcOp {
+        temperature_mode: OpTemperatureMode,
+        temperature_celsius: f64,
+        initial_guess: OpInitialGuess,
+        node_initialization: OpNodeInitialization,
+        homotopy: OpHomotopy,
+        annotation: OpAnnotation,
+        device_detail: OpDeviceDetail,
+        save_device_op: OpSaveDevice,
+        accuracy: OpAccuracy,
+        selected_devices: Vec<String>,
+        previous_state: Option<OpPreviousState>,
+        violation_devices: Vec<String>,
+        violation_source_content_digest: Option<crate::product::ContentDigest>,
+        run_point: OpRunPointContext,
+    },
     /// DC sweep
     DcSweep {
         source_name: String,
@@ -188,31 +226,62 @@ pub enum AnalysisSpec {
     /// Noise analysis
     Noise {
         output_node: String,
+        /// Exact differential-output reference. Legacy specifications default
+        /// to canonical ground; no live UI singleton is consulted.
+        #[serde(default = "default_noise_reference_node")]
+        reference_node: String,
+        /// Independent source used to normalize input-referred density.
+        /// Empty legacy values deliberately fail validation instead of being
+        /// guessed from mutable setup state.
+        #[serde(default)]
+        input_source: String,
         start_freq: f64,
         stop_freq: f64,
         points_per_decade: usize,
+        /// Exact selected sweep mode, including explicit-list mode.
+        #[serde(default)]
+        sweep: NoiseSweepType,
+        /// Exact authored axis when `sweep` is explicit-list.
+        #[serde(default)]
+        explicit_frequencies: Option<Vec<f64>>,
+        /// Named `.DATA` table for imported manual decks. The table remains
+        /// bound to the immutable source while the resolved axis is retained
+        /// above for validation and identity.
+        #[serde(default)]
+        data_table_name: Option<String>,
+        #[serde(default)]
+        contribution_detail: NoiseContributionDetail,
+        #[serde(default)]
+        integration_mode: NoiseIntegrationMode,
         temperature: f64,
     },
     /// Periodic steady-state
     Pss {
-        fundamental_freq: f64,
-        num_harmonics: usize,
-        tolerance: f64,
-        /// Maximum nonlinear solve iterations.
-        #[serde(default = "default_pss_max_iterations")]
-        max_iterations: usize,
-        /// Requested numerical formulation.
+        /// Numerical mode. Only authenticated shooting is accepted; the HB
+        /// variant exists solely to reject legacy HB-PSS state explicitly.
         #[serde(default)]
         method: PssMethod,
+        fundamental_freq: f64,
+        /// Exact named periodic large-signal sources.
+        #[serde(default = "default_pss_tone_sources")]
+        tone_sources: Vec<String>,
+        /// Settling periods before the shooting solve.
+        #[serde(default = "default_pss_stabilization_cycles")]
+        tstab_periods: usize,
+        /// Shooting waveform samples per period.
+        #[serde(default = "default_pss_shooting_points")]
+        points_per_period: usize,
+        /// Relative periodicity tolerance.
+        #[serde(alias = "period_tolerance")]
+        tolerance: f64,
         /// Whether the fundamental is an oscillator-period initial guess.
         #[serde(default)]
         oscillator_mode: bool,
         /// Oscillator waveform used for period detection in autonomous mode.
         #[serde(default)]
         oscillator_node: Option<String>,
-        /// Preserve computed harmonics in the service result.
-        #[serde(default = "default_true")]
-        save_harmonics: bool,
+        /// Numeric harmonic retention count. Zero retains no spectrum.
+        num_harmonics: usize,
     },
     /// Harmonic balance
     HarmonicBalance {
@@ -464,6 +533,72 @@ pub enum AnalysisSpec {
         include_mismatch: bool,
         normalized_contributions: bool,
     },
+}
+
+impl AnalysisSpec {
+    /// Canonical fresh operating-point request used by imported `.OP` decks.
+    #[must_use]
+    pub fn dc_op() -> Self {
+        let config = crate::simulation::dialog::OpConfig::default();
+        Self::DcOp {
+            temperature_mode: config.temperature_mode,
+            temperature_celsius: config.temperature_celsius,
+            initial_guess: config.initial_guess,
+            node_initialization: config.node_initialization,
+            homotopy: config.homotopy,
+            annotation: config.annotation,
+            device_detail: config.device_detail,
+            save_device_op: config.save_device_op,
+            accuracy: config.accuracy,
+            selected_devices: config.selected_devices,
+            previous_state: config.previous_state,
+            violation_devices: config.violation_devices,
+            violation_source_content_digest: config.violation_source_content_digest,
+            run_point: config.run_point,
+        }
+    }
+}
+
+#[cfg(test)]
+mod operating_point_serde_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_unit_operating_point_plan_migrates_without_guessing_fields() {
+        let legacy: AnalysisSpec = serde_json::from_str("\"DcOp\"").expect("legacy unit OP");
+        assert_eq!(legacy, AnalysisSpec::LegacyDcOp);
+        assert_eq!(
+            legacy.run_type(),
+            crate::simulation::multi_run::AnalysisRunType::DcOp
+        );
+
+        let current = AnalysisSpec::dc_op();
+        let encoded = serde_json::to_string(&current).expect("current OP serializes");
+        assert!(encoded.contains("DcOpConfigured"));
+        assert_eq!(
+            serde_json::from_str::<AnalysisSpec>(&encoded).unwrap(),
+            current
+        );
+    }
+
+    #[test]
+    fn legacy_noise_spec_is_retained_but_fails_closed_without_input_identity() {
+        let legacy = r#"{"Noise":{"output_node":"out","start_freq":1.0,"stop_freq":1000.0,"points_per_decade":10,"temperature":300.15}}"#;
+        let decoded: AnalysisSpec =
+            serde_json::from_str(legacy).expect("legacy noise spec decodes");
+        assert!(matches!(
+            &decoded,
+            AnalysisSpec::Noise {
+                reference_node,
+                input_source,
+                sweep: NoiseSweepType::Decade,
+                contribution_detail: NoiseContributionDetail::Top50,
+                integration_mode: NoiseIntegrationMode::Enabled,
+                ..
+            } if reference_node == "0" && input_source.is_empty()
+        ));
+        assert!(decoded.validate().is_err());
+    }
 }
 
 /// Retained transfer-gain normalization policy.

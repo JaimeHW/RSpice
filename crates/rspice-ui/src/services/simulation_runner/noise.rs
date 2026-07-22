@@ -359,7 +359,8 @@ mod tests {
     }
 
     const NOISY_DIVIDER_DECK: &str = "\
-V1 in 0 DC 1
+Noisy divider
+V1 in 0 DC 1 AC 1
 R1 in out 1k
 R2 out 0 1k
 .end

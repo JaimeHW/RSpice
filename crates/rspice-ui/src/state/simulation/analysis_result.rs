@@ -29,6 +29,7 @@ pub enum AnalysisResultSourceDomain {
 pub struct AnalysisResultProvenance {
     source_domain: AnalysisResultSourceDomain,
     source_instance_id: AnalysisInstanceId,
+    authored_source_instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     prepared_snapshot_digest: ContentDigest,
     dependency_ids: Vec<AnalysisInstanceId>,
@@ -60,6 +61,24 @@ impl AnalysisResultProvenance {
         prepared_snapshot_digest: ContentDigest,
         dependency_ids: Vec<AnalysisInstanceId>,
     ) -> Result<Self, String> {
+        Self::new_with_authored_source_domain(
+            source_domain,
+            source_instance_id,
+            source_instance_id,
+            source_revision,
+            prepared_snapshot_digest,
+            dependency_ids,
+        )
+    }
+
+    pub fn new_with_authored_source_domain(
+        source_domain: AnalysisResultSourceDomain,
+        source_instance_id: AnalysisInstanceId,
+        authored_source_instance_id: AnalysisInstanceId,
+        source_revision: ObjectRevision,
+        prepared_snapshot_digest: ContentDigest,
+        dependency_ids: Vec<AnalysisInstanceId>,
+    ) -> Result<Self, String> {
         let mut unique_dependencies = HashSet::with_capacity(dependency_ids.len());
         for dependency_id in &dependency_ids {
             if *dependency_id == source_instance_id {
@@ -77,6 +96,7 @@ impl AnalysisResultProvenance {
         Ok(Self {
             source_domain,
             source_instance_id,
+            authored_source_instance_id,
             source_revision,
             prepared_snapshot_digest,
             dependency_ids,
@@ -91,6 +111,13 @@ impl AnalysisResultProvenance {
     #[must_use]
     pub const fn source_instance_id(&self) -> AnalysisInstanceId {
         self.source_instance_id
+    }
+
+    /// Stable plan identity that authored this result. It differs from the
+    /// execution identity for deterministically expanded PVT points.
+    #[must_use]
+    pub const fn authored_source_instance_id(&self) -> AnalysisInstanceId {
+        self.authored_source_instance_id
     }
 
     #[must_use]
@@ -137,7 +164,7 @@ pub struct NoiseContributorRow {
     /// Device instance name.
     pub device: String,
     /// Noise mechanism label ("thermal", "flicker", "shot", "burst").
-    pub mechanism: &'static str,
+    pub mechanism: String,
     /// Output-referred noise power integrated over the band (V²).
     pub power: f64,
     /// Share of the total integrated output noise (percent).
@@ -151,8 +178,12 @@ pub struct NoiseContributorRow {
 pub struct NoiseSummary {
     /// Contributors, ranked by integrated power, descending.
     pub rows: Vec<NoiseContributorRow>,
-    /// Total integrated output noise over the band (V rms).
-    pub total_rms: f64,
+    /// Total integrated output noise over the band (V rms). `None` means the
+    /// selected execution policy intentionally omitted this evidence.
+    pub total_rms: Option<f64>,
+    /// Total integrated input-referred noise (V rms), retained only when the
+    /// named-source normalization was validated and the policy requested it.
+    pub input_rms: Option<f64>,
     /// Analysis band, for the panel header (Hz).
     pub band: (f64, f64),
 }
@@ -397,6 +428,74 @@ pub enum TransferFunctionAccuracyEvidence {
     Robust,
 }
 
+macro_rules! op_evidence_enum {
+    ($name:ident { $($variant:ident),+ $(,)? }) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name { $($variant),+ }
+    };
+}
+
+op_evidence_enum!(OperatingPointTemperatureEvidence {
+    PvtRunSet,
+    Nominal27C,
+    Explicit,
+    ActiveRunSetAxis
+});
+op_evidence_enum!(OperatingPointInitialGuessEvidence {
+    Automatic,
+    PreviousConverged,
+    UserNodeVoltages,
+    ZeroState
+});
+op_evidence_enum!(OperatingPointNodeInitializationEvidence {
+    UseIcAndNodeset,
+    IgnoreIcAndNodeset,
+    ForceIcValues,
+    ValidateOnly
+});
+op_evidence_enum!(OperatingPointHomotopyEvidence {
+    Adaptive,
+    SourceStepping,
+    GminStepping,
+    PseudoTransient,
+    None
+});
+op_evidence_enum!(OperatingPointAnnotationEvidence {
+    VoltagesAndCurrents,
+    VoltagesOnly,
+    VoltagesAndDeviceOp,
+    None
+});
+op_evidence_enum!(OperatingPointDeviceDetailEvidence {
+    SelectedAndViolations,
+    AllDevices,
+    ViolationsOnly,
+    None
+});
+op_evidence_enum!(OperatingPointSaveDeviceEvidence {
+    Enabled,
+    Disabled,
+    FinalPointOnly
+});
+op_evidence_enum!(OperatingPointAccuracyEvidence {
+    Fast,
+    Balanced,
+    Accurate,
+    Robust
+});
+op_evidence_enum!(OperatingPointProcessEvidence { TT, SS, FF, SF, FS });
+
+impl Default for OperatingPointProcessEvidence {
+    fn default() -> Self {
+        Self::TT
+    }
+}
+
+const fn default_op_run_point_count() -> u64 {
+    1
+}
+
 /// Immutable, analysis-native result evidence that is neither waveform data
 /// nor presentation state.
 ///
@@ -406,6 +505,44 @@ pub enum TransferFunctionAccuracyEvidence {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AnalysisResultPayload {
+    OperatingPoint {
+        temperature_mode: OperatingPointTemperatureEvidence,
+        temperature_celsius: f64,
+        initial_guess: OperatingPointInitialGuessEvidence,
+        node_initialization: OperatingPointNodeInitializationEvidence,
+        homotopy: OperatingPointHomotopyEvidence,
+        annotation: OperatingPointAnnotationEvidence,
+        device_detail: OperatingPointDeviceDetailEvidence,
+        save_device_op: OperatingPointSaveDeviceEvidence,
+        accuracy: OperatingPointAccuracyEvidence,
+        selected_devices: Vec<String>,
+        #[serde(default)]
+        violation_devices: Vec<String>,
+        #[serde(default)]
+        violation_source_content_digest: Option<crate::product::ContentDigest>,
+        validated_startup_directives: u64,
+        #[serde(default)]
+        mna_node_names: Vec<String>,
+        #[serde(default)]
+        mna_branch_names: Vec<String>,
+        #[serde(default)]
+        mna_solution: Vec<f64>,
+        /// Exact executable source plus voltage-corner mutation that produced
+        /// this state. Absent only on legacy retained results, which are not
+        /// eligible for Previous-converged startup.
+        #[serde(default)]
+        effective_source_content_digest: Option<crate::product::ContentDigest>,
+        #[serde(default)]
+        run_point_index: u64,
+        #[serde(default = "default_op_run_point_count")]
+        run_point_count: u64,
+        #[serde(default)]
+        run_point_process: OperatingPointProcessEvidence,
+        #[serde(default)]
+        run_point_supply_voltage: Option<f64>,
+        #[serde(default)]
+        run_point_nominal_supply_voltage: Option<f64>,
+    },
     PoleZero {
         poles: Vec<ComplexResultValue>,
         zeros: Vec<ComplexResultValue>,
@@ -449,6 +586,81 @@ impl AnalysisResultPayload {
     /// Validate exact retained evidence against the analysis that owns it.
     pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
         match self {
+            Self::OperatingPoint {
+                temperature_celsius,
+                selected_devices,
+                violation_devices,
+                violation_source_content_digest,
+                mna_node_names,
+                mna_branch_names,
+                mna_solution,
+                effective_source_content_digest: _,
+                run_point_index,
+                run_point_count,
+                run_point_supply_voltage,
+                run_point_nominal_supply_voltage,
+                ..
+            } => {
+                if analysis_type != AnalysisType::DcOp {
+                    return Err(format!(
+                        "operating-point payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                if !temperature_celsius.is_finite() || *temperature_celsius <= -273.15 {
+                    return Err("operating-point payload has an invalid temperature".to_owned());
+                }
+                if selected_devices.iter().any(|name| {
+                    name.is_empty() || name.trim() != name || name.chars().any(char::is_whitespace)
+                }) || selected_devices.windows(2).any(|pair| pair[0] >= pair[1])
+                {
+                    return Err(
+                        "operating-point selected devices are not canonical sorted identities"
+                            .to_owned(),
+                    );
+                }
+                if violation_devices.iter().any(|name| {
+                    name.is_empty() || name.trim() != name || name.chars().any(char::is_whitespace)
+                }) || violation_devices.windows(2).any(|pair| pair[0] >= pair[1])
+                {
+                    return Err(
+                        "operating-point violation devices are not canonical sorted identities"
+                            .to_owned(),
+                    );
+                }
+                if violation_devices.is_empty() != violation_source_content_digest.is_none() {
+                    return Err(
+                        "operating-point SOA devices are missing their source identity".to_owned(),
+                    );
+                }
+                let ordered_len = mna_node_names.len().saturating_add(mna_branch_names.len());
+                if (!mna_solution.is_empty() && ordered_len != mna_solution.len())
+                    || mna_solution.iter().any(|value| !value.is_finite())
+                    || mna_node_names
+                        .iter()
+                        .chain(mna_branch_names)
+                        .any(|name| name.is_empty() || name.trim() != name)
+                {
+                    return Err(
+                        "operating-point retained MNA state is incomplete or invalid".to_owned(),
+                    );
+                }
+                if *run_point_count == 0 || *run_point_index >= *run_point_count {
+                    return Err("operating-point retained run-point position is invalid".to_owned());
+                }
+                match (run_point_supply_voltage, run_point_nominal_supply_voltage) {
+                    (None, None) => {}
+                    (Some(supply), Some(nominal))
+                        if supply.is_finite()
+                            && *supply > 0.0
+                            && nominal.is_finite()
+                            && *nominal > 0.0 => {}
+                    _ => {
+                        return Err(
+                            "operating-point retained PVT supply evidence is invalid".to_owned()
+                        );
+                    }
+                }
+            }
             Self::PoleZero { poles, zeros, gain } => {
                 if analysis_type != AnalysisType::PoleZero {
                     return Err(format!(
@@ -793,7 +1005,7 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::PoleZero { .. } | Self::Sensitivity { .. } => true,
+            Self::OperatingPoint { .. } | Self::PoleZero { .. } | Self::Sensitivity { .. } => true,
             Self::ScalarMeasurements { values } => !values.is_empty(),
             Self::TransferFunction {
                 gain,
@@ -1178,6 +1390,12 @@ pub struct AnalysisResult {
 }
 
 impl AnalysisResult {
+    /// Exact prepared-task provenance for current retained results.
+    #[must_use]
+    pub fn provenance(&self) -> Option<&AnalysisResultProvenance> {
+        self.provenance.as_ref()
+    }
+
     /// Create a new successful analysis result
     pub fn new(id: u64, analysis_type: AnalysisType, label: impl Into<String>) -> Self {
         Self {
@@ -1247,9 +1465,11 @@ impl AnalysisResult {
 
     /// Attach the ranked noise-contributor summary.
     pub fn with_noise_summary(mut self, summary: NoiseSummary) -> Self {
-        if !summary.rows.is_empty() {
-            self.noise_summary = Some(summary);
-        }
+        // An empty contributor table is meaningful for the `SummaryOnly`
+        // retention policy. The integrated totals and exact analysis band are
+        // still authoritative result evidence and must survive conversion and
+        // project persistence even when individual contributors were omitted.
+        self.noise_summary = Some(summary);
         self
     }
 
@@ -1455,6 +1675,20 @@ impl AnalysisResult {
 #[cfg(test)]
 mod retained_payload_tests {
     use super::*;
+
+    #[test]
+    fn summary_only_noise_retains_integrated_totals_without_contributor_rows() {
+        let summary = NoiseSummary {
+            rows: Vec::new(),
+            total_rms: Some(2.5e-6),
+            input_rms: Some(1.25e-6),
+            band: (10.0, 1.0e6),
+        };
+        let result = AnalysisResult::new(1, AnalysisType::Noise, "NOISE")
+            .with_noise_summary(summary.clone());
+
+        assert_eq!(result.noise_summary, Some(summary));
+    }
 
     fn transfer_function_payload() -> AnalysisResultPayload {
         AnalysisResultPayload::TransferFunction {

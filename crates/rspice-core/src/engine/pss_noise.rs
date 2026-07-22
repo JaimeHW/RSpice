@@ -80,6 +80,31 @@ impl Engine {
         offsets: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<OscPnoiseResult, SimulationError> {
+        self.run_pnoise_oscillator_impl(netlist, config, offsets, None, abort)
+    }
+
+    /// Compute oscillator phase noise from an exact retained shooting-PSS
+    /// state. Circuit structures are rebuilt from the same authenticated
+    /// netlist, but the periodic orbit is never solved again.
+    pub fn run_pnoise_oscillator_from_pss_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        offsets: &[Value],
+        operating_point: &super::PssOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<OscPnoiseResult, SimulationError> {
+        self.run_pnoise_oscillator_impl(netlist, config, offsets, Some(operating_point), abort)
+    }
+
+    fn run_pnoise_oscillator_impl(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        offsets: &[Value],
+        operating_point: Option<&super::PssOperatingPoint>,
+        abort: &dyn AbortSignal,
+    ) -> Result<OscPnoiseResult, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -104,9 +129,28 @@ impl Engine {
             ));
         }
 
-        let (pss, mut circuit, mut matrix, x0) =
-            self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
-        let period = pss.period;
+        let (period, mut circuit, mut matrix, x0) = if let Some(operating_point) = operating_point {
+            let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+            let matrix = self.build_matrix(&circuit)?;
+            circuit.link_indices(&matrix);
+            let state_dimension = circuit.capacitors.len() + circuit.inductors.len();
+            if operating_point.shooting_state().len() != state_dimension {
+                return Err(SimulationError::Circuit(format!(
+                    "retained PSS reactive-state dimension {} does not match dependent circuit dimension {state_dimension}",
+                    operating_point.shooting_state().len()
+                )));
+            }
+            (
+                operating_point.analysis().period,
+                circuit,
+                matrix,
+                operating_point.shooting_state().to_vec(),
+            )
+        } else {
+            let (pss, circuit, matrix, x0) =
+                self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
+            (pss.period, circuit, matrix, x0)
+        };
         let f0 = 1.0 / period;
 
         // ------------------------------------------------------------------

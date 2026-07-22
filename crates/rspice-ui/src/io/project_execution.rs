@@ -385,9 +385,9 @@ fn validate_active_simulation_plan(plan: &SimSetupState) -> Result<(), String> {
 
 fn validate_reference_pvt(plan: &SimSetupState) -> Result<(), String> {
     let temperature = plan.reference_pvt.temperature_celsius;
-    if !temperature.is_finite() || temperature < -273.15 {
+    if !temperature.is_finite() || temperature <= -273.15 {
         return Err(format!(
-            "simulation_plan.reference_pvt.temperature_celsius must be finite and at or above -273.15 C, got {temperature}"
+            "simulation_plan.reference_pvt.temperature_celsius must be finite and above -273.15 C, got {temperature}"
         ));
     }
     if plan.options.temp != temperature {
@@ -692,7 +692,7 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                 ));
             }
             if !corner.temperature.is_finite()
-                || corner.temperature < -273.15
+                || corner.temperature <= -273.15
                 || !corner.vdd_factor.is_finite()
                 || corner.vdd_factor <= 0.0
             {

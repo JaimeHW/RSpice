@@ -318,7 +318,7 @@ impl Engine {
         result
     }
 
-    fn solve_nonlinear_nodeset_dc_startup_with_abort(
+    pub(in crate::engine) fn solve_nonlinear_nodeset_dc_startup_with_abort(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,

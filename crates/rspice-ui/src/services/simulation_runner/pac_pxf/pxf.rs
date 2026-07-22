@@ -11,7 +11,10 @@ use super::super::{
     infer_primary_output_node_with_abort, infer_primary_source_name_with_abort, is_ground_like,
     parse_runner_netlist_with_abort,
 };
-use super::pac::{PacFrequencySweep, PacRunConfig, run_pac_internal_with_abort};
+use super::pac::{
+    PacFrequencySweep, PacRunConfig, run_pac_internal_from_pss_with_abort,
+    run_pac_internal_with_abort,
+};
 use super::shared::normalize_pac_node_name;
 // =============================================================================
 // PXF (Periodic Transfer Function) Analysis
@@ -190,6 +193,41 @@ pub fn run_pxf_analysis_with_config_and_abort(
     run_pxf_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
 }
 
+/// Run PXF from the exact authenticated numerical state produced by the
+/// prerequisite PSS task.
+pub fn run_pxf_analysis_from_pss_with_abort(
+    netlist_text: &str,
+    config: &PxfRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    run_pxf_analysis_from_pss_with_source_path_and_abort(
+        netlist_text,
+        config,
+        operating_point,
+        None,
+        abort,
+    )
+}
+
+/// Run PXF from an exact retained PSS state with direct-call source-relative
+/// include and model resolution.
+pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PxfRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pxf_analysis_for_netlist_with_operating_point_abort(
+        &netlist,
+        config,
+        Some(operating_point),
+        abort,
+    )
+}
+
 /// Run PXF analysis with explicit configuration and a source path used to
 /// resolve relative includes and model file references.
 pub fn run_pxf_analysis_with_config_and_source_path(
@@ -220,6 +258,15 @@ pub fn run_pxf_analysis_with_config_and_source_path_and_abort(
 fn run_pxf_analysis_for_netlist_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PxfRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    run_pxf_analysis_for_netlist_with_operating_point_abort(netlist, config, None, abort)
+}
+
+fn run_pxf_analysis_for_netlist_with_operating_point_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PxfRunConfig,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
     use rspice_core::analysis::advanced::pxf::PxfConfig;
@@ -254,7 +301,12 @@ fn run_pxf_analysis_for_netlist_with_abort(
         abstol: config.abstol,
     };
 
-    let pac_internal = run_pac_internal_with_abort(netlist, &pac_cfg, abort)?;
+    let pac_internal = match operating_point {
+        Some(operating_point) => {
+            run_pac_internal_from_pss_with_abort(netlist, &pac_cfg, operating_point, abort)?
+        }
+        None => run_pac_internal_with_abort(netlist, &pac_cfg, abort)?,
+    };
     let pac_result = pac_internal.pac_result;
 
     let sideband_indices = pac_result.conversion_matrix.sideband_indices();

@@ -248,6 +248,7 @@ fn convert_transient_result(
         time: filtered_time,
         waveforms,
         measurements,
+        periodic_state: None,
     })
 }
 

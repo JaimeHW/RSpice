@@ -121,6 +121,33 @@ impl EnvelopeSourceCatalog {
             )
         })
     }
+
+    fn exact_periodic_selection_error(&self, requested: &[String]) -> Option<String> {
+        if let Some(error) = self.selection_error(requested) {
+            return Some(error.replace("modulation source", "periodic tone source"));
+        }
+        if let Some(diagnostic) = &self.diagnostic {
+            return Some(format!(
+                "The circuit periodic-source catalog is unavailable: {diagnostic}"
+            ));
+        }
+        let omitted = self
+            .names
+            .iter()
+            .filter(|available| {
+                !requested
+                    .iter()
+                    .any(|requested| available.eq_ignore_ascii_case(requested))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        (!omitted.is_empty()).then(|| {
+            format!(
+                "PSS Tones must include every elaborated periodic source; omitted: {}",
+                omitted.join(", ")
+            )
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -2494,13 +2521,14 @@ fn analysis_editor(
     let mut draft = selected.draft.clone();
     let serialized_before = serde_json::to_vec(&draft);
     let mut action = None;
-    let envelope_sources =
-        matches!(draft, AnalysisDraft::Envelope(_)).then(|| envelope_source_catalog(ui, app));
+    let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
+        .then(|| envelope_source_catalog(ui, app));
+    let validation_error = analysis_validation_error(app, &draft, envelope_sources.as_ref());
 
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        analysis_form_header(ui, &selected);
+        analysis_form_header(ui, &selected, validation_error.as_deref());
         if availability_label(selected.kind) != "Production" {
             capability_banner(ui, selected.kind);
         }
@@ -2512,10 +2540,7 @@ fn analysis_editor(
             viewport_width <= 760.0,
             &mut action,
         );
-        let (note, form_anchor_y) =
-            analysis_form_body(ui, app, &mut draft, envelope_sources.as_ref());
-        form_status(ui, app, &draft, note, envelope_sources.as_ref());
-        form_anchor_y
+        analysis_form_body(ui, app, &mut draft, envelope_sources.as_ref())
     });
     let form_anchor_y = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
@@ -2582,9 +2607,9 @@ fn adjusted_scroll_for_stack_delta(scroll_y: f32, before: f32, after: f32) -> f3
     (scroll_y + after - before).max(0.0)
 }
 
-fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis) {
+fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis, validation_error: Option<&str>) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
@@ -2617,7 +2642,7 @@ fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis) {
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
-    let (status, color) = if selected.issues.is_empty() {
+    let (status, color) = if selected.issues.is_empty() && validation_error.is_none() {
         (
             availability_label(selected.kind),
             if availability_label(selected.kind) == "Production" {
@@ -2636,6 +2661,9 @@ fn analysis_form_header(ui: &mut Ui, selected: &SelectedAnalysis) {
         theme::sans(tokens::FS_0, FontWeight::Regular),
         color,
     );
+    if let Some(error) = validation_error {
+        response.on_hover_text(error);
+    }
 }
 
 fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
@@ -2853,10 +2881,25 @@ fn analysis_form_body(
     app: &RSpiceApp,
     draft: &mut AnalysisDraft,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
-) -> (&'static str, f32) {
+) -> f32 {
+    let project_revision = app.state.workspace.project.revision();
+    let previous_state = app
+        .state
+        .simulation
+        .newest_retained_op_state(project_revision)
+        .is_some();
+    let soa_violations = app
+        .state
+        .simulation
+        .active_soa_violation_context(project_revision)
+        .is_some();
+    let op_context = analysis_form::OpContextAvailability {
+        previous_state,
+        soa_violations,
+    };
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
-    let output = egui::Frame::new()
+    egui::Frame::new()
         .fill(t.color.bg_app)
         .inner_margin(egui::Margin {
             left: 8,
@@ -2867,28 +2910,26 @@ fn analysis_form_body(
         .show(ui, |ui| {
             ui.set_width(content_width);
             ui.spacing_mut().item_spacing.y = 0.0;
-            analysis_form::form(
+            let _note = analysis_form::form(
                 ui,
                 draft,
                 app.state.ui.preferences.quantity_presentation_policy(),
                 app.state.ui.number_locale,
                 envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
-            )
-        });
-    (output.inner, output.response.rect.top())
+                op_context,
+            );
+        })
+        .response
+        .rect
+        .top()
 }
 
-fn form_status(
-    ui: &mut Ui,
+fn analysis_validation_error(
     app: &RSpiceApp,
     draft: &AnalysisDraft,
-    note: &str,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
-) {
-    let t = Tokens::get(ui.ctx());
-    let content_width = (ui.available_width() - 16.0).max(1.0);
-    let validation_error = app
-        .state
+) -> Option<String> {
+    app.state
         .sim_setup
         .analysis_draft_validation_error(draft)
         .or_else(|| match (draft, envelope_sources) {
@@ -2896,100 +2937,12 @@ fn form_status(
                 .to_config()
                 .ok()
                 .and_then(|config| catalog.selection_error(&config.modulation_sources)),
+            (AnalysisDraft::Pss(setup), Some(catalog)) => setup
+                .to_config()
+                .ok()
+                .and_then(|config| catalog.exact_periodic_selection_error(&config.tone_sources)),
             _ => None,
-        });
-    let valid = validation_error.is_none();
-    let detail = validation_error.as_deref().unwrap_or(note);
-    let response = egui::Frame::new()
-        .fill(t.color.bg_app)
-        .inner_margin(egui::Margin::symmetric(8, 6))
-        .show(ui, |ui| {
-            ui.set_width(content_width);
-            let status = if valid {
-                "Analysis configuration valid"
-            } else {
-                "Analysis configuration blocked"
-            };
-            let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-            let detail_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-            let status_galley =
-                ui.painter()
-                    .layout_no_wrap(status.to_owned(), status_font, t.color.text_dim);
-            let detail_galley = ui.painter().layout_no_wrap(
-                detail.to_owned(),
-                detail_font.clone(),
-                t.color.text_dim,
-            );
-            let status_text_width = status_galley.size().x;
-            let detail_width = detail_galley.size().x;
-            let status_gap = ui.spacing().item_spacing.x;
-            let status_width = 10.0 + status_gap + status_text_width;
-            let column_gap = 12.0;
-            let inline_height = status_galley.size().y.max(detail_galley.size().y).max(16.0);
-            debug_assert!(inline_height.is_finite() && inline_height >= 16.0);
-            let inline = status_width + column_gap + detail_width <= content_width;
-
-            if inline {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = column_gap;
-                    let (status_rect, status_response) = ui.allocate_exact_size(
-                        vec2(status_width, inline_height),
-                        egui::Sense::hover(),
-                    );
-                    status_response.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), status)
-                    });
-                    ui.painter().circle_filled(
-                        egui::pos2(status_rect.left() + 5.0, status_rect.center().y),
-                        3.0,
-                        if valid { t.color.ok } else { t.color.err },
-                    );
-                    let status_text_rect = egui::Rect::from_min_max(
-                        egui::pos2(status_rect.left() + 10.0 + status_gap, status_rect.top()),
-                        status_rect.right_bottom(),
-                    );
-                    ui.painter().with_clip_rect(status_text_rect).galley(
-                        egui::pos2(
-                            status_text_rect.left(),
-                            status_text_rect.center().y - status_galley.size().y * 0.5,
-                        ),
-                        status_galley.clone(),
-                        t.color.text_dim,
-                    );
-                    ui.allocate_ui_with_layout(
-                        vec2(ui.available_width(), inline_height),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(detail)
-                                        .font(detail_font.clone())
-                                        .color(if valid { t.color.text_dim } else { t.color.err }),
-                                )
-                                .truncate(),
-                            );
-                        },
-                    );
-                });
-            } else {
-                ui.spacing_mut().item_spacing.y = 4.0;
-                status_dot(ui, if valid { t.color.ok } else { t.color.err }, status);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(detail)
-                            .font(detail_font)
-                            .color(if valid { t.color.text_dim } else { t.color.err }),
-                    )
-                    .wrap(),
-                );
-            }
         })
-        .response;
-    ui.painter().hline(
-        response.rect.x_range(),
-        response.rect.top(),
-        Stroke::new(1.0, t.color.border),
-    );
 }
 
 fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<AnalysisAction> {
@@ -4108,12 +4061,13 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
                 Ok((repair, receipt)) => {
                     refresh_analysis_projections(app);
                     app.state.workbench.analysis_lifecycle_status = format!(
-                        "Receipt #{} committed for instance {id}. Prerequisite repair completed atomically: {} added, {} enabled, {} moved earlier, and {} exact bindings updated. Prior datasets remain immutable.",
+                        "Receipt #{} committed for instance {id}. Prerequisite repair completed atomically: {} added, {} enabled, {} moved earlier, {} exact bindings updated, and {} invalid bindings removed. Prior datasets remain immutable.",
                         receipt.sequence(),
                         repair.inserted().len(),
                         repair.enabled().len(),
                         repair.moved().len(),
                         repair.bound().len(),
+                        repair.removed().len(),
                     );
                 }
                 Err(error) => record_failure(app, "Repair prerequisites", &error),
@@ -4369,7 +4323,9 @@ const fn dependency_issue_is_repairable(issue: &AnalysisPlanIssue) -> bool {
     matches!(
         issue,
         AnalysisPlanIssue::MissingPrerequisite { .. }
+            | AnalysisPlanIssue::UnexpectedDependencyRole { .. }
             | AnalysisPlanIssue::DuplicateDependencyRole { .. }
+            | AnalysisPlanIssue::SelfDependency { .. }
             | AnalysisPlanIssue::DanglingDependency { .. }
             | AnalysisPlanIssue::WrongDependencyKind { .. }
             | AnalysisPlanIssue::DisabledDependency { .. }
@@ -4383,27 +4339,110 @@ fn dependency_repair_cta(
     issues: &[AnalysisPlanIssue],
     dependencies: &[AnalysisDependency],
 ) -> Option<String> {
-    let issue = issues
-        .iter()
-        .find(|issue| dependency_issue_is_repairable(issue))?;
-    if let AnalysisPlanIssue::MissingPrerequisite {
-        dependent,
-        prerequisite,
-    } = issue
-        && !plan.dependency_prerequisite_is_repairable(*dependent, *prerequisite)
-    {
-        return None;
-    }
-    let prerequisite_for_target = |target| {
-        dependencies
-            .iter()
-            .find(|dependency| dependency.target() == target)
-            .map(|dependency| dependency.prerequisite())
+    let prerequisite_for_target = |dependent, target| {
+        plan.instance(dependent)
+            .and_then(|instance| {
+                instance
+                    .dependencies()
+                    .iter()
+                    .find(|dependency| dependency.target() == target)
+                    .map(|dependency| dependency.prerequisite())
+            })
+            .or_else(|| {
+                // Unit fixtures and legacy callers may supply the exact edge
+                // separately. The owning instance remains authoritative when
+                // it is available, avoiding ambiguity across a transitive
+                // closure that happens to repeat a corrupt target identity.
+                dependencies
+                    .iter()
+                    .find(|dependency| dependency.target() == target)
+                    .map(|dependency| dependency.prerequisite())
+            })
     };
+    let repair_role = |issue: &AnalysisPlanIssue| match issue {
+        AnalysisPlanIssue::MissingPrerequisite {
+            dependent,
+            prerequisite,
+        }
+        | AnalysisPlanIssue::UnexpectedDependencyRole {
+            dependent,
+            prerequisite,
+        }
+        | AnalysisPlanIssue::DuplicateDependencyRole {
+            dependent,
+            prerequisite,
+        }
+        | AnalysisPlanIssue::WrongDependencyKind {
+            dependent,
+            prerequisite,
+            ..
+        }
+        | AnalysisPlanIssue::IncompatibleDependencyConfiguration {
+            dependent,
+            prerequisite,
+            ..
+        } => Some((*dependent, *prerequisite)),
+        AnalysisPlanIssue::SelfDependency { dependent } => {
+            prerequisite_for_target(*dependent, *dependent)
+                .map(|prerequisite| (*dependent, prerequisite))
+        }
+        AnalysisPlanIssue::DanglingDependency { dependent, target }
+        | AnalysisPlanIssue::DisabledDependency { dependent, target }
+        | AnalysisPlanIssue::DependencyNotEarlier { dependent, target } => {
+            prerequisite_for_target(*dependent, *target)
+                .map(|prerequisite| (*dependent, prerequisite))
+        }
+        _ => None,
+    };
+    let complete_closure_is_repairable = |dependent| {
+        plan.instance(dependent).is_some_and(|instance| {
+            instance.prerequisite_roles().iter().all(|prerequisite| {
+                plan.dependency_prerequisite_is_repairable(dependent, *prerequisite)
+            })
+        })
+    };
+    // Corrupt legacy state can contain an undeclared edge before a genuinely
+    // repairable missing role. Do not let that unrelated issue suppress the
+    // contextual quick action for the declared prerequisite.
+    let issue = issues.iter().find(|issue| {
+        dependency_issue_is_repairable(issue)
+            && match issue {
+                AnalysisPlanIssue::UnexpectedDependencyRole { dependent, .. } => {
+                    complete_closure_is_repairable(*dependent)
+                }
+                _ => repair_role(issue).is_some_and(|(dependent, prerequisite)| {
+                    complete_closure_is_repairable(dependent)
+                        && plan.dependency_prerequisite_is_repairable(dependent, prerequisite)
+                }),
+            }
+    })?;
     Some(match issue {
         AnalysisPlanIssue::MissingPrerequisite {
             dependent,
             prerequisite,
+        } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
+        AnalysisPlanIssue::UnexpectedDependencyRole { prerequisite, .. } => {
+            format!("Remove unexpected {} binding", prerequisite.label())
+        }
+        AnalysisPlanIssue::DuplicateDependencyRole { prerequisite, .. } => {
+            format!("Resolve duplicate {} binding", prerequisite.label())
+        }
+        AnalysisPlanIssue::SelfDependency { dependent } => {
+            prerequisite_for_target(*dependent, *dependent).map_or_else(
+                || "Replace self prerequisite".to_owned(),
+                |prerequisite| compatible_dependency_repair_label(plan, *dependent, prerequisite),
+            )
+        }
+        AnalysisPlanIssue::DanglingDependency { dependent, target } => {
+            prerequisite_for_target(*dependent, *target).map_or_else(
+                || "Replace missing prerequisite".to_owned(),
+                |prerequisite| compatible_dependency_repair_label(plan, *dependent, prerequisite),
+            )
+        }
+        AnalysisPlanIssue::WrongDependencyKind {
+            dependent,
+            prerequisite,
+            ..
         } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
         AnalysisPlanIssue::DisabledDependency { dependent, target } => {
             let also_needs_move = issues.iter().any(|candidate| {
@@ -4415,8 +4454,14 @@ fn dependency_repair_cta(
                     } if candidate_dependent == dependent && candidate_target == target
                 )
             });
-            prerequisite_for_target(*target).map_or_else(
-                || "Repair prerequisites".to_owned(),
+            prerequisite_for_target(*dependent, *target).map_or_else(
+                || {
+                    if also_needs_move {
+                        "Enable and move prerequisite earlier".to_owned()
+                    } else {
+                        "Enable prerequisite".to_owned()
+                    }
+                },
                 |prerequisite| {
                     if also_needs_move {
                         format!("Enable and move {} earlier", prerequisite.label())
@@ -4426,17 +4471,18 @@ fn dependency_repair_cta(
                 },
             )
         }
-        AnalysisPlanIssue::DependencyNotEarlier { target, .. } => prerequisite_for_target(*target)
-            .map_or_else(
-                || "Repair prerequisites".to_owned(),
+        AnalysisPlanIssue::DependencyNotEarlier { dependent, target } => {
+            prerequisite_for_target(*dependent, *target).map_or_else(
+                || "Move prerequisite earlier".to_owned(),
                 |prerequisite| format!("Move {} earlier", prerequisite.label()),
-            ),
+            )
+        }
         AnalysisPlanIssue::IncompatibleDependencyConfiguration {
             dependent,
             prerequisite,
             ..
         } => compatible_dependency_repair_label(plan, *dependent, *prerequisite),
-        _ => "Repair prerequisites".to_owned(),
+        _ => unreachable!("repairable dependency issue must have a contextual action"),
     })
 }
 
@@ -4459,7 +4505,7 @@ fn compatible_dependency_repair_label(
         .iter()
         .position(|instance| instance.id() == dependent)
     else {
-        return "Repair prerequisites".to_owned();
+        return format!("Repair {} prerequisite", prerequisite.label());
     };
     let before = &plan.instances()[..position];
     let after = &plan.instances()[position + 1..];
@@ -4507,12 +4553,26 @@ fn dependency_closure_ids(
             continue;
         }
         if let Some(instance) = plan.instance(id) {
-            pending.extend(
-                instance
+            pending.extend(instance.dependencies().iter().filter_map(|dependency| {
+                let target = dependency.target();
+                let role_is_unique = instance
                     .dependencies()
                     .iter()
-                    .map(|dependency| dependency.target()),
-            );
+                    .filter(|candidate| candidate.prerequisite() == dependency.prerequisite())
+                    .count()
+                    == 1;
+                if target == id
+                    || !role_is_unique
+                    || !instance
+                        .prerequisite_roles()
+                        .contains(&dependency.prerequisite())
+                {
+                    return None;
+                }
+                plan.instance(target)
+                    .filter(|candidate| candidate.kind() == dependency.prerequisite())
+                    .map(|candidate| candidate.id())
+            }));
         }
     }
     closure
@@ -4663,6 +4723,25 @@ mod tests {
         assert_eq!(
             catalog.selection_error(&["VBIAS".to_owned()]).as_deref(),
             Some("Unknown or DC-only circuit modulation source: VBIAS")
+        );
+    }
+
+    #[test]
+    fn pss_source_catalog_requires_the_complete_exact_tone_set() {
+        let catalog = EnvelopeSourceCatalog {
+            source_digest: ContentDigest::from_bytes([0x34; 32]),
+            names: vec!["VCLK".to_owned(), "Xdrv.VLO".to_owned()],
+            diagnostic: None,
+        };
+        assert_eq!(
+            catalog.exact_periodic_selection_error(&["xDRV.vlo".to_owned(), "vclk".to_owned()]),
+            None
+        );
+        assert_eq!(
+            catalog
+                .exact_periodic_selection_error(&["VCLK".to_owned()])
+                .as_deref(),
+            Some("PSS Tones must include every elaborated periodic source; omitted: Xdrv.VLO")
         );
     }
 
@@ -4825,8 +4904,111 @@ mod tests {
                 &[dependency],
             )
             .as_deref(),
-            Some("Repair prerequisites")
+            Some("Move Operating point earlier")
         );
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::DanglingDependency { dependent, target }],
+                &[dependency],
+            )
+            .as_deref(),
+            Some("Move Operating point earlier")
+        );
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::DuplicateDependencyRole {
+                    dependent,
+                    prerequisite: AnalysisKind::OperatingPoint,
+                }],
+                &[dependency],
+            )
+            .as_deref(),
+            Some("Resolve duplicate Operating point binding")
+        );
+        let self_dependency = AnalysisDependency::new(AnalysisKind::OperatingPoint, dependent);
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::SelfDependency { dependent }],
+                &[self_dependency],
+            )
+            .as_deref(),
+            Some("Move Operating point earlier")
+        );
+
+        let mut no_prerequisites = crate::simulation::plan::SimulationPlan::empty();
+        let (op, _) = no_prerequisites
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        let unexpected_self = AnalysisDependency::new(AnalysisKind::Ac, op);
+        assert_eq!(
+            dependency_repair_cta(
+                &no_prerequisites,
+                &[
+                    AnalysisPlanIssue::UnexpectedDependencyRole {
+                        dependent: op,
+                        prerequisite: AnalysisKind::Ac,
+                    },
+                    AnalysisPlanIssue::SelfDependency { dependent: op },
+                ],
+                &[unexpected_self],
+            )
+            .as_deref(),
+            Some("Remove unexpected AC response binding"),
+            "an unexpected legacy edge must be removable with one atomic quick repair"
+        );
+
+        let mut mixed_corruption = crate::simulation::plan::SimulationPlan::empty();
+        let (ac, _) = mixed_corruption
+            .insert(AnalysisKind::Ac)
+            .expect("AC inserts");
+        let unexpected_self = AnalysisDependency::new(AnalysisKind::Ac, ac);
+        assert_eq!(
+            dependency_repair_cta(
+                &mixed_corruption,
+                &[
+                    AnalysisPlanIssue::SelfDependency { dependent: ac },
+                    AnalysisPlanIssue::MissingPrerequisite {
+                        dependent: ac,
+                        prerequisite: AnalysisKind::OperatingPoint,
+                    },
+                ],
+                &[unexpected_self],
+            )
+            .as_deref(),
+            Some("Add Operating point"),
+            "an undeclared corrupt edge must not hide a repairable declared prerequisite"
+        );
+    }
+
+    #[test]
+    fn every_declared_prerequisite_kind_has_a_contextual_add_action() {
+        let dependent_kinds = AnalysisKind::ALL
+            .into_iter()
+            .filter(|kind| !kind.prerequisites().is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(dependent_kinds.len(), 24);
+
+        for kind in dependent_kinds {
+            let mut plan = crate::simulation::plan::SimulationPlan::empty();
+            let (dependent, _) = plan.insert(kind).expect("dependent inserts");
+            let issue = AnalysisPlanIssue::MissingPrerequisite {
+                dependent,
+                prerequisite: kind.prerequisites()[0],
+            };
+            let expected = if kind == AnalysisKind::Fourier {
+                "Add compatible Transient".to_owned()
+            } else {
+                format!("Add {}", kind.prerequisites()[0].label())
+            };
+            assert_eq!(
+                dependency_repair_cta(&plan, &[issue], &[]).as_deref(),
+                Some(expected.as_str()),
+                "{kind}"
+            );
+        }
     }
 
     #[test]
@@ -4881,6 +5063,21 @@ mod tests {
             None,
             "repair must not be offered until the consumer configuration is valid"
         );
+        assert_eq!(
+            dependency_repair_cta(
+                &plan,
+                &[AnalysisPlanIssue::DuplicateDependencyRole {
+                    dependent: fourier,
+                    prerequisite: AnalysisKind::Transient,
+                }],
+                &[
+                    AnalysisDependency::new(AnalysisKind::Transient, coarse),
+                    AnalysisDependency::new(AnalysisKind::Transient, AnalysisInstanceId::new()),
+                ],
+            ),
+            None,
+            "corrupt-edge repair must not be offered for an invalid Fourier consumer"
+        );
     }
 
     #[test]
@@ -4911,6 +5108,64 @@ mod tests {
             dependency_repair_cta(&plan, &issues, plan.instance(pac).unwrap().dependencies())
                 .as_deref(),
             Some("Add Operating point")
+        );
+    }
+
+    #[test]
+    fn selected_dependency_closure_ignores_wrong_dangling_self_and_duplicate_edges() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+        let (first_op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("first OP inserts");
+        let (second_op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("second OP inserts");
+
+        let with_dependencies = |dependencies: Vec<AnalysisDependency>| {
+            let mut encoded = serde_json::to_value(&plan).expect("plan serializes");
+            let instances = encoded["instances"]
+                .as_array_mut()
+                .expect("instances serialize as an array");
+            let ac_instance = instances
+                .iter_mut()
+                .find(|instance| instance["id"] == serde_json::json!(ac))
+                .expect("serialized AC remains present");
+            ac_instance["dependencies"] =
+                serde_json::to_value(dependencies).expect("dependencies serialize");
+            serde_json::from_value::<crate::simulation::plan::SimulationPlan>(encoded)
+                .expect("raw corrupt fixture deserializes")
+        };
+        let assert_root_only = |dependencies| {
+            let corrupt = with_dependencies(dependencies);
+            assert_eq!(dependency_closure_ids(&corrupt, ac), HashSet::from([ac]));
+        };
+
+        assert_root_only(vec![AnalysisDependency::new(
+            AnalysisKind::OperatingPoint,
+            pss,
+        )]);
+        assert_root_only(vec![AnalysisDependency::new(
+            AnalysisKind::OperatingPoint,
+            AnalysisInstanceId::new(),
+        )]);
+        assert_root_only(vec![AnalysisDependency::new(
+            AnalysisKind::OperatingPoint,
+            ac,
+        )]);
+        assert_root_only(vec![
+            AnalysisDependency::new(AnalysisKind::OperatingPoint, first_op),
+            AnalysisDependency::new(AnalysisKind::OperatingPoint, second_op),
+        ]);
+
+        let valid = with_dependencies(vec![AnalysisDependency::new(
+            AnalysisKind::OperatingPoint,
+            first_op,
+        )]);
+        assert_eq!(
+            dependency_closure_ids(&valid, ac),
+            HashSet::from([ac, first_op])
         );
     }
 

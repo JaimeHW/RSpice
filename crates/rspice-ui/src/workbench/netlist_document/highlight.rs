@@ -430,6 +430,8 @@ mod tests {
     fn error_diagnostic(span: Option<Range<usize>>, line: Option<usize>) -> Diagnostic {
         Diagnostic {
             severity: DiagnosticSeverity::Error,
+            source_path: None,
+            source_line: line,
             span,
             line,
             column: None,

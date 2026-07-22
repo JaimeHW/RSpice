@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
+use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, SpPort};
 use crate::simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::{SimulationError, SpecExecutionOptions};
@@ -11,6 +12,8 @@ pub(super) fn run_frequency_spec(
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
@@ -78,9 +81,9 @@ pub(super) fn run_frequency_spec(
             accuracy,
             abort,
         ),
-        AnalysisSpec::Pac => run_pac(netlist, options, abort),
-        AnalysisSpec::Pxf => run_pxf(netlist, options, abort),
-        AnalysisSpec::Pnoise => run_pnoise(netlist, options, abort),
+        AnalysisSpec::Pac => run_pac(netlist, source_path, options, dependencies, abort),
+        AnalysisSpec::Pxf => run_pxf(netlist, source_path, options, dependencies, abort),
+        AnalysisSpec::Pnoise => run_pnoise(netlist, source_path, options, dependencies, abort),
         AnalysisSpec::Stb {
             probe_node,
             start_freq,
@@ -96,7 +99,7 @@ pub(super) fn run_frequency_spec(
             points_per_decade,
             abort,
         ),
-        AnalysisSpec::Pstb => run_pstb(netlist, options, abort),
+        AnalysisSpec::Pstb => run_pstb(netlist, source_path, options, dependencies, abort),
         other => Err(super::misrouted_spec_error("frequency", &other)),
     }
 }
@@ -308,6 +311,8 @@ R2 out 0 1k
             tf_spec(),
             SpecExecutionOptions::default(),
             DIVIDER,
+            None,
+            &ResolvedExecutionDependencies::default(),
             &NoAbort,
         )
         .expect("TF runner succeeds");
@@ -353,6 +358,8 @@ R2 out 0 1k
             tf_spec(),
             SpecExecutionOptions::default(),
             "not a netlist",
+            None,
+            &ResolvedExecutionDependencies::default(),
             &ImmediateAbort,
         );
 
@@ -375,7 +382,9 @@ R2 out 0 1k
 
 fn run_pac(
     netlist: &str,
+    source_path: Option<&Path>,
     options: SpecExecutionOptions,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let pac_cfg = required_execution_option(
@@ -383,8 +392,26 @@ fn run_pac(
         "PAC analysis requires explicit PAC execution options",
         abort,
     )?;
+    let periodic_state = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!("PAC periodic dependency is unavailable: {error}"))
+    })?;
+    periodic_state
+        .validate_consumer_basis(
+            "PAC",
+            pac_cfg.pss_fundamental_freq,
+            pac_cfg.pss_num_harmonics,
+            pac_cfg.pss_tolerance,
+            false,
+        )
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pac_analysis_with_abort(netlist, &pac_cfg, abort)
+        svc_runner::run_pac_analysis_from_pss_with_source_path_and_abort(
+            netlist,
+            &pac_cfg,
+            periodic_state.operating_point(),
+            source_path,
+            abort,
+        )
     })?;
 
     Ok(SimulationResult::Ac {
@@ -396,7 +423,9 @@ fn run_pac(
 
 fn run_pxf(
     netlist: &str,
+    source_path: Option<&Path>,
     options: SpecExecutionOptions,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let pxf_cfg = required_execution_option(
@@ -404,8 +433,26 @@ fn run_pxf(
         "PXF analysis requires explicit PXF execution options",
         abort,
     )?;
+    let periodic_state = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!("PXF periodic dependency is unavailable: {error}"))
+    })?;
+    periodic_state
+        .validate_consumer_basis(
+            "PXF",
+            pxf_cfg.pss_fundamental_freq,
+            pxf_cfg.pss_num_harmonics,
+            pxf_cfg.pss_tolerance,
+            false,
+        )
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pxf_analysis_with_config_and_abort(netlist, &pxf_cfg, abort)
+        svc_runner::run_pxf_analysis_from_pss_with_source_path_and_abort(
+            netlist,
+            &pxf_cfg,
+            periodic_state.operating_point(),
+            source_path,
+            abort,
+        )
     })?;
 
     let mut waveforms = HashMap::new();
@@ -431,18 +478,39 @@ fn run_pxf(
 
 fn run_pnoise(
     netlist: &str,
+    source_path: Option<&Path>,
     options: SpecExecutionOptions,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    let data = if let Some(pnoise_cfg) = options.pnoise {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_pnoise_analysis_with_config_and_abort(netlist, &pnoise_cfg, abort)
-        })?
-    } else {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_pnoise_analysis_with_abort(netlist, abort)
-        })?
-    };
+    let pnoise_cfg = required_execution_option(
+        options.pnoise,
+        "PNOISE analysis requires explicit PNOISE execution options",
+        abort,
+    )?;
+    let periodic_state = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "PNOISE periodic dependency is unavailable: {error}"
+        ))
+    })?;
+    periodic_state
+        .validate_consumer_basis(
+            "PNOISE",
+            pnoise_cfg.pss_fundamental_freq,
+            pnoise_cfg.pss_num_harmonics,
+            pnoise_cfg.pss_tolerance,
+            pnoise_cfg.noise_ref == svc_runner::PnoiseReference::Phase,
+        )
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_pnoise_analysis_from_pss_with_source_path_and_abort(
+            netlist,
+            &pnoise_cfg,
+            periodic_state.operating_point(),
+            source_path,
+            abort,
+        )
+    })?;
 
     let freq_len = data.frequencies.len().max(1);
     let mut contributors = HashMap::with_capacity(data.contributors.len());
@@ -520,7 +588,9 @@ fn stb_sweep_type(sweep: FrequencySweep) -> rspice_core::analysis::advanced::stb
 
 fn run_pstb(
     netlist: &str,
+    source_path: Option<&Path>,
     options: SpecExecutionOptions,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let pstb_cfg = required_execution_option(
@@ -528,8 +598,26 @@ fn run_pstb(
         "PSTB analysis requires explicit PSTB execution options",
         abort,
     )?;
+    let periodic_state = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!("PSTB periodic dependency is unavailable: {error}"))
+    })?;
+    periodic_state
+        .validate_consumer_basis(
+            "PSTB",
+            pstb_cfg.pss_fundamental_freq,
+            pstb_cfg.pss_num_harmonics,
+            pstb_cfg.pss_tolerance,
+            false,
+        )
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pstb_analysis_with_config_and_abort(netlist, &pstb_cfg, abort)
+        svc_runner::run_pstb_analysis_from_pss_with_source_path_and_abort(
+            netlist,
+            &pstb_cfg,
+            periodic_state.operating_point(),
+            source_path,
+            abort,
+        )
     })?;
 
     let mut waveforms = HashMap::new();

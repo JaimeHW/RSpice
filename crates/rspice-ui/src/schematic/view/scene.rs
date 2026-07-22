@@ -350,6 +350,41 @@ struct OperatingPointCanvasAnnotation {
     selected_current: bool,
 }
 
+fn device_op_param_unit(name: &str) -> &'static str {
+    match name {
+        "id" | "ic" | "ib" => "A",
+        "vgs" | "vds" | "vbs" | "vth" | "vbe" | "vce" | "vd" => "V",
+        "gm" | "gds" | "gmb" | "gd" => "S",
+        _ => "",
+    }
+}
+
+fn device_op_annotation_label(entry: &rspice_core::circuit::DeviceOpEntry) -> String {
+    let identity = entry.region.map_or_else(
+        || format!("{} [{}]", entry.name, entry.device_kind),
+        |region| format!("{} [{} · {region}]", entry.name, entry.device_kind),
+    );
+    let values = entry
+        .params
+        .iter()
+        .take(3)
+        .map(|(name, value)| {
+            let unit = device_op_param_unit(name);
+            format!(
+                "{name}={}{}",
+                crate::state::format_engineering(*value),
+                unit
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if values.is_empty() {
+        identity
+    } else {
+        format!("{identity} · {values}")
+    }
+}
+
 fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
     let name = name.trim();
     let (head, tail) = name.split_once('(')?;
@@ -360,9 +395,9 @@ fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
     (!inner.is_empty()).then_some(inner)
 }
 
-/// Produce annotations only from the newest completed run. The retained
-/// cross-probe point map is replaced for each dispatch, so pairing it with an
-/// older selected dataset would falsely attach values to a different design.
+/// Produce annotations only from the explicitly selected analysis. The
+/// retained cross-probe point map is replaced for each dispatch, so pairing
+/// it with any other result would falsely attach values to a different solve.
 fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
     let policy = state.schematic.document_policy.operating_point_annotations;
     if policy == OperatingPointAnnotationPolicy::Hidden
@@ -374,13 +409,25 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     {
         return Vec::new();
     }
-    let Some(dc_op) = state.simulation.runs.first().and_then(|run| {
-        run.analyses
-            .iter()
-            .find_map(|analysis| analysis.dc_op.as_ref())
-    }) else {
+    let Some((dc_op, retained_annotation, device_op)) =
+        state.simulation.active_analysis().and_then(|analysis| {
+            analysis.dc_op.as_ref().map(|dc_op| {
+                let annotation = match analysis.result_payload.as_ref() {
+                    Some(crate::state::AnalysisResultPayload::OperatingPoint {
+                        annotation,
+                        ..
+                    }) => Some(*annotation),
+                    _ => None,
+                };
+                (dc_op, annotation, analysis.device_op.as_ref())
+            })
+        })
+    else {
         return Vec::new();
     };
+    if retained_annotation == Some(crate::state::OperatingPointAnnotationEvidence::None) {
+        return Vec::new();
+    }
 
     let mut annotations = Vec::new();
     for voltage in &dc_op.node_voltages {
@@ -428,7 +475,10 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
         });
     }
 
-    if policy == OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents {
+    let retained_currents = retained_annotation.is_none_or(|annotation| {
+        annotation == crate::state::OperatingPointAnnotationEvidence::VoltagesAndCurrents
+    });
+    if retained_currents && policy == OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents {
         for component in state.schematic.components.iter().filter(|component| {
             state.schematic.selection.has_component(component.id)
                 && object_is_on_active_sheet(state, component.id)
@@ -448,6 +498,29 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
                     crate::state::format_engineering(current.value),
                     current.unit
                 ),
+                selected_current: true,
+            });
+        }
+    }
+    if retained_annotation
+        == Some(crate::state::OperatingPointAnnotationEvidence::VoltagesAndDeviceOp)
+        && policy == OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents
+        && let Some(report) = device_op
+    {
+        for component in state.schematic.components.iter().filter(|component| {
+            state.schematic.selection.has_component(component.id)
+                && object_is_on_active_sheet(state, component.id)
+        }) {
+            let Some(entry) = report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
+            else {
+                continue;
+            };
+            annotations.push(OperatingPointCanvasAnnotation {
+                position: component.pos,
+                label: device_op_annotation_label(entry),
                 selected_current: true,
             });
         }
@@ -585,7 +658,7 @@ mod tests {
     use super::*;
     use crate::common::app::AppState;
     use crate::state::{
-        AnalysisResult, AnalysisType, ComponentType, DcOpResult, OperatingPointValue,
+        AnalysisResult, AnalysisType, ComponentType, DcOpResult, Junction, OperatingPointValue,
         PortDirection, PortSpec, ResolvedCellSymbol, SimulationRun, SymbolDocument, SymbolPin,
         SymbolShape,
     };
@@ -646,12 +719,15 @@ mod tests {
 
     fn state_with_operating_point() -> AppState {
         let mut state = AppState::default();
+        state.schematic.document_policy.operating_point_annotations =
+            OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents;
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(40, 30));
         component.name = "VBIAS".to_owned();
         state.schematic.components.push(component);
         state.schematic.selection.select_component(1);
 
         let point = Point::new(20, 10);
+        state.schematic.junctions.push(Junction::new(2, point));
         state.simulation.cross_probe.update(
             state.workspace.active_view.clone(),
             HashMap::from([(point, "OUT".to_owned())]),
@@ -676,6 +752,8 @@ mod tests {
             }),
         );
         state.simulation.runs.insert(0, run);
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
         state
     }
 
@@ -704,6 +782,51 @@ mod tests {
     }
 
     #[test]
+    fn retained_device_op_mode_annotates_only_selected_authoritative_devices() {
+        use crate::state::*;
+
+        let mut state = state_with_operating_point();
+        let analysis = &mut state.simulation.runs[0].analyses[0];
+        analysis.result_payload = Some(AnalysisResultPayload::OperatingPoint {
+            temperature_mode: OperatingPointTemperatureEvidence::PvtRunSet,
+            temperature_celsius: 27.0,
+            initial_guess: OperatingPointInitialGuessEvidence::Automatic,
+            node_initialization: OperatingPointNodeInitializationEvidence::UseIcAndNodeset,
+            homotopy: OperatingPointHomotopyEvidence::Adaptive,
+            annotation: OperatingPointAnnotationEvidence::VoltagesAndDeviceOp,
+            device_detail: OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+            save_device_op: OperatingPointSaveDeviceEvidence::Enabled,
+            accuracy: OperatingPointAccuracyEvidence::Balanced,
+            selected_devices: vec!["VBIAS".to_owned()],
+            violation_devices: Vec::new(),
+            violation_source_content_digest: None,
+            validated_startup_directives: 0,
+            mna_node_names: vec!["OUT".to_owned()],
+            mna_branch_names: vec!["VBIAS".to_owned()],
+            mna_solution: vec![1.25, 2.0e-3],
+            effective_source_content_digest: None,
+            run_point_index: 0,
+            run_point_count: 1,
+            run_point_process: OperatingPointProcessEvidence::TT,
+            run_point_supply_voltage: None,
+            run_point_nominal_supply_voltage: None,
+        });
+        analysis.device_op = Some(rspice_core::circuit::DeviceOpReport {
+            entries: vec![rspice_core::circuit::DeviceOpEntry {
+                name: "VBIAS".to_owned(),
+                device_kind: "SOURCE",
+                region: None,
+                params: vec![("id", 2.0e-3)],
+            }],
+        });
+
+        let annotations = operating_point_annotations(&state);
+        assert_eq!(annotations.len(), 2, "voltage plus selected device OP");
+        assert!(annotations[1].label.contains("VBIAS [SOURCE]"));
+        assert!(annotations[1].label.contains("id=2mA"));
+    }
+
+    #[test]
     fn topology_edit_invalidates_retained_operating_point_positions() {
         let mut state = state_with_operating_point();
         assert!(!operating_point_annotations(&state).is_empty());
@@ -711,5 +834,35 @@ mod tests {
         state.schematic.bump_topology_version();
 
         assert!(operating_point_annotations(&state).is_empty());
+    }
+
+    #[test]
+    fn annotations_follow_only_the_explicitly_selected_operating_point() {
+        let mut state = state_with_operating_point();
+        state.simulation.runs[0].add_analysis(
+            AnalysisResult::new(2, AnalysisType::DcOp, "OP hot").with_dc_op(DcOpResult {
+                node_voltages: vec![OperatingPointValue {
+                    name: "V(out)".to_owned(),
+                    value: 2.5,
+                    unit: "V".to_owned(),
+                }],
+                branch_currents: vec![OperatingPointValue {
+                    name: "I(vbias)".to_owned(),
+                    value: 4.0e-3,
+                    unit: "A".to_owned(),
+                }],
+                power_dissipation: Vec::new(),
+            }),
+        );
+
+        state.simulation.active_analysis_idx = Some(1);
+        let hot = operating_point_annotations(&state);
+        assert!(hot[0].label.contains("2.5"), "{hot:?}");
+        assert!(hot[1].label.contains("4m"), "{hot:?}");
+
+        state.simulation.active_analysis_idx = Some(0);
+        let nominal = operating_point_annotations(&state);
+        assert!(nominal[0].label.contains("1.25"));
+        assert!(nominal[1].label.contains("2m"));
     }
 }

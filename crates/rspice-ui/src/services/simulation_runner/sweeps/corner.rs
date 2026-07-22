@@ -141,17 +141,12 @@ fn run_corner_analysis_with_bound_models(
         if process_netlists.contains_key(process) {
             continue;
         }
-        let mut model_cards = Vec::new();
-        for (binding_index, binding) in config.model_bindings.iter().enumerate() {
-            poll_periodically(abort, binding_index)?;
-            if binding.process == *process {
-                model_cards.push(format!(
-                    "* RSpice sealed model source: {}\n{}",
-                    binding.source_label, binding.materialized_model_cards
-                ));
-            }
-        }
-        let source = inject_model_cards_with_abort(&source_without_reference, &model_cards, abort)?;
+        let source = materialize_corner_process_source_from_stripped(
+            &source_without_reference,
+            config,
+            *process,
+            abort,
+        )?;
         process_netlists.insert(*process, source);
     }
 
@@ -192,6 +187,50 @@ fn run_corner_analysis_with_bound_models(
         )?);
     }
     finish_corner_data(&points, results, config, abort)
+}
+
+/// Freeze the exact executable source for one process corner. This is shared
+/// by the aggregate corner runner and OP PVT task expansion so a process axis
+/// cannot be retained as metadata while the solver silently uses the
+/// reference model cards.
+pub(crate) fn materialize_corner_process_source(
+    source: &str,
+    config: &CornerRunConfig,
+    process: super::types::CornerProcess,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<String> {
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
+    if !config.process_corners.contains(&process) {
+        return Err(ServiceRunError::Failure(format!(
+            "{} is not an enabled point in the prepared corner contract",
+            process.as_keyword()
+        )));
+    }
+    if config.model_bindings.is_empty() {
+        return Ok(source.to_owned());
+    }
+    let stripped = strip_reference_model_binding_with_abort(source, abort)?;
+    materialize_corner_process_source_from_stripped(&stripped, config, process, abort)
+}
+
+fn materialize_corner_process_source_from_stripped(
+    stripped_source: &str,
+    config: &CornerRunConfig,
+    process: super::types::CornerProcess,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<String> {
+    let mut model_cards = Vec::new();
+    for (binding_index, binding) in config.model_bindings.iter().enumerate() {
+        poll_periodically(abort, binding_index)?;
+        if binding.process == process {
+            model_cards.push(format!(
+                "* RSpice sealed model source: {}\n{}",
+                binding.source_label, binding.materialized_model_cards
+            ));
+        }
+    }
+    inject_model_cards_with_abort(stripped_source, &model_cards, abort)
 }
 
 fn run_corner_analysis_with_netlist(

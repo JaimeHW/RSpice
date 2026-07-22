@@ -29,12 +29,17 @@ pub use ac_bode::{
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, ComplexResultValue, DcOpResult, MonteCarloVariableMetadata,
-    NoiseContributorRow, NoiseSummary, OperatingPointValue, ReliabilityCheckpointEvidence,
-    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
-    SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
-    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
-    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
+    NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
+    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
+    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
+    OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,
+    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
+    ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
+    ReliabilityStressEvidence, SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence,
+    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
+    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
+    TransferFunctionScalarEvidence,
 };
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;

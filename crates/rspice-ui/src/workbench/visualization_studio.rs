@@ -3812,7 +3812,8 @@ fn retained_pole_zero_payload(
         AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
             Some((poles.as_slice(), zeros.as_slice(), *gain))
         }
-        AnalysisResultPayload::Sensitivity { .. }
+        AnalysisResultPayload::OperatingPoint { .. }
+        | AnalysisResultPayload::Sensitivity { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
@@ -3836,7 +3837,8 @@ fn retained_sensitivity_payload(
             result_mode,
             rows,
         } => Some((output.as_str(), *result_mode, rows.as_slice())),
-        AnalysisResultPayload::PoleZero { .. }
+        AnalysisResultPayload::OperatingPoint { .. }
+        | AnalysisResultPayload::PoleZero { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
@@ -5702,7 +5704,7 @@ fn matching_comparison_analysis<'a>(
     if let Some(source_id) = active
         .provenance
         .as_ref()
-        .map(|provenance| provenance.source_instance_id())
+        .map(|provenance| provenance.authored_source_instance_id())
     {
         return run
             .find_analysis_by_source_instance(source_id)

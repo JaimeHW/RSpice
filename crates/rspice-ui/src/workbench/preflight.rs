@@ -1158,6 +1158,10 @@ fn context_panel(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> Rect {
             response.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title)
             });
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::Label);
+                node.set_label(title);
+            });
             ui.painter().rect_filled(header, 0.0, t.color.bg_panel_2);
             ui.painter().text(
                 header.left_center() + Vec2::new(10.0, 0.0),

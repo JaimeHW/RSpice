@@ -231,6 +231,10 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .map(|label| (label.name.clone(), label.pos, label.is_ground()))
         .collect::<Vec<_>>();
     navigator_section_header(ui, "Nets", &labels.len().to_string());
+    if labels.is_empty() {
+        empty_navigator_row(ui, "No named nets match this filter");
+        return;
+    }
     let graph = NetGraph::build(&app.state.schematic.wires, &app.state.schematic.junctions);
     for (name, position, ground) in labels {
         let connected = graph.find_connected_wires(position);
@@ -274,6 +278,10 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|(_, _, port)| matches_query(&query, &[&port.name, port.direction.keyword()]))
         .collect::<Vec<_>>();
     navigator_section_header(ui, "Named signals", &ports.len().to_string());
+    if ports.is_empty() {
+        empty_navigator_row(ui, "No ports match this filter");
+        return;
+    }
     for (component_id, position, port) in ports {
         if nav_row_indented_mono(
             ui,
@@ -294,6 +302,8 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     shelf_search(ui, app);
+    let query = normalized(&app.state.workbench.placement_query);
+    let visible_matches = component_shelf_match_count(app, &query);
     let mut primitive = None;
     let mut cell = None;
     ScrollArea::vertical()
@@ -301,12 +311,55 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui, |ui| {
             primitive = pinned(ui, app).or_else(|| primitive_catalog(ui, app));
             cell = project_library(ui, app);
+            if !query.is_empty() && visible_matches == 0 {
+                empty_navigator_row(ui, "No component or cell matches this filter");
+            }
         });
     if let Some(kind) = primitive {
         arm_primitive(app, kind, ui.ctx());
     } else if let Some(binding) = cell {
         arm_cell(app, binding, ui.ctx());
     }
+}
+
+fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
+    let primitive_matches = PRIMITIVE_GROUPS
+        .iter()
+        .map(|(_, section_names)| {
+            primitive_entries(section_names)
+                .into_iter()
+                .filter(|entry| matches_query(query, &[entry.label, entry.kind.display_name()]))
+                .count()
+        })
+        .sum::<usize>();
+    let library_matches = cell_candidates(app)
+        .into_iter()
+        .filter(|candidate| {
+            matches_query(
+                query,
+                &[&candidate.library, &candidate.cell, &candidate.view],
+            )
+        })
+        .count();
+    primitive_matches + library_matches
+}
+
+fn empty_navigator_row(ui: &mut Ui, message: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width().max(1.0), t.metrics.row_h.max(29.0)),
+        egui::Sense::hover(),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        message,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message)
+    });
 }
 
 fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -484,7 +537,19 @@ fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> 
 fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     let query = normalized(&app.state.workbench.placement_query);
     let mut armed = None;
-    section_header(ui, "Primitives", Some(&primitive_entry_count().to_string()));
+    let visible_count = PRIMITIVE_GROUPS
+        .iter()
+        .map(|(_, section_names)| {
+            primitive_entries(section_names)
+                .into_iter()
+                .filter(|entry| matches_query(&query, &[entry.label, entry.kind.display_name()]))
+                .count()
+        })
+        .sum::<usize>();
+    if visible_count == 0 && !query.is_empty() {
+        return None;
+    }
+    section_header(ui, "Primitives", Some(&visible_count.to_string()));
     for (group, section_names) in PRIMITIVE_GROUPS {
         let entries = primitive_entries(section_names)
             .into_iter()
@@ -708,6 +773,7 @@ fn primitive_entries(section_names: &[&str]) -> Vec<ComponentPaletteEntry> {
         .collect()
 }
 
+#[cfg(test)]
 fn primitive_entry_count() -> usize {
     component_palette()
         .iter()
@@ -759,6 +825,16 @@ mod tests {
     fn shelf_search_matches_labels_case_insensitively() {
         assert!(matches_query("nmos", &["NMOS", "Semiconductors"]));
         assert!(!matches_query("nmos", &["Resistor", "Passives"]));
+    }
+
+    #[test]
+    fn shelf_match_count_drives_a_truthful_filtered_empty_state() {
+        let app = RSpiceApp::test_instance();
+        assert!(component_shelf_match_count(&app, "resistor") > 0);
+        assert_eq!(
+            component_shelf_match_count(&app, "no-such-component-or-cell"),
+            0
+        );
     }
 
     #[test]

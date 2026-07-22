@@ -10,13 +10,16 @@ mod permit;
 mod snapshot;
 
 pub(in crate::simulation) use artifact::{
-    ExecutionArtifactEnvelope, PreparedDependencyBinding, ResolvedExecutionDependencies,
-    TransientTrajectoryArtifact,
+    ExecutionArtifactEnvelope, ExecutionArtifactKind, PreparedDependencyBinding,
+    ResolvedExecutionDependencies, TransientTrajectoryArtifact,
 };
+#[cfg(any(target_arch = "wasm32", test))]
+pub(in crate::simulation) use canonical::f64_sequence_digest;
 pub(crate) use canonical::manual_deck_analysis_instance_id_from_tag;
 pub(in crate::simulation) use canonical::{
     analysis_kind_tag, content_digest, drc_receipt_digest, manual_deck_analysis_instance_id,
-    manual_source_receipt_digest, sealed_dependency_closure_digest,
+    manual_source_receipt_digest, operating_point_effective_source_digest,
+    sealed_dependency_closure_digest,
 };
 pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
 pub(in crate::simulation) use snapshot::{

@@ -194,7 +194,8 @@ pub(crate) struct PssStateTrace {
 }
 
 /// PSS analysis result with detailed convergence info
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct PssAnalysisResult {
     /// The periodic steady-state solution
     pub result: PssResult,
@@ -210,6 +211,323 @@ pub struct PssAnalysisResult {
     pub floquet_multipliers: Vec<num_complex::Complex64>,
     /// Whether circuit is stable (all multipliers inside unit circle)
     pub is_stable: bool,
+}
+
+/// Exact DC operating-point state used to initialize shooting PSS.
+///
+/// The solution uses the core MNA ordering: one value for every non-ground
+/// node, followed by one value for every branch-current unknown. Node and
+/// branch names are retained in that same order so the seed can be rejected
+/// if it is presented to a different or re-elaborated circuit.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+pub struct PssDcOperatingPointSeed {
+    node_names: Vec<String>,
+    branch_names: Vec<String>,
+    solution: Vec<Value>,
+}
+
+impl PssDcOperatingPointSeed {
+    /// Construct a structurally self-consistent PSS DC seed.
+    ///
+    /// Circuit-specific name and dimension checks are intentionally repeated
+    /// when the seed is consumed, after the target netlist has been fully
+    /// elaborated. This constructor rejects malformed transport payloads
+    /// before they can enter the solver boundary.
+    pub fn try_new(
+        node_names: Vec<String>,
+        branch_names: Vec<String>,
+        solution: Vec<Value>,
+    ) -> Result<Self, SimulationError> {
+        let expected_solution_len = node_names
+            .len()
+            .checked_add(branch_names.len())
+            .ok_or_else(|| {
+                SimulationError::Circuit("PSS DC seed dimensions overflow the platform".to_owned())
+            })?;
+        if solution.len() != expected_solution_len {
+            return Err(SimulationError::Circuit(format!(
+                "PSS DC seed contains {} MNA values, but its {} node names and {} branch names require {expected_solution_len}",
+                solution.len(),
+                node_names.len(),
+                branch_names.len()
+            )));
+        }
+        if solution.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::Circuit(
+                "PSS DC seed contains a non-finite MNA value".to_owned(),
+            ));
+        }
+        Self::validate_names("node", &node_names)?;
+        Self::validate_names("branch", &branch_names)?;
+
+        Ok(Self {
+            node_names,
+            branch_names,
+            solution,
+        })
+    }
+
+    /// Canonical non-ground node names in MNA order.
+    pub fn node_names(&self) -> &[String] {
+        &self.node_names
+    }
+
+    /// Canonical branch-current unknown names in MNA order.
+    pub fn branch_names(&self) -> &[String] {
+        &self.branch_names
+    }
+
+    /// Full MNA solution: node voltages followed by branch currents.
+    pub fn solution(&self) -> &[Value] {
+        &self.solution
+    }
+
+    fn validate_names(kind: &str, names: &[String]) -> Result<(), SimulationError> {
+        let mut seen = std::collections::HashSet::with_capacity(names.len());
+        for name in names {
+            if name.is_empty() || name.trim() != name {
+                return Err(SimulationError::Circuit(format!(
+                    "PSS DC seed contains a non-canonical {kind} name"
+                )));
+            }
+            let normalized = name.to_ascii_uppercase();
+            if !seen.insert(normalized) {
+                return Err(SimulationError::Circuit(format!(
+                    "PSS DC seed contains duplicate {kind} name '{name}'"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_for_circuit(&self, circuit: &Circuit) -> Result<(), SimulationError> {
+        let expected_node_names = circuit.node_names_sorted();
+        let expected_branch_names = circuit.branch_names_sorted();
+        if self.node_names != expected_node_names {
+            return Err(SimulationError::Circuit(format!(
+                "PSS DC seed node basis does not match the elaborated circuit: expected {:?}, received {:?}",
+                expected_node_names, self.node_names
+            )));
+        }
+        if self.branch_names != expected_branch_names {
+            return Err(SimulationError::Circuit(format!(
+                "PSS DC seed branch basis does not match the elaborated circuit: expected {:?}, received {:?}",
+                expected_branch_names, self.branch_names
+            )));
+        }
+        if self.solution.len() != circuit.matrix_size() {
+            return Err(SimulationError::Circuit(format!(
+                "PSS DC seed has {} MNA values, but the elaborated circuit requires {}",
+                self.solution.len(),
+                circuit.matrix_size()
+            )));
+        }
+        if self.solution.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::Circuit(
+                "PSS DC seed contains a non-finite MNA value".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Exact converged shooting-PSS numerical state retained for dependent
+/// analyses. This is deliberately distinct from a display waveform: the
+/// reactive shooting state and monodromy matrix are part of the contract and
+/// must survive task and worker boundaries without being recomputed.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+pub struct PssOperatingPoint {
+    config: PssConfig,
+    analysis: PssAnalysisResult,
+    shooting_state: Vec<Value>,
+}
+
+impl PssOperatingPoint {
+    /// Fully materialized shooting configuration that produced this state.
+    pub fn config(&self) -> &PssConfig {
+        &self.config
+    }
+
+    /// Converged periodic result and stability data.
+    pub fn analysis(&self) -> &PssAnalysisResult {
+        &self.analysis
+    }
+
+    /// Reactive state at the authenticated phase origin.
+    pub fn shooting_state(&self) -> &[Value] {
+        &self.shooting_state
+    }
+
+    /// Highest Fourier harmonic that can be projected without exceeding the
+    /// Nyquist limit of the retained time-domain orbit. Saved-output harmonic
+    /// count is intentionally not part of this capacity: dependent analyses
+    /// consume the authenticated orbit, not the optional display spectrum.
+    pub fn spectral_harmonic_capacity(&self) -> usize {
+        self.config
+            .points_per_period
+            .min(self.analysis.result.time.len().saturating_sub(1))
+            / 2
+    }
+
+    /// Reconstruct a retained operating point after authenticated transport.
+    /// Shape and finiteness checks are repeated here so callers cannot feed a
+    /// fabricated partial state into dependent numerical kernels.
+    pub fn try_from_parts(
+        config: PssConfig,
+        analysis: PssAnalysisResult,
+        shooting_state: Vec<Value>,
+    ) -> Result<Self, SimulationError> {
+        config.validate().map_err(PssError::InvalidConfig)?;
+        Self::validate_parts(&config, &analysis, &shooting_state)?;
+        Ok(Self {
+            config,
+            analysis,
+            shooting_state,
+        })
+    }
+
+    fn validate_parts(
+        config: &PssConfig,
+        analysis: &PssAnalysisResult,
+        shooting_state: &[Value],
+    ) -> Result<(), SimulationError> {
+        if !analysis.period.is_finite() || analysis.period <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has an invalid period".to_owned(),
+            ));
+        }
+        if !analysis.result.period.is_finite()
+            || !analysis.result.frequency.is_finite()
+            || analysis.result.period <= 0.0
+            || analysis.result.frequency <= 0.0
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS result has an invalid period or frequency".to_owned(),
+            ));
+        }
+        let period_tolerance =
+            (64.0 * Value::EPSILON * analysis.period.abs()).max(Value::MIN_POSITIVE);
+        if (analysis.result.period - analysis.period).abs() > period_tolerance
+            || (analysis.result.frequency - 1.0 / analysis.period).abs()
+                > 64.0 * Value::EPSILON * analysis.result.frequency.abs().max(1.0)
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS result basis is inconsistent with its shooting period".to_owned(),
+            ));
+        }
+        if !config.is_autonomous() {
+            let requested_period = config.period();
+            let relative_error = ((analysis.period - requested_period) / requested_period).abs();
+            if relative_error > 1.0e-9 {
+                return Err(SimulationError::Circuit(format!(
+                    "retained PSS period {:.16e} s does not match its driven configuration period {:.16e} s",
+                    analysis.period, requested_period
+                )));
+            }
+        }
+        if analysis.result.time.len() < 2
+            || analysis.result.waveforms.is_empty()
+            || analysis.result.node_names.len() != analysis.result.waveforms.len()
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has an incomplete periodic orbit".to_owned(),
+            ));
+        }
+        let expected_time_samples = config.points_per_period.checked_add(1).ok_or_else(|| {
+            SimulationError::Circuit("retained PSS point count overflows the platform".to_owned())
+        })?;
+        if analysis.result.time.len() != expected_time_samples {
+            return Err(SimulationError::Circuit(format!(
+                "retained PSS orbit has {} time samples; its configured grid requires {expected_time_samples}",
+                analysis.result.time.len()
+            )));
+        }
+        if !analysis.final_residual.is_finite()
+            || !analysis.result.residual_norm.is_finite()
+            || analysis.final_residual < 0.0
+            || analysis.result.residual_norm < 0.0
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has an invalid residual".to_owned(),
+            ));
+        }
+        if analysis
+            .result
+            .floquet_multipliers
+            .iter()
+            .chain(&analysis.floquet_multipliers)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has a non-finite Floquet multiplier".to_owned(),
+            ));
+        }
+        let mut normalized_node_names =
+            std::collections::HashSet::with_capacity(analysis.result.node_names.len());
+        for node_name in &analysis.result.node_names {
+            let normalized = node_name.trim().to_ascii_uppercase();
+            if normalized.is_empty() || !normalized_node_names.insert(normalized) {
+                return Err(SimulationError::Circuit(
+                    "retained PSS operating point has an empty or duplicate node name".to_owned(),
+                ));
+            }
+        }
+        if analysis.result.time.iter().any(|value| !value.is_finite())
+            || analysis
+                .result
+                .time
+                .windows(2)
+                .any(|pair| pair[1] <= pair[0])
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has an invalid time grid".to_owned(),
+            ));
+        }
+        let first_time = analysis.result.time[0];
+        let last_time = *analysis
+            .result
+            .time
+            .last()
+            .expect("validated non-empty PSS time grid");
+        if first_time.abs() > period_tolerance
+            || (last_time - analysis.period).abs() > period_tolerance
+            || analysis
+                .result
+                .time
+                .iter()
+                .any(|time| *time < -period_tolerance || *time > analysis.period + period_tolerance)
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS time grid does not span exactly one shooting period".to_owned(),
+            ));
+        }
+        let sample_count = analysis.result.time.len();
+        if analysis.result.waveforms.iter().any(|waveform| {
+            waveform.values.len() != sample_count
+                || waveform.values.iter().any(|value| !value.is_finite())
+        }) {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has an invalid waveform payload".to_owned(),
+            ));
+        }
+        if shooting_state.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has an invalid reactive state".to_owned(),
+            ));
+        }
+        if analysis.monodromy.len() != shooting_state.len()
+            || analysis.monodromy.iter().any(|row| {
+                row.len() != shooting_state.len() || row.iter().any(|value| !value.is_finite())
+            })
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has an invalid monodromy matrix".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Phase-consistent state at the end of one converged PSS period, projected
@@ -279,6 +597,84 @@ impl Engine {
     ) -> Result<PssAnalysisResult, SimulationError> {
         self.run_pss_with_state_abort(netlist, config, abort)
             .map(|(result, _, _, _)| result)
+    }
+
+    /// Run PSS from an exact, externally retained DC operating point.
+    ///
+    /// The seed must match the fully elaborated circuit's canonical node and
+    /// branch ordering exactly. A valid seed replaces the internal DC solve;
+    /// it is used directly to initialize reactive state and stabilization.
+    pub fn run_pss_with_dc_seed(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        dc_seed: &PssDcOperatingPointSeed,
+    ) -> Result<PssAnalysisResult, SimulationError> {
+        self.run_pss_with_dc_seed_and_abort(netlist, config, dc_seed, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::run_pss_with_dc_seed`].
+    pub fn run_pss_with_dc_seed_and_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        dc_seed: &PssDcOperatingPointSeed,
+        abort: &dyn AbortSignal,
+    ) -> Result<PssAnalysisResult, SimulationError> {
+        self.run_pss_with_state_and_frozen_sources_abort(
+            netlist,
+            config,
+            &std::collections::BTreeSet::new(),
+            false,
+            Some(dc_seed),
+            abort,
+        )
+        .map(|(result, _, _, _)| result)
+    }
+
+    /// Solve PSS and retain the exact numerical state required by dependent
+    /// periodic analyses.
+    pub fn run_pss_operating_point_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<PssOperatingPoint, SimulationError> {
+        let retained_config = config.clone();
+        let (analysis, _, _, shooting_state) =
+            self.run_pss_with_state_abort(netlist, config, abort)?;
+        PssOperatingPoint::try_from_parts(retained_config, analysis, shooting_state)
+    }
+
+    /// Solve PSS from an exact DC seed and retain the converged numerical
+    /// state required by dependent periodic analyses.
+    pub fn run_pss_operating_point_with_dc_seed(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        dc_seed: &PssDcOperatingPointSeed,
+    ) -> Result<PssOperatingPoint, SimulationError> {
+        self.run_pss_operating_point_with_dc_seed_and_abort(netlist, config, dc_seed, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::run_pss_operating_point_with_dc_seed`].
+    pub fn run_pss_operating_point_with_dc_seed_and_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        dc_seed: &PssDcOperatingPointSeed,
+        abort: &dyn AbortSignal,
+    ) -> Result<PssOperatingPoint, SimulationError> {
+        let retained_config = config.clone();
+        let (analysis, _, _, shooting_state) = self.run_pss_with_state_and_frozen_sources_abort(
+            netlist,
+            config,
+            &std::collections::BTreeSet::new(),
+            false,
+            Some(dc_seed),
+            abort,
+        )?;
+        PssOperatingPoint::try_from_parts(retained_config, analysis, shooting_state)
     }
 
     /// Run PSS and materialize a phase-consistent transient continuation
@@ -356,6 +752,7 @@ impl Engine {
                 config,
                 &frozen_source_set,
                 true,
+                None,
                 abort,
             )?;
         Self::ensure_pss_continuation_netlist_identity(
@@ -646,6 +1043,7 @@ impl Engine {
             config,
             &std::collections::BTreeSet::new(),
             false,
+            None,
             abort,
         )
     }
@@ -656,6 +1054,7 @@ impl Engine {
         config: PssConfig,
         frozen_sources: &std::collections::BTreeSet<String>,
         require_exact_continuation_state: bool,
+        dc_seed: Option<&PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
         if abort.is_aborted() {
@@ -692,9 +1091,22 @@ impl Engine {
                 .saturating_add(state_dimension.saturating_mul(2)),
         )?;
 
-        // Get DC operating point as initial condition.
-        let dc_solution =
-            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
+        // Use the exact retained operating point when one was supplied. The
+        // basis check happens only after full circuit elaboration and matrix
+        // construction, so stale or structurally tampered states fail closed.
+        // No fresh DC solve is performed on this path.
+        let dc_solution = match dc_seed {
+            Some(seed) => {
+                seed.validate_for_circuit(&circuit)?;
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                seed.solution.clone()
+            }
+            None => {
+                self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
+            }
+        };
 
         // Initialize capacitor/inductor state from DC
         self.pss_initialize_reactive_state(&mut circuit, &dc_solution);
@@ -1864,6 +2276,43 @@ impl Engine {
 mod tests {
     use super::*;
 
+    fn retained_parts() -> (PssConfig, PssAnalysisResult, Vec<Value>) {
+        let config = PssConfig::new(1.0)
+            .with_harmonics(4)
+            .with_points_per_period(16);
+        let time = (0..=16)
+            .map(|index| index as Value / 16.0)
+            .collect::<Vec<_>>();
+        let waveform = time
+            .iter()
+            .map(|time| (2.0 * std::f64::consts::PI * time).sin())
+            .collect();
+        let result = PssResult {
+            period: 1.0,
+            frequency: 1.0,
+            iterations: 2,
+            residual_norm: 1.0e-10,
+            time,
+            waveforms: vec![PeriodicWaveform::from_values(waveform)],
+            node_names: vec!["out".to_owned()],
+            period_detected: false,
+            floquet_multipliers: Vec::new(),
+        };
+        (
+            config,
+            PssAnalysisResult {
+                result,
+                iterations: 2,
+                final_residual: 1.0e-10,
+                period: 1.0,
+                monodromy: Vec::new(),
+                floquet_multipliers: Vec::new(),
+                is_stable: true,
+            },
+            Vec::new(),
+        )
+    }
+
     fn assert_close(actual: Value, expected: Value) {
         let tolerance = 32.0 * Value::EPSILON * expected.abs().max(1.0);
         assert!(
@@ -1955,6 +2404,43 @@ mod tests {
             backward_euler.coeff_v_n_minus_1
         );
         assert!(!coefficients.needs_two_history);
+    }
+
+    #[test]
+    fn retained_driven_orbit_without_reactive_state_is_valid_and_reports_nyquist_capacity() {
+        let (config, analysis, shooting_state) = retained_parts();
+        let operating_point =
+            PssOperatingPoint::try_from_parts(config, analysis, shooting_state).unwrap();
+        assert!(operating_point.shooting_state().is_empty());
+        assert_eq!(operating_point.spectral_harmonic_capacity(), 8);
+    }
+
+    #[test]
+    fn retained_operating_point_rejects_structurally_tampered_numerical_evidence() {
+        let (config, mut analysis, shooting_state) = retained_parts();
+        analysis.result.frequency = 2.0;
+        assert!(
+            PssOperatingPoint::try_from_parts(config.clone(), analysis, shooting_state.clone())
+                .is_err()
+        );
+
+        let (_, mut analysis, _) = retained_parts();
+        analysis.result.node_names[0].clear();
+        assert!(
+            PssOperatingPoint::try_from_parts(config.clone(), analysis, shooting_state.clone())
+                .is_err()
+        );
+
+        let (_, mut analysis, _) = retained_parts();
+        analysis.result.floquet_multipliers = vec![num_complex::Complex64::new(Value::NAN, 0.0)];
+        assert!(
+            PssOperatingPoint::try_from_parts(config.clone(), analysis, shooting_state.clone())
+                .is_err()
+        );
+
+        let (_, mut analysis, _) = retained_parts();
+        analysis.result.time[8] = 2.0;
+        assert!(PssOperatingPoint::try_from_parts(config, analysis, shooting_state).is_err());
     }
 
     #[test]

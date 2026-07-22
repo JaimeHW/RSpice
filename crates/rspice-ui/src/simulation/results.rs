@@ -76,6 +76,9 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         /// Evaluated `.MEAS TRAN` results.
         measurements: Vec<rspice_core::MeasureResult>,
+        /// Exact shooting-PSS numerical state when this transient-shaped
+        /// result was produced by PSS. Ordinary transient results carry none.
+        periodic_state: Option<std::sync::Arc<rspice_core::engine::PssOperatingPoint>>,
     },
 
     /// AC analysis results

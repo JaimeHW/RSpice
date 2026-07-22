@@ -13,7 +13,13 @@ use crate::services::simulation_runner::{
     PnoiseReference, PxfFrequencySweep,
 };
 use crate::simulation::AnalysisConfig;
-use crate::simulation::config::{AcSweepType, PzAnalysisType};
+use crate::simulation::config::{
+    AcSweepType, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PzAnalysisType,
+};
+use crate::simulation::dialog::{
+    OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpHomotopy, OpInitialGuess,
+    OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+};
 use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
@@ -135,6 +141,38 @@ pub(in crate::simulation) fn content_digest(domain: &str, bytes: &[u8]) -> Conte
     writer.finish()
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+pub(in crate::simulation) fn f64_sequence_digest(domain: &str, values: &[f64]) -> ContentDigest {
+    let mut writer = CanonicalWriter::new(domain);
+    writer.sequence(values.len());
+    for value in values {
+        writer.f64(*value);
+    }
+    writer.finish()
+}
+
+/// Identity of the exact executable source and voltage mutation consumed by
+/// one OP. Process-corner materialization is already represented in
+/// `source`; supply scaling is authenticated separately because it is applied
+/// to the parsed netlist immediately before circuit construction.
+pub(in crate::simulation) fn operating_point_effective_source_digest(
+    source: &str,
+    run_point: OpRunPointContext,
+) -> ContentDigest {
+    let mut writer = CanonicalWriter::new("rspice.op-effective-source/v1");
+    writer.digest(crate::workbench::netlist_document::source_content_digest(
+        source,
+    ));
+    writer.option(run_point.supply_voltage.as_ref(), |writer, value| {
+        writer.f64(*value);
+    });
+    writer.option(
+        run_point.nominal_supply_voltage.as_ref(),
+        |writer, value| writer.f64(*value),
+    );
+    writer.finish()
+}
+
 /// Stable manual-deck task identity derived from the exact expanded source.
 ///
 /// Manual decks do not own durable [`SimulationPlan`](crate::simulation::plan::SimulationPlan)
@@ -192,7 +230,10 @@ pub(in crate::simulation) fn analysis_config_digest(
 fn encode_analysis_config(writer: &mut CanonicalWriter, config: Option<&AnalysisConfig>) {
     writer.domain("engine-analysis-config");
     writer.option(config, |writer, config| match config {
-        AnalysisConfig::DcOp => writer.u8(0),
+        AnalysisConfig::DcOp(config) => {
+            writer.u8(0);
+            encode_op_config(writer, config);
+        }
         AnalysisConfig::DcSweep(config) => {
             writer.u8(1);
             writer.string(&config.source);
@@ -236,6 +277,13 @@ fn encode_analysis_config(writer: &mut CanonicalWriter, config: Option<&Analysis
             writer.usize(config.num_points);
             writer.f64(config.start_freq);
             writer.f64(config.stop_freq);
+            writer.option(config.explicit_frequencies.as_ref(), |w, frequencies| {
+                encode_f64_slice(w, frequencies);
+            });
+            writer.option(config.data_table_name.as_ref(), |w, name| w.string(name));
+            encode_noise_contribution_detail(writer, config.contribution_detail);
+            encode_noise_integration_mode(writer, config.integration_mode);
+            writer.f64(config.temperature_kelvin);
         }
         AnalysisConfig::PoleZero(config) => {
             writer.u8(5);
@@ -257,6 +305,139 @@ fn encode_analysis_config(writer: &mut CanonicalWriter, config: Option<&Analysis
             writer.option(config.frequency.as_ref(), |w, v| w.f64(*v));
         }
     });
+}
+
+fn encode_op_config(writer: &mut CanonicalWriter, config: &OpConfig) {
+    encode_op_fields(
+        writer,
+        config.temperature_mode,
+        config.temperature_celsius,
+        config.initial_guess,
+        config.node_initialization,
+        config.homotopy,
+        config.annotation,
+        config.device_detail,
+        config.save_device_op,
+        config.accuracy,
+        &config.selected_devices,
+        config.previous_state.as_ref(),
+        &config.violation_devices,
+        config.violation_source_content_digest.as_ref(),
+        config.run_point,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_op_fields(
+    writer: &mut CanonicalWriter,
+    temperature_mode: OpTemperatureMode,
+    temperature_celsius: f64,
+    initial_guess: OpInitialGuess,
+    node_initialization: OpNodeInitialization,
+    homotopy: OpHomotopy,
+    annotation: OpAnnotation,
+    device_detail: OpDeviceDetail,
+    save_device_op: OpSaveDevice,
+    accuracy: OpAccuracy,
+    selected_devices: &[String],
+    previous_state: Option<&OpPreviousState>,
+    violation_devices: &[String],
+    violation_source_content_digest: Option<&ContentDigest>,
+    run_point: OpRunPointContext,
+) {
+    writer.u8(match temperature_mode {
+        OpTemperatureMode::PvtRunSet => 0,
+        OpTemperatureMode::Nominal27C => 1,
+        OpTemperatureMode::Explicit => 2,
+        OpTemperatureMode::ActiveRunSetAxis => 3,
+    });
+    writer.f64(temperature_celsius);
+    writer.u8(match initial_guess {
+        OpInitialGuess::Automatic => 0,
+        OpInitialGuess::PreviousConverged => 1,
+        OpInitialGuess::UserNodeVoltages => 2,
+        OpInitialGuess::ZeroState => 3,
+    });
+    writer.u8(match node_initialization {
+        OpNodeInitialization::UseIcAndNodeset => 0,
+        OpNodeInitialization::IgnoreIcAndNodeset => 1,
+        OpNodeInitialization::ForceIcValues => 2,
+        OpNodeInitialization::ValidateOnly => 3,
+    });
+    writer.u8(match homotopy {
+        OpHomotopy::Adaptive => 0,
+        OpHomotopy::SourceStepping => 1,
+        OpHomotopy::GminStepping => 2,
+        OpHomotopy::PseudoTransient => 3,
+        OpHomotopy::None => 4,
+    });
+    writer.u8(match annotation {
+        OpAnnotation::VoltagesAndCurrents => 0,
+        OpAnnotation::VoltagesOnly => 1,
+        OpAnnotation::VoltagesAndDeviceOp => 2,
+        OpAnnotation::None => 3,
+    });
+    writer.u8(match device_detail {
+        OpDeviceDetail::SelectedAndViolations => 0,
+        OpDeviceDetail::AllDevices => 1,
+        OpDeviceDetail::ViolationsOnly => 2,
+        OpDeviceDetail::None => 3,
+    });
+    writer.u8(match save_device_op {
+        OpSaveDevice::Enabled => 0,
+        OpSaveDevice::Disabled => 1,
+        OpSaveDevice::FinalPointOnly => 2,
+    });
+    writer.u8(match accuracy {
+        OpAccuracy::Fast => 0,
+        OpAccuracy::Balanced => 1,
+        OpAccuracy::Accurate => 2,
+        OpAccuracy::Robust => 3,
+    });
+    writer.sequence(selected_devices.len());
+    for device in selected_devices {
+        writer.string(device);
+    }
+    writer.option(previous_state, |writer, previous| {
+        writer.digest(previous.source_content_digest);
+        writer.digest(previous.producer_snapshot_digest);
+        writer.digest(previous.producer_result_digest);
+        writer.sequence(previous.node_names.len());
+        for name in &previous.node_names {
+            writer.string(name);
+        }
+        writer.sequence(previous.branch_names.len());
+        for name in &previous.branch_names {
+            writer.string(name);
+        }
+        writer.sequence(previous.solution.len());
+        for value in &previous.solution {
+            writer.f64(*value);
+        }
+    });
+    writer.sequence(violation_devices.len());
+    for device in violation_devices {
+        writer.string(device);
+    }
+    writer.option(violation_source_content_digest, |writer, digest| {
+        writer.digest(*digest);
+    });
+    writer.usize(run_point.index);
+    writer.usize(run_point.count);
+    writer.u8(match run_point.process {
+        crate::simulation::dialog::corner::ProcessCorner::TT => 0,
+        crate::simulation::dialog::corner::ProcessCorner::SS => 1,
+        crate::simulation::dialog::corner::ProcessCorner::FF => 2,
+        crate::simulation::dialog::corner::ProcessCorner::SF => 3,
+        crate::simulation::dialog::corner::ProcessCorner::FS => 4,
+    });
+    writer.option(run_point.supply_voltage.as_ref(), |writer, voltage| {
+        writer.f64(*voltage);
+    });
+    writer.option(
+        run_point.nominal_supply_voltage.as_ref(),
+        |writer, voltage| writer.f64(*voltage),
+    );
 }
 
 pub(in crate::simulation) fn manual_source_receipt_digest(
@@ -409,8 +590,40 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
     writer.domain("analysis-spec");
     writer.u8(analysis_kind_tag(spec));
     match spec {
-        AnalysisSpec::DcOp
-        | AnalysisSpec::Pac
+        AnalysisSpec::LegacyDcOp => encode_op_config(writer, &OpConfig::default()),
+        AnalysisSpec::DcOp {
+            temperature_mode,
+            temperature_celsius,
+            initial_guess,
+            node_initialization,
+            homotopy,
+            annotation,
+            device_detail,
+            save_device_op,
+            accuracy,
+            selected_devices,
+            previous_state,
+            violation_devices,
+            violation_source_content_digest,
+            run_point,
+        } => encode_op_fields(
+            writer,
+            *temperature_mode,
+            *temperature_celsius,
+            *initial_guess,
+            *node_initialization,
+            *homotopy,
+            *annotation,
+            *device_detail,
+            *save_device_op,
+            *accuracy,
+            selected_devices,
+            previous_state.as_ref(),
+            violation_devices,
+            violation_source_content_digest.as_ref(),
+            *run_point,
+        ),
+        AnalysisSpec::Pac
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pstb
@@ -508,38 +721,65 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
         }
         AnalysisSpec::Noise {
             output_node,
+            reference_node,
+            input_source,
             start_freq,
             stop_freq,
             points_per_decade,
+            sweep,
+            explicit_frequencies,
+            data_table_name,
+            contribution_detail,
+            integration_mode,
             temperature,
         } => {
             writer.string(output_node);
+            writer.string(reference_node);
+            writer.string(input_source);
             writer.f64(*start_freq);
             writer.f64(*stop_freq);
             writer.usize(*points_per_decade);
+            writer.u64(match sweep {
+                NoiseSweepType::Decade => 0,
+                NoiseSweepType::Octave => 1,
+                NoiseSweepType::Linear => 2,
+                NoiseSweepType::ExplicitFrequencyList => 3,
+                NoiseSweepType::Unsupported(value) => value.saturating_add(4),
+            });
+            writer.option(explicit_frequencies.as_ref(), |w, frequencies| {
+                encode_f64_slice(w, frequencies);
+            });
+            writer.option(data_table_name.as_ref(), |w, name| w.string(name));
+            encode_noise_contribution_detail(writer, *contribution_detail);
+            encode_noise_integration_mode(writer, *integration_mode);
             writer.f64(*temperature);
         }
         AnalysisSpec::Pss {
-            fundamental_freq,
-            num_harmonics,
-            tolerance,
-            max_iterations,
             method,
+            fundamental_freq,
+            tone_sources,
+            tstab_periods,
+            points_per_period,
+            tolerance,
             oscillator_mode,
             oscillator_node,
-            save_harmonics,
+            num_harmonics,
         } => {
-            writer.f64(*fundamental_freq);
-            writer.usize(*num_harmonics);
-            writer.f64(*tolerance);
             writer.u8(match method {
                 crate::simulation::multi_run::PssMethod::Shooting => 0,
                 crate::simulation::multi_run::PssMethod::HarmonicBalance => 1,
             });
-            writer.usize(*max_iterations);
+            writer.f64(*fundamental_freq);
+            writer.sequence(tone_sources.len());
+            for source in tone_sources {
+                writer.string(source);
+            }
+            writer.usize(*tstab_periods);
+            writer.usize(*points_per_period);
+            writer.f64(*tolerance);
             writer.bool(*oscillator_mode);
             writer.option(oscillator_node.as_ref(), |w, value| w.string(value));
-            writer.bool(*save_harmonics);
+            writer.usize(*num_harmonics);
         }
         AnalysisSpec::HarmonicBalance {
             tones,
@@ -1143,6 +1383,23 @@ fn encode_frequency_sweep(writer: &mut CanonicalWriter, sweep: FrequencySweep) {
     });
 }
 
+fn encode_noise_contribution_detail(writer: &mut CanonicalWriter, detail: NoiseContributionDetail) {
+    writer.u8(match detail {
+        NoiseContributionDetail::Top50 => 0,
+        NoiseContributionDetail::AllContributors => 1,
+        NoiseContributionDetail::Top20 => 2,
+        NoiseContributionDetail::SummaryOnly => 3,
+    });
+}
+
+fn encode_noise_integration_mode(writer: &mut CanonicalWriter, mode: NoiseIntegrationMode) {
+    writer.u8(match mode {
+        NoiseIntegrationMode::Enabled => 0,
+        NoiseIntegrationMode::OutputNoiseOnly => 1,
+        NoiseIntegrationMode::Disabled => 2,
+    });
+}
+
 fn encode_envelope_initial_periodic_solve(
     writer: &mut CanonicalWriter,
     value: EnvelopeInitialPeriodicSolve,
@@ -1170,7 +1427,7 @@ fn encode_envelope_extraction_path(writer: &mut CanonicalWriter, value: Envelope
 
 pub(in crate::simulation) fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
     match spec {
-        AnalysisSpec::DcOp => 0,
+        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => 0,
         AnalysisSpec::DcSweep { .. } => 1,
         AnalysisSpec::Ac { .. } => 2,
         AnalysisSpec::AcData { .. } => 3,
@@ -1284,6 +1541,177 @@ mod tests {
     use super::*;
     use crate::services::drc::{DrcLocation, DrcViolation};
     use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+
+    fn exact_noise_spec() -> AnalysisSpec {
+        AnalysisSpec::Noise {
+            output_node: "out".to_owned(),
+            reference_node: "ref".to_owned(),
+            input_source: "VIN".to_owned(),
+            start_freq: 10.0,
+            stop_freq: 1.0e6,
+            points_per_decade: 30,
+            sweep: NoiseSweepType::Decade,
+            explicit_frequencies: None,
+            data_table_name: None,
+            contribution_detail: NoiseContributionDetail::Top50,
+            integration_mode: NoiseIntegrationMode::Enabled,
+            temperature: 300.15,
+        }
+    }
+
+    #[test]
+    fn noise_digest_changes_for_every_exact_execution_field() {
+        let base = exact_noise_spec();
+        let digest = |spec: &AnalysisSpec, config: Option<&AnalysisConfig>| {
+            analysis_config_digest(".noise", spec, config, &SpecExecutionOptions::default())
+        };
+        let baseline = digest(&base, None);
+
+        let mut variants = Vec::new();
+        macro_rules! changed {
+            ($field:ident, $value:expr) => {{
+                let mut spec = base.clone();
+                let AnalysisSpec::Noise { $field, .. } = &mut spec else {
+                    unreachable!()
+                };
+                *$field = $value;
+                variants.push(spec);
+            }};
+        }
+        changed!(output_node, "other".to_owned());
+        changed!(reference_node, "0".to_owned());
+        changed!(input_source, "VOTHER".to_owned());
+        changed!(start_freq, 11.0);
+        changed!(stop_freq, 2.0e6);
+        changed!(points_per_decade, 31);
+        changed!(sweep, NoiseSweepType::Octave);
+        changed!(explicit_frequencies, Some(vec![10.0, 100.0]));
+        changed!(data_table_name, Some("points".to_owned()));
+        changed!(contribution_detail, NoiseContributionDetail::Top20);
+        changed!(integration_mode, NoiseIntegrationMode::OutputNoiseOnly);
+        changed!(temperature, 398.15);
+
+        for variant in variants {
+            assert_ne!(baseline, digest(&variant, None), "variant: {variant:?}");
+        }
+
+        let base_config = crate::simulation::config::NoiseAnalysisConfig::default();
+        let mut changed_config = base_config.clone();
+        changed_config.contribution_detail = NoiseContributionDetail::SummaryOnly;
+        assert_ne!(
+            digest(&base, Some(&AnalysisConfig::Noise(base_config)),),
+            digest(&base, Some(&AnalysisConfig::Noise(changed_config)),)
+        );
+    }
+
+    #[test]
+    fn pss_digest_changes_for_every_exact_nine_field_contract_value() {
+        let base = AnalysisSpec::Pss {
+            method: crate::simulation::multi_run::PssMethod::Shooting,
+            fundamental_freq: 1.0e6,
+            tone_sources: vec!["VCLK".to_owned()],
+            tstab_periods: 20,
+            points_per_period: 512,
+            tolerance: 1.0e-7,
+            oscillator_mode: false,
+            oscillator_node: None,
+            num_harmonics: 20,
+        };
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(".pss", spec, None, &SpecExecutionOptions::default())
+        };
+        let baseline = digest(&base);
+        let mut variants = Vec::new();
+        macro_rules! changed {
+            ($field:ident, $value:expr) => {{
+                let mut spec = base.clone();
+                let AnalysisSpec::Pss { $field, .. } = &mut spec else {
+                    unreachable!()
+                };
+                *$field = $value;
+                variants.push(spec);
+            }};
+        }
+        changed!(
+            method,
+            crate::simulation::multi_run::PssMethod::HarmonicBalance
+        );
+        changed!(fundamental_freq, 2.0e6);
+        changed!(tone_sources, vec!["VLO".to_owned(), "VRF".to_owned()]);
+        changed!(tstab_periods, 21);
+        changed!(points_per_period, 1024);
+        changed!(tolerance, 2.0e-8);
+        changed!(oscillator_mode, true);
+        changed!(oscillator_node, Some("osc".to_owned()));
+        changed!(num_harmonics, 21);
+
+        for variant in variants {
+            assert_ne!(baseline, digest(&variant), "variant: {variant:?}");
+        }
+    }
+
+    #[test]
+    fn operating_point_digest_is_sensitive_to_every_contract_field() {
+        let base = AnalysisSpec::dc_op();
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(".op", spec, None, &SpecExecutionOptions::default())
+        };
+        let baseline = digest(&base);
+
+        let mut variants = Vec::new();
+        macro_rules! changed {
+            ($field:ident, $value:expr) => {{
+                let mut spec = base.clone();
+                let AnalysisSpec::DcOp { $field, .. } = &mut spec else {
+                    unreachable!()
+                };
+                *$field = $value;
+                variants.push(spec);
+            }};
+        }
+        changed!(temperature_mode, OpTemperatureMode::Explicit);
+        changed!(temperature_celsius, 91.25);
+        changed!(initial_guess, OpInitialGuess::ZeroState);
+        changed!(node_initialization, OpNodeInitialization::ForceIcValues);
+        changed!(homotopy, OpHomotopy::SourceStepping);
+        changed!(annotation, OpAnnotation::VoltagesOnly);
+        changed!(device_detail, OpDeviceDetail::AllDevices);
+        changed!(save_device_op, OpSaveDevice::Disabled);
+        changed!(accuracy, OpAccuracy::Accurate);
+        changed!(selected_devices, vec!["M1".to_owned()]);
+        changed!(
+            previous_state,
+            Some(OpPreviousState {
+                source_content_digest: ContentDigest::from_bytes([1; 32]),
+                producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
+                producer_result_digest: ContentDigest::from_bytes([3; 32]),
+                node_names: vec!["out".to_owned()],
+                branch_names: vec!["V1".to_owned()],
+                solution: vec![1.0, -1.0e-3],
+            })
+        );
+        changed!(violation_devices, vec!["M2".to_owned()]);
+        changed!(
+            violation_source_content_digest,
+            Some(ContentDigest::from_bytes([4; 32]))
+        );
+        changed!(
+            run_point,
+            OpRunPointContext {
+                index: 1,
+                count: 2,
+                ..OpRunPointContext::default()
+            }
+        );
+
+        for variant in variants {
+            assert_ne!(
+                baseline,
+                digest(&variant),
+                "unchanged digest for {variant:?}"
+            );
+        }
+    }
 
     #[test]
     fn length_prefixes_prevent_concatenation_collisions() {
@@ -1462,28 +1890,19 @@ mod tests {
             "manual-expanded-source/v1",
             b"deck\nR1 out 0 1k\n.op\n.end\n",
         );
-        let first = manual_deck_analysis_instance_id(source, &AnalysisSpec::DcOp, 0);
+        let op = AnalysisSpec::dc_op();
+        let first = manual_deck_analysis_instance_id(source, &op, 0);
 
+        assert_eq!(first, manual_deck_analysis_instance_id(source, &op, 0));
         assert_eq!(
             first,
-            manual_deck_analysis_instance_id(source, &AnalysisSpec::DcOp, 0)
-        );
-        assert_eq!(
-            first,
-            manual_deck_analysis_instance_id_from_tag(
-                source,
-                analysis_kind_tag(&AnalysisSpec::DcOp),
-                0,
-            )
+            manual_deck_analysis_instance_id_from_tag(source, analysis_kind_tag(&op), 0,)
         );
         assert_ne!(
             first,
-            manual_deck_analysis_instance_id(changed_source, &AnalysisSpec::DcOp, 0)
+            manual_deck_analysis_instance_id(changed_source, &op, 0)
         );
-        assert_ne!(
-            first,
-            manual_deck_analysis_instance_id(source, &AnalysisSpec::DcOp, 1)
-        );
+        assert_ne!(first, manual_deck_analysis_instance_id(source, &op, 1));
         assert_ne!(
             first,
             manual_deck_analysis_instance_id(

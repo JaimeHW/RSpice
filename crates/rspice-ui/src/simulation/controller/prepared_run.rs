@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use rspice_core::netlist::{IncludeProcessor, parse_include_directive, parse_lib_directive};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_core::netlist::IncludeProcessor;
+use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
 use super::*;
 use crate::simulation::execution::{
@@ -335,7 +337,11 @@ impl SimulationController {
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
         netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
         let (expanded_netlist, sealed_source_dependencies) =
-            expand_generated_dependencies(&netlist, root_schematic.current_file.as_deref())?;
+            expand_generated_dependencies_with_sealed_sources(
+                &netlist,
+                root_schematic.current_file.as_deref(),
+                Some(&sealed_models),
+            )?;
         netlist = expanded_netlist;
         reject_deferred_external_sources_with_project_runtimes(
             &netlist,
@@ -457,7 +463,7 @@ impl SimulationController {
             ));
         }
         let (expanded, canonical_origin, sealed_source_dependencies) =
-            expand_manual_dependencies(&composed, origin)?;
+            expand_manual_dependencies(&composed, origin, &state.model_library_manager)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?;
         reject_deferred_external_sources_with_project_runtimes(
             &expanded,
@@ -924,6 +930,7 @@ fn attach_saved_output_contracts(
 fn expand_manual_dependencies(
     source: &str,
     origin: Option<&Path>,
+    model_libraries: &crate::state::ModelLibraryManager,
 ) -> Result<
     (
         String,
@@ -936,25 +943,74 @@ fn expand_manual_dependencies(
         return Ok((source.to_owned(), None, Vec::new()));
     };
     let absolute_origin = absolute_source_identity(origin)?;
-    let mut processor = IncludeProcessor::new(&absolute_origin);
-    let expanded = processor
-        .expand_content(source, &absolute_origin)
-        .map_err(|error| {
-            PreparationError::new(
-                PreparationStage::SourceChecks,
-                format!("Could not seal manual deck dependencies: {error}"),
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let sealed = model_libraries
+            .seal_execution_sources()
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let (expanded, dependencies) = sealed
+            .expand_root_dependencies(
+                &absolute_origin,
+                source,
+                &rspice_core::abort_signal::NoAbort,
             )
-        })?;
-    Ok((
-        expanded,
-        Some(path_identity(&absolute_origin)),
-        processor.resolved_dependencies().to_vec(),
-    ))
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
+        Ok((
+            expanded,
+            Some(path_identity(&absolute_origin)),
+            dependencies,
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = model_libraries;
+        let mut processor = IncludeProcessor::new(&absolute_origin);
+        let expanded = processor
+            .expand_content(source, &absolute_origin)
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::SourceChecks,
+                    format!("Could not seal manual deck dependencies: {error}"),
+                )
+            })?;
+        Ok((
+            expanded,
+            Some(path_identity(&absolute_origin)),
+            processor.resolved_dependencies().to_vec(),
+        ))
+    }
 }
 
 pub(crate) fn expand_generated_dependencies(
     source: &str,
     origin: Option<&Path>,
+    model_libraries: &crate::state::ModelLibraryManager,
+) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), PreparationError> {
+    #[cfg(target_arch = "wasm32")]
+    let sealed = model_libraries
+        .seal_execution_sources()
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = model_libraries;
+
+    expand_generated_dependencies_with_sealed_sources(source, origin, {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Some(&sealed)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            None
+        }
+    })
+}
+
+fn expand_generated_dependencies_with_sealed_sources(
+    source: &str,
+    origin: Option<&Path>,
+    sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
 ) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), PreparationError> {
     if !contains_external_include_directive(source) {
         return Ok((source.to_owned(), Vec::new()));
@@ -962,15 +1018,27 @@ pub(crate) fn expand_generated_dependencies(
 
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = origin;
-        return Err(PreparationError::new(
-            PreparationStage::SourceChecks,
-            "Configured filesystem-backed SPICE sources are unavailable in this browser session",
-        ));
+        let origin = origin.ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::SourceChecks,
+                "Configured external SPICE sources require an imported root identity before browser execution",
+            )
+        })?;
+        let origin = absolute_source_identity(origin)?;
+        let sealed_sources = sealed_sources.ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                "Configured external SPICE sources have no authenticated browser source bundle",
+            )
+        })?;
+        return sealed_sources
+            .expand_root_dependencies(&origin, source, &rspice_core::abort_signal::NoAbort)
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let _ = sealed_sources;
         let owner = match origin {
             Some(path) => absolute_source_identity(path)?,
             None => execution_current_directory()?.join("__rspice_generated_source__.cir"),
@@ -987,6 +1055,10 @@ pub(crate) fn expand_generated_dependencies(
 }
 
 fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
+    #[cfg(target_arch = "wasm32")]
+    if crate::state::model_library::is_portable_absolute_path(path) {
+        return Ok(path.to_path_buf());
+    }
     if path.is_absolute() {
         return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     }
@@ -1627,9 +1699,12 @@ mod tests {
             model.display()
         );
 
-        let (expanded, dependencies) =
-            expand_generated_dependencies(&source, Some(&directory.join("generated.cir")))
-                .expect("configured dependency seals");
+        let (expanded, dependencies) = expand_generated_dependencies(
+            &source,
+            Some(&directory.join("generated.cir")),
+            &crate::state::ModelLibraryManager::default(),
+        )
+        .expect("configured dependency seals");
 
         assert!(expanded.contains("Rsrc in out 9k"));
         assert!(!expanded.contains("Rsrc in out 4k"));
@@ -1950,7 +2025,7 @@ mod tests {
 
         let active_run_id = state.simulation.start_run().id;
         controller.current_run_id = Some(active_run_id);
-        controller.current_spec = Some(AnalysisSpec::DcOp);
+        controller.current_spec = Some(AnalysisSpec::dc_op());
         controller.current_analysis_idx = 1;
         controller.total_analyses = 2;
         controller.cached_netlist = Some("existing sealed batch".to_owned());
@@ -1958,7 +2033,7 @@ mod tests {
         controller.start_authorized_snapshot(&mut state);
 
         assert_eq!(controller.current_run_id, Some(active_run_id));
-        assert_eq!(controller.current_spec, Some(AnalysisSpec::DcOp));
+        assert_eq!(controller.current_spec, Some(AnalysisSpec::dc_op()));
         assert_eq!(controller.current_analysis_idx, 1);
         assert_eq!(controller.total_analyses, 2);
         assert_eq!(
@@ -2126,6 +2201,41 @@ mod tests {
             .consume_snapshot_for_dispatch(&mut state)
             .expect_err("changed include must invalidate authorization");
         assert_eq!(error.stage(), PreparationStage::Authorization);
+
+        fs::remove_dir_all(directory).expect("remove include fixture");
+    }
+
+    #[test]
+    fn dispatched_include_closure_never_reopens_mutated_source_files() {
+        let directory = fixture_dir("dispatched-include-closure");
+        let origin = directory.join("deck.cir");
+        let include = directory.join("device.inc");
+        fs::write(&include, "R1 out 0 1k\n").expect("write include");
+        let source = "deck\n.include device.inc\nV1 out 0 1\n.op\n.end\n";
+        fs::write(&origin, source).expect("write deck origin");
+
+        let mut state = AppState::default();
+        state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+        state.workspace.netlist_source = Some(source.to_owned());
+        state.workspace.netlist_source_path = Some(origin);
+        let mut controller = SimulationController::new();
+        controller
+            .validate_manual_deck_document(&state)
+            .expect("validate the exact include closure");
+        let dispatch = controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .expect("freeze the authorized dispatch");
+
+        fs::write(&include, "R1 out 0 2k\n").expect("mutate source after dispatch");
+
+        assert!(dispatch.executable_netlist().contains("R1 out 0 1k"));
+        assert!(!dispatch.executable_netlist().contains("R1 out 0 2k"));
+        assert!(!contains_external_include_directive(
+            dispatch.executable_netlist()
+        ));
+        for task in dispatch.tasks() {
+            assert_eq!(task.executable_netlist(), dispatch.executable_netlist());
+        }
 
         fs::remove_dir_all(directory).expect("remove include fixture");
     }

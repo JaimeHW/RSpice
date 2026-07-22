@@ -12,6 +12,7 @@ const TRAPGEAR_SIGN_CHANGE_FLOOR: Value = crate::constants::VNTOL;
 
 /// Numerical integration methods for transient analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub enum IntegrationMethod {
     /// Backward Euler (first order, very stable)
     BackwardEuler,

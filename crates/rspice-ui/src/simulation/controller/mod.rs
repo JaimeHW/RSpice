@@ -22,8 +22,8 @@ use crate::common::export_workflow::ExportWorkflowIo;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
 use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
-    AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
-    PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
+    AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
+    PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 use crate::simulation::execution::{ExecutionArtifactEnvelope, TouchstoneExportPolicy};
 use crate::simulation::multi_run::{
@@ -92,6 +92,12 @@ pub struct SimulationController {
     current_provenance: Option<AnalysisResultProvenance>,
     /// Digest of the exact prepared payload currently executing.
     current_config_digest: Option<crate::product::ContentDigest>,
+    /// Identity of the exact per-task executable source. Process-corner
+    /// overrides are already materialized in these bytes; voltage-corner
+    /// parameters remain authenticated in the OP seed payload.
+    current_effective_source_content_digest: Option<crate::product::ContentDigest>,
+    /// Source identity extended with the exact OP voltage-corner mutation.
+    current_op_effective_source_content_digest: Option<crate::product::ContentDigest>,
     /// Immutable output contracts authenticated with the current task before
     /// its dispatch token is moved into the runner.
     current_saved_output_contracts: Vec<PreparedSavedOutput>,
@@ -146,6 +152,8 @@ impl SimulationController {
             current_spec: None,
             current_provenance: None,
             current_config_digest: None,
+            current_effective_source_content_digest: None,
+            current_op_effective_source_content_digest: None,
             current_saved_output_contracts: Vec::new(),
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
             current_run_id: None,
@@ -407,6 +415,8 @@ impl SimulationController {
         self.current_spec = None;
         self.current_provenance = None;
         self.current_config_digest = None;
+        self.current_effective_source_content_digest = None;
+        self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
@@ -437,6 +447,8 @@ impl SimulationController {
         self.current_spec = None;
         self.current_provenance = None;
         self.current_config_digest = None;
+        self.current_effective_source_content_digest = None;
+        self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
 
@@ -471,9 +483,10 @@ impl SimulationController {
             let message = format!(
                 "Skipped {analysis_name}: prerequisite analysis result(s) {unavailable} did not complete successfully"
             );
-            let provenance = match AnalysisResultProvenance::new_with_source_domain(
+            let provenance = match AnalysisResultProvenance::new_with_authored_source_domain(
                 self.current_source_domain,
                 candidate.instance_id(),
+                candidate.authored_instance_id(),
                 candidate.source_revision(),
                 candidate.snapshot_digest(),
                 candidate.dependencies().to_vec(),
@@ -525,9 +538,10 @@ impl SimulationController {
         let config = next_analysis.config().cloned();
         let analysis_name = next_analysis.label().to_owned();
         self.touchstone_export_policy = next_analysis.touchstone_export_policy().clone();
-        let provenance = match AnalysisResultProvenance::new_with_source_domain(
+        let provenance = match AnalysisResultProvenance::new_with_authored_source_domain(
             self.current_source_domain,
             next_analysis.instance_id(),
+            next_analysis.authored_instance_id(),
             next_analysis.source_revision(),
             next_analysis.snapshot_digest(),
             next_analysis.dependencies().to_vec(),
@@ -556,6 +570,21 @@ impl SimulationController {
         self.current_spec = Some(spec.clone());
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
+        self.current_effective_source_content_digest =
+            Some(crate::workbench::netlist_document::source_content_digest(
+                next_analysis.executable_netlist(),
+            ));
+        self.current_op_effective_source_content_digest = config.as_ref().and_then(|config| {
+            let AnalysisConfig::DcOp(config) = config else {
+                return None;
+            };
+            Some(
+                crate::simulation::execution::operating_point_effective_source_digest(
+                    next_analysis.executable_netlist(),
+                    config.run_point,
+                ),
+            )
+        });
         self.current_saved_output_contracts = next_analysis.saved_output_contracts().to_vec();
 
         // Update status with multi-analysis progress
@@ -753,6 +782,8 @@ impl SimulationController {
         self.current_spec = None;
         self.current_provenance = None;
         self.current_config_digest = None;
+        self.current_effective_source_content_digest = None;
+        self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
@@ -924,7 +955,7 @@ impl SimulationController {
 
     fn analysis_name(&self, config: &AnalysisConfig) -> &'static str {
         match config {
-            AnalysisConfig::DcOp => "DC Operating Point",
+            AnalysisConfig::DcOp(_) => "DC Operating Point",
             AnalysisConfig::DcSweep(_) => "DC Sweep",
             AnalysisConfig::Transient(_) => "Transient",
             AnalysisConfig::Ac(_) => "AC",
@@ -944,7 +975,7 @@ impl SimulationController {
     /// for proper categorization in the Results Browser.
     fn config_to_analysis_type(&self, config: &AnalysisConfig) -> AnalysisType {
         match config {
-            AnalysisConfig::DcOp => AnalysisType::DcOp,
+            AnalysisConfig::DcOp(_) => AnalysisType::DcOp,
             AnalysisConfig::DcSweep(_) => AnalysisType::DcSweep,
             AnalysisConfig::Transient(_) => AnalysisType::Transient,
             AnalysisConfig::Ac(_) => AnalysisType::Ac,
@@ -1089,36 +1120,124 @@ impl SimulationController {
                         })
                         .flatten()
                         .collect::<Vec<_>>();
-                    let produced_artifact = if !required_artifact_waveforms.is_empty()
-                        && matches!(
-                            self.current_spec.as_ref(),
-                            Some(AnalysisSpec::Transient { .. })
-                        ) {
-                        match (self.current_provenance.as_ref(), self.current_config_digest) {
-                            (Some(provenance), Some(config_digest)) => {
-                                match ExecutionArtifactEnvelope::from_transient_result(
-                                    provenance.prepared_snapshot_digest(),
-                                    provenance.source_instance_id(),
-                                    provenance.source_revision(),
-                                    config_digest,
-                                    &sim_result,
-                                    &required_artifact_waveforms,
-                                ) {
-                                    Ok(artifact) => artifact,
-                                    Err(error) => {
-                                        let message = format!(
-                                            "Transient result could not produce its authenticated dependency artifact: {error}"
-                                        );
-                                        log::error!("{message}");
-                                        state.push_sim_message(ConsoleMessage::error(message));
-                                        None
-                                    }
-                                }
-                            }
-                            _ => None,
+                    let periodic_artifact_required = self
+                        .current_provenance
+                        .as_ref()
+                        .map(|provenance| provenance.source_instance_id())
+                        .is_some_and(|producer| {
+                            self.pending_analyses.iter().any(|task| {
+                                task.dependencies().contains(&producer)
+                                    && matches!(
+                                        task.spec(),
+                                        AnalysisSpec::Pac
+                                            | AnalysisSpec::Pxf
+                                            | AnalysisSpec::Pnoise
+                                            | AnalysisSpec::Pstb
+                                    )
+                            })
+                        });
+                    let dc_seed_artifact_required = self
+                        .current_provenance
+                        .as_ref()
+                        .map(|provenance| provenance.source_instance_id())
+                        .is_some_and(|producer| {
+                            self.pending_analyses.iter().any(|task| {
+                                task.dependencies().contains(&producer)
+                                    && matches!(
+                                        task.spec(),
+                                        AnalysisSpec::Pss {
+                                            method: PssMethod::Shooting,
+                                            ..
+                                        }
+                                    )
+                            })
+                        });
+                    let produced_artifact = match (
+                        self.current_spec.as_ref(),
+                        self.current_provenance.as_ref(),
+                        self.current_config_digest,
+                    ) {
+                        (
+                            Some(AnalysisSpec::Transient { .. }),
+                            Some(provenance),
+                            Some(config_digest),
+                        ) if !required_artifact_waveforms.is_empty() => {
+                            ExecutionArtifactEnvelope::from_transient_result(
+                                provenance.prepared_snapshot_digest(),
+                                provenance.source_instance_id(),
+                                provenance.source_revision(),
+                                config_digest,
+                                &sim_result,
+                                &required_artifact_waveforms,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "Transient result could not produce its authenticated dependency artifact: {error}"
+                                )
+                            })
                         }
-                    } else {
-                        None
+                        (
+                            Some(pss_spec @ AnalysisSpec::Pss { .. }),
+                            Some(provenance),
+                            Some(config_digest),
+                        ) if periodic_artifact_required => {
+                            ExecutionArtifactEnvelope::from_periodic_result(
+                                provenance.prepared_snapshot_digest(),
+                                provenance.source_instance_id(),
+                                provenance.source_revision(),
+                                config_digest,
+                                pss_spec,
+                                &sim_result,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "PSS result could not produce its authenticated periodic-state artifact: {error}"
+                                )
+                            })
+                        }
+                        (
+                            Some(AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }),
+                            Some(provenance),
+                            Some(config_digest),
+                        ) if dc_seed_artifact_required => {
+                            match (
+                                self.current_effective_source_content_digest,
+                                self.current_config.as_ref(),
+                            ) {
+                                (
+                                    Some(effective_source_content_digest),
+                                    Some(AnalysisConfig::DcOp(prepared_config)),
+                                ) => {
+                                    ExecutionArtifactEnvelope::from_dc_operating_point_result(
+                                        provenance.prepared_snapshot_digest(),
+                                        provenance.source_instance_id(),
+                                        provenance.source_revision(),
+                                        config_digest,
+                                        effective_source_content_digest,
+                                        prepared_config,
+                                        &sim_result,
+                                    )
+                                    .map_err(|error| {
+                                        format!(
+                                            "Operating-point result could not produce its authenticated shooting-PSS seed: {error}"
+                                        )
+                                    })
+                                }
+                                _ => Err(
+                                    "operating-point result has no authenticated effective source and prepared configuration"
+                                        .to_owned(),
+                                ),
+                            }
+                        }
+                        _ => Ok(None),
+                    };
+                    let (produced_artifact, artifact_failure) = match produced_artifact {
+                        Ok(artifact) => (artifact, None),
+                        Err(message) => {
+                            log::error!("{message}");
+                            state.push_sim_message(ConsoleMessage::error(message.clone()));
+                            (None, Some(message))
+                        }
                     };
 
                     self.apply_result_side_effects(state, &sim_result);
@@ -1169,6 +1288,18 @@ impl SimulationController {
                             &current_label,
                         )
                     };
+                    if let Some(AnalysisResultPayload::OperatingPoint {
+                        effective_source_content_digest,
+                        ..
+                    }) = analysis_result.result_payload.as_mut()
+                    {
+                        *effective_source_content_digest =
+                            self.current_op_effective_source_content_digest;
+                    }
+                    if let Some(message) = artifact_failure {
+                        analysis_result.success = false;
+                        analysis_result.error_message = Some(message);
+                    }
                     self.materialize_current_saved_outputs(&mut analysis_result);
                     let retention_error = analysis_result.error_message.clone();
                     if let Some(provenance) = self.current_provenance.take() {
@@ -1267,6 +1398,8 @@ impl SimulationController {
                     self.current_spec = None;
                     self.current_provenance = None;
                     self.current_config_digest = None;
+                    self.current_effective_source_content_digest = None;
+                    self.current_op_effective_source_content_digest = None;
                     self.current_saved_output_contracts.clear();
                     self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
                     self.current_run_id = None;
@@ -1689,7 +1822,7 @@ mod tests {
         let mut controller = SimulationController::new();
         let export_io = MockExportWorkflowIo::default();
         state.simulation.start_run();
-        controller.current_spec = Some(AnalysisSpec::DcOp);
+        controller.current_spec = Some(AnalysisSpec::dc_op());
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
         controller
@@ -1769,7 +1902,7 @@ mod tests {
         let export_io = MockExportWorkflowIo::default();
         state.simulation.start_run();
         state.simulation.status = "Running".to_string();
-        controller.current_spec = Some(AnalysisSpec::DcOp);
+        controller.current_spec = Some(AnalysisSpec::dc_op());
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
         controller
@@ -1798,7 +1931,7 @@ mod tests {
         let export_io = MockExportWorkflowIo::default();
         state.simulation.start_run();
         state.simulation.status = "Running".to_string();
-        controller.current_spec = Some(AnalysisSpec::DcOp);
+        controller.current_spec = Some(AnalysisSpec::dc_op());
         controller.current_analysis_idx = 1;
         controller.total_analyses = 1;
         controller
@@ -1832,7 +1965,7 @@ mod tests {
             state.simulation.select_run(1),
             "user can inspect an older run while a newer run is in flight"
         );
-        controller.current_spec = Some(AnalysisSpec::DcOp);
+        controller.current_spec = Some(AnalysisSpec::dc_op());
         let provenance = synthetic_result_provenance();
         let expected_source_id = provenance.source_instance_id();
         controller.current_provenance = Some(provenance);
@@ -1915,6 +2048,7 @@ mod tests {
                 time,
                 waveforms,
                 measurements: Vec::new(),
+                periodic_state: None,
             }))
             .expect("seed completed transient result");
 
@@ -2022,7 +2156,7 @@ mod tests {
         let export_io = MockExportWorkflowIo::default();
         let run_sequence = state.simulation.start_run().id;
         bind_test_run_running(&mut state, &mut controller, run_sequence);
-        controller.current_spec = Some(AnalysisSpec::DcOp);
+        controller.current_spec = Some(AnalysisSpec::dc_op());
         let provenance = synthetic_result_provenance();
         let expected_source_id = provenance.source_instance_id();
         let expected_snapshot = provenance.prepared_snapshot_digest();
@@ -2057,8 +2191,8 @@ mod tests {
         use crate::product::{ContentDigest, ObjectRevision};
         use crate::simulation::dialog::corner::ProcessCorner;
         use crate::simulation::execution::{
-            ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
-            RunSourceReceipt, SavePolicy, SnapshotParts,
+            ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedDependencyBinding,
+            PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy, SnapshotParts,
         };
 
         let prerequisite_id = crate::product::AnalysisInstanceId::new();
@@ -2069,6 +2203,46 @@ mod tests {
             spec_options: SpecExecutionOptions::default(),
             analysis_line: line.to_owned(),
         };
+        let prerequisite = PreparedTask::new(
+            prerequisite_id,
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            "Prerequisite",
+            task(
+                AnalysisSpec::Transient {
+                    stop_time: 1.0,
+                    step_time: 0.005,
+                    start_time: 0.0,
+                    max_timestep: None,
+                    uic: false,
+                },
+                ".tran 0.005 1",
+            ),
+        );
+        let mut dependent = PreparedTask::new(
+            dependent_id,
+            ObjectRevision::INITIAL,
+            vec![prerequisite_id],
+            "Dependent",
+            task(
+                AnalysisSpec::Fourier {
+                    fundamental_freq: 2.0,
+                    num_harmonics: 4,
+                    output_node: "out".to_owned(),
+                    output_ref: "0".to_owned(),
+                    start_time: 0.0,
+                    stop_time: 1.0,
+                    compute_thd: true,
+                    normalize: false,
+                },
+                ".four 2 V(out)",
+            ),
+        );
+        dependent.set_dependency_bindings(vec![PreparedDependencyBinding::transient_trajectory(
+            prerequisite_id,
+            prerequisite.source_revision(),
+            prerequisite.config_digest(),
+        )]);
         let snapshot = PreparedRunSnapshot::new(SnapshotParts {
             intent: SimulationRunIntent::SimulateRunSet,
             simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
@@ -2077,22 +2251,7 @@ mod tests {
             source_digest: ContentDigest::from_bytes([0x71; 32]),
             reference_process: ProcessCorner::TT,
             reference_temperature_celsius: 27.0,
-            tasks: vec![
-                PreparedTask::new(
-                    prerequisite_id,
-                    ObjectRevision::INITIAL,
-                    Vec::new(),
-                    "Prerequisite",
-                    task(AnalysisSpec::DcOp, ".op"),
-                ),
-                PreparedTask::new(
-                    dependent_id,
-                    ObjectRevision::INITIAL,
-                    vec![prerequisite_id],
-                    "Dependent",
-                    task(AnalysisSpec::Pac, ".pac"),
-                ),
-            ],
+            tasks: vec![prerequisite, dependent],
             executable_netlist: "deck\n.op\n.end\n".to_owned(),
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities: Vec::new(),
@@ -2133,7 +2292,7 @@ mod tests {
             .run_by_sequence_mut(run_sequence)
             .expect("active run")
             .add_analysis(
-                AnalysisResult::failed(1, AnalysisType::DcOp, "Prerequisite", "solver failed")
+                AnalysisResult::failed(1, AnalysisType::Transient, "Prerequisite", "solver failed")
                     .with_provenance(failed_provenance),
             );
 
@@ -2630,8 +2789,8 @@ mod tests {
                     ("gain".to_owned(), 10.0),
                 ]),
             },
-            AnalysisType::Tf,
-            "TF",
+            AnalysisType::DcMismatch,
+            "DC mismatch",
         );
         assert_eq!(
             scalar.result_payload,
@@ -2741,7 +2900,7 @@ mod tests {
         controller.abort();
 
         assert_eq!(total_analyses, 1);
-        assert!(matches!(current_spec, Some(AnalysisSpec::DcOp)));
+        assert!(matches!(current_spec, Some(AnalysisSpec::DcOp { .. })));
         assert_eq!(source_domain, Some(AnalysisResultSourceDomain::ManualDeck));
         assert!(cached_netlist.contains(".op\n.end"));
         assert_eq!(run_count, 1);

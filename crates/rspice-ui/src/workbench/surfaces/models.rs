@@ -29,7 +29,7 @@ const MODEL_PHONE_TABLE_MIN_W: f32 = 690.0;
 const GENERAL_TABLE_MIN_W: f32 = 760.0;
 const MODEL_PHONE_BREAKPOINT: f32 = 560.0;
 const MODEL_SUMMARY_BREAKPOINT: f32 = 820.0;
-const MODEL_TABLE_MIN_H: f32 = 120.0;
+const MODEL_TABLE_MIN_H: f32 = 180.0;
 const MODEL_WIDE_SUMMARY_H: f32 = 150.0;
 const MODEL_STACKED_SUMMARY_H: f32 = 300.0;
 const MODEL_TITLE_MIN_CONTENT_H: f32 = 48.0;
@@ -1273,16 +1273,15 @@ fn data_table(
             }
 
             if rows.is_empty() {
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(table_width, t.metrics.row_h.max(44.0)),
-                    Sense::hover(),
-                );
+                let empty_height =
+                    (viewport.height() - TABLE_HEAD_H).max(t.metrics.row_h.max(44.0));
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(table_width, empty_height), Sense::hover());
                 let mut empty = ui.new_child(
                     egui::UiBuilder::new()
                         .max_rect(rect)
-                        .layout(Layout::left_to_right(Align::Center)),
+                        .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
                 );
-                empty.add_space(8.0);
                 let response = empty.label(
                     egui::RichText::new(empty_message)
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
@@ -1780,9 +1779,25 @@ fn draw_include_graph(ui: &mut Ui, libraries: &[IncludeLibrary], collapsed: bool
     let size = ui.available_size();
     let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter().rect_filled(viewport, 0.0, t.color.bg_inset);
+    let content_rect = viewport.shrink(26.0);
+    if libraries.is_empty() {
+        let mut empty = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(content_rect)
+                .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
+        );
+        let message = "No loaded model libraries expose an include graph.";
+        let response = empty.label(
+            egui::RichText::new(message)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+        accessible_model_text(&empty, &response, message);
+        return;
+    }
     let mut child = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(viewport.shrink(26.0))
+            .max_rect(content_rect)
             .layout(Layout::top_down(Align::Center)),
     );
     ScrollArea::both()
@@ -1790,19 +1805,6 @@ fn draw_include_graph(ui: &mut Ui, libraries: &[IncludeLibrary], collapsed: bool
         .auto_shrink([false, false])
         .show(&mut child, |ui| {
             ui.set_min_width(400.0);
-            if libraries.is_empty() {
-                let response = ui.label(
-                    egui::RichText::new("No loaded model libraries expose an include graph.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-                accessible_model_text(
-                    ui,
-                    &response,
-                    "No loaded model libraries expose an include graph.",
-                );
-                return;
-            }
             for library in libraries {
                 let root_label = library
                     .root
@@ -2371,6 +2373,10 @@ mod tests {
                         && body_bounds.y0 >= description_bounds.y1 - 1.0
                         && body_bounds.y1 <= 560.0,
                     "{body_label} overlaps the title or leaves the visible body on {page:?} at {width}: action={bounds:?}, description={description_bounds:?}, body={body_bounds:?}"
+                );
+                assert!(
+                    (body_bounds.y0 + body_bounds.y1) * 0.5 >= 220.0,
+                    "{body_label} is stranded at the top of an otherwise empty table on {page:?} at {width}: {body_bounds:?}"
                 );
             }
         }

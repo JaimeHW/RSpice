@@ -6,7 +6,7 @@ use super::super::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };
 
-pub(super) fn apply_voltage_corner(
+pub(crate) fn apply_voltage_corner(
     netlist: &mut rspice_core::Netlist,
     corner_voltage: Value,
     nominal_voltage: Value,
@@ -68,7 +68,7 @@ pub(super) fn apply_voltage_corner(
     Ok(())
 }
 
-pub(super) fn infer_nominal_supply_voltage(
+pub(crate) fn infer_nominal_supply_voltage(
     netlist: &rspice_core::Netlist,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Option<Value>> {

@@ -412,8 +412,8 @@ impl SimSetupState {
         if !temperature_celsius.is_finite() {
             return Err("Reference temperature must be finite".to_owned());
         }
-        if temperature_celsius < -273.15 {
-            return Err("Reference temperature cannot be below absolute zero".to_owned());
+        if temperature_celsius <= -273.15 {
+            return Err("Reference temperature must be above absolute zero".to_owned());
         }
 
         self.reference_pvt = ReferencePvtPoint {
@@ -438,8 +438,8 @@ impl SimSetupState {
         if !temperature_celsius.is_finite() {
             return Err("Reference temperature must be finite".to_owned());
         }
-        if temperature_celsius < -273.15 {
-            return Err("Reference temperature cannot be below absolute zero".to_owned());
+        if temperature_celsius <= -273.15 {
+            return Err("Reference temperature must be above absolute zero".to_owned());
         }
         self.reference_pvt.temperature_celsius = temperature_celsius;
         self.options.temp = temperature_celsius;
@@ -1011,8 +1011,8 @@ mod tests {
         let before = setup.reference_pvt;
 
         let error = setup
-            .set_reference_pvt(ProcessCorner::SS, -274.0)
-            .expect_err("temperature below absolute zero must fail");
+            .set_reference_pvt(ProcessCorner::SS, -273.15)
+            .expect_err("absolute zero itself must fail");
 
         assert!(error.contains("absolute zero"));
         assert_eq!(setup.reference_pvt, before);

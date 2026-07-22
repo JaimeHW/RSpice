@@ -89,21 +89,76 @@ fn region_colors(region: &str, t: &Tokens) -> (egui::Color32, egui::Color32) {
     (fg.gamma_multiply(0.16), fg)
 }
 
-/// The most recent device-OP report in the active run, with its analysis
-/// label for the header.
-fn active_report(state: &AppState) -> Option<(&rspice_core::circuit::DeviceOpReport, &str)> {
-    let run = state.simulation.active_run()?;
-    run.analyses.iter().rev().find_map(|analysis| {
-        analysis
-            .device_op
-            .as_ref()
-            .map(|r| (r, analysis.label.as_str()))
-    })
+/// The explicitly selected device-OP report, with its analysis label for the
+/// header. Never fall back to another result: doing so displays stale bias
+/// evidence under the selected analysis identity.
+fn active_report(
+    state: &AppState,
+) -> Option<(
+    &rspice_core::circuit::DeviceOpReport,
+    &str,
+    Option<(
+        &crate::state::OperatingPointDeviceDetailEvidence,
+        &[String],
+        &[String],
+    )>,
+)> {
+    let analysis = state.simulation.active_analysis()?;
+    let report = analysis.device_op.as_ref()?;
+    let detail = match analysis.result_payload.as_ref() {
+        Some(crate::state::AnalysisResultPayload::OperatingPoint {
+            device_detail,
+            selected_devices,
+            violation_devices,
+            ..
+        }) => Some((
+            device_detail,
+            selected_devices.as_slice(),
+            violation_devices.as_slice(),
+        )),
+        _ => None,
+    };
+    Some((report, analysis.label.as_str(), detail))
 }
 
 /// One flattened, filter-matched row.
 struct Row<'a> {
     entry: &'a rspice_core::circuit::DeviceOpEntry,
+}
+
+fn retained_detail_allows(
+    entry_name: &str,
+    retained_detail: &Option<(
+        crate::state::OperatingPointDeviceDetailEvidence,
+        Vec<String>,
+        Vec<String>,
+    )>,
+) -> bool {
+    match retained_detail {
+        None | Some((crate::state::OperatingPointDeviceDetailEvidence::AllDevices, _, _)) => true,
+        Some((
+            crate::state::OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+            selected,
+            violations,
+        )) => {
+            // An empty captured selection means "no selection restriction". The
+            // authoritative report remains useful while no device-limit
+            // evaluator is bound; it must not collapse the default inspector.
+            (selected.is_empty() && violations.is_empty())
+                || selected
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(entry_name))
+                || violations
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(entry_name))
+        }
+        Some((crate::state::OperatingPointDeviceDetailEvidence::ViolationsOnly, _, violations)) => {
+            violations
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(entry_name))
+        }
+        Some((crate::state::OperatingPointDeviceDetailEvidence::None, _, _)) => false,
+    }
 }
 
 impl Row<'_> {
@@ -138,7 +193,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let Some((report, _label)) = active_report(state) else {
+    let Some((report, _label, retained_detail)) = active_report(state) else {
         well_hint(
             ui,
             "No operating-point report — run a DC operating point (.op) analysis",
@@ -147,6 +202,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     // Snapshot what rendering needs so the borrow on `state` can drop.
     let report = report.clone();
+    let retained_detail = retained_detail
+        .map(|(detail, selected, violations)| (*detail, selected.to_vec(), violations.to_vec()));
     let filter = state.ui.results.op_filter.clone();
     let sort = state.ui.results.op_sort.clone();
     let mut clicked_sort: Option<String> = None;
@@ -164,6 +221,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .entries
                     .iter()
                     .filter(|entry| entry.device_kind == family)
+                    .filter(|entry| retained_detail_allows(&entry.name, &retained_detail))
                     .map(|entry| Row { entry })
                     .filter(|row| row.matches(&filter))
                     .collect();
@@ -412,13 +470,78 @@ mod layout_tests {
         assert_eq!(op_table_min_width(), 902.0);
         assert!(op_table_min_width() > 390.0);
     }
+
+    #[test]
+    fn default_selected_detail_keeps_the_authoritative_report_useful() {
+        use crate::state::OperatingPointDeviceDetailEvidence;
+
+        assert!(retained_detail_allows(
+            "M1",
+            &Some((
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+                Vec::new(),
+                Vec::new(),
+            )),
+        ));
+        assert!(retained_detail_allows(
+            "m1",
+            &Some((
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+                vec!["M1".to_owned()],
+                Vec::new(),
+            )),
+        ));
+        assert!(!retained_detail_allows(
+            "M2",
+            &Some((
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+                vec!["M1".to_owned()],
+                Vec::new(),
+            )),
+        ));
+        assert!(retained_detail_allows(
+            "M2",
+            &Some((
+                OperatingPointDeviceDetailEvidence::ViolationsOnly,
+                Vec::new(),
+                vec!["M2".to_owned()],
+            )),
+        ));
+    }
+
+    #[test]
+    fn report_selection_never_falls_back_to_a_stale_analysis() {
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+
+        let report = || rspice_core::circuit::DeviceOpReport {
+            entries: vec![rspice_core::circuit::DeviceOpEntry {
+                name: "M1".to_owned(),
+                device_kind: "MOSFET",
+                region: Some("saturation"),
+                params: Vec::new(),
+            }],
+        };
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        let mut first = AnalysisResult::new(1, AnalysisType::DcOp, "OP 1");
+        first.device_op = Some(report());
+        run.add_analysis(first);
+        run.add_analysis(AnalysisResult::new(2, AnalysisType::DcOp, "OP 2"));
+        state.simulation.runs.push(run);
+        state.simulation.active_run_idx = Some(0);
+
+        state.simulation.active_analysis_idx = Some(1);
+        assert!(active_report(&state).is_none());
+        state.simulation.active_analysis_idx = Some(0);
+        assert_eq!(active_report(&state).unwrap().1, "OP 1");
+    }
 }
 
 /// Right panel: report summary (counts by family and region, extremes).
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     use crate::ui::widgets::section_header;
 
-    let Some((report, label)) = active_report(state) else {
+    let Some((report, label, _retained_detail)) = active_report(state) else {
         return;
     };
 

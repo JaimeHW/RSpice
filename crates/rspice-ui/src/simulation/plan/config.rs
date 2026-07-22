@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::common::app::{AcSetup, DcSetup, NoiseSetup, TranSetup};
+use crate::common::app::{AcSetup, DcSetup, TranSetup};
+use crate::simulation::config::{
+    AcSweepType, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
+};
 use crate::simulation::dependency_contract::{
     FourierTransientRequirement, TransientCapability, validate_fourier_transient_contract,
 };
@@ -18,38 +21,194 @@ use super::AnalysisKind;
 /// identity. Each analysis instance owns a deep copy.
 pub type AcDraft = AcSetup;
 
-/// Noise draft with an independent sweep density and mode.
+/// Noise draft with an independent, losslessly persisted analysis contract.
 ///
 /// The legacy singleton setup borrowed these two values from AC. Keeping them
-/// here removes that hidden cross-analysis mutation while preserving raw text
-/// buffers that may be temporarily incomplete during editing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// here removes that hidden cross-analysis mutation. Raw text buffers are
+/// retained so an unfinished edit can still round-trip through project save.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NoiseDraft {
     pub output: String,
+    /// Legacy output reference. New drafts use `output` for either a
+    /// single-ended node or a comma-separated differential expression.
+    #[serde(default = "default_noise_reference")]
     pub reference: String,
     pub input: String,
     pub fstart: String,
     pub fstop: String,
     pub points: String,
-    /// 0 = decade, 1 = octave, 2 = linear.
-    pub sweep: usize,
+    pub sweep: NoiseSweepType,
+    /// Comma/space-separated frequency values used only by the explicit mode.
+    #[serde(default = "default_noise_frequency_list")]
+    pub explicit_frequencies: String,
+    #[serde(default)]
+    pub contribution_detail: NoiseContributionDetail,
+    #[serde(default)]
+    pub integration_mode: NoiseIntegrationMode,
 }
 
 impl Default for NoiseDraft {
     fn default() -> Self {
-        let noise = NoiseSetup::default();
-        let ac = AcSetup::default();
         Self {
-            output: noise.output,
-            reference: noise.reference,
-            input: noise.input,
-            fstart: noise.fstart,
-            fstop: noise.fstop,
-            points: ac.points,
-            sweep: ac.sweep,
+            output: "afe_out".to_owned(),
+            reference: default_noise_reference(),
+            input: "VIN_DIFF".to_owned(),
+            fstart: "10".to_owned(),
+            fstop: "1Meg".to_owned(),
+            points: "30".to_owned(),
+            sweep: NoiseSweepType::Decade,
+            explicit_frequencies: default_noise_frequency_list(),
+            contribution_detail: NoiseContributionDetail::Top50,
+            integration_mode: NoiseIntegrationMode::Enabled,
         }
     }
+}
+
+fn default_noise_reference() -> String {
+    "0".to_owned()
+}
+
+fn default_noise_frequency_list() -> String {
+    "10, 100, 1k, 10k, 100k, 1Meg".to_owned()
+}
+
+impl NoiseDraft {
+    /// Parse this raw draft into a complete executable configuration.
+    pub fn to_config(&self) -> Result<NoiseAnalysisConfig, String> {
+        let (output_node, reference_node) =
+            parse_noise_output_expression(&self.output, &self.reference)?;
+        let input_source = self.input.trim().to_owned();
+        if input_source.is_empty() {
+            return Err("input source is required".to_owned());
+        }
+
+        let (sweep_type, num_points, start_freq, stop_freq, explicit_frequencies) = match self.sweep
+        {
+            NoiseSweepType::Decade | NoiseSweepType::Octave | NoiseSweepType::Linear => {
+                let num_points = parse_positive_usize(&self.points, "noise point count")?;
+                let start_freq = parse_positive(&self.fstart, "noise start frequency")?;
+                let stop_freq = parse_positive(&self.fstop, "noise stop frequency")?;
+                if stop_freq <= start_freq {
+                    return Err(
+                        "noise stop frequency must be greater than start frequency".to_owned()
+                    );
+                }
+                let sweep_type = match self.sweep {
+                    NoiseSweepType::Decade => AcSweepType::Decade,
+                    NoiseSweepType::Octave => AcSweepType::Octave,
+                    NoiseSweepType::Linear => AcSweepType::Linear,
+                    _ => unreachable!("matched fixed noise sweep"),
+                };
+                (sweep_type, num_points, start_freq, stop_freq, None)
+            }
+            NoiseSweepType::ExplicitFrequencyList => {
+                let frequencies = parse_noise_frequency_list(&self.explicit_frequencies)?;
+                let start = frequencies.first().copied().unwrap_or_default();
+                let stop = frequencies.last().copied().unwrap_or_default();
+                (
+                    AcSweepType::Decade,
+                    frequencies.len(),
+                    start,
+                    stop,
+                    Some(frequencies),
+                )
+            }
+            NoiseSweepType::Unsupported(index) => {
+                return Err(format!(
+                    "noise sweep mode {index} is outside the supported schema"
+                ));
+            }
+        };
+
+        let config = NoiseAnalysisConfig {
+            output_node,
+            reference_node,
+            input_source,
+            sweep_type,
+            num_points,
+            start_freq,
+            stop_freq,
+            explicit_frequencies,
+            data_table_name: None,
+            contribution_detail: self.contribution_detail,
+            integration_mode: self.integration_mode,
+            temperature_kelvin: rspice_core::constants::TEMP_REFERENCE,
+        };
+        config
+            .validate()
+            .map_err(|errors| errors.join("; "))
+            .map(|()| config)
+    }
+}
+
+fn parse_noise_output_expression(
+    output: &str,
+    legacy_reference: &str,
+) -> Result<(String, String), String> {
+    let output = output.trim();
+    if output.is_empty() {
+        return Err("output node or expression is required".to_owned());
+    }
+    let has_voltage_prefix = output
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("v("));
+    if has_voltage_prefix != output.ends_with(')') {
+        return Err("voltage output expressions must use V(node) or V(node,reference)".to_owned());
+    }
+    let inner = if has_voltage_prefix {
+        &output[2..output.len() - 1]
+    } else {
+        output
+    };
+    let mut nodes = inner.split(',').map(str::trim);
+    let positive = nodes.next().unwrap_or_default();
+    let explicit_reference = nodes.next();
+    if positive.is_empty() || nodes.next().is_some() {
+        return Err(
+            "output expression must name one node or one differential node pair".to_owned(),
+        );
+    }
+    let reference = explicit_reference.unwrap_or_else(|| legacy_reference.trim());
+    if reference.contains(',') || explicit_reference.is_some_and(str::is_empty) {
+        return Err("output reference must name exactly one node".to_owned());
+    }
+    Ok((
+        positive.to_owned(),
+        if reference.is_empty() {
+            default_noise_reference()
+        } else {
+            reference.to_owned()
+        },
+    ))
+}
+
+fn parse_noise_frequency_list(text: &str) -> Result<Vec<f64>, String> {
+    let values = text
+        .split(|character: char| character == ',' || character == ';' || character.is_whitespace())
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            parse_spice_value_checked(value)
+                .map_err(|error| format!("invalid explicit noise frequency '{value}': {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if values.is_empty() {
+        return Err("explicit frequency list must contain at least one value".to_owned());
+    }
+    let mut previous = None;
+    for value in &values {
+        if *value <= 0.0 {
+            return Err("explicit noise frequencies must be greater than zero".to_owned());
+        }
+        if previous.is_some_and(|previous| *value <= previous) {
+            return Err(
+                "explicit noise frequencies must be strictly increasing without duplicates"
+                    .to_owned(),
+            );
+        }
+        previous = Some(*value);
+    }
+    Ok(values)
 }
 
 /// DISTO draft with its own AC sweep and optional second-tone ratio.
@@ -551,6 +710,7 @@ impl AnalysisDraft {
     /// them through the retired singleton configuration model.
     pub fn manifest_configuration_error(&self) -> Option<String> {
         match self {
+            Self::Noise(draft) => draft.to_config().err(),
             Self::Qpss(draft) => validate_qpss(draft),
             Self::Hbsp(draft) | Self::Psp(draft) => validate_periodic_network(draft),
             Self::Hbnoise(draft) => validate_hbnoise(draft),
@@ -1003,8 +1163,161 @@ mod tests {
         let AnalysisDraft::Disto(disto) = disto else {
             panic!("expected DISTO draft");
         };
-        assert_eq!(noise.points, "101");
+        assert_eq!(noise.points, "30");
+        assert_eq!(noise.sweep, NoiseSweepType::Decade);
         assert_eq!(disto.sweep.points, "101");
+    }
+
+    #[test]
+    fn noise_defaults_match_the_eight_field_mockup_contract() {
+        let draft = NoiseDraft::default();
+        assert_eq!(draft.sweep, NoiseSweepType::Decade);
+        assert_eq!(draft.points, "30");
+        assert_eq!(draft.fstart, "10");
+        assert_eq!(draft.fstop, "1Meg");
+        assert_eq!(draft.output, "afe_out");
+        assert_eq!(draft.input, "VIN_DIFF");
+        assert_eq!(draft.contribution_detail, NoiseContributionDetail::Top50);
+        assert_eq!(draft.integration_mode, NoiseIntegrationMode::Enabled);
+        assert!(draft.to_config().is_ok());
+    }
+
+    #[test]
+    fn legacy_noise_draft_migrates_without_inventing_active_settings() {
+        let json = r#"{
+            "kind":"noise",
+            "draft":{
+                "output":"legacy_out",
+                "reference":"legacy_ref",
+                "input":"VLEGACY",
+                "fstart":"2",
+                "fstop":"2Meg",
+                "points":"17",
+                "sweep":1
+            }
+        }"#;
+        let restored: AnalysisDraft = serde_json::from_str(json).expect("legacy draft migrates");
+        let AnalysisDraft::Noise(restored) = restored else {
+            panic!("expected migrated noise draft");
+        };
+        assert_eq!(restored.sweep, NoiseSweepType::Octave);
+        assert_eq!(restored.contribution_detail, NoiseContributionDetail::Top50);
+        assert_eq!(restored.integration_mode, NoiseIntegrationMode::Enabled);
+        let config = restored
+            .to_config()
+            .expect("migrated draft remains executable");
+        assert_eq!(config.output_node, "legacy_out");
+        assert_eq!(config.reference_node, "legacy_ref");
+        assert_eq!(config.input_source, "VLEGACY");
+        assert_eq!(config.sweep_type, AcSweepType::Octave);
+        assert_eq!(config.num_points, 17);
+    }
+
+    #[test]
+    fn current_noise_draft_round_trips_every_owned_field() {
+        let draft = NoiseDraft {
+            output: "sensor_p,sensor_n".to_owned(),
+            reference: "legacy_reference_is_retained".to_owned(),
+            input: "IIN_CAL".to_owned(),
+            fstart: "11".to_owned(),
+            fstop: "9Meg".to_owned(),
+            points: "41".to_owned(),
+            sweep: NoiseSweepType::ExplicitFrequencyList,
+            explicit_frequencies: "11 1k 9Meg".to_owned(),
+            contribution_detail: NoiseContributionDetail::SummaryOnly,
+            integration_mode: NoiseIntegrationMode::Disabled,
+        };
+        let json = serde_json::to_string(&draft).expect("current draft serializes");
+        assert!(json.contains("\"sweep\":\"explicit_frequency_list\""));
+        let restored: NoiseDraft = serde_json::from_str(&json).expect("current draft restores");
+        assert_eq!(restored, draft);
+    }
+
+    #[test]
+    fn invalid_legacy_noise_sweep_is_retained_and_rejected() {
+        let json = r#"{
+            "kind":"noise",
+            "draft":{
+                "output":"out",
+                "reference":"0",
+                "input":"V1",
+                "fstart":"1",
+                "fstop":"1Meg",
+                "points":"10",
+                "sweep":99
+            }
+        }"#;
+        let restored: AnalysisDraft =
+            serde_json::from_str(json).expect("invalid index is retained");
+        let AnalysisDraft::Noise(restored) = restored else {
+            panic!("expected noise draft");
+        };
+        assert_eq!(restored.sweep, NoiseSweepType::Unsupported(99));
+        assert!(restored.to_config().is_err());
+    }
+
+    #[test]
+    fn noise_differential_output_and_explicit_axis_convert_exactly() {
+        let draft = NoiseDraft {
+            output: "V(sensor_p, sensor_n)".to_owned(),
+            input: "IIN_CAL".to_owned(),
+            sweep: NoiseSweepType::ExplicitFrequencyList,
+            explicit_frequencies: "10, 1k; 1Meg".to_owned(),
+            contribution_detail: NoiseContributionDetail::AllContributors,
+            integration_mode: NoiseIntegrationMode::OutputNoiseOnly,
+            ..NoiseDraft::default()
+        };
+        let config = draft.to_config().expect("exact draft converts");
+        assert_eq!(config.output_node, "sensor_p");
+        assert_eq!(config.reference_node, "sensor_n");
+        assert_eq!(config.input_source, "IIN_CAL");
+        assert_eq!(config.explicit_frequencies, Some(vec![10.0, 1.0e3, 1.0e6]));
+        assert_eq!(
+            config.contribution_detail,
+            NoiseContributionDetail::AllContributors
+        );
+        assert_eq!(
+            config.integration_mode,
+            NoiseIntegrationMode::OutputNoiseOnly
+        );
+    }
+
+    #[test]
+    fn noise_validation_rejects_invalid_output_input_and_frequency_axes() {
+        for draft in [
+            NoiseDraft {
+                output: "V(a,b,c)".to_owned(),
+                ..NoiseDraft::default()
+            },
+            NoiseDraft {
+                input: " ".to_owned(),
+                ..NoiseDraft::default()
+            },
+            NoiseDraft {
+                output: "V(out\n)\n.op".to_owned(),
+                ..NoiseDraft::default()
+            },
+            NoiseDraft {
+                input: "VIN\n.tran 1n 1u".to_owned(),
+                ..NoiseDraft::default()
+            },
+            NoiseDraft {
+                fstop: "1".to_owned(),
+                ..NoiseDraft::default()
+            },
+            NoiseDraft {
+                sweep: NoiseSweepType::ExplicitFrequencyList,
+                explicit_frequencies: "10, 10".to_owned(),
+                ..NoiseDraft::default()
+            },
+        ] {
+            assert!(draft.to_config().is_err());
+            assert!(
+                AnalysisDraft::Noise(draft.clone())
+                    .manifest_configuration_error()
+                    .is_some()
+            );
+        }
     }
 
     #[test]

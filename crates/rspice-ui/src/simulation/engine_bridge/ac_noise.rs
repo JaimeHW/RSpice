@@ -4,7 +4,9 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::noise::NoiseResult;
 
 use super::{EngineBridge, ensure_not_aborted};
-use crate::simulation::config::{AcAnalysisConfig, NoiseAnalysisConfig};
+use crate::simulation::config::{
+    AcAnalysisConfig, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode,
+};
 use crate::simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 
@@ -113,15 +115,6 @@ impl EngineBridge {
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
         let engine = self.engine_for_netlist(netlist);
-        let frequencies = config.generate_frequencies();
-        ensure_not_aborted(abort)?;
-
-        if frequencies.is_empty() {
-            return Err(SimulationError::InvalidConfig(
-                "Invalid noise frequency sweep configuration".to_string(),
-            ));
-        }
-
         let output_node = config.output_node.trim();
         if output_node.is_empty() {
             return Err(SimulationError::InvalidConfig(
@@ -136,17 +129,39 @@ impl EngineBridge {
         }
         let output_reference = nonempty_trimmed(&config.reference_node);
 
-        let noise_results = engine
-            .run_noise_named_with_input_source_and_abort(
-                netlist,
-                output_node,
-                output_reference,
-                input_source,
-                &frequencies,
-                config.default_temperature(),
-                abort,
-            )
-            .map_err(|e| self.translate_error(e))?;
+        let noise_results = if let Some(table_name) = config.data_table_name.as_deref() {
+            engine
+                .run_noise_data_named_with_input_source_and_abort(
+                    netlist,
+                    output_node,
+                    output_reference,
+                    input_source,
+                    table_name,
+                    config.default_temperature(),
+                    abort,
+                )
+                .map(|(_, results)| results)
+                .map_err(|e| self.translate_error(e))?
+        } else {
+            let frequencies = config.generate_frequencies();
+            ensure_not_aborted(abort)?;
+            if frequencies.is_empty() {
+                return Err(SimulationError::InvalidConfig(
+                    "Invalid noise frequency sweep configuration".to_string(),
+                ));
+            }
+            engine
+                .run_noise_named_with_input_source_and_abort(
+                    netlist,
+                    output_node,
+                    output_reference,
+                    input_source,
+                    &frequencies,
+                    config.default_temperature(),
+                    abort,
+                )
+                .map_err(|e| self.translate_error(e))?
+        };
         ensure_not_aborted(abort)?;
 
         if noise_results.is_empty() {
@@ -156,18 +171,24 @@ impl EngineBridge {
         // The named API above validates the selected independent source and
         // computes a real transfer normalization before returning. Only that
         // successful path is allowed to publish an input-referred spectrum.
+        let frequencies = noise_results
+            .iter()
+            .map(|result| result.frequency)
+            .collect::<Vec<_>>();
         let (output_noise, input_noise, contributors) =
             collect_noise_series(&noise_results, true, abort)?;
 
         // Ranked band-integrated contributor summary — the table the noise
         // viewer's right panel shows. Consumes the per-frequency results
         // last; everything above only borrowed them.
-        let band = (
-            frequencies.first().copied().unwrap_or(0.0),
-            frequencies.last().copied().unwrap_or(0.0),
+        let band = frequencies.iter().copied().fold(
+            (f64::INFINITY, f64::NEG_INFINITY),
+            |(minimum, maximum), frequency| (minimum.min(frequency), maximum.max(frequency)),
         );
         ensure_not_aborted(abort)?;
-        let integrated = rspice_core::analysis::IntegratedNoise::new(noise_results);
+        let mut integration_results = noise_results;
+        integration_results.sort_by(|left, right| left.frequency.total_cmp(&right.frequency));
+        let integrated = rspice_core::analysis::IntegratedNoise::new(integration_results);
         ensure_not_aborted(abort)?;
         let contribution_summary = integrated.contribution_summary();
         ensure_not_aborted(abort)?;
@@ -176,18 +197,22 @@ impl EngineBridge {
             ensure_not_aborted(abort)?;
             rows.push(crate::state::NoiseContributorRow {
                 device: contribution.device_name,
-                // The current UI row contract stores only static broad-class
-                // labels. The core summary still keeps distinct mechanism
-                // rows; the later result-contract tranche can expose the
-                // owned canonical mechanism string without collapsing them.
-                mechanism: contribution.noise_type.label(),
+                mechanism: contribution.mechanism,
                 power: contribution.integrated_power,
                 share_pct: contribution.percentage,
             });
         }
+        let (rows, contributors) =
+            retain_contribution_evidence(rows, contributors, config.contribution_detail);
+        let (total_rms, input_rms) = retain_integrated_totals(
+            integrated.total_output_noise(),
+            integrated.total_input_referred_noise(),
+            config.integration_mode,
+        );
         let summary = crate::state::NoiseSummary {
             rows,
-            total_rms: integrated.total_output_noise(),
+            total_rms,
+            input_rms,
             band,
         };
 
@@ -225,20 +250,64 @@ fn collect_noise_series(
             input_noise.push(result.input_referred_density);
         }
 
-        // The result contract exposes one waveform per device while the core
-        // reports one contribution per device mechanism. Aggregate mechanisms
-        // at the same frequency instead of appending them, which would corrupt
-        // the waveform length whenever a device owns multiple noise sources.
         for contribution in &result.contributions {
             ensure_not_aborted(abort)?;
+            let mechanism = contribution
+                .identity
+                .mechanism
+                .as_deref()
+                .unwrap_or_else(|| contribution.noise_type.label());
             let values = contributors
-                .entry(contribution.identity.device.clone())
+                .entry(contributor_key(&contribution.identity.device, mechanism))
                 .or_insert_with(|| vec![0.0; point_count]);
             values[point_index] += contribution.output_contribution;
         }
     }
 
     Ok((output_noise, input_noise, contributors))
+}
+
+fn contributor_key(device: &str, mechanism: &str) -> String {
+    format!("{device} · {mechanism}")
+}
+
+fn retain_contribution_evidence(
+    mut rows: Vec<crate::state::NoiseContributorRow>,
+    mut contributors: HashMap<String, Vec<f64>>,
+    detail: NoiseContributionDetail,
+) -> (
+    Vec<crate::state::NoiseContributorRow>,
+    HashMap<String, Vec<f64>>,
+) {
+    let retain_count = match detail {
+        NoiseContributionDetail::AllContributors => rows.len(),
+        NoiseContributionDetail::Top50 => 50,
+        NoiseContributionDetail::Top20 => 20,
+        NoiseContributionDetail::SummaryOnly => 0,
+    };
+    rows.truncate(retain_count);
+    if detail == NoiseContributionDetail::SummaryOnly {
+        contributors.clear();
+    } else {
+        let retained = rows
+            .iter()
+            .map(|row| contributor_key(&row.device, &row.mechanism))
+            .collect::<std::collections::HashSet<_>>();
+        contributors.retain(|name, _| retained.contains(name));
+    }
+    (rows, contributors)
+}
+
+fn retain_integrated_totals(
+    output_rms: f64,
+    input_rms: f64,
+    mode: NoiseIntegrationMode,
+) -> (Option<f64>, Option<f64>) {
+    match mode {
+        NoiseIntegrationMode::Enabled => (Some(output_rms), Some(input_rms)),
+        NoiseIntegrationMode::OutputNoiseOnly => (Some(output_rms), None),
+        NoiseIntegrationMode::Disabled => (None, None),
+    }
 }
 
 fn ac_node_waveform_name(result: &rspice_core::analysis::AcResult, node_idx: usize) -> String {
@@ -269,6 +338,7 @@ mod tests {
     use crate::simulation::config::AcSweepType;
 
     const DIFFERENTIAL_NOISE_DECK: &str = "\
+differential noise bridge
 V1 in 0 0 AC 1
 R1 in p 1k
 R2 p n 2k
@@ -285,6 +355,7 @@ R3 n 0 3k
             num_points: 2,
             start_freq: 1.0e3,
             stop_freq: 2.0e3,
+            ..NoiseAnalysisConfig::default()
         }
     }
 
@@ -344,7 +415,7 @@ R3 n 0 3k
     }
 
     #[test]
-    fn result_policy_never_fabricates_input_noise_and_aggregates_device_mechanisms() {
+    fn result_policy_never_fabricates_input_noise_and_preserves_mechanisms() {
         let point = NoiseResult {
             frequency: 1.0e3,
             node_names: Vec::new(),
@@ -387,6 +458,77 @@ R3 n 0 3k
             input, None,
             "output-only results must not be labeled inoise"
         );
-        assert_eq!(contributors.get("M1"), Some(&vec![7.0, 13.0]));
+        assert_eq!(
+            contributors.get(&contributor_key("M1", "thermal")),
+            Some(&vec![2.0, 7.0])
+        );
+        assert_eq!(
+            contributors.get(&contributor_key("M1", "flicker")),
+            Some(&vec![5.0, 6.0])
+        );
+    }
+
+    #[test]
+    fn noise_retention_and_integration_policies_are_enforced_exactly() {
+        let rows = (0..60)
+            .map(|index| crate::state::NoiseContributorRow {
+                device: format!("R{index}"),
+                mechanism: "thermal".to_owned(),
+                power: (60 - index) as f64,
+                share_pct: (60 - index) as f64 / 18.3,
+            })
+            .collect::<Vec<_>>();
+        let contributors = rows
+            .iter()
+            .map(|row| {
+                (
+                    contributor_key(&row.device, &row.mechanism),
+                    vec![row.power],
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        for (detail, expected) in [
+            (NoiseContributionDetail::Top20, 20),
+            (NoiseContributionDetail::Top50, 50),
+        ] {
+            let (retained_rows, retained_contributors) =
+                retain_contribution_evidence(rows.clone(), contributors.clone(), detail);
+            assert_eq!(retained_rows.len(), expected);
+            assert_eq!(retained_contributors.len(), expected);
+            assert!(
+                retained_rows
+                    .windows(2)
+                    .all(|rows| rows[0].power >= rows[1].power)
+            );
+        }
+
+        let (summary_rows, summary_contributors) = retain_contribution_evidence(
+            rows.clone(),
+            contributors.clone(),
+            NoiseContributionDetail::SummaryOnly,
+        );
+        assert!(summary_rows.is_empty());
+        assert!(summary_contributors.is_empty());
+        let (all_rows, all_contributors) = retain_contribution_evidence(
+            rows,
+            contributors,
+            NoiseContributionDetail::AllContributors,
+        );
+        assert_eq!(all_rows.len(), 60);
+        assert_eq!(all_contributors.len(), 60);
+
+        assert_eq!(
+            retain_integrated_totals(3.0, 2.0, NoiseIntegrationMode::Enabled),
+            (Some(3.0), Some(2.0))
+        );
+        assert_eq!(
+            retain_integrated_totals(3.0, 2.0, NoiseIntegrationMode::OutputNoiseOnly),
+            (Some(3.0), None)
+        );
+        assert_eq!(
+            retain_integrated_totals(3.0, 2.0, NoiseIntegrationMode::Disabled),
+            (None, None)
+        );
     }
 }

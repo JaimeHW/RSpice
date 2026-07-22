@@ -68,6 +68,110 @@ fn prepare_active_typed_result_csv(state: &AppState) -> Option<PreparedTypedResu
 
     use crate::state::{AnalysisResultPayload, SensitivityResultMode};
     match payload {
+        AnalysisResultPayload::OperatingPoint {
+            temperature_mode,
+            temperature_celsius,
+            initial_guess,
+            node_initialization,
+            homotopy,
+            annotation,
+            device_detail,
+            save_device_op,
+            accuracy,
+            selected_devices,
+            violation_devices,
+            violation_source_content_digest,
+            validated_startup_directives,
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+            effective_source_content_digest,
+            run_point_index,
+            run_point_count,
+            run_point_process,
+            run_point_supply_voltage,
+            run_point_nominal_supply_voltage,
+        } => {
+            let mut contents = String::from("field,value,unit\n");
+            for (field, value, unit) in [
+                (
+                    "temperature_mode",
+                    serialized_enum_name(temperature_mode),
+                    "",
+                ),
+                (
+                    "temperature_celsius",
+                    format!("{temperature_celsius:.17e}"),
+                    "degC",
+                ),
+                ("initial_guess", serialized_enum_name(initial_guess), ""),
+                (
+                    "node_initialization",
+                    serialized_enum_name(node_initialization),
+                    "",
+                ),
+                ("homotopy", serialized_enum_name(homotopy), ""),
+                ("annotation", serialized_enum_name(annotation), ""),
+                ("device_detail", serialized_enum_name(device_detail), ""),
+                ("save_device_op", serialized_enum_name(save_device_op), ""),
+                ("accuracy", serialized_enum_name(accuracy), ""),
+                (
+                    "validated_startup_directives",
+                    validated_startup_directives.to_string(),
+                    "count",
+                ),
+                ("selected_devices", selected_devices.join(";"), ""),
+                ("violation_devices", violation_devices.join(";"), ""),
+                (
+                    "violation_source_content_digest",
+                    violation_source_content_digest
+                        .map_or_else(String::new, |digest| digest.to_string()),
+                    "sha256",
+                ),
+                ("mna_nodes", mna_node_names.len().to_string(), "count"),
+                ("mna_branches", mna_branch_names.len().to_string(), "count"),
+                ("mna_values", mna_solution.len().to_string(), "count"),
+                (
+                    "effective_source_content_digest",
+                    effective_source_content_digest
+                        .map_or_else(String::new, |digest| digest.to_string()),
+                    "sha256",
+                ),
+                ("run_point_index", run_point_index.to_string(), "zero_based"),
+                ("run_point_count", run_point_count.to_string(), "count"),
+                (
+                    "run_point_process",
+                    serialized_enum_name(run_point_process),
+                    "",
+                ),
+                (
+                    "run_point_supply_voltage",
+                    run_point_supply_voltage
+                        .map(|voltage| format!("{voltage:.17e}"))
+                        .unwrap_or_default(),
+                    "V",
+                ),
+                (
+                    "run_point_nominal_supply_voltage",
+                    run_point_nominal_supply_voltage
+                        .map(|voltage| format!("{voltage:.17e}"))
+                        .unwrap_or_default(),
+                    "V",
+                ),
+            ] {
+                contents.push_str(&format!(
+                    "{},{},{}\n",
+                    csv_text(field),
+                    csv_text(&value),
+                    csv_text(unit)
+                ));
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "operating-point-contract.csv",
+                contents,
+                detail: "exact operating-point execution and retention contract".to_owned(),
+            })
+        }
         AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
             let mut contents =
                 String::from("record,index,real_rad_per_s,imaginary_rad_per_s,value\n");
@@ -362,6 +466,13 @@ fn csv_text(value: &str) -> String {
     } else {
         value.to_owned()
     }
+}
+
+fn serialized_enum_name<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value)
+        .expect("retained evidence enums are JSON-serializable")
+        .trim_matches('"')
+        .to_owned()
 }
 
 fn export_typed_result_csv(

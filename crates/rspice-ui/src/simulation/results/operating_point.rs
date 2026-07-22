@@ -7,6 +7,20 @@ use std::collections::HashMap;
 /// DC operating point result
 #[derive(Debug, Clone, Default)]
 pub struct DcOpResult {
+    /// Exact solve, annotation, and retention contract applied to this result.
+    pub configuration: crate::simulation::dialog::OpConfig,
+
+    /// Number of authored startup directives validated before any selected
+    /// ignore/validate-only execution filtering was applied.
+    pub validated_startup_directives: usize,
+
+    /// Exact core MNA ordering and values. Ground is omitted; node values are
+    /// followed by branch values. This is retained so a later compatible OP
+    /// can use the converged state without reconstructing order from maps.
+    pub mna_node_names: Vec<String>,
+    pub mna_branch_names: Vec<String>,
+    pub mna_solution: Vec<f64>,
+
     /// Node voltages
     pub node_voltages: HashMap<String, f64>,
 
@@ -25,12 +39,25 @@ pub struct DcOpResult {
 impl DcOpResult {
     /// Get voltage at a node
     pub fn voltage(&self, node: &str) -> Option<f64> {
-        self.node_voltages.get(node).copied()
+        self.node_voltages.get(node).copied().or_else(|| {
+            self.node_voltages
+                .iter()
+                .find_map(|(name, value)| name.eq_ignore_ascii_case(node).then_some(*value))
+        })
     }
 
     /// Get current through a branch
     pub fn current(&self, branch: &str) -> Option<f64> {
-        self.branch_currents.get(branch).copied()
+        self.branch_currents.get(branch).copied().or_else(|| {
+            self.branch_currents.iter().find_map(|(name, value)| {
+                (name.eq_ignore_ascii_case(branch)
+                    || name
+                        .strip_prefix("I(")
+                        .and_then(|name| name.strip_suffix(')'))
+                        .is_some_and(|name| name.eq_ignore_ascii_case(branch)))
+                .then_some(*value)
+            })
+        })
     }
 }
 

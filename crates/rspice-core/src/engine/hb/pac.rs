@@ -53,8 +53,34 @@ impl Engine {
         config: PacConfig,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
+        self.run_pac_impl(netlist, config, None, abort)
+    }
+
+    /// Run periodic AC from an exact previously converged shooting-PSS
+    /// operating point. The large-signal state is projected into the PAC
+    /// spectral basis; it is never re-solved.
+    pub fn run_pac_from_pss_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: PacConfig,
+        operating_point: &super::super::PssOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PacAnalysisResult, SimulationError> {
+        self.run_pac_impl(netlist, config, Some(operating_point), abort)
+    }
+
+    fn run_pac_impl(
+        &self,
+        netlist: &Netlist,
+        mut config: PacConfig,
+        operating_point: Option<&super::super::PssOperatingPoint>,
+        abort: &dyn AbortSignal,
+    ) -> Result<PacAnalysisResult, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
+        }
+        if let Some(operating_point) = operating_point {
+            config.fundamental_freq = operating_point.analysis().result.frequency;
         }
         if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
             return Err(SimulationError::Circuit(
@@ -87,6 +113,14 @@ impl Engine {
         .unwrap_or(usize::MAX);
         let op_harmonics = span.max(extreme).max(8);
         self.ensure_analysis_points(op_harmonics.saturating_add(1))?;
+        if let Some(operating_point) = operating_point
+            && op_harmonics > operating_point.spectral_harmonic_capacity()
+        {
+            return Err(SimulationError::Circuit(format!(
+                "PAC requires {op_harmonics} periodic harmonics for its sideband span, but the retained PSS time orbit has Nyquist capacity {}",
+                operating_point.spectral_harmonic_capacity()
+            )));
+        }
 
         let input_name = config
             .input_source
@@ -144,22 +178,29 @@ impl Engine {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
 
-        let mut state = HbSolverState::new(num_nodes, op_harmonics);
-        if has_nonlinear {
-            solver
-                .solve_newton_with_abort(&mut state, abort)
-                .map_err(|e| match e {
-                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
-                    _ => SimulationError::Circuit(format!("PAC operating-point solve failed: {e}")),
-                })?;
+        let state = if let Some(operating_point) = operating_point {
+            self.hb_state_from_pss_operating_point(operating_point, &hb_config, &node_names)?
         } else {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
+            let mut state = HbSolverState::new(num_nodes, op_harmonics);
+            if has_nonlinear {
+                solver
+                    .solve_newton_with_abort(&mut state, abort)
+                    .map_err(|e| match e {
+                        crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                        _ => SimulationError::Circuit(format!(
+                            "PAC operating-point solve failed: {e}"
+                        )),
+                    })?;
+            } else {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                solver.solve_linear(&mut state).map_err(|e| {
+                    SimulationError::Circuit(format!("PAC operating-point solve failed: {e}"))
+                })?;
             }
-            solver.solve_linear(&mut state).map_err(|e| {
-                SimulationError::Circuit(format!("PAC operating-point solve failed: {e}"))
-            })?;
-        }
+            state
+        };
 
         // Resolve the small-signal input source to node-space injections of
         // unit amplitude.

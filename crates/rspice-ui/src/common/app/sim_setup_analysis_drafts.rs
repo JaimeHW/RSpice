@@ -245,7 +245,8 @@ impl SimSetupState {
         }
         let mut projection = self.clone();
         projection.apply_analysis_draft_projection(draft);
-        if matches!(draft, AnalysisDraft::OperatingPoint(_)) {
+        if matches!(draft, AnalysisDraft::OperatingPoint(state) if matches!(state.temperature_mode_idx, 0 | 3))
+        {
             projection.op.temperature = self.reference_pvt.temperature_celsius.to_string();
         }
         projection.validation_error(draft.legacy_index())
@@ -258,7 +259,8 @@ impl SimSetupState {
         }
         let mut projection = self.clone();
         projection.apply_analysis_draft_projection(draft);
-        if matches!(draft, AnalysisDraft::OperatingPoint(_)) {
+        if matches!(draft, AnalysisDraft::OperatingPoint(state) if matches!(state.temperature_mode_idx, 0 | 3))
+        {
             projection.op.temperature = self.reference_pvt.temperature_celsius.to_string();
         }
         projection.summary(draft.legacy_index())
@@ -350,7 +352,8 @@ impl SimSetupState {
             )?;
         }
         projection.apply_analysis_draft_projection(instance.draft());
-        if instance.kind() == AnalysisKind::OperatingPoint {
+        if matches!(instance.draft(), AnalysisDraft::OperatingPoint(state) if matches!(state.temperature_mode_idx, 0 | 3))
+        {
             projection.op.temperature = self.reference_pvt.temperature_celsius.to_string();
         }
         projection.enabled.clear();
@@ -373,7 +376,10 @@ impl SimSetupState {
                 fstart: self.noise.fstart.clone(),
                 fstop: self.noise.fstop.clone(),
                 points: self.ac.points.clone(),
-                sweep: self.ac.sweep,
+                sweep: crate::simulation::config::NoiseSweepType::from_selection_index(
+                    self.ac.sweep,
+                ),
+                ..NoiseDraft::default()
             }),
             AnalysisKind::PoleZero => AnalysisDraft::PoleZero(self.pz.clone()),
             AnalysisKind::Sensitivity => AnalysisDraft::Sensitivity(self.sens.clone()),
@@ -430,7 +436,7 @@ impl SimSetupState {
                     fstop: value.fstop.clone(),
                 };
                 self.ac.points.clone_from(&value.points);
-                self.ac.sweep = value.sweep;
+                self.ac.sweep = value.sweep.legacy_index().unwrap_or(usize::MAX);
             }
             AnalysisDraft::PoleZero(value) => self.pz = value.clone(),
             AnalysisDraft::Sensitivity(value) => self.sens = value.clone(),
@@ -487,7 +493,7 @@ mod tests {
         let mut setup = SimSetupState::new();
         let noise = AnalysisDraft::Noise(NoiseDraft {
             points: "77".to_owned(),
-            sweep: 2,
+            sweep: crate::simulation::config::NoiseSweepType::Linear,
             ..NoiseDraft::default()
         });
         setup.apply_analysis_draft_projection(&noise);

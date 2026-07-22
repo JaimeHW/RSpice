@@ -2086,7 +2086,7 @@ fn corner_point_labels(
     let instance = plan
         .instances()
         .iter()
-        .find(|instance| instance.id() == provenance.source_instance_id())?;
+        .find(|instance| instance.id() == provenance.authored_source_instance_id())?;
     if instance.modified_revision() != provenance.source_revision() {
         return None;
     }

@@ -20,6 +20,7 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::advanced::harmonic_balance::HbFft;
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
 use crate::netlist::SourceSpec;
@@ -143,6 +144,68 @@ impl HbDriveTone {
 }
 
 impl Engine {
+    /// Project an authenticated shooting-PSS orbit into the HB spectral basis
+    /// used by periodic small-signal kernels. This is a representation change,
+    /// not an operating-point solve: every coefficient is sampled from the
+    /// retained orbit and no Newton or linear large-signal solve is run.
+    fn hb_state_from_pss_operating_point(
+        &self,
+        operating_point: &super::PssOperatingPoint,
+        config: &HbConfig,
+        node_names: &[String],
+    ) -> Result<HbSolverState, SimulationError> {
+        let analysis = operating_point.analysis();
+        let result = &analysis.result;
+        if !result.frequency.is_finite() || result.frequency <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "periodic operating point has an invalid fundamental frequency".to_owned(),
+            ));
+        }
+        let relative_frequency_error =
+            ((result.frequency - config.fundamental_freq) / result.frequency).abs();
+        if relative_frequency_error > 1.0e-9 {
+            return Err(SimulationError::Circuit(format!(
+                "periodic operating-point frequency {:.16e} Hz does not match the dependent analysis basis {:.16e} Hz",
+                result.frequency, config.fundamental_freq
+            )));
+        }
+        if node_names.len() != result.waveforms.len() {
+            return Err(SimulationError::Circuit(format!(
+                "periodic operating point contains {} node waveforms for a {}-node dependent circuit",
+                result.waveforms.len(),
+                node_names.len()
+            )));
+        }
+
+        let mut fft = HbFft::with_size(config.num_harmonics, config.fft_size());
+        let sample_count = fft.size();
+        let mut state = HbSolverState::new(node_names.len(), config.num_harmonics);
+        for (target_index, target_name) in node_names.iter().enumerate() {
+            let source_index = result
+                .node_names
+                .iter()
+                .position(|source_name| source_name.eq_ignore_ascii_case(target_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic operating point has no waveform for dependent-circuit node '{target_name}'"
+                    ))
+                })?;
+            let waveform = &result.waveforms[source_index];
+            let samples = (0..sample_count)
+                .map(|sample_index| {
+                    let time = analysis.period * sample_index as Value / sample_count as Value;
+                    waveform.interpolate(&result.time, time, analysis.period)
+                })
+                .collect::<Vec<_>>();
+            state.x[target_index] = fft.to_frequency_domain(&samples);
+        }
+        state.iteration = analysis.iterations.max(1);
+        state.total_iterations = analysis.iterations;
+        state.residual_norm = analysis.final_residual;
+        state.converged = true;
+        Ok(state)
+    }
+
     /// Run Harmonic Balance analysis
     ///
     /// This is the main entry point for HB simulation. It builds the circuit,

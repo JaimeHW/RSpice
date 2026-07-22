@@ -399,6 +399,51 @@ pub fn run_pstb_analysis_with_config_and_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
+    run_pstb_analysis_impl(netlist_text, config, source_path, None, abort)
+}
+
+/// Run PSTB from the exact authenticated monodromy matrix produced by the
+/// prerequisite PSS task.
+pub fn run_pstb_analysis_from_pss_with_abort(
+    netlist_text: &str,
+    config: &PstbRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
+    run_pstb_analysis_from_pss_with_source_path_and_abort(
+        netlist_text,
+        config,
+        operating_point,
+        None,
+        abort,
+    )
+}
+
+/// Run PSTB from an exact retained PSS state with direct-call source-relative
+/// include and model resolution.
+pub fn run_pstb_analysis_from_pss_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PstbRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
+    run_pstb_analysis_impl(
+        netlist_text,
+        config,
+        source_path,
+        Some(operating_point),
+        abort,
+    )
+}
+
+fn run_pstb_analysis_impl(
+    netlist_text: &str,
+    config: &PstbRunConfig,
+    source_path: Option<&Path>,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
     use rspice_core::analysis::PssConfig;
     use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
 
@@ -418,18 +463,24 @@ pub fn run_pstb_analysis_with_config_and_source_path_and_abort(
     ensure_not_aborted(abort)?;
     let probe = resolve_pstb_probe_with_abort(&circuit, &config.probe_instance, abort)?;
 
-    let pss_harmonics = config.pss_num_harmonics.max(config.max_harmonics);
-    let pss_config = PssConfig::new(config.pss_fundamental_freq)
-        .with_harmonics(pss_harmonics)
-        .with_tolerance(config.pss_tolerance)
-        .with_max_iterations(50)
-        .with_tstab_periods(10);
-    let pss_result = engine
-        .run_pss_with_abort(&netlist, pss_config, abort)
-        .map_err(|error| match error {
-            rspice_core::SimulationError::Aborted => ServiceRunError::Aborted,
-            other => ServiceRunError::from(PstbRunError::Pss(other.to_string())),
-        })?;
+    let owned_pss;
+    let pss_result = if let Some(operating_point) = operating_point {
+        operating_point.analysis()
+    } else {
+        let pss_harmonics = config.pss_num_harmonics.max(config.max_harmonics);
+        let pss_config = PssConfig::new(config.pss_fundamental_freq)
+            .with_harmonics(pss_harmonics)
+            .with_tolerance(config.pss_tolerance)
+            .with_max_iterations(50)
+            .with_tstab_periods(10);
+        owned_pss = engine
+            .run_pss_with_abort(&netlist, pss_config, abort)
+            .map_err(|error| match error {
+                rspice_core::SimulationError::Aborted => ServiceRunError::Aborted,
+                other => ServiceRunError::from(PstbRunError::Pss(other.to_string())),
+            })?;
+        &owned_pss
+    };
     ensure_not_aborted(abort)?;
 
     if pss_result.monodromy.is_empty() {

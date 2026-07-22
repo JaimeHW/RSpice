@@ -90,17 +90,21 @@ pub use pac_pxf::{
     PacData, PacFrequencySweep, PacRunConfig, PxfData, PxfFrequencySweep, PxfRunConfig,
     run_pac_analysis, run_pac_analysis_auto, run_pac_analysis_auto_with_abort,
     run_pac_analysis_auto_with_source_path, run_pac_analysis_auto_with_source_path_and_abort,
+    run_pac_analysis_from_pss_with_abort, run_pac_analysis_from_pss_with_source_path_and_abort,
     run_pac_analysis_with_abort, run_pac_analysis_with_source_path,
-    run_pac_analysis_with_source_path_and_abort, run_pxf_analysis, run_pxf_analysis_with_abort,
-    run_pxf_analysis_with_config, run_pxf_analysis_with_config_and_abort,
-    run_pxf_analysis_with_config_and_source_path,
+    run_pac_analysis_with_source_path_and_abort, run_pxf_analysis,
+    run_pxf_analysis_from_pss_with_abort, run_pxf_analysis_from_pss_with_source_path_and_abort,
+    run_pxf_analysis_with_abort, run_pxf_analysis_with_config,
+    run_pxf_analysis_with_config_and_abort, run_pxf_analysis_with_config_and_source_path,
     run_pxf_analysis_with_config_and_source_path_and_abort, run_pxf_analysis_with_source_path,
     run_pxf_analysis_with_source_path_and_abort,
 };
 pub use pnoise::{
     PnoiseData, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig, run_pnoise_analysis,
-    run_pnoise_analysis_with_abort, run_pnoise_analysis_with_config,
-    run_pnoise_analysis_with_config_and_abort, run_pnoise_analysis_with_config_and_source_path,
+    run_pnoise_analysis_from_pss_with_abort,
+    run_pnoise_analysis_from_pss_with_source_path_and_abort, run_pnoise_analysis_with_abort,
+    run_pnoise_analysis_with_config, run_pnoise_analysis_with_config_and_abort,
+    run_pnoise_analysis_with_config_and_source_path,
     run_pnoise_analysis_with_config_and_source_path_and_abort,
     run_pnoise_analysis_with_source_path, run_pnoise_analysis_with_source_path_and_abort,
 };
@@ -110,11 +114,13 @@ pub use pole_zero::{
 };
 pub use pss::{
     PssData, PssRunConfig, run_pss_analysis, run_pss_analysis_with_abort,
-    run_pss_analysis_with_config_and_source_path_and_abort, run_pss_analysis_with_source_path,
+    run_pss_analysis_with_config_and_source_path_and_abort,
+    run_pss_analysis_with_dc_seed_and_source_path_and_abort, run_pss_analysis_with_source_path,
     run_pss_analysis_with_source_path_and_abort,
 };
 pub use pstb::{
-    PstbData, PstbRunConfig, run_pstb_analysis, run_pstb_analysis_with_abort,
+    PstbData, PstbRunConfig, run_pstb_analysis, run_pstb_analysis_from_pss_with_abort,
+    run_pstb_analysis_from_pss_with_source_path_and_abort, run_pstb_analysis_with_abort,
     run_pstb_analysis_with_config, run_pstb_analysis_with_config_and_abort,
     run_pstb_analysis_with_config_and_source_path,
     run_pstb_analysis_with_config_and_source_path_and_abort, run_pstb_analysis_with_source_path,
@@ -163,8 +169,9 @@ pub use sweeps::{
     run_parametric_analysis_with_source_path, run_parametric_analysis_with_source_path_and_abort,
 };
 pub(crate) use sweeps::{
-    REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, expand_corner_pvt_points,
-    expand_step_sweep_values,
+    REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, apply_voltage_corner,
+    expand_corner_pvt_points, expand_step_sweep_values, infer_nominal_supply_voltage,
+    materialize_corner_process_source,
 };
 pub use tf::{
     TfAccuracy, TfData, TfGainBasis, TfGainMetadata, TfGainUnit, TfNormalization, TfQuantity,
