@@ -728,6 +728,8 @@ fn xyce_level2_native_diode_param(name: &str) -> bool {
             | "XTI"
             | "EG"
             | "TNOM"
+            | "TBV1"
+            | "TBV2"
     )
 }
 

@@ -13,7 +13,11 @@ const XYCE_7_KOVERQ: Value = 1.3806226e-23 / 1.6021918e-19;
 const REFTEMP: Value = 300.15;
 const EPSMIN: Value = 1.0e-28;
 const MAX_EXP_ARG: Value = 100.0;
-const BREAKDOWN_EXP_ARG_MAX: Value = 40.0;
+// Xyce's diode model uses the same 100.0 exponent ceiling for reverse
+// breakdown as for the forward junction.  A lower ceiling changes the
+// breakdown I/V curve itself (the linear continuation becomes the model),
+// which is observable in cold, low-Is Level=2 sweeps.
+const BREAKDOWN_EXP_ARG_MAX: Value = 100.0;
 
 /// Pre-computed stamp indices for O(1) matrix access (2-terminal device)
 #[derive(Debug, Clone, Default)]
@@ -95,6 +99,12 @@ pub struct Diode {
     pub tnom_c: Option<Value>,
     /// Select the PSpice-compatible Xyce/HSPICE LEVEL=2 junction-temperature law.
     pub pspice_level2: bool,
+    /// Linear temperature coefficient for the reverse breakdown voltage
+    /// (Xyce TBV1, in 1/C).
+    pub tbv1: Value,
+    /// Quadratic temperature coefficient for the reverse breakdown voltage
+    /// (Xyce TBV2, in 1/C^2).
+    pub tbv2: Value,
 
     // Noise parameters
     /// Flicker noise coefficient (KF)
@@ -217,6 +227,8 @@ impl Diode {
             eg: 1.11,
             tnom_c: None,
             pspice_level2: false,
+            tbv1: 0.0,
+            tbv2: 0.0,
 
             // Flicker noise off by default (diosetup.c: fNcoef 0, fNexp 1).
             kf: 0.0,
@@ -486,6 +498,16 @@ impl Diode {
         if let Some(&v) = params.get("TNOM") {
             self.tnom_c = Some(v);
         }
+        if let Some(&v) = params.get("TBV1")
+            && v.is_finite()
+        {
+            self.tbv1 = v;
+        }
+        if let Some(&v) = params.get("TBV2")
+            && v.is_finite()
+        {
+            self.tbv2 = v;
+        }
         if !self.breakdown_emission_given {
             self.breakdown_emission_coefficient = self.n;
         }
@@ -638,9 +660,16 @@ impl Diode {
         }
 
         self.vt = vt;
-        self.temperature_breakdown_voltage = self
-            .bv
-            .and_then(|bv| self.xbv_matched_breakdown_voltage(bv));
+        self.temperature_breakdown_voltage = self.bv.and_then(|bv| {
+            let delta_t = temp - tnom;
+            let temperature_factor = 1.0 + delta_t * (self.tbv1 + self.tbv2 * delta_t);
+            let temperature_bv = bv * temperature_factor;
+            temperature_bv
+                .is_finite()
+                .then_some(temperature_bv)
+                .filter(|value| *value > 0.0)
+                .and_then(|value| self.xbv_matched_breakdown_voltage(value))
+        });
     }
 
     /// Cached operating-point values from the last accepted Newton solution:
@@ -1218,5 +1247,49 @@ mod tests {
         d.set_temperature(273.15 + 85.0, REFTEMP);
         assert!(d.vj < 0.8, "vj={} should drop at 85C", d.vj);
         assert!(d.cj0 > 2e-12, "cj0={} should rise at 85C", d.cj0);
+    }
+
+    #[test]
+    fn xyce_level2_breakdown_voltage_applies_tbv1_and_tbv2_before_matching() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("LEVEL".to_string(), 2.0);
+        params.insert("BV".to_string(), 7.255);
+        params.insert("IBV".to_string(), 1.0e-20);
+        params.insert("TBV1".to_string(), 1.3e-4);
+        params.insert("TBV2".to_string(), -5.0e-8);
+
+        let mut diode = Diode::spice_defaults("d1".to_string(), 1, 2).with_model_params(&params);
+        let tnom = REFTEMP;
+        let temp = 273.15 - 55.0;
+        diode.set_temperature_xyce_7(temp, tnom);
+
+        let delta_t = temp - tnom;
+        let expected = 7.255 * (1.0 + delta_t * (1.3e-4 - 5.0e-8 * delta_t));
+        let actual = diode
+            .active_breakdown_voltage()
+            .expect("TBV-adjusted breakdown voltage is active");
+        assert!((actual - expected).abs() <= expected * 1.0e-12);
+    }
+
+    #[test]
+    fn xyce_breakdown_exponential_retains_the_full_model_exponent_range() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("BV".to_string(), 7.255);
+        params.insert("IBV".to_string(), 1.0e-3);
+
+        let mut diode = Diode::spice_defaults("d1".to_string(), 1, 2).with_model_params(&params);
+        diode.set_temperature_xyce_7(273.15 - 55.0, REFTEMP);
+        let breakdown = diode
+            .active_breakdown_voltage()
+            .expect("matched breakdown voltage is active");
+        let argument = 50.0;
+        let vd = -(breakdown + argument * diode.vt);
+        let expected = -diode.is * argument.exp();
+        let actual = diode.current(vd);
+
+        assert!(
+            (actual - expected).abs() <= expected.abs() * 1.0e-12,
+            "reverse breakdown current {actual:e} does not match Xyce exponential {expected:e}"
+        );
     }
 }
