@@ -4,10 +4,14 @@
 //! datasets.  Source samples and their content digests are never edited in
 //! place; presentation changes are committed atomically through [`DocumentEdit`].
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::io::{self, Write};
+use std::marker::PhantomData;
 use std::num::NonZeroU64;
 
+use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -16,6 +20,384 @@ use crate::product::{
     RevisionError,
 };
 use crate::results::viewer_catalog::{ViewerArt, viewer_document};
+
+/// Maximum immutable result projections retained by one visualization document.
+pub const MAX_VISUALIZATION_DATASETS: usize = 32;
+/// Maximum typed columns retained by one immutable result projection.
+pub const MAX_SOURCE_COLUMNS: usize = 4_096;
+/// Maximum rows retained by one immutable result projection.
+pub const MAX_SOURCE_ROWS: usize = 1_000_000;
+/// Maximum typed cells retained by one immutable result projection.
+pub const MAX_SOURCE_CELLS_PER_DATASET: usize = 8_000_000;
+/// Maximum typed cells retained across one visualization document.
+pub const MAX_SOURCE_CELLS_TOTAL: usize = 8_000_000;
+/// Maximum UTF-8 bytes retained by text-valued cells in one source dataset.
+pub const MAX_SOURCE_TEXT_BYTES_PER_DATASET: usize = 64 * 1024 * 1024;
+/// Maximum UTF-8 bytes retained by text-valued cells across one document.
+pub const MAX_SOURCE_TEXT_BYTES_TOTAL: usize = 128 * 1024 * 1024;
+/// Maximum number of report-style pages in one visualization document.
+pub const MAX_VISUALIZATION_PAGES: usize = 64;
+/// Maximum number of panes in one visualization document.
+pub const MAX_VISUALIZATION_PANES: usize = 256;
+/// Maximum number of axes in one visualization document.
+pub const MAX_VISUALIZATION_AXES: usize = 512;
+/// Maximum number of traces in one visualization document.
+pub const MAX_VISUALIZATION_TRACES: usize = 4_096;
+/// Maximum number of cursors in one visualization document.
+pub const MAX_VISUALIZATION_CURSORS: usize = 4_096;
+/// Maximum number of markers in one visualization document.
+pub const MAX_VISUALIZATION_MARKERS: usize = 8_192;
+/// Maximum number of measurements in one visualization document.
+pub const MAX_VISUALIZATION_MEASUREMENTS: usize = 4_096;
+/// Maximum number of annotations in one visualization document.
+pub const MAX_VISUALIZATION_ANNOTATIONS: usize = 4_096;
+/// Maximum number of viewport/cursor link groups in one visualization document.
+pub const MAX_VISUALIZATION_LINK_GROUPS: usize = 1_024;
+/// Maximum number of immutable deletion records in one visualization document.
+pub const MAX_VISUALIZATION_TOMBSTONES: usize = 65_536;
+/// Maximum number of retained exact-comparison receipts.
+pub const MAX_VISUALIZATION_COMPARISONS: usize = 4_096;
+/// Maximum members carried by one measurement or link group.
+pub const MAX_ENTITY_REFERENCES: usize = 4_096;
+/// Maximum signal records carried by one comparison receipt.
+pub const MAX_COMPARISON_SIGNALS: usize = 4_096;
+/// Maximum stable-key length in UTF-8 bytes.
+pub const MAX_VISUALIZATION_KEY_BYTES: usize = 256;
+/// Maximum ordinary title/label length in UTF-8 bytes.
+pub const MAX_VISUALIZATION_LABEL_BYTES: usize = 1_024;
+/// Maximum engineering-unit length in UTF-8 bytes.
+pub const MAX_VISUALIZATION_UNIT_BYTES: usize = 64;
+/// Maximum retained text-valued source cell length in UTF-8 bytes.
+pub const MAX_SOURCE_TEXT_BYTES: usize = 4_096;
+/// Maximum retained annotation length in UTF-8 bytes.
+pub const MAX_ANNOTATION_TEXT_BYTES: usize = 16_384;
+/// Maximum number of edits accepted by one atomic visualization transaction.
+pub const MAX_VISUALIZATION_TRANSACTION_EDITS: usize = 4_096;
+/// Maximum declared family dimensions in one presentation policy.
+pub const MAX_FAMILY_DIMENSIONS: usize = 32;
+/// Maximum visual encoding maps in one family presentation policy.
+pub const MAX_FAMILY_ENCODINGS: usize = 16;
+/// Maximum exact members in one family set-membership predicate.
+pub const MAX_FAMILY_PREDICATE_VALUES: usize = 256;
+/// Maximum direct children in one family logical predicate node.
+pub const MAX_FAMILY_PREDICATE_CHILDREN: usize = 64;
+/// Maximum nesting depth of one family predicate root, including `Not` nodes.
+pub const MAX_FAMILY_PREDICATE_DEPTH: usize = 32;
+/// Maximum total nodes retained by one family predicate root.
+pub const MAX_FAMILY_PREDICATE_NODES: usize = 1_024;
+/// Maximum comparison-signal records retained across all receipts in one document.
+pub const MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL: usize = 16_384;
+/// Maximum trace references retained across all measurements in one document.
+pub const MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL: usize = 16_384;
+/// Maximum entity references retained across all link groups in one document.
+pub const MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL: usize = 16_384;
+
+struct BoundedVec<T, const MAX: usize>(Vec<T>);
+
+impl<T, const MAX: usize> BoundedVec<T, MAX> {
+    fn into_inner(self) -> Vec<T> {
+        self.0
+    }
+}
+
+impl<'de, T, const MAX: usize> Deserialize<'de> for BoundedVec<T, MAX>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BoundedVecVisitor<T, const MAX: usize>(PhantomData<T>);
+
+        impl<'de, T, const MAX: usize> Visitor<'de> for BoundedVecVisitor<T, MAX>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = BoundedVec<T, MAX>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(formatter, "a sequence containing at most {MAX} entries")
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                if sequence.size_hint().is_some_and(|hint| hint > MAX) {
+                    return Err(serde::de::Error::custom(format!(
+                        "sequence exceeds the {MAX}-entry resource limit"
+                    )));
+                }
+                let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(MAX));
+                while values.len() < MAX {
+                    match sequence.next_element()? {
+                        Some(value) => values.push(value),
+                        None => return Ok(BoundedVec(values)),
+                    }
+                }
+                if sequence.next_element::<IgnoredAny>()?.is_some() {
+                    return Err(serde::de::Error::custom(format!(
+                        "sequence exceeds the {MAX}-entry resource limit"
+                    )));
+                }
+                Ok(BoundedVec(values))
+            }
+        }
+
+        deserializer.deserialize_seq(BoundedVecVisitor::<T, MAX>(PhantomData))
+    }
+}
+
+trait NestedResourceCount {
+    fn nested_resource_count(&self) -> usize;
+}
+
+struct AggregateBoundedVec<T, const MAX_ITEMS: usize, const MAX_NESTED: usize>(Vec<T>);
+
+impl<T, const MAX_ITEMS: usize, const MAX_NESTED: usize>
+    AggregateBoundedVec<T, MAX_ITEMS, MAX_NESTED>
+{
+    fn into_inner(self) -> Vec<T> {
+        self.0
+    }
+}
+
+impl<'de, T, const MAX_ITEMS: usize, const MAX_NESTED: usize> Deserialize<'de>
+    for AggregateBoundedVec<T, MAX_ITEMS, MAX_NESTED>
+where
+    T: Deserialize<'de> + NestedResourceCount,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct AggregateVisitor<T, const MAX_ITEMS: usize, const MAX_NESTED: usize>(PhantomData<T>);
+
+        impl<'de, T, const MAX_ITEMS: usize, const MAX_NESTED: usize> Visitor<'de>
+            for AggregateVisitor<T, MAX_ITEMS, MAX_NESTED>
+        where
+            T: Deserialize<'de> + NestedResourceCount,
+        {
+            type Value = AggregateBoundedVec<T, MAX_ITEMS, MAX_NESTED>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "at most {MAX_ITEMS} entries containing {MAX_NESTED} aggregate nested resources"
+                )
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                if sequence.size_hint().is_some_and(|hint| hint > MAX_ITEMS) {
+                    return Err(serde::de::Error::custom(format!(
+                        "sequence exceeds the {MAX_ITEMS}-entry resource limit"
+                    )));
+                }
+                let mut values =
+                    Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(MAX_ITEMS));
+                let mut nested = 0_usize;
+                while values.len() < MAX_ITEMS {
+                    let Some(value) = sequence.next_element::<T>()? else {
+                        return Ok(AggregateBoundedVec(values));
+                    };
+                    nested = nested
+                        .checked_add(value.nested_resource_count())
+                        .ok_or_else(|| {
+                            <A::Error as serde::de::Error>::custom(
+                                "aggregate nested resource count overflowed",
+                            )
+                        })?;
+                    if nested > MAX_NESTED {
+                        return Err(serde::de::Error::custom(format!(
+                            "sequence exceeds the {MAX_NESTED}-entry aggregate nested resource limit"
+                        )));
+                    }
+                    values.push(value);
+                }
+                if sequence.next_element::<IgnoredAny>()?.is_some() {
+                    return Err(serde::de::Error::custom(format!(
+                        "sequence exceeds the {MAX_ITEMS}-entry resource limit"
+                    )));
+                }
+                Ok(AggregateBoundedVec(values))
+            }
+        }
+
+        deserializer.deserialize_seq(AggregateVisitor::<T, MAX_ITEMS, MAX_NESTED>(PhantomData))
+    }
+}
+
+struct BoundedString<const MAX: usize>(String);
+
+impl<'de, const MAX: usize> Deserialize<'de> for BoundedString<MAX> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BoundedStringVisitor<const MAX: usize>;
+
+        impl<const MAX: usize> Visitor<'_> for BoundedStringVisitor<MAX> {
+            type Value = BoundedString<MAX>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(formatter, "a UTF-8 string containing at most {MAX} bytes")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX {
+                    return Err(E::custom(format!(
+                        "string exceeds the {MAX}-byte resource limit"
+                    )));
+                }
+                Ok(BoundedString(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() > MAX {
+                    return Err(E::custom(format!(
+                        "string exceeds the {MAX}-byte resource limit"
+                    )));
+                }
+                Ok(BoundedString(value))
+            }
+        }
+
+        deserializer.deserialize_string(BoundedStringVisitor::<MAX>)
+    }
+}
+
+fn deserialize_key_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BoundedString::<MAX_VISUALIZATION_KEY_BYTES>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_label_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BoundedString::<MAX_VISUALIZATION_LABEL_BYTES>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_unit_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<BoundedString<MAX_VISUALIZATION_UNIT_BYTES>>::deserialize(deserializer)
+        .map(|value| value.map(|value| value.0))
+}
+
+fn deserialize_annotation_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BoundedString::<MAX_ANNOTATION_TEXT_BYTES>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_source_text_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BoundedString::<MAX_SOURCE_TEXT_BYTES>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_filter_source_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    BoundedString::<4_096>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_label_prefix<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<BoundedString<64>>::deserialize(deserializer).map(|value| value.map(|value| value.0))
+}
+
+fn deserialize_bounded_vec<'de, D, T, const MAX: usize>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    BoundedVec::<T, MAX>::deserialize(deserializer).map(BoundedVec::into_inner)
+}
+
+fn deserialize_measurement_trace_ids<'de, D>(deserializer: D) -> Result<Vec<TraceId>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_ENTITY_REFERENCES>(deserializer)
+}
+
+fn deserialize_link_members<'de, D>(deserializer: D) -> Result<Vec<EntityRef>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_ENTITY_REFERENCES>(deserializer)
+}
+
+fn deserialize_comparison_signals<'de, D>(
+    deserializer: D,
+) -> Result<Vec<SignalComparison>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_COMPARISON_SIGNALS>(deserializer)
+}
+
+fn deserialize_family_dimensions<'de, D>(deserializer: D) -> Result<Vec<FamilyDimension>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_FAMILY_DIMENSIONS>(deserializer)
+}
+
+fn deserialize_family_encodings<'de, D>(deserializer: D) -> Result<Vec<FamilyEncodingMap>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_FAMILY_ENCODINGS>(deserializer)
+}
+
+fn deserialize_family_predicate_values<'de, D>(deserializer: D) -> Result<Vec<TypedValue>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_FAMILY_PREDICATE_VALUES>(deserializer)
+}
+
+fn deserialize_family_predicate_children<'de, D>(
+    deserializer: D,
+) -> Result<Vec<FamilyPredicate>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_FAMILY_PREDICATE_CHILDREN>(deserializer)
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct BoundedKey(#[serde(deserialize_with = "deserialize_key_string")] String);
+
+fn deserialize_comparison_signal_keys<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, BoundedKey, MAX_COMPARISON_SIGNALS>(deserializer)
+        .map(|keys| keys.into_iter().map(|key| key.0).collect())
+}
 
 #[derive(Default)]
 struct Sha256Writer(Sha256);
@@ -94,13 +476,36 @@ pub enum ValueType {
     Text,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "type", content = "value")]
 pub enum TypedValue {
     Real(f64),
     Integer(i64),
     Boolean(bool),
     Text(String),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "type", content = "value")]
+enum TypedValueWire {
+    Real(f64),
+    Integer(i64),
+    Boolean(bool),
+    Text(#[serde(deserialize_with = "deserialize_source_text_string")] String),
+}
+
+impl<'de> Deserialize<'de> for TypedValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match TypedValueWire::deserialize(deserializer)? {
+            TypedValueWire::Real(value) => Self::Real(value),
+            TypedValueWire::Integer(value) => Self::Integer(value),
+            TypedValueWire::Boolean(value) => Self::Boolean(value),
+            TypedValueWire::Text(value) => Self::Text(value),
+        })
+    }
 }
 
 impl TypedValue {
@@ -120,10 +525,14 @@ impl TypedValue {
                 field,
                 message: "real values must be finite".to_owned(),
             }),
-            Self::Text(value) if value.is_empty() => Err(VisualizationError::InvalidValue {
-                field,
-                message: "text values must not be empty".to_owned(),
-            }),
+            Self::Text(value) if value.is_empty() || value.len() > MAX_SOURCE_TEXT_BYTES => {
+                Err(VisualizationError::InvalidValue {
+                    field,
+                    message: format!(
+                        "text values must contain 1 to {MAX_SOURCE_TEXT_BYTES} UTF-8 bytes"
+                    ),
+                })
+            }
             _ => Ok(()),
         }
     }
@@ -173,10 +582,13 @@ pub enum ColumnRole {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceColumn {
+    #[serde(deserialize_with = "deserialize_key_string")]
     key: String,
+    #[serde(deserialize_with = "deserialize_label_string")]
     label: String,
     value_type: ValueType,
     role: ColumnRole,
+    #[serde(deserialize_with = "deserialize_unit_string")]
     unit: Option<String>,
 }
 
@@ -195,19 +607,14 @@ impl SourceColumn {
             role,
             unit,
         };
-        validate_key("source-column.key", &column.key)?;
-        validate_label("source-column.label", &column.label)?;
-        if column
-            .unit
-            .as_ref()
-            .is_some_and(|unit| unit.trim().is_empty())
-        {
-            return Err(VisualizationError::InvalidValue {
-                field: "source-column.unit",
-                message: "unit must be absent or non-blank".to_owned(),
-            });
-        }
+        column.validate()?;
         Ok(column)
+    }
+
+    fn validate(&self) -> Result<(), VisualizationError> {
+        validate_key("source-column.key", &self.key)?;
+        validate_label("source-column.label", &self.label)?;
+        validate_optional_unit("source-column.unit", self.unit.as_deref())
     }
 
     #[must_use]
@@ -236,9 +643,26 @@ impl SourceColumn {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SourceRow {
     values: Vec<TypedValue>,
+}
+
+#[derive(Deserialize)]
+struct SourceRowWire {
+    values: BoundedVec<TypedValue, MAX_SOURCE_COLUMNS>,
+}
+
+impl<'de> Deserialize<'de> for SourceRow {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = SourceRowWire::deserialize(deserializer)?;
+        Ok(Self {
+            values: wire.values.into_inner(),
+        })
+    }
 }
 
 impl SourceRow {
@@ -251,14 +675,124 @@ impl SourceRow {
     pub fn values(&self) -> &[TypedValue] {
         &self.values
     }
+
+    fn retained_text_bytes(&self) -> Result<usize, VisualizationError> {
+        self.values.iter().try_fold(0_usize, |total, value| {
+            let bytes = match value {
+                TypedValue::Text(value) => value.len(),
+                TypedValue::Real(_) | TypedValue::Integer(_) | TypedValue::Boolean(_) => 0,
+            };
+            total
+                .checked_add(bytes)
+                .ok_or_else(|| VisualizationError::InvalidValue {
+                    field: "source-dataset.retained-text-bytes",
+                    message: "retained source text byte count overflowed".to_owned(),
+                })
+        })
+    }
+}
+
+struct BoundedSourceRows(Vec<SourceRow>);
+
+impl<'de> Deserialize<'de> for BoundedSourceRows {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SourceRowsVisitor;
+
+        impl<'de> Visitor<'de> for SourceRowsVisitor {
+            type Value = BoundedSourceRows;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "at most {MAX_SOURCE_ROWS} rows and {MAX_SOURCE_CELLS_PER_DATASET} cells"
+                )
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                if sequence
+                    .size_hint()
+                    .is_some_and(|hint| hint > MAX_SOURCE_ROWS)
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "source row sequence exceeds the {MAX_SOURCE_ROWS}-row resource limit"
+                    )));
+                }
+                let mut rows =
+                    Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(MAX_SOURCE_ROWS));
+                let mut cells = 0_usize;
+                let mut text_bytes = 0_usize;
+                while rows.len() < MAX_SOURCE_ROWS {
+                    let Some(row) = sequence.next_element::<SourceRow>()? else {
+                        return Ok(BoundedSourceRows(rows));
+                    };
+                    cells = cells.checked_add(row.values.len()).ok_or_else(|| {
+                        <A::Error as serde::de::Error>::custom("source cell count overflowed")
+                    })?;
+                    if cells > MAX_SOURCE_CELLS_PER_DATASET {
+                        return Err(serde::de::Error::custom(format!(
+                            "source rows exceed the {MAX_SOURCE_CELLS_PER_DATASET}-cell resource limit"
+                        )));
+                    }
+                    let row_text_bytes = row.retained_text_bytes().map_err(|error| {
+                        <A::Error as serde::de::Error>::custom(error.to_string())
+                    })?;
+                    text_bytes = checked_bounded_sum(
+                        "source-dataset.retained-text-bytes",
+                        text_bytes,
+                        row_text_bytes,
+                        MAX_SOURCE_TEXT_BYTES_PER_DATASET,
+                    )
+                    .map_err(|error| <A::Error as serde::de::Error>::custom(error.to_string()))?;
+                    rows.push(row);
+                }
+                if sequence.next_element::<IgnoredAny>()?.is_some() {
+                    return Err(serde::de::Error::custom(format!(
+                        "source row sequence exceeds the {MAX_SOURCE_ROWS}-row resource limit"
+                    )));
+                }
+                Ok(BoundedSourceRows(rows))
+            }
+        }
+
+        deserializer.deserialize_seq(SourceRowsVisitor)
+    }
 }
 
 /// An immutable snapshot of one persisted result dataset.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SourceDataset {
     binding: DatasetBinding,
     columns: Vec<SourceColumn>,
     rows: Vec<SourceRow>,
+}
+
+#[derive(Deserialize)]
+struct SourceDatasetWire {
+    binding: DatasetBinding,
+    columns: BoundedVec<SourceColumn, MAX_SOURCE_COLUMNS>,
+    rows: BoundedSourceRows,
+}
+
+impl<'de> Deserialize<'de> for SourceDataset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = SourceDatasetWire::deserialize(deserializer)?;
+        let dataset = Self {
+            binding: wire.binding,
+            columns: wire.columns.into_inner(),
+            rows: wire.rows.0,
+        };
+        dataset.validate().map_err(serde::de::Error::custom)?;
+        Ok(dataset)
+    }
 }
 
 impl SourceDataset {
@@ -292,16 +826,37 @@ impl SourceDataset {
     }
 
     fn validate(&self) -> Result<(), VisualizationError> {
-        if self.columns.is_empty() {
+        if self.columns.is_empty() || self.columns.len() > MAX_SOURCE_COLUMNS {
             return Err(VisualizationError::InvalidValue {
                 field: "source-dataset.columns",
-                message: "at least one coordinate and one signal column are required".to_owned(),
+                message: format!("a dataset requires 1 to {MAX_SOURCE_COLUMNS} typed columns"),
             });
         }
+        ensure_maximum_len("source-dataset.rows", self.rows.len(), MAX_SOURCE_ROWS)?;
+        let cell_count = self
+            .rows
+            .len()
+            .checked_mul(self.columns.len())
+            .ok_or_else(|| VisualizationError::InvalidValue {
+                field: "source-dataset.cells",
+                message: "source cell count overflowed the supported address space".to_owned(),
+            })?;
+        ensure_maximum_len(
+            "source-dataset.cells",
+            cell_count,
+            MAX_SOURCE_CELLS_PER_DATASET,
+        )?;
+        let retained_text_bytes = self.retained_text_bytes()?;
+        ensure_maximum_len(
+            "source-dataset.retained-text-bytes",
+            retained_text_bytes,
+            MAX_SOURCE_TEXT_BYTES_PER_DATASET,
+        )?;
         let mut keys = HashSet::with_capacity(self.columns.len());
         let mut coordinates = 0;
         let mut signals = 0;
         for column in &self.columns {
+            column.validate()?;
             if !keys.insert(column.key.as_str()) {
                 return Err(VisualizationError::DuplicateKey(column.key.clone()));
             }
@@ -352,6 +907,102 @@ impl SourceDataset {
             }
         }
         Ok(())
+    }
+
+    fn retained_text_bytes(&self) -> Result<usize, VisualizationError> {
+        self.rows.iter().try_fold(0_usize, |total, row| {
+            checked_bounded_sum(
+                "source-dataset.retained-text-bytes",
+                total,
+                row.retained_text_bytes()?,
+                MAX_SOURCE_TEXT_BYTES_PER_DATASET,
+            )
+        })
+    }
+}
+
+struct BoundedSourceDatasets(Vec<SourceDataset>);
+
+impl<'de> Deserialize<'de> for BoundedSourceDatasets {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SourceDatasetsVisitor;
+
+        impl<'de> Visitor<'de> for SourceDatasetsVisitor {
+            type Value = BoundedSourceDatasets;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "at most {MAX_VISUALIZATION_DATASETS} datasets and {MAX_SOURCE_CELLS_TOTAL} cells"
+                )
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                if sequence
+                    .size_hint()
+                    .is_some_and(|hint| hint > MAX_VISUALIZATION_DATASETS)
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "dataset sequence exceeds the {MAX_VISUALIZATION_DATASETS}-dataset resource limit"
+                    )));
+                }
+                let mut datasets = Vec::with_capacity(
+                    sequence
+                        .size_hint()
+                        .unwrap_or(0)
+                        .min(MAX_VISUALIZATION_DATASETS),
+                );
+                let mut cells = 0_usize;
+                let mut text_bytes = 0_usize;
+                while datasets.len() < MAX_VISUALIZATION_DATASETS {
+                    let Some(dataset) = sequence.next_element::<SourceDataset>()? else {
+                        return Ok(BoundedSourceDatasets(datasets));
+                    };
+                    let dataset_cells = dataset
+                        .rows
+                        .len()
+                        .checked_mul(dataset.columns.len())
+                        .ok_or_else(|| {
+                            <A::Error as serde::de::Error>::custom("source cell count overflowed")
+                        })?;
+                    cells = cells.checked_add(dataset_cells).ok_or_else(|| {
+                        <A::Error as serde::de::Error>::custom(
+                            "aggregate source cell count overflowed",
+                        )
+                    })?;
+                    if cells > MAX_SOURCE_CELLS_TOTAL {
+                        return Err(serde::de::Error::custom(format!(
+                            "datasets exceed the {MAX_SOURCE_CELLS_TOTAL}-cell resource limit"
+                        )));
+                    }
+                    let dataset_text_bytes = dataset.retained_text_bytes().map_err(|error| {
+                        <A::Error as serde::de::Error>::custom(error.to_string())
+                    })?;
+                    text_bytes = checked_bounded_sum(
+                        "visualization-document.retained-source-text-bytes",
+                        text_bytes,
+                        dataset_text_bytes,
+                        MAX_SOURCE_TEXT_BYTES_TOTAL,
+                    )
+                    .map_err(|error| <A::Error as serde::de::Error>::custom(error.to_string()))?;
+                    datasets.push(dataset);
+                }
+                if sequence.next_element::<IgnoredAny>()?.is_some() {
+                    return Err(serde::de::Error::custom(format!(
+                        "dataset sequence exceeds the {MAX_VISUALIZATION_DATASETS}-dataset resource limit"
+                    )));
+                }
+                Ok(BoundedSourceDatasets(datasets))
+            }
+        }
+
+        deserializer.deserialize_seq(SourceDatasetsVisitor)
     }
 }
 
@@ -488,32 +1139,139 @@ impl NumericTolerance {
 
 fn validate_key(field: &'static str, value: &str) -> Result<(), VisualizationError> {
     if value.is_empty()
+        || value.len() > MAX_VISUALIZATION_KEY_BYTES
         || !value
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || "._:/[]()-".contains(character))
     {
         return Err(VisualizationError::InvalidValue {
             field,
-            message: "must be a non-empty stable ASCII key".to_owned(),
+            message: format!(
+                "must be a non-empty stable ASCII key of at most {MAX_VISUALIZATION_KEY_BYTES} bytes"
+            ),
         });
     }
     Ok(())
 }
 
 fn validate_label(field: &'static str, value: &str) -> Result<(), VisualizationError> {
-    if value.trim().is_empty() || value.chars().any(char::is_control) {
+    if value.trim().is_empty()
+        || value.len() > MAX_VISUALIZATION_LABEL_BYTES
+        || value.chars().any(char::is_control)
+    {
         return Err(VisualizationError::InvalidValue {
             field,
-            message: "must be non-blank and contain no control characters".to_owned(),
+            message: format!(
+                "must be non-blank, contain no control characters, and not exceed {MAX_VISUALIZATION_LABEL_BYTES} bytes"
+            ),
         });
     }
     Ok(())
 }
 
+fn validate_optional_unit(
+    field: &'static str,
+    unit: Option<&str>,
+) -> Result<(), VisualizationError> {
+    if unit.is_some_and(|unit| {
+        unit.trim().is_empty()
+            || unit.len() > MAX_VISUALIZATION_UNIT_BYTES
+            || unit.chars().any(char::is_control)
+    }) {
+        return Err(VisualizationError::InvalidValue {
+            field,
+            message: format!(
+                "unit must be absent or non-blank, control-free, and at most {MAX_VISUALIZATION_UNIT_BYTES} bytes"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn ensure_maximum_len(
+    field: &'static str,
+    actual: usize,
+    maximum: usize,
+) -> Result<(), VisualizationError> {
+    if actual > maximum {
+        return Err(VisualizationError::InvalidValue {
+            field,
+            message: format!("contains {actual} entries; the resource limit is {maximum}"),
+        });
+    }
+    Ok(())
+}
+
+fn checked_bounded_sum(
+    field: &'static str,
+    current: usize,
+    additional: usize,
+    maximum: usize,
+) -> Result<usize, VisualizationError> {
+    let total =
+        current
+            .checked_add(additional)
+            .ok_or_else(|| VisualizationError::InvalidValue {
+                field,
+                message: "resource accounting overflowed the supported address space".to_owned(),
+            })?;
+    ensure_maximum_len(field, total, maximum)?;
+    Ok(total)
+}
+
+fn validate_aggregate_nested_resources<T: NestedResourceCount>(
+    field: &'static str,
+    values: &[T],
+    maximum: usize,
+) -> Result<(), VisualizationError> {
+    values.iter().try_fold(0_usize, |total, value| {
+        checked_bounded_sum(field, total, value.nested_resource_count(), maximum)
+    })?;
+    Ok(())
+}
+
 fn validate_dataset_set(datasets: &[SourceDataset]) -> Result<(), VisualizationError> {
+    if datasets.is_empty() || datasets.len() > MAX_VISUALIZATION_DATASETS {
+        return Err(VisualizationError::InvalidValue {
+            field: "visualization-document.datasets",
+            message: format!(
+                "a visualization document requires 1 to {MAX_VISUALIZATION_DATASETS} datasets"
+            ),
+        });
+    }
     let mut bindings = HashMap::new();
+    let mut aggregate_cells = 0_usize;
+    let mut aggregate_text_bytes = 0_usize;
     for dataset in datasets {
         dataset.validate()?;
+        let cells = dataset
+            .rows
+            .len()
+            .checked_mul(dataset.columns.len())
+            .ok_or_else(|| VisualizationError::InvalidValue {
+                field: "visualization-document.source-cells",
+                message: "aggregate source cell count overflowed the supported address space"
+                    .to_owned(),
+            })?;
+        aggregate_cells =
+            aggregate_cells
+                .checked_add(cells)
+                .ok_or_else(|| VisualizationError::InvalidValue {
+                    field: "visualization-document.source-cells",
+                    message: "aggregate source cell count overflowed the supported address space"
+                        .to_owned(),
+                })?;
+        ensure_maximum_len(
+            "visualization-document.source-cells",
+            aggregate_cells,
+            MAX_SOURCE_CELLS_TOTAL,
+        )?;
+        aggregate_text_bytes = checked_bounded_sum(
+            "visualization-document.retained-source-text-bytes",
+            aggregate_text_bytes,
+            dataset.retained_text_bytes()?,
+            MAX_SOURCE_TEXT_BYTES_TOTAL,
+        )?;
         if let Some(bound) =
             bindings.insert(dataset.binding.dataset_id, dataset.binding.content_digest)
         {
@@ -572,7 +1330,17 @@ fn validate_annotation(
     anchor: &AnnotationAnchor,
     text: &str,
 ) -> Result<(), VisualizationError> {
-    validate_label("annotation.text", text)?;
+    if text.trim().is_empty()
+        || text.len() > MAX_ANNOTATION_TEXT_BYTES
+        || text.chars().any(char::is_control)
+    {
+        return Err(VisualizationError::InvalidValue {
+            field: "annotation.text",
+            message: format!(
+                "must be non-blank, control-free, and at most {MAX_ANNOTATION_TEXT_BYTES} bytes"
+            ),
+        });
+    }
     document.require_pane(pane_id)?;
     match anchor {
         AnnotationAnchor::Pane {
@@ -604,7 +1372,10 @@ fn validate_link_members(
     kind: LinkKind,
     members: &[EntityRef],
 ) -> Result<(), VisualizationError> {
-    if members.len() < 2 || members.iter().collect::<HashSet<_>>().len() != members.len() {
+    if members.len() < 2
+        || members.len() > MAX_ENTITY_REFERENCES
+        || members.iter().collect::<HashSet<_>>().len() != members.len()
+    {
         return Err(VisualizationError::InvalidLinkMembers(kind));
     }
     for member in members {
@@ -772,6 +1543,19 @@ pub(crate) fn compare_source_datasets(
     if request.signal_keys.is_empty() {
         return Err(VisualizationError::EmptyComparison);
     }
+    if request.signal_keys.len() > MAX_COMPARISON_SIGNALS {
+        return Err(VisualizationError::InvalidValue {
+            field: "comparison.signal-keys",
+            message: format!("a comparison supports at most {MAX_COMPARISON_SIGNALS} signal keys"),
+        });
+    }
+    let mut unique_signals = HashSet::with_capacity(request.signal_keys.len());
+    for signal_key in &request.signal_keys {
+        validate_key("comparison.signal-key", signal_key)?;
+        if !unique_signals.insert(signal_key.as_str()) {
+            return Err(VisualizationError::DuplicateKey(signal_key.clone()));
+        }
+    }
     request.policy.tolerance.validate()?;
     let baseline_coordinates = coordinate_indices(baseline);
     let candidate_coordinates = coordinate_indices(candidate);
@@ -829,11 +1613,7 @@ pub(crate) fn compare_source_datasets(
         return Err(VisualizationError::NoComparableRows);
     }
     let mut signal_receipts = Vec::with_capacity(request.signal_keys.len());
-    let mut unique_signals = HashSet::new();
     for signal_key in &request.signal_keys {
-        if !unique_signals.insert(signal_key) {
-            return Err(VisualizationError::DuplicateKey(signal_key.clone()));
-        }
         let baseline_index = column_index(baseline, signal_key)?;
         let candidate_index = column_index(candidate, signal_key)?;
         let baseline_column = &baseline.columns[baseline_index];
@@ -1030,6 +1810,7 @@ pub enum PanePlacement {
 /// validation error rather than an implicit reinterpretation of a saved plot.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FamilyDimension {
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub key: String,
     pub value_type: ValueType,
 }
@@ -1083,6 +1864,7 @@ pub enum FamilyAggregationMethod {
 pub struct FamilyAggregationPolicy {
     pub method: FamilyAggregationMethod,
     /// Family dimensions eliminated by the aggregation.
+    #[serde(deserialize_with = "deserialize_family_dimensions")]
     pub over_dimensions: Vec<FamilyDimension>,
 }
 
@@ -1103,7 +1885,7 @@ pub enum FamilyComparisonOperator {
 /// Typed, serializable filter predicate. The AST is authoritative; `source`
 /// on [`FamilyFilterExpression`] is retained for exact UI round-tripping and
 /// review receipts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "kind")]
 pub enum FamilyPredicate {
     Constant {
@@ -1136,9 +1918,134 @@ pub enum FamilyPredicate {
     },
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+enum FamilyPredicateWire {
+    Constant {
+        value: bool,
+    },
+    Compare {
+        dimension: FamilyDimension,
+        operator: FamilyComparisonOperator,
+        value: TypedValue,
+    },
+    In {
+        dimension: FamilyDimension,
+        #[serde(deserialize_with = "deserialize_family_predicate_values")]
+        values: Vec<TypedValue>,
+    },
+    Between {
+        dimension: FamilyDimension,
+        lower: TypedValue,
+        upper: TypedValue,
+        include_lower: bool,
+        include_upper: bool,
+    },
+    All {
+        #[serde(deserialize_with = "deserialize_family_predicate_children")]
+        predicates: Vec<FamilyPredicate>,
+    },
+    Any {
+        #[serde(deserialize_with = "deserialize_family_predicate_children")]
+        predicates: Vec<FamilyPredicate>,
+    },
+    Not {
+        predicate: Box<FamilyPredicate>,
+    },
+}
+
+#[derive(Default)]
+struct PredicateDecodeBudget {
+    depth: usize,
+    nodes: usize,
+}
+
+std::thread_local! {
+    static PREDICATE_DECODE_BUDGET: RefCell<Option<PredicateDecodeBudget>> = const { RefCell::new(None) };
+}
+
+struct PredicateDecodeGuard {
+    root: bool,
+}
+
+impl PredicateDecodeGuard {
+    fn enter() -> Result<Self, String> {
+        PREDICATE_DECODE_BUDGET.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let root = slot.is_none();
+            let budget = slot.get_or_insert_with(PredicateDecodeBudget::default);
+            if budget.depth >= MAX_FAMILY_PREDICATE_DEPTH {
+                return Err(format!(
+                    "family predicate exceeds the {MAX_FAMILY_PREDICATE_DEPTH}-level decode depth limit"
+                ));
+            }
+            if budget.nodes >= MAX_FAMILY_PREDICATE_NODES {
+                return Err(format!(
+                    "family predicate exceeds the {MAX_FAMILY_PREDICATE_NODES}-node decode limit"
+                ));
+            }
+            budget.depth += 1;
+            budget.nodes += 1;
+            Ok(Self { root })
+        })
+    }
+}
+
+impl Drop for PredicateDecodeGuard {
+    fn drop(&mut self) {
+        PREDICATE_DECODE_BUDGET.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if self.root {
+                *slot = None;
+            } else if let Some(budget) = slot.as_mut() {
+                budget.depth = budget.depth.saturating_sub(1);
+            }
+        });
+    }
+}
+
+impl<'de> Deserialize<'de> for FamilyPredicate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let _guard = PredicateDecodeGuard::enter().map_err(serde::de::Error::custom)?;
+        Ok(match FamilyPredicateWire::deserialize(deserializer)? {
+            FamilyPredicateWire::Constant { value } => Self::Constant { value },
+            FamilyPredicateWire::Compare {
+                dimension,
+                operator,
+                value,
+            } => Self::Compare {
+                dimension,
+                operator,
+                value,
+            },
+            FamilyPredicateWire::In { dimension, values } => Self::In { dimension, values },
+            FamilyPredicateWire::Between {
+                dimension,
+                lower,
+                upper,
+                include_lower,
+                include_upper,
+            } => Self::Between {
+                dimension,
+                lower,
+                upper,
+                include_lower,
+                include_upper,
+            },
+            FamilyPredicateWire::All { predicates } => Self::All { predicates },
+            FamilyPredicateWire::Any { predicates } => Self::Any { predicates },
+            FamilyPredicateWire::Not { predicate } => Self::Not { predicate },
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FamilyFilterExpression {
     /// User-authored expression preserved exactly for display and audit.
+    #[serde(deserialize_with = "deserialize_filter_source_string")]
     pub source: String,
     /// Parsed, typed predicate used for evaluation.
     pub predicate: FamilyPredicate,
@@ -1217,6 +2124,7 @@ pub enum FamilyEncodingMap {
     },
     Label {
         dimension: FamilyDimension,
+        #[serde(deserialize_with = "deserialize_label_prefix")]
         prefix: Option<String>,
     },
 }
@@ -1241,11 +2149,13 @@ impl FamilyEncodingMap {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FamilyPresentationPolicy {
     pub x_dimension: FamilyXDimension,
+    #[serde(deserialize_with = "deserialize_family_dimensions")]
     pub family_dimensions: Vec<FamilyDimension>,
     pub facet_layout: Option<FamilyFacetLayout>,
     pub aggregation: FamilyAggregationPolicy,
     pub filter: Option<FamilyFilterExpression>,
     pub missing_points: MissingPointPolicy,
+    #[serde(deserialize_with = "deserialize_family_encodings")]
     pub encodings: Vec<FamilyEncodingMap>,
 }
 
@@ -1274,10 +2184,13 @@ impl FamilyPresentationPolicy {
                 message: "the X dimension must be real or integer valued".to_owned(),
             });
         }
-        if self.family_dimensions.is_empty() || self.family_dimensions.len() > 32 {
+        if self.family_dimensions.is_empty() || self.family_dimensions.len() > MAX_FAMILY_DIMENSIONS
+        {
             return Err(VisualizationError::InvalidValue {
                 field: "family.dimensions",
-                message: "a family policy requires between 1 and 32 dimensions".to_owned(),
+                message: format!(
+                    "a family policy requires between 1 and {MAX_FAMILY_DIMENSIONS} dimensions"
+                ),
             });
         }
         let mut dimension_keys = HashSet::with_capacity(self.family_dimensions.len());
@@ -1305,6 +2218,11 @@ impl FamilyPresentationPolicy {
     }
 
     fn validate_aggregation(&self) -> Result<HashSet<&str>, VisualizationError> {
+        ensure_maximum_len(
+            "family.aggregation.dimensions",
+            self.aggregation.over_dimensions.len(),
+            MAX_FAMILY_DIMENSIONS,
+        )?;
         let is_none = self.aggregation.method == FamilyAggregationMethod::None;
         if is_none != self.aggregation.over_dimensions.is_empty() {
             return Err(VisualizationError::InvalidValue {
@@ -1357,10 +2275,12 @@ impl FamilyPresentationPolicy {
         depth: u8,
         nodes: &mut u16,
     ) -> Result<(), VisualizationError> {
-        if depth >= 32 {
+        if usize::from(depth) >= MAX_FAMILY_PREDICATE_DEPTH {
             return Err(VisualizationError::InvalidValue {
                 field: "family.filter.predicate",
-                message: "filter predicate nesting cannot exceed 32 levels".to_owned(),
+                message: format!(
+                    "filter predicate nesting cannot exceed {MAX_FAMILY_PREDICATE_DEPTH} levels"
+                ),
             });
         }
         *nodes = nodes
@@ -1369,10 +2289,12 @@ impl FamilyPresentationPolicy {
                 field: "family.filter.predicate",
                 message: "filter predicate is too large".to_owned(),
             })?;
-        if *nodes > 1024 {
+        if usize::from(*nodes) > MAX_FAMILY_PREDICATE_NODES {
             return Err(VisualizationError::InvalidValue {
                 field: "family.filter.predicate",
-                message: "filter predicate cannot exceed 1024 nodes".to_owned(),
+                message: format!(
+                    "filter predicate cannot exceed {MAX_FAMILY_PREDICATE_NODES} nodes"
+                ),
             });
         }
         match predicate {
@@ -1410,10 +2332,12 @@ impl FamilyPresentationPolicy {
             }
             FamilyPredicate::In { dimension, values } => {
                 self.require_declared_dimension(dimension, "family.filter.dimension")?;
-                if values.is_empty() || values.len() > 256 {
+                if values.is_empty() || values.len() > MAX_FAMILY_PREDICATE_VALUES {
                     return Err(VisualizationError::InvalidValue {
                         field: "family.filter.values",
-                        message: "set membership requires between 1 and 256 values".to_owned(),
+                        message: format!(
+                            "set membership requires between 1 and {MAX_FAMILY_PREDICATE_VALUES} values"
+                        ),
                     });
                 }
                 for (index, value) in values.iter().enumerate() {
@@ -1454,10 +2378,12 @@ impl FamilyPresentationPolicy {
                 }
             }
             FamilyPredicate::All { predicates } | FamilyPredicate::Any { predicates } => {
-                if predicates.is_empty() || predicates.len() > 64 {
+                if predicates.is_empty() || predicates.len() > MAX_FAMILY_PREDICATE_CHILDREN {
                     return Err(VisualizationError::InvalidValue {
                         field: "family.filter.predicate",
-                        message: "logical groups require between 1 and 64 predicates".to_owned(),
+                        message: format!(
+                            "logical groups require between 1 and {MAX_FAMILY_PREDICATE_CHILDREN} predicates"
+                        ),
                     });
                 }
                 for child in predicates {
@@ -1472,10 +2398,12 @@ impl FamilyPresentationPolicy {
     }
 
     fn validate_encodings(&self, aggregated: &HashSet<&str>) -> Result<(), VisualizationError> {
-        if self.encodings.len() > 16 {
+        if self.encodings.len() > MAX_FAMILY_ENCODINGS {
             return Err(VisualizationError::InvalidValue {
                 field: "family.encodings",
-                message: "a family policy supports at most 16 encoding maps".to_owned(),
+                message: format!(
+                    "a family policy supports at most {MAX_FAMILY_ENCODINGS} encoding maps"
+                ),
             });
         }
         let mut slots = HashSet::with_capacity(self.encodings.len());
@@ -1709,10 +2637,12 @@ impl AxisRange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Page {
     pub id: PageId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub title: String,
     #[serde(default)]
     pub layout: PageLayout,
     #[serde(default = "default_page_template_id")]
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub template_id: String,
     #[serde(default)]
     pub update_policy: PageUpdatePolicy,
@@ -1722,9 +2652,11 @@ pub struct Page {
 pub struct Pane {
     pub id: PaneId,
     pub page_id: PageId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub title: String,
     pub kind: PaneKind,
     #[serde(default = "default_viewer_id")]
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub viewer_id: String,
     #[serde(default)]
     pub binding: Option<PaneDataBinding>,
@@ -1740,9 +2672,11 @@ pub struct Pane {
 pub struct Axis {
     pub id: AxisId,
     pub pane_id: PaneId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub orientation: AxisOrientation,
     pub scale: AxisScale,
+    #[serde(deserialize_with = "deserialize_unit_string")]
     pub unit: Option<String>,
     pub range: Option<AxisRange>,
 }
@@ -1752,10 +2686,13 @@ pub struct Trace {
     pub id: TraceId,
     pub pane_id: PaneId,
     pub binding: DatasetBinding,
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub signal_key: String,
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub coordinate_key: String,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub visible: bool,
 }
@@ -1766,6 +2703,7 @@ pub struct Cursor {
     pub pane_id: PaneId,
     pub axis_id: AxisId,
     pub position: TypedValue,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
 }
 
@@ -1775,6 +2713,7 @@ pub struct Marker {
     pub pane_id: PaneId,
     pub trace_id: TraceId,
     pub coordinate: TypedValue,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
 }
 
@@ -1794,9 +2733,17 @@ pub enum MeasurementKind {
 pub struct Measurement {
     pub id: MeasurementId,
     pub pane_id: PaneId,
+    #[serde(deserialize_with = "deserialize_measurement_trace_ids")]
     pub trace_ids: Vec<TraceId>,
     pub kind: MeasurementKind,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
+}
+
+impl NestedResourceCount for Measurement {
+    fn nested_resource_count(&self) -> usize {
+        self.trace_ids.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1817,6 +2764,7 @@ pub struct Annotation {
     pub id: AnnotationId,
     pub pane_id: PaneId,
     pub anchor: AnnotationAnchor,
+    #[serde(deserialize_with = "deserialize_annotation_string")]
     pub text: String,
 }
 
@@ -1831,9 +2779,17 @@ pub enum LinkKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LinkGroup {
     pub id: LinkGroupId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub kind: LinkKind,
+    #[serde(deserialize_with = "deserialize_link_members")]
     pub members: Vec<EntityRef>,
+}
+
+impl NestedResourceCount for LinkGroup {
+    fn nested_resource_count(&self) -> usize {
+        self.members.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1845,9 +2801,11 @@ pub struct Tombstone {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewAxis {
     pub pane_id: PaneId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub orientation: AxisOrientation,
     pub scale: AxisScale,
+    #[serde(deserialize_with = "deserialize_unit_string")]
     pub unit: Option<String>,
     pub range: Option<AxisRange>,
 }
@@ -1856,17 +2814,22 @@ pub struct NewAxis {
 pub struct NewTrace {
     pub pane_id: PaneId,
     pub binding: DatasetBinding,
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub signal_key: String,
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub coordinate_key: String,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewPage {
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub title: String,
     pub layout: PageLayout,
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub template_id: String,
     pub update_policy: PageUpdatePolicy,
 }
@@ -1874,8 +2837,10 @@ pub struct NewPage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewPane {
     pub page_id: PageId,
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub title: String,
     pub kind: PaneKind,
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub viewer_id: String,
     pub binding: Option<PaneDataBinding>,
     pub placement: PanePlacement,
@@ -1883,8 +2848,10 @@ pub struct NewPane {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewPagePane {
+    #[serde(deserialize_with = "deserialize_label_string")]
     pub title: String,
     pub kind: PaneKind,
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub viewer_id: String,
     pub binding: Option<PaneDataBinding>,
 }
@@ -2090,6 +3057,7 @@ pub enum ComparisonPrecisionPolicy {
 pub struct ComparisonRequest {
     pub baseline: DatasetBinding,
     pub candidate: DatasetBinding,
+    #[serde(deserialize_with = "deserialize_comparison_signal_keys")]
     pub signal_keys: Vec<String>,
     pub policy: ComparisonPolicy,
 }
@@ -2103,6 +3071,7 @@ pub enum ComparisonDisposition {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SignalComparison {
+    #[serde(deserialize_with = "deserialize_key_string")]
     pub signal_key: String,
     pub compared_rows: usize,
     pub failed_rows: usize,
@@ -2116,8 +3085,15 @@ pub struct ComparisonReceipt {
     pub candidate: DatasetBinding,
     pub policy: ComparisonPolicy,
     pub rows_compared: usize,
+    #[serde(deserialize_with = "deserialize_comparison_signals")]
     pub signals: Vec<SignalComparison>,
     pub disposition: ComparisonDisposition,
+}
+
+impl NestedResourceCount for ComparisonReceipt {
+    fn nested_resource_count(&self) -> usize {
+        self.signals.len()
+    }
 }
 
 impl ComparisonReceipt {
@@ -2129,10 +3105,15 @@ impl ComparisonReceipt {
                 message: "baseline and candidate must be distinct immutable datasets".to_owned(),
             });
         }
-        if self.rows_compared == 0 || self.signals.is_empty() {
+        if self.rows_compared == 0
+            || self.signals.is_empty()
+            || self.signals.len() > MAX_COMPARISON_SIGNALS
+        {
             return Err(VisualizationError::InvalidValue {
                 field: "comparison-receipt",
-                message: "a receipt must contain at least one compared row and signal".to_owned(),
+                message: format!(
+                    "a receipt must contain compared rows and 1 to {MAX_COMPARISON_SIGNALS} signals"
+                ),
             });
         }
         let mut signal_keys = HashSet::new();
@@ -2490,20 +3471,33 @@ struct VisualizationDocumentWire {
     schema_version: u16,
     id: ResultDocumentId,
     revision: ObjectRevision,
+    #[serde(deserialize_with = "deserialize_label_string")]
     title: String,
     next_serial: u64,
-    datasets: Vec<SourceDataset>,
-    pages: Vec<Page>,
-    panes: Vec<Pane>,
-    axes: Vec<Axis>,
-    traces: Vec<Trace>,
-    cursors: Vec<Cursor>,
-    markers: Vec<Marker>,
-    measurements: Vec<Measurement>,
-    annotations: Vec<Annotation>,
-    link_groups: Vec<LinkGroup>,
-    tombstones: Vec<Tombstone>,
-    comparisons: Vec<ComparisonReceipt>,
+    datasets: BoundedSourceDatasets,
+    pages: BoundedVec<Page, MAX_VISUALIZATION_PAGES>,
+    panes: BoundedVec<Pane, MAX_VISUALIZATION_PANES>,
+    axes: BoundedVec<Axis, MAX_VISUALIZATION_AXES>,
+    traces: BoundedVec<Trace, MAX_VISUALIZATION_TRACES>,
+    cursors: BoundedVec<Cursor, MAX_VISUALIZATION_CURSORS>,
+    markers: BoundedVec<Marker, MAX_VISUALIZATION_MARKERS>,
+    measurements: AggregateBoundedVec<
+        Measurement,
+        MAX_VISUALIZATION_MEASUREMENTS,
+        MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL,
+    >,
+    annotations: BoundedVec<Annotation, MAX_VISUALIZATION_ANNOTATIONS>,
+    link_groups: AggregateBoundedVec<
+        LinkGroup,
+        MAX_VISUALIZATION_LINK_GROUPS,
+        MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL,
+    >,
+    tombstones: BoundedVec<Tombstone, MAX_VISUALIZATION_TOMBSTONES>,
+    comparisons: AggregateBoundedVec<
+        ComparisonReceipt,
+        MAX_VISUALIZATION_COMPARISONS,
+        MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL,
+    >,
 }
 
 const fn legacy_visualization_schema_version() -> u16 {
@@ -2522,18 +3516,18 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             revision: wire.revision,
             title: wire.title,
             next_serial: wire.next_serial,
-            datasets: wire.datasets,
-            pages: wire.pages,
-            panes: wire.panes,
-            axes: wire.axes,
-            traces: wire.traces,
-            cursors: wire.cursors,
-            markers: wire.markers,
-            measurements: wire.measurements,
-            annotations: wire.annotations,
-            link_groups: wire.link_groups,
-            tombstones: wire.tombstones,
-            comparisons: wire.comparisons,
+            datasets: wire.datasets.0,
+            pages: wire.pages.into_inner(),
+            panes: wire.panes.into_inner(),
+            axes: wire.axes.into_inner(),
+            traces: wire.traces.into_inner(),
+            cursors: wire.cursors.into_inner(),
+            markers: wire.markers.into_inner(),
+            measurements: wire.measurements.into_inner(),
+            annotations: wire.annotations.into_inner(),
+            link_groups: wire.link_groups.into_inner(),
+            tombstones: wire.tombstones.into_inner(),
+            comparisons: wire.comparisons.into_inner(),
         };
         match document.schema_version {
             1 => {
@@ -2554,6 +3548,15 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
+    /// Resource hardening does not change the schema-v3 wire vocabulary.
+    ///
+    /// V1, V2, and V3 documents within the published resource limits retain
+    /// their prior deterministic interpretation. Inputs above those limits
+    /// are rejected as unsafe containers; the limits do not reinterpret or
+    /// migrate any accepted source value, identity, or presentation entity.
+    /// Unknown extension fields remain ignored for schema-v3 forward
+    /// compatibility; introducing required semantics still requires a schema
+    /// revision.
     pub const SCHEMA_VERSION: u16 = 3;
 
     pub fn new(
@@ -2712,10 +3715,12 @@ impl VisualizationDocument {
                 actual: self.revision,
             });
         }
-        if edits.is_empty() {
+        if edits.is_empty() || edits.len() > MAX_VISUALIZATION_TRANSACTION_EDITS {
             return Err(VisualizationError::InvalidValue {
                 field: "transaction.edits",
-                message: "a transaction must contain at least one edit".to_owned(),
+                message: format!(
+                    "a transaction must contain 1 to {MAX_VISUALIZATION_TRANSACTION_EDITS} edits"
+                ),
             });
         }
         let previous_revision = self.revision;
@@ -3237,16 +4242,7 @@ impl VisualizationDocument {
             DocumentEdit::AddAxis(axis) => {
                 self.require_pane(axis.pane_id)?;
                 validate_label("axis.label", &axis.label)?;
-                if axis
-                    .unit
-                    .as_ref()
-                    .is_some_and(|unit| unit.trim().is_empty())
-                {
-                    return Err(VisualizationError::InvalidValue {
-                        field: "axis.unit",
-                        message: "unit must be absent or non-blank".to_owned(),
-                    });
-                }
+                validate_optional_unit("axis.unit", axis.unit.as_deref())?;
                 let id = AxisId::allocate(self.allocate_serial()?)?;
                 self.axes.push(Axis {
                     id,
@@ -3308,10 +4304,12 @@ impl VisualizationDocument {
                 label,
             } => {
                 validate_label("measurement.label", &label)?;
-                if trace_ids.is_empty() {
+                if trace_ids.is_empty() || trace_ids.len() > MAX_ENTITY_REFERENCES {
                     return Err(VisualizationError::InvalidValue {
                         field: "measurement.traces",
-                        message: "at least one trace is required".to_owned(),
+                        message: format!(
+                            "a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"
+                        ),
                     });
                 }
                 for trace_id in &trace_ids {
@@ -3701,6 +4699,76 @@ impl VisualizationDocument {
         }
         validate_label("visualization-document.title", &self.title)?;
         validate_dataset_set(&self.datasets)?;
+        ensure_maximum_len(
+            "visualization-document.pages",
+            self.pages.len(),
+            MAX_VISUALIZATION_PAGES,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.panes",
+            self.panes.len(),
+            MAX_VISUALIZATION_PANES,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.axes",
+            self.axes.len(),
+            MAX_VISUALIZATION_AXES,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.traces",
+            self.traces.len(),
+            MAX_VISUALIZATION_TRACES,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.cursors",
+            self.cursors.len(),
+            MAX_VISUALIZATION_CURSORS,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.markers",
+            self.markers.len(),
+            MAX_VISUALIZATION_MARKERS,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.measurements",
+            self.measurements.len(),
+            MAX_VISUALIZATION_MEASUREMENTS,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.annotations",
+            self.annotations.len(),
+            MAX_VISUALIZATION_ANNOTATIONS,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.link-groups",
+            self.link_groups.len(),
+            MAX_VISUALIZATION_LINK_GROUPS,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.tombstones",
+            self.tombstones.len(),
+            MAX_VISUALIZATION_TOMBSTONES,
+        )?;
+        ensure_maximum_len(
+            "visualization-document.comparisons",
+            self.comparisons.len(),
+            MAX_VISUALIZATION_COMPARISONS,
+        )?;
+        validate_aggregate_nested_resources(
+            "visualization-document.measurement-trace-references",
+            &self.measurements,
+            MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL,
+        )?;
+        validate_aggregate_nested_resources(
+            "visualization-document.link-member-references",
+            &self.link_groups,
+            MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL,
+        )?;
+        validate_aggregate_nested_resources(
+            "visualization-document.comparison-signals",
+            &self.comparisons,
+            MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL,
+        )?;
         if self.pages.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "visualization-document.pages",
@@ -3779,11 +4847,14 @@ impl VisualizationDocument {
         }
         for axis in &self.axes {
             validate_label("axis.label", &axis.label)?;
+            validate_optional_unit("axis.unit", axis.unit.as_deref())?;
             self.require_pane(axis.pane_id)?;
             ensure_identity(&mut identities, EntityRef::Axis(axis.id))?;
         }
         for trace in &self.traces {
             validate_label("trace.label", &trace.label)?;
+            validate_key("trace.signal-key", &trace.signal_key)?;
+            validate_key("trace.coordinate-key", &trace.coordinate_key)?;
             self.require_pane(trace.pane_id)?;
             self.require_axis_in_pane(trace.x_axis_id, trace.pane_id)?;
             self.require_axis_in_pane(trace.y_axis_id, trace.pane_id)?;
@@ -3812,10 +4883,12 @@ impl VisualizationDocument {
         }
         for measurement in &self.measurements {
             validate_label("measurement.label", &measurement.label)?;
-            if measurement.trace_ids.is_empty() {
+            if measurement.trace_ids.is_empty()
+                || measurement.trace_ids.len() > MAX_ENTITY_REFERENCES
+            {
                 return Err(VisualizationError::InvalidValue {
                     field: "measurement.traces",
-                    message: "at least one trace is required".to_owned(),
+                    message: format!("a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"),
                 });
             }
             for trace in &measurement.trace_ids {
@@ -4106,6 +5179,273 @@ mod tests {
             ),
             Err(VisualizationError::DuplicateCoordinateRow(1))
         ));
+    }
+
+    #[test]
+    fn source_dataset_limits_are_enforced_at_construction_and_deserialization() {
+        let source = binding(31);
+        let columns = (0..MAX_SOURCE_COLUMNS)
+            .map(|index| {
+                SourceColumn::new(
+                    format!("c{index}"),
+                    format!("Column {index}"),
+                    ValueType::Real,
+                    if index == 0 {
+                        ColumnRole::Coordinate
+                    } else {
+                        ColumnRole::Signal
+                    },
+                    None,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let at_limit = SourceDataset::new(source, columns, Vec::new()).unwrap();
+
+        let mut encoded = serde_json::to_value(&at_limit).unwrap();
+        let encoded_columns = encoded["columns"].as_array_mut().unwrap();
+        let extra_column = encoded_columns[0].clone();
+        encoded_columns.push(extra_column);
+        let error = serde_json::from_value::<SourceDataset>(encoded).unwrap_err();
+        assert!(error.to_string().contains("resource limit"));
+
+        let oversized_text = SourceDataset::new(
+            binding(32),
+            vec![
+                SourceColumn::new(
+                    "corner",
+                    "Corner",
+                    ValueType::Text,
+                    ColumnRole::Coordinate,
+                    None,
+                )
+                .unwrap(),
+                SourceColumn::new("value", "Value", ValueType::Real, ColumnRole::Signal, None)
+                    .unwrap(),
+            ],
+            vec![SourceRow::new(vec![
+                TypedValue::Text("x".repeat(MAX_SOURCE_TEXT_BYTES + 1)),
+                TypedValue::Real(1.0),
+            ])],
+        );
+        assert!(matches!(
+            oversized_text,
+            Err(VisualizationError::InvalidValue {
+                field: "source-row.value",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn visualization_document_deserialization_rejects_oversized_entity_sequences() {
+        let (document, _) = document();
+        let mut encoded = serde_json::to_value(&document).unwrap();
+        let pages = encoded["pages"].as_array_mut().unwrap();
+        let page = pages[0].clone();
+        while pages.len() <= MAX_VISUALIZATION_PAGES {
+            pages.push(page.clone());
+        }
+        let error = serde_json::from_value::<VisualizationDocument>(encoded).unwrap_err();
+        assert!(error.to_string().contains("resource limit"));
+    }
+
+    #[test]
+    fn atomic_transactions_reject_oversized_edit_batches_before_mutation() {
+        let (mut document, _) = document();
+        let before = document.clone();
+        let page = document.pages()[0].id;
+        let edits = (0..=MAX_VISUALIZATION_TRANSACTION_EDITS)
+            .map(|_| DocumentEdit::Rename {
+                entity: EntityRef::Page(page),
+                value: "Bounded".to_owned(),
+            })
+            .collect();
+        assert!(matches!(
+            document.transact(document.revision(), edits),
+            Err(VisualizationError::InvalidValue {
+                field: "transaction.edits",
+                ..
+            })
+        ));
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn nested_sequences_and_source_strings_are_bounded_during_deserialization() {
+        let predicate = FamilyPredicate::All {
+            predicates: vec![FamilyPredicate::Constant { value: true }],
+        };
+        let mut predicate_json = serde_json::to_value(predicate).unwrap();
+        let child = predicate_json["predicates"][0].clone();
+        let children = predicate_json["predicates"].as_array_mut().unwrap();
+        while children.len() <= MAX_FAMILY_PREDICATE_CHILDREN {
+            children.push(child.clone());
+        }
+        let predicate_error =
+            serde_json::from_value::<FamilyPredicate>(predicate_json).unwrap_err();
+        assert!(predicate_error.to_string().contains("resource limit"));
+
+        let measurement = Measurement {
+            id: MeasurementId::allocate(1).unwrap(),
+            pane_id: PaneId::allocate(2).unwrap(),
+            trace_ids: vec![TraceId::allocate(3).unwrap()],
+            kind: MeasurementKind::Point,
+            label: "Point".to_owned(),
+        };
+        let mut measurement_json = serde_json::to_value(measurement).unwrap();
+        let trace = measurement_json["trace_ids"][0].clone();
+        let traces = measurement_json["trace_ids"].as_array_mut().unwrap();
+        while traces.len() <= MAX_ENTITY_REFERENCES {
+            traces.push(trace.clone());
+        }
+        let measurement_error =
+            serde_json::from_value::<Measurement>(measurement_json).unwrap_err();
+        assert!(measurement_error.to_string().contains("resource limit"));
+
+        let source = dataset(binding(33), 0.0);
+        let mut source_json = serde_json::to_value(source).unwrap();
+        source_json["rows"][0]["values"][0] = serde_json::json!({
+            "type": "text",
+            "value": "x".repeat(MAX_SOURCE_TEXT_BYTES + 1),
+        });
+        let text_error = serde_json::from_value::<SourceDataset>(source_json).unwrap_err();
+        assert!(text_error.to_string().contains("resource limit"));
+    }
+
+    #[test]
+    fn predicate_deserialization_enforces_shared_depth_and_total_node_budgets() {
+        let leaf = FamilyPredicate::Constant { value: true };
+        let branch = FamilyPredicate::All {
+            predicates: vec![leaf.clone(); MAX_FAMILY_PREDICATE_CHILDREN],
+        };
+        let broad = FamilyPredicate::All {
+            predicates: vec![branch; 16],
+        };
+        let broad_error =
+            serde_json::from_value::<FamilyPredicate>(serde_json::to_value(broad).unwrap())
+                .unwrap_err();
+        assert!(broad_error.to_string().contains("1024-node"));
+
+        let nested_not = |levels: usize| {
+            (1..levels).fold(leaf.clone(), |predicate, _| FamilyPredicate::Not {
+                predicate: Box::new(predicate),
+            })
+        };
+        let at_depth_limit = nested_not(MAX_FAMILY_PREDICATE_DEPTH);
+        let restored: FamilyPredicate =
+            serde_json::from_value(serde_json::to_value(&at_depth_limit).unwrap()).unwrap();
+        assert_eq!(restored, at_depth_limit);
+
+        let over_depth_limit = nested_not(MAX_FAMILY_PREDICATE_DEPTH + 1);
+        let depth_error = serde_json::from_value::<FamilyPredicate>(
+            serde_json::to_value(over_depth_limit).unwrap(),
+        )
+        .unwrap_err();
+        assert!(depth_error.to_string().contains("32-level"));
+
+        let restored_after_errors: FamilyPredicate =
+            serde_json::from_value(serde_json::to_value(leaf).unwrap()).unwrap();
+        assert_eq!(
+            restored_after_errors,
+            FamilyPredicate::Constant { value: true }
+        );
+    }
+
+    #[test]
+    fn document_aggregate_nested_resource_budgets_accept_boundaries_and_reject_overflow() {
+        for (field, maximum) in [
+            (
+                "visualization-document.comparison-signals",
+                MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL,
+            ),
+            (
+                "visualization-document.measurement-trace-references",
+                MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL,
+            ),
+            (
+                "visualization-document.link-member-references",
+                MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL,
+            ),
+        ] {
+            assert_eq!(
+                checked_bounded_sum(field, maximum - 1, 1, maximum).unwrap(),
+                maximum
+            );
+            assert!(matches!(
+                checked_bounded_sum(field, maximum, 1, maximum),
+                Err(VisualizationError::InvalidValue { .. })
+            ));
+        }
+
+        let measurement = Measurement {
+            id: MeasurementId::allocate(1).unwrap(),
+            pane_id: PaneId::allocate(2).unwrap(),
+            trace_ids: vec![TraceId::allocate(3).unwrap(); MAX_ENTITY_REFERENCES],
+            kind: MeasurementKind::Point,
+            label: "Aggregate boundary".to_owned(),
+        };
+        let mut encoded = serde_json::to_value(document().0).unwrap();
+        encoded["measurements"] = serde_json::to_value(vec![measurement; 5]).unwrap();
+        let error = serde_json::from_value::<VisualizationDocument>(encoded).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("aggregate nested resource limit")
+        );
+    }
+
+    #[test]
+    fn retained_source_text_accounting_accepts_the_boundary_and_rejects_one_more_byte() {
+        assert_eq!(
+            checked_bounded_sum(
+                "source-dataset.retained-text-bytes",
+                MAX_SOURCE_TEXT_BYTES_PER_DATASET - 1,
+                1,
+                MAX_SOURCE_TEXT_BYTES_PER_DATASET,
+            )
+            .unwrap(),
+            MAX_SOURCE_TEXT_BYTES_PER_DATASET
+        );
+        assert!(matches!(
+            checked_bounded_sum(
+                "source-dataset.retained-text-bytes",
+                MAX_SOURCE_TEXT_BYTES_PER_DATASET,
+                1,
+                MAX_SOURCE_TEXT_BYTES_PER_DATASET,
+            ),
+            Err(VisualizationError::InvalidValue {
+                field: "source-dataset.retained-text-bytes",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn resource_hardening_preserves_extensions_and_bounded_schema_migrations() {
+        let source = dataset(binding(34), 0.0);
+        let mut source_json = serde_json::to_value(&source).unwrap();
+        source_json["untrusted_extension"] = serde_json::json!([]);
+        source_json["rows"][0]["untrusted_row_extension"] = serde_json::json!({});
+        let restored_source: SourceDataset = serde_json::from_value(source_json).unwrap();
+        assert_eq!(restored_source, source);
+
+        let (document, source_binding) = document();
+        let mut extended = serde_json::to_value(&document).unwrap();
+        extended["untrusted_document_extension"] = serde_json::json!({ "future": true });
+        let restored_extended: VisualizationDocument = serde_json::from_value(extended).unwrap();
+        assert_eq!(restored_extended, document);
+        for schema_version in [1, 2] {
+            let mut legacy = serde_json::to_value(&document).unwrap();
+            legacy["schema_version"] = serde_json::json!(schema_version);
+            let restored: VisualizationDocument = serde_json::from_value(legacy).unwrap();
+            assert_eq!(
+                restored.schema_version,
+                VisualizationDocument::SCHEMA_VERSION
+            );
+            assert_eq!(restored.datasets()[0].binding(), source_binding);
+            assert_eq!(restored.datasets()[0].rows(), document.datasets()[0].rows());
+        }
     }
 
     #[test]
@@ -4479,6 +5819,51 @@ mod tests {
             disposition: ComparisonDisposition::Failed,
         };
         assert!(malformed.validate_structure().is_err());
+    }
+
+    #[test]
+    fn comparison_rejects_oversized_or_overlong_signal_keys_before_result_work() {
+        let baseline = binding(35);
+        let candidate = binding(36);
+        let baseline_data = dataset(baseline, 0.0);
+        let candidate_data = dataset(candidate, 0.0);
+        let policy = ComparisonPolicy {
+            row_alignment: RowAlignmentPolicy::RequireIdentical,
+            tolerance: NumericTolerance::new(0.0, 0.0).unwrap(),
+            require_identical_units: true,
+            execution: ComparisonExecutionContract::default(),
+        };
+        let overlong = ComparisonRequest {
+            baseline,
+            candidate,
+            signal_keys: vec!["s".repeat(MAX_VISUALIZATION_KEY_BYTES + 1)],
+            policy,
+        };
+        assert!(matches!(
+            compare_source_datasets(&baseline_data, &candidate_data, &overlong),
+            Err(VisualizationError::InvalidValue {
+                field: "comparison.signal-key",
+                ..
+            })
+        ));
+
+        let oversized = ComparisonRequest {
+            baseline,
+            candidate,
+            signal_keys: vec!["v(out)".to_owned(); MAX_COMPARISON_SIGNALS + 1],
+            policy,
+        };
+        assert!(matches!(
+            compare_source_datasets(&baseline_data, &candidate_data, &oversized),
+            Err(VisualizationError::InvalidValue {
+                field: "comparison.signal-keys",
+                ..
+            })
+        ));
+        let wire_error =
+            serde_json::from_value::<ComparisonRequest>(serde_json::to_value(oversized).unwrap())
+                .unwrap_err();
+        assert!(wire_error.to_string().contains("resource limit"));
     }
 
     #[test]
