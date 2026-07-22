@@ -1740,6 +1740,11 @@ impl Vdmos {
     ///
     /// Returns (Cgs, Cgd, Cds) for transient analysis stamping.
     pub fn capacitances(&self, vgs: Value, vds: Value) -> (Value, Value, Value) {
+        if self.xyce_level18 {
+            let vgd = vgs - vds;
+            let (cgs, cgd, _cgb) = self.xyce_level18_meyer_capacitances(vgs, vgd, 0.0);
+            return (cgs, cgd, 0.0);
+        }
         let vgd = vgs - vds; // Gate-to-drain voltage
 
         let cgs = self.cgs_effective(vgs) + self.cgs_overlap.max(0.0);
@@ -1747,6 +1752,130 @@ impl Vdmos {
         let cds = self.cds; // Fixed for now, could be voltage-dependent
 
         (cgs, cgd, cds)
+    }
+
+    /// Evaluate the canonical Xyce LEVEL=18 Meyer charge model.
+    ///
+    /// Xyce stores the half-capacitances returned by `UCCMqmeyer` and doubles
+    /// them for DC operating-point companions.  RSpice's transient companion
+    /// consumes the instantaneous branch capacitance directly, so return the
+    /// corresponding full Cgs/Cgd/Cgb values here.  The certified Level=18
+    /// envelope uses CV=1/CVE=1; the alternate charge selectors remain
+    /// outside the native oracle contract.
+    fn xyce_level18_meyer_capacitances(
+        &self,
+        xvgs: Value,
+        xvgd: Value,
+        xvbs: Value,
+    ) -> (Value, Value, Value) {
+        let tox = self.xyce_oxide_thickness.max(1.0e-12);
+        let length = self.xyce_length.max(1.0e-12);
+        let width = self.xyce_width.max(0.0);
+        let phi = self.xyce_phi.max(1.0e-12);
+        if width <= 0.0 {
+            return (0.0, 0.0, 0.0);
+        }
+
+        const EPS_OXIDE: Value = 3.453_133e-11;
+        let cox = EPS_OXIDE / tox * length * width;
+        let von = self.xyce_level18_von(xvbs);
+        let vgst = xvgs - von;
+        let (mut capgs, mut capgd, mut capgb) = if vgst <= -phi {
+            (0.0, 0.0, cox / 2.0)
+        } else if vgst <= -phi / 2.0 {
+            (0.0, 0.0, -vgst * cox / (2.0 * phi))
+        } else if vgst <= 0.0 {
+            (
+                vgst * cox / (1.5 * phi) + cox / 3.0,
+                0.0,
+                -vgst * cox / (2.0 * phi),
+            )
+        } else {
+            let vds = xvgs - xvgd;
+            let vdsat = self.xyce_level18_vsate(xvgs, vds, xvbs);
+            if vdsat <= vds {
+                (cox / 3.0, 0.0, 0.0)
+            } else {
+                let vddif = 2.0 * vdsat - vds;
+                let vddif_sq = vddif * vddif;
+                if vddif_sq <= 1.0e-30 {
+                    (cox / 3.0, 0.0, 0.0)
+                } else {
+                    (
+                        cox * (1.0 - (vdsat - vds) * (vdsat - vds) / vddif_sq) / 3.0,
+                        cox * (1.0 - vdsat * vdsat / vddif_sq) / 3.0,
+                        0.0,
+                    )
+                }
+            }
+        };
+
+        capgs = capgs.max(0.0);
+        capgd = capgd.max(0.0);
+        capgb = capgb.max(0.0);
+        (
+            2.0 * capgs + self.cgs_overlap.max(0.0),
+            2.0 * capgd + self.cgd_overlap.max(0.0),
+            2.0 * capgb + self.cgb_overlap.max(0.0),
+        )
+    }
+
+    /// Return the Xyce UCCM effective saturation voltage used by both the
+    /// Level=18 current and Meyer-capacitance equations.
+    fn xyce_level18_vsate(&self, xvgs: Value, xvdds: Value, xvbs: Value) -> Value {
+        const CONST_Q: Value = 1.602_191_8e-19;
+        const CONST_BOLTZ: Value = 1.380_622_6e-23;
+        const CONST_REF_TEMP: Value = 300.15;
+        const CONST_EPS_OX: Value = 3.453_133e-11;
+        const EXP_LIMIT: Value = 150.0;
+
+        let vt = (CONST_BOLTZ / CONST_Q) * CONST_REF_TEMP;
+        let eta = self.xyce_eta.max(1.0e-12);
+        let etavt = eta * vt;
+        let tox = self.xyce_oxide_thickness.max(1.0e-12);
+        let length = self.xyce_length.max(1.0e-12);
+        let width = self.xyce_width.max(0.0);
+        let surface_mobility = self.xyce_surface_mobility.max(1.0e-12);
+        let vsigma = self.xyce_vsigma.max(1.0e-12);
+        if width <= 0.0 {
+            return 0.0;
+        }
+
+        let von = self.xyce_level18_von(xvbs);
+        let vgt0 = xvgs - von;
+        let dibl_exp = ((vgt0 - self.xyce_vsigmat) / vsigma).clamp(-EXP_LIMIT, EXP_LIMIT);
+        let sigma = self.xyce_sigma0 / (1.0 + dibl_exp.exp());
+        let vgt = vgt0 + sigma * xvdds;
+        let b = 0.5 * vgt / vt - 1.0;
+        let q = (self.xyce_delta * self.xyce_delta + b * b).sqrt();
+        let vgte = vt * (2.0 + b + q);
+        let mobility_denom = (1.0 + self.xyce_theta * (vgte + 2.0 * von) / tox).max(1.0e-12);
+        let mobility = surface_mobility / mobility_denom;
+
+        let x = vgt / etavt;
+        let n0 = CONST_EPS_OX * eta * vt / (2.0 * CONST_Q * tox);
+        let ns = if x > 50.0 {
+            n0 * 2.0 * x
+        } else if x < -30.0 {
+            n0 * x.exp()
+        } else {
+            2.0 * n0 * (1.0 + 0.5 * x.exp()).ln()
+        };
+        if ns < 1.0e-38 {
+            return 0.0;
+        }
+
+        let gchi0 = CONST_Q * width / length;
+        let gchi = gchi0 * mobility * ns;
+        let rt = (self.rs + self.rd).max(0.0);
+        let gch = gchi / (1.0 + gchi * rt);
+        if gch <= 1.0e-30 {
+            return 0.0;
+        }
+        let vl = self.xyce_max_drift_velocity.max(1.0e-12) * length / surface_mobility;
+        let d = (1.0 + 2.0 * gchi * self.rs.max(0.0) + vgte * vgte / (vl * vl)).sqrt();
+        let isat = gchi * vgte / (1.0 + gchi * self.rs.max(0.0) + d);
+        (isat / gch).max(0.0)
     }
 
     #[inline]
