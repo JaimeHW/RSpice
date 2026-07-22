@@ -4697,6 +4697,7 @@ impl Engine {
                     }
                     diode.set_sidewall_perimeter(sidewall_perimeter * mult);
                     diode.multiplicity = mult;
+                    diode.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
                     if self.config.spice_dialect == SpiceDialect::Xyce {
                         diode.set_temperature_xyce_7(temp_k, tnom_k);
                     } else {

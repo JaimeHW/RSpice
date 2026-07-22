@@ -962,7 +962,8 @@ impl Engine {
         slots: &[TwoTerminalStampSlots],
     ) {
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
-            let vd = Self::differential_voltage(voltages, diode.node_anode, diode.node_cathode);
+            let vd_raw = Self::differential_voltage(voltages, diode.node_anode, diode.node_cathode);
+            let vd = diode.transient_charge_voltage(vd_raw);
             let (qd, capd) = diode.junction_charge_and_capacitance(vd);
             if !capd.is_finite() || capd <= 0.0 {
                 continue;

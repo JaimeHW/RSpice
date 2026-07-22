@@ -99,6 +99,12 @@ pub struct Diode {
     pub tnom_c: Option<Value>,
     /// Select the PSpice-compatible Xyce/HSPICE LEVEL=2 junction-temperature law.
     pub pspice_level2: bool,
+    /// Select Xyce 7.10's legacy `DeviceSupport::pnjlim` limiter.
+    ///
+    /// Xyce's native diode uses the original limiter, while ngspice uses the
+    /// later negative-voltage-safe `DEVpnjlim` variant.  This is a dialect
+    /// property of the native diode evaluator, not a test-specific behavior.
+    xyce_legacy_pnjlim: bool,
     /// Linear temperature coefficient for the reverse breakdown voltage
     /// (Xyce TBV1, in 1/C).
     pub tbv1: Value,
@@ -227,6 +233,7 @@ impl Diode {
             eg: 1.11,
             tnom_c: None,
             pspice_level2: false,
+            xyce_legacy_pnjlim: false,
             tbv1: 0.0,
             tbv2: 0.0,
 
@@ -271,34 +278,30 @@ impl Diode {
                     * self.effective_bottom_saturation_current().max(1e-300)))
             .ln();
 
+        let limit_junction =
+            |candidate: Value, previous: Value, thermal: Value, critical: Value| {
+                if self.xyce_legacy_pnjlim {
+                    Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
+                } else {
+                    crate::device::veriloga_generated::limiting::pnjlim_new(
+                        candidate, previous, thermal, critical,
+                    )
+                }
+            };
+
         let (vd, limited) = if let Some(bv) = self.bv.filter(|bv| bv.is_finite() && *bv > 0.0) {
             let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
             if vd_raw < 0.0_f64.min(-bv + 10.0 * vtebrk) {
                 let transformed = -(vd_raw + bv);
                 let old_transformed = -(self.last_limited_vd.get() + bv);
                 let (limited_transformed, limited) =
-                    crate::device::veriloga_generated::limiting::pnjlim_new(
-                        transformed,
-                        old_transformed,
-                        vtebrk,
-                        vcrit,
-                    );
+                    limit_junction(transformed, old_transformed, vtebrk, vcrit);
                 (-(limited_transformed + bv), limited)
             } else {
-                crate::device::veriloga_generated::limiting::pnjlim_new(
-                    vd_raw,
-                    self.last_limited_vd.get(),
-                    vte,
-                    vcrit,
-                )
+                limit_junction(vd_raw, self.last_limited_vd.get(), vte, vcrit)
             }
         } else {
-            crate::device::veriloga_generated::limiting::pnjlim_new(
-                vd_raw,
-                self.last_limited_vd.get(),
-                vte,
-                vcrit,
-            )
+            limit_junction(vd_raw, self.last_limited_vd.get(), vte, vcrit)
         };
         self.limited.set(limited);
         self.last_limited_vd.set(vd);
@@ -310,6 +313,46 @@ impl Diode {
         self.last_stamp_id.set(stamped_id);
         self.last_stamp_gd.set(stamped_gd);
         (vd, stamped_id, stamped_gd)
+    }
+
+    /// Xyce 7.10's historical `DeviceSupport::pnjlim` implementation.
+    ///
+    /// The diode model intentionally differs from `pnjlim_new`: the classic
+    /// Xyce routine has no negative-voltage branch and uses
+    /// `1 + (vnew-vold)/vt` in its forward-bias logarithm.  Keeping this
+    /// equation local to the native diode avoids changing the Verilog-A
+    /// generated limiter used by generated devices.
+    #[inline]
+    fn limit_xyce_pnjlim(
+        candidate: Value,
+        previous: Value,
+        thermal_voltage: Value,
+        critical_voltage: Value,
+    ) -> (Value, bool) {
+        let thermal_voltage = thermal_voltage.max(EPSMIN);
+        if !candidate.is_finite() {
+            return (previous, false);
+        }
+        if !previous.is_finite() {
+            return (candidate, false);
+        }
+        if candidate <= critical_voltage
+            || (candidate - previous).abs() <= thermal_voltage + thermal_voltage
+        {
+            return (candidate, false);
+        }
+
+        let limited = if previous > 0.0 {
+            let arg = 1.0 + (candidate - previous) / thermal_voltage;
+            if arg > 0.0 {
+                previous + thermal_voltage * arg.ln()
+            } else {
+                critical_voltage
+            }
+        } else {
+            thermal_voltage * (candidate / thermal_voltage).ln()
+        };
+        (limited, true)
     }
 
     /// Return the flicker-noise coefficients `(KF, AF)`, if enabled by the
@@ -579,6 +622,68 @@ impl Diode {
     /// while native/ngspice operation keeps the modern default above.
     pub fn set_temperature_xyce_7(&mut self, temp_kelvin: Value, default_tnom_kelvin: Value) {
         self.set_temperature_with_k_over_q(temp_kelvin, default_tnom_kelvin, XYCE_7_KOVERQ);
+    }
+
+    /// Select the native Xyce diode iteration limiter.
+    ///
+    /// Xyce 7.10's diode model calls the historical `DeviceSupport::pnjlim`
+    /// routine.  Other dialects retain ngspice's `pnjlim_new` behavior.
+    pub fn set_xyce_compatibility(&mut self, enabled: bool) {
+        self.xyce_legacy_pnjlim = enabled;
+    }
+
+    /// Evaluate the junction limiter for a candidate without mutating the
+    /// Newton history. Xyce evaluates both conduction and charge from this
+    /// same pnjlim-limited voltage during a Newton load; transient charge
+    /// companions are assembled before the conduction stamp, so they need a
+    /// side-effect-free preview of that load.
+    #[inline]
+    pub(crate) fn limited_junction_voltage_for(&self, vd_raw: Value) -> Value {
+        let vte = self.n * self.vt;
+        let vcrit = vte
+            * (vte
+                / (std::f64::consts::SQRT_2
+                    * self.effective_bottom_saturation_current().max(1e-300)))
+            .ln();
+        let limit_junction =
+            |candidate: Value, previous: Value, thermal: Value, critical: Value| {
+                if self.xyce_legacy_pnjlim {
+                    Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
+                } else {
+                    crate::device::veriloga_generated::limiting::pnjlim_new(
+                        candidate, previous, thermal, critical,
+                    )
+                }
+            };
+        if let Some(bv) = self.bv.filter(|bv| bv.is_finite() && *bv > 0.0) {
+            let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
+            if vd_raw < 0.0_f64.min(-bv + 10.0 * vtebrk) {
+                let transformed = -(vd_raw + bv);
+                let old_transformed = -(self.last_limited_vd.get() + bv);
+                let (limited_transformed, _) =
+                    limit_junction(transformed, old_transformed, vtebrk, vcrit);
+                -(limited_transformed + bv)
+            } else {
+                let (vd, _) = limit_junction(vd_raw, self.last_limited_vd.get(), vte, vcrit);
+                vd
+            }
+        } else {
+            let (vd, _) = limit_junction(vd_raw, self.last_limited_vd.get(), vte, vcrit);
+            vd
+        }
+    }
+
+    /// Evaluate the voltage used by the native Xyce transient charge load.
+    /// Xyce forms `Qd` from the same pnjlim-limited junction voltage as the
+    /// conduction Jacobian during a Newton load; other dialects retain the
+    /// raw companion voltage used by their existing transient contract.
+    #[inline]
+    pub(crate) fn transient_charge_voltage(&self, vd_raw: Value) -> Value {
+        if self.xyce_legacy_pnjlim {
+            self.limited_junction_voltage_for(vd_raw)
+        } else {
+            vd_raw
+        }
     }
 
     fn set_temperature_with_k_over_q(
@@ -1238,6 +1343,27 @@ mod tests {
         assert!((d.is - is0).abs() <= is0 * 1e-12);
         assert!((d.vj - vj0).abs() <= vj0 * 1e-12, "vj={} vs {}", d.vj, vj0);
         assert!((d.cj0 - cj0).abs() <= cj0 * 1e-12);
+    }
+
+    #[test]
+    fn xyce_diode_limiter_matches_legacy_devicesupport_pnjlim() {
+        let vt = XYCE_7_KOVERQ * REFTEMP;
+        let previous = 0.7;
+        let candidate = 5.0;
+        let expected = previous + vt * (1.0 + (candidate - previous) / vt).ln();
+        let (actual, limited) = Diode::limit_xyce_pnjlim(candidate, previous, vt, 1.0);
+
+        assert!(limited);
+        assert!((actual - expected).abs() <= 4.0 * f64::EPSILON * expected.abs().max(1.0));
+    }
+
+    #[test]
+    fn xyce_diode_limiter_leaves_negative_candidates_unclamped() {
+        let vt = XYCE_7_KOVERQ * REFTEMP;
+        let (actual, limited) = Diode::limit_xyce_pnjlim(-2.0, 0.0, vt, 1.0);
+
+        assert_eq!(actual, -2.0);
+        assert!(!limited);
     }
 
     #[test]
