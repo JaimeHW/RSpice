@@ -54849,18 +54849,32 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         op_report: &crate::circuit::DeviceOpReport,
         probe: &XyceLeadCurrentProbe,
     ) -> Result<f64, String> {
-        let parameter = probe.terminal.op_parameter().ok_or_else(|| {
-            format!(
-                "lead-current probe '{}({})' targets unsupported terminal current",
-                probe.terminal.function_name(),
-                probe.element_name
-            )
-        })?;
-
         for entry in &op_report.entries {
             if !Self::device_instance_names_match(&entry.name, &probe.element_name) {
                 continue;
             }
+            let parameter = probe
+                .terminal
+                .op_parameter()
+                .or_else(|| {
+                    if entry.device_kind == "BJT" {
+                        match probe.terminal {
+                            XyceLeadCurrentTerminal::Bulk => Some("ib"),
+                            XyceLeadCurrentTerminal::Collector => Some("ic"),
+                            XyceLeadCurrentTerminal::Emitter => Some("ie"),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "lead-current probe '{}({})' targets unsupported terminal current",
+                        probe.terminal.function_name(),
+                        probe.element_name
+                    )
+                })?;
             if let Some(value) = Self::xyce_device_operating_point_value(entry, parameter) {
                 return Ok(value);
             }
@@ -54973,11 +54987,30 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             XyceLeadCurrentTerminal::Source => {
                 Self::netlist_device_is_native_b3soi_mosfet(netlist, &probe.element_name)
             }
-            XyceLeadCurrentTerminal::Gate
-            | XyceLeadCurrentTerminal::Bulk
-            | XyceLeadCurrentTerminal::Collector
-            | XyceLeadCurrentTerminal::Emitter => false,
+            XyceLeadCurrentTerminal::Gate => false,
+            XyceLeadCurrentTerminal::Bulk => {
+                Self::netlist_element_is_bjt(netlist, &probe.element_name)
+            }
+            XyceLeadCurrentTerminal::Collector | XyceLeadCurrentTerminal::Emitter => {
+                Self::netlist_element_is_bjt(netlist, &probe.element_name)
+            }
         }
+    }
+
+    fn netlist_element_is_bjt(netlist: &Netlist, instance_name: &str) -> bool {
+        if netlist.elements.iter().any(|element| {
+            matches!(element.kind, ElementKind::Bjt { .. })
+                && Self::device_instance_names_match(&element.name, instance_name)
+        }) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            flattened.elements.iter().any(|element| {
+                matches!(element.kind, ElementKind::Bjt { .. })
+                    && Self::device_instance_names_match(&element.name, instance_name)
+            })
+        })
     }
 
     fn dc_probe_is_omitted_empty_wildcard(probe: &str, netlist: &Netlist) -> bool {

@@ -283,6 +283,7 @@ impl CircuitData {
 
         for bjt in &self.bjts.devices {
             let (vbe, vbc, ic, ib, gm) = bjt.op_values();
+            let (_, _, ie) = bjt.operating_point_currents();
             let beta = if ib.abs() > 1e-30 { ic / ib } else { 0.0 };
             entries.push(DeviceOpEntry {
                 name: bjt.name.clone(),
@@ -291,6 +292,7 @@ impl CircuitData {
                 params: vec![
                     ("ic", ic),
                     ("ib", ib),
+                    ("ie", ie),
                     ("vbe", vbe),
                     ("vce", vbe - vbc),
                     ("beta", beta),
