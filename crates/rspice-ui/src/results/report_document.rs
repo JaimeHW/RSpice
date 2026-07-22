@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::io;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -24,6 +25,10 @@ const MAX_SECTIONS_PER_PAGE: usize = 256;
 const MAX_BLOCKS_PER_SECTION: usize = 1_024;
 const MAX_BLOCKS_TOTAL: usize = 8_192;
 const MAX_TRANSACTION_EDITS: usize = 256;
+pub const MAX_REPORT_REVISION_HISTORY_RECORDS: usize = 8_192;
+pub const MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES: u64 = 512 * 1_048_576;
+const REPORT_MIGRATION_REVISION_ID_NAMESPACE: Uuid =
+    Uuid::from_u128(0x7273_7069_6365_2d72_6576_2d68_6973_742d);
 const MAX_DATASET_BINDINGS: usize = 4_096;
 const MAX_TABLE_COLUMNS: usize = 256;
 const MAX_TABLE_ROWS: usize = 100_000;
@@ -85,6 +90,7 @@ macro_rules! stable_uuid_id {
 stable_uuid_id!(ReportPageId);
 stable_uuid_id!(ReportSectionId);
 stable_uuid_id!(ReportBlockId);
+stable_uuid_id!(ReportRevisionId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "kind", content = "id")]
@@ -1162,6 +1168,295 @@ impl ReportReferenceAudit {
     }
 }
 
+/// Provenance of the first reconstructable source revision retained by a
+/// report document.
+///
+/// Native documents retain revision one and every successor. Documents loaded
+/// from an older schema retain an explicit baseline instead: this preserves
+/// their exact current content without manufacturing revisions that the older
+/// format never stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportRevisionHistoryOrigin {
+    Native,
+    ImportedSchemaOneBaseline,
+    ImportedSchemaTwoBaseline,
+}
+
+/// Complete report source at one committed document revision.
+///
+/// The snapshot deliberately excludes the history ledger itself. Its fields
+/// are otherwise sufficient to reconstruct and validate the report source at
+/// the named revision, including its receipts and tombstones.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportDocumentSnapshot {
+    document_id: ResultDocumentId,
+    revision: ObjectRevision,
+    title: String,
+    template: ReportTemplate,
+    pages: Vec<ReportPage>,
+    receipts: Vec<ReportMutationReceipt>,
+    tombstones: Vec<ReportTombstone>,
+    legacy_origin_entities: Vec<ReportEntityRef>,
+}
+
+impl ReportDocumentSnapshot {
+    #[must_use]
+    pub const fn document_id(&self) -> ResultDocumentId {
+        self.document_id
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> ObjectRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    #[must_use]
+    pub const fn template(&self) -> ReportTemplate {
+        self.template
+    }
+
+    #[must_use]
+    pub fn pages(&self) -> &[ReportPage] {
+        &self.pages
+    }
+
+    #[must_use]
+    pub fn receipts(&self) -> &[ReportMutationReceipt] {
+        &self.receipts
+    }
+
+    #[must_use]
+    pub fn tombstones(&self) -> &[ReportTombstone] {
+        &self.tombstones
+    }
+
+    #[must_use]
+    pub fn legacy_origin_entities(&self) -> &[ReportEntityRef] {
+        &self.legacy_origin_entities
+    }
+}
+
+/// Immutable audit record for a complete report source revision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportRevisionRecord {
+    revision_identity: ReportRevisionId,
+    document_id: ResultDocumentId,
+    revision: ObjectRevision,
+    prior_revision_identity: Option<ReportRevisionId>,
+    prior_record_digest: Option<ContentDigest>,
+    timestamp_unix_ms: u64,
+    actor: String,
+    revision_note: String,
+    snapshot_serialized_bytes: u64,
+    snapshot_digest: ContentDigest,
+    record_digest: ContentDigest,
+    snapshot: ReportDocumentSnapshot,
+}
+
+impl ReportRevisionRecord {
+    #[must_use]
+    pub const fn revision_identity(&self) -> ReportRevisionId {
+        self.revision_identity
+    }
+
+    #[must_use]
+    pub const fn document_id(&self) -> ResultDocumentId {
+        self.document_id
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> ObjectRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn prior_revision_identity(&self) -> Option<ReportRevisionId> {
+        self.prior_revision_identity
+    }
+
+    #[must_use]
+    pub const fn prior_record_digest(&self) -> Option<ContentDigest> {
+        self.prior_record_digest
+    }
+
+    #[must_use]
+    pub const fn timestamp_unix_ms(&self) -> u64 {
+        self.timestamp_unix_ms
+    }
+
+    #[must_use]
+    pub fn actor(&self) -> &str {
+        &self.actor
+    }
+
+    #[must_use]
+    pub fn revision_note(&self) -> &str {
+        &self.revision_note
+    }
+
+    #[must_use]
+    pub const fn snapshot_serialized_bytes(&self) -> u64 {
+        self.snapshot_serialized_bytes
+    }
+
+    #[must_use]
+    pub const fn snapshot_digest(&self) -> ContentDigest {
+        self.snapshot_digest
+    }
+
+    #[must_use]
+    pub const fn record_digest(&self) -> ContentDigest {
+        self.record_digest
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> &ReportDocumentSnapshot {
+        &self.snapshot
+    }
+}
+
+/// Ordered, append-only source-revision ledger owned by one report document.
+/// The canonical serialized snapshots are bounded in aggregate so malformed or
+/// pathologically large projects cannot create unbounded memory or file growth.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportRevisionHistory {
+    origin: ReportRevisionHistoryOrigin,
+    records: Vec<ReportRevisionRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct BoundedReportRevisionRecords(Vec<ReportRevisionRecord>);
+
+impl<'de> Deserialize<'de> for BoundedReportRevisionRecords {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RecordsVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for RecordsVisitor {
+            type Value = BoundedReportRevisionRecords;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "at most {MAX_REPORT_REVISION_HISTORY_RECORDS} authenticated report revision snapshots"
+                )
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                if sequence
+                    .size_hint()
+                    .is_some_and(|hint| hint > MAX_REPORT_REVISION_HISTORY_RECORDS)
+                {
+                    return Err(serde::de::Error::custom(invalid_revision_history()));
+                }
+                let mut records = Vec::with_capacity(
+                    sequence
+                        .size_hint()
+                        .unwrap_or(0)
+                        .min(MAX_REPORT_REVISION_HISTORY_RECORDS),
+                );
+                let mut aggregate_snapshot_bytes = 0_u64;
+                loop {
+                    if records.len() >= MAX_REPORT_REVISION_HISTORY_RECORDS {
+                        if sequence.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                            return Err(serde::de::Error::custom(invalid_revision_history()));
+                        }
+                        break;
+                    }
+                    let Some(record) = sequence.next_element::<ReportRevisionRecord>()? else {
+                        break;
+                    };
+                    let (snapshot_digest, snapshot_serialized_bytes) =
+                        report_snapshot_digest_and_size(&record.snapshot)
+                            .map_err(serde::de::Error::custom)?;
+                    aggregate_snapshot_bytes = aggregate_snapshot_bytes
+                        .checked_add(snapshot_serialized_bytes)
+                        .ok_or_else(|| {
+                            serde::de::Error::custom(ReportError::CapacityExceeded(
+                                "report source revision snapshot bytes",
+                            ))
+                        })?;
+                    if aggregate_snapshot_bytes > MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES
+                        || snapshot_serialized_bytes != record.snapshot_serialized_bytes
+                        || snapshot_digest != record.snapshot_digest
+                    {
+                        return Err(serde::de::Error::custom(invalid_revision_history()));
+                    }
+                    records.push(record);
+                }
+                Ok(BoundedReportRevisionRecords(records))
+            }
+        }
+
+        deserializer.deserialize_seq(RecordsVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportRevisionHistory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            origin: ReportRevisionHistoryOrigin,
+            records: BoundedReportRevisionRecords,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        for record in &wire.records.0 {
+            let record_digest = report_revision_record_digest(
+                record.revision_identity,
+                record.document_id,
+                record.revision,
+                wire.origin,
+                record.prior_revision_identity,
+                record.prior_record_digest,
+                record.timestamp_unix_ms,
+                &record.actor,
+                &record.revision_note,
+                record.snapshot_serialized_bytes,
+                record.snapshot_digest,
+            )
+            .map_err(serde::de::Error::custom)?;
+            if record_digest != record.record_digest {
+                return Err(serde::de::Error::custom(invalid_revision_history()));
+            }
+        }
+        Ok(Self {
+            origin: wire.origin,
+            records: wire.records.0,
+        })
+    }
+}
+
+impl ReportRevisionHistory {
+    #[must_use]
+    pub const fn origin(&self) -> ReportRevisionHistoryOrigin {
+        self.origin
+    }
+
+    #[must_use]
+    pub fn records(&self) -> &[ReportRevisionRecord] {
+        &self.records
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReportDocument {
     schema_version: u16,
@@ -1173,9 +1468,11 @@ pub struct ReportDocument {
     receipts: Vec<ReportMutationReceipt>,
     tombstones: Vec<ReportTombstone>,
     legacy_origin_entities: Vec<ReportEntityRef>,
+    revision_history: ReportRevisionHistory,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReportDocumentWire {
     schema_version: u16,
     id: ResultDocumentId,
@@ -1190,6 +1487,28 @@ struct ReportDocumentWire {
     tombstones: Vec<ReportTombstone>,
     #[serde(default)]
     legacy_origin_entities: Vec<ReportEntityRef>,
+    #[serde(default)]
+    revision_history: ReportRevisionHistoryWireField,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+enum ReportRevisionHistoryWireField {
+    #[default]
+    Missing,
+    Null,
+    Value(ReportRevisionHistory),
+}
+
+impl<'de> Deserialize<'de> for ReportRevisionHistoryWireField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<ReportRevisionHistory>::deserialize(deserializer).map(|value| match value {
+            Some(history) => Self::Value(history),
+            None => Self::Null,
+        })
+    }
 }
 
 impl<'de> Deserialize<'de> for ReportDocument {
@@ -1198,6 +1517,40 @@ impl<'de> Deserialize<'de> for ReportDocument {
         D: Deserializer<'de>,
     {
         let wire = ReportDocumentWire::deserialize(deserializer)?;
+        let revision_history = match (wire.schema_version, wire.revision_history) {
+            (ReportDocument::SCHEMA_VERSION, ReportRevisionHistoryWireField::Value(history)) => {
+                history
+            }
+            (ReportDocument::SCHEMA_VERSION, ReportRevisionHistoryWireField::Missing) => {
+                return Err(serde::de::Error::custom(ReportError::InvalidValue {
+                    field: "report-document.revision-history",
+                    message: "current-schema documents must retain their revision history"
+                        .to_owned(),
+                }));
+            }
+            (1 | 2, ReportRevisionHistoryWireField::Missing) => ReportRevisionHistory {
+                origin: ReportRevisionHistoryOrigin::Native,
+                records: Vec::new(),
+            },
+            (_, ReportRevisionHistoryWireField::Missing) => ReportRevisionHistory {
+                origin: ReportRevisionHistoryOrigin::Native,
+                records: Vec::new(),
+            },
+            (version, ReportRevisionHistoryWireField::Value(_)) => {
+                return Err(serde::de::Error::custom(ReportError::InvalidValue {
+                    field: "report-document.revision-history",
+                    message: format!(
+                        "schema {version} must not contain a revision history introduced by a later schema"
+                    ),
+                }));
+            }
+            (_, ReportRevisionHistoryWireField::Null) => {
+                return Err(serde::de::Error::custom(ReportError::InvalidValue {
+                    field: "report-document.revision-history",
+                    message: "revision history must not be null".to_owned(),
+                }));
+            }
+        };
         let mut document = Self {
             schema_version: wire.schema_version,
             id: wire.id,
@@ -1208,6 +1561,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
             receipts: wire.receipts,
             tombstones: wire.tombstones,
             legacy_origin_entities: wire.legacy_origin_entities,
+            revision_history,
         };
         document.migrate().map_err(serde::de::Error::custom)?;
         document.validate().map_err(serde::de::Error::custom)?;
@@ -1216,7 +1570,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
 }
 
 impl ReportDocument {
-    pub const SCHEMA_VERSION: u16 = 2;
+    pub const SCHEMA_VERSION: u16 = 3;
 
     pub fn new(title: impl Into<String>) -> Result<Self, ReportError> {
         Self::new_with_template(title, ReportTemplate::ReleaseVerification42)
@@ -1226,7 +1580,7 @@ impl ReportDocument {
         title: impl Into<String>,
         template: ReportTemplate,
     ) -> Result<Self, ReportError> {
-        let document = Self {
+        let mut document = Self {
             schema_version: Self::SCHEMA_VERSION,
             id: ResultDocumentId::new(),
             revision: ObjectRevision::INITIAL,
@@ -1236,7 +1590,16 @@ impl ReportDocument {
             receipts: Vec::new(),
             tombstones: Vec::new(),
             legacy_origin_entities: Vec::new(),
+            revision_history: ReportRevisionHistory {
+                origin: ReportRevisionHistoryOrigin::Native,
+                records: Vec::new(),
+            },
         };
+        document.append_revision_record(
+            0,
+            "rspice-local-session".to_owned(),
+            "Create report document".to_owned(),
+        )?;
         document.validate()?;
         Ok(document)
     }
@@ -1282,6 +1645,71 @@ impl ReportDocument {
     }
 
     #[must_use]
+    pub const fn revision_history(&self) -> &ReportRevisionHistory {
+        &self.revision_history
+    }
+
+    /// Resolve one immutable source record by the composite document/revision
+    /// identity used by persisted report references.
+    #[must_use]
+    pub fn revision_record(
+        &self,
+        document_id: ResultDocumentId,
+        revision: ObjectRevision,
+    ) -> Option<&ReportRevisionRecord> {
+        if document_id != self.id {
+            return None;
+        }
+        self.revision_history
+            .records
+            .iter()
+            .find(|record| record.revision == revision)
+    }
+
+    /// Reconstruct an independently valid report document at a retained
+    /// revision. The reconstructed document carries only the history prefix
+    /// that was known at that point in time.
+    pub fn reconstruct_revision(
+        &self,
+        document_id: ResultDocumentId,
+        revision: ObjectRevision,
+    ) -> Result<Self, ReportError> {
+        if document_id != self.id {
+            return Err(ReportError::RevisionNotRetained {
+                document_id,
+                revision,
+            });
+        }
+        let record_index = self
+            .revision_history
+            .records
+            .iter()
+            .position(|record| record.revision == revision)
+            .ok_or(ReportError::RevisionNotRetained {
+                document_id,
+                revision,
+            })?;
+        let snapshot = &self.revision_history.records[record_index].snapshot;
+        let reconstructed = Self {
+            schema_version: Self::SCHEMA_VERSION,
+            id: snapshot.document_id,
+            revision: snapshot.revision,
+            title: snapshot.title.clone(),
+            template: snapshot.template,
+            pages: snapshot.pages.clone(),
+            receipts: snapshot.receipts.clone(),
+            tombstones: snapshot.tombstones.clone(),
+            legacy_origin_entities: snapshot.legacy_origin_entities.clone(),
+            revision_history: ReportRevisionHistory {
+                origin: self.revision_history.origin,
+                records: self.revision_history.records[..=record_index].to_vec(),
+            },
+        };
+        reconstructed.validate()?;
+        Ok(reconstructed)
+    }
+
+    #[must_use]
     pub fn page(&self, page_id: ReportPageId) -> Option<&ReportPage> {
         self.pages.iter().find(|page| page.id == page_id)
     }
@@ -1309,6 +1737,28 @@ impl ReportDocument {
         edits: Vec<ReportEdit>,
         timestamp_unix_ms: u64,
     ) -> Result<ReportMutationReceipt, ReportError> {
+        let edit_count = edits.len();
+        self.transact_with_context(
+            expected_document_revision,
+            edits,
+            timestamp_unix_ms,
+            "rspice-local-session",
+            format!("Apply {edit_count} atomic report edit(s)"),
+        )
+    }
+
+    /// Commit one atomic edit transaction with explicit revision provenance.
+    ///
+    /// The actor and note are persisted with the complete post-commit source
+    /// snapshot; neither is inferred during reload or reconstruction.
+    pub fn transact_with_context(
+        &mut self,
+        expected_document_revision: ObjectRevision,
+        edits: Vec<ReportEdit>,
+        timestamp_unix_ms: u64,
+        actor: impl Into<String>,
+        revision_note: impl Into<String>,
+    ) -> Result<ReportMutationReceipt, ReportError> {
         if expected_document_revision != self.revision {
             return Err(ReportError::DocumentRevisionConflict {
                 expected: expected_document_revision,
@@ -1323,12 +1773,39 @@ impl ReportDocument {
                 ),
             });
         }
+        if self.revision_history.records.len() >= MAX_REPORT_REVISION_HISTORY_RECORDS {
+            return Err(ReportError::CapacityExceeded(
+                "report source revision history",
+            ));
+        }
+        let actor = actor.into();
+        let revision_note = revision_note.into();
+        validate_label("report-revision.actor", &actor, 256)?;
+        validate_label("report-revision.note", &revision_note, 4_096)?;
         let committed_revision = self.revision.next()?;
         let edit_count = u16::try_from(edits.len()).map_err(|_| ReportError::InvalidValue {
             field: "transaction.edits",
             message: "edit count cannot be represented in a mutation receipt".to_owned(),
         })?;
-        let mut candidate = self.clone();
+        // Build the candidate source without cloning the potentially large
+        // immutable ledger. The new complete snapshot is measured against the
+        // retained aggregate before that ledger is copied, keeping an
+        // over-capacity failure atomic and memory-bounded.
+        let mut candidate = Self {
+            schema_version: self.schema_version,
+            id: self.id,
+            revision: self.revision,
+            title: self.title.clone(),
+            template: self.template,
+            pages: self.pages.clone(),
+            receipts: self.receipts.clone(),
+            tombstones: self.tombstones.clone(),
+            legacy_origin_entities: self.legacy_origin_entities.clone(),
+            revision_history: ReportRevisionHistory {
+                origin: self.revision_history.origin,
+                records: Vec::new(),
+            },
+        };
         let mut created = Vec::new();
         let mut changed = Vec::new();
         let mut tombstoned = Vec::new();
@@ -1357,6 +1834,26 @@ impl ReportDocument {
         };
         candidate.revision = committed_revision;
         candidate.receipts.push(receipt.clone());
+        let candidate_snapshot = candidate.current_snapshot();
+        let (candidate_snapshot_digest, candidate_snapshot_bytes) =
+            report_snapshot_digest_and_size(&candidate_snapshot)?;
+        validate_revision_history_snapshot_capacity(
+            self.revision_history
+                .records
+                .iter()
+                .map(|record| record.snapshot_serialized_bytes)
+                .chain(std::iter::once(candidate_snapshot_bytes)),
+        )?;
+        candidate.revision_history = self.revision_history.clone();
+        candidate.append_prepared_revision_record(
+            ReportRevisionId::new(),
+            timestamp_unix_ms,
+            actor,
+            revision_note,
+            candidate_snapshot,
+            candidate_snapshot_digest,
+            candidate_snapshot_bytes,
+        )?;
         candidate.validate()?;
         *self = candidate;
         Ok(receipt)
@@ -1441,6 +1938,129 @@ impl ReportDocument {
         })
     }
 
+    fn current_snapshot(&self) -> ReportDocumentSnapshot {
+        ReportDocumentSnapshot {
+            document_id: self.id,
+            revision: self.revision,
+            title: self.title.clone(),
+            template: self.template,
+            pages: self.pages.clone(),
+            receipts: self.receipts.clone(),
+            tombstones: self.tombstones.clone(),
+            legacy_origin_entities: self.legacy_origin_entities.clone(),
+        }
+    }
+
+    fn append_revision_record(
+        &mut self,
+        timestamp_unix_ms: u64,
+        actor: String,
+        revision_note: String,
+    ) -> Result<(), ReportError> {
+        let snapshot = self.current_snapshot();
+        let (snapshot_digest, snapshot_serialized_bytes) =
+            report_snapshot_digest_and_size(&snapshot)?;
+        self.append_prepared_revision_record(
+            ReportRevisionId::new(),
+            timestamp_unix_ms,
+            actor,
+            revision_note,
+            snapshot,
+            snapshot_digest,
+            snapshot_serialized_bytes,
+        )
+    }
+
+    fn append_migrated_revision_record(
+        &mut self,
+        source_schema_version: u16,
+        timestamp_unix_ms: u64,
+        revision_note: String,
+    ) -> Result<(), ReportError> {
+        let snapshot = self.current_snapshot();
+        let (snapshot_digest, snapshot_serialized_bytes) =
+            report_snapshot_digest_and_size(&snapshot)?;
+        let mut identity_material = Vec::with_capacity(16 + 8 + 2 + 32);
+        identity_material.extend_from_slice(self.id.as_uuid().as_bytes());
+        identity_material.extend_from_slice(&self.revision.get().to_be_bytes());
+        identity_material.extend_from_slice(&source_schema_version.to_be_bytes());
+        identity_material.extend_from_slice(snapshot_digest.as_bytes());
+        let revision_identity = migrated_report_revision_id(&identity_material)?;
+        self.append_prepared_revision_record(
+            revision_identity,
+            timestamp_unix_ms,
+            "rspice-schema-migration".to_owned(),
+            revision_note,
+            snapshot,
+            snapshot_digest,
+            snapshot_serialized_bytes,
+        )
+    }
+
+    fn append_prepared_revision_record(
+        &mut self,
+        revision_identity: ReportRevisionId,
+        timestamp_unix_ms: u64,
+        actor: String,
+        revision_note: String,
+        snapshot: ReportDocumentSnapshot,
+        snapshot_digest: ContentDigest,
+        snapshot_serialized_bytes: u64,
+    ) -> Result<(), ReportError> {
+        if self.revision_history.records.len() >= MAX_REPORT_REVISION_HISTORY_RECORDS {
+            return Err(ReportError::CapacityExceeded(
+                "report source revision history",
+            ));
+        }
+        validate_label("report-revision.actor", &actor, 256)?;
+        validate_label("report-revision.note", &revision_note, 4_096)?;
+        validate_revision_history_snapshot_capacity(
+            self.revision_history
+                .records
+                .iter()
+                .map(|record| record.snapshot_serialized_bytes)
+                .chain(std::iter::once(snapshot_serialized_bytes)),
+        )?;
+        let prior_revision_identity = self
+            .revision_history
+            .records
+            .last()
+            .map(|record| record.revision_identity);
+        let prior_record_digest = self
+            .revision_history
+            .records
+            .last()
+            .map(|record| record.record_digest);
+        let record_digest = report_revision_record_digest(
+            revision_identity,
+            self.id,
+            self.revision,
+            self.revision_history.origin,
+            prior_revision_identity,
+            prior_record_digest,
+            timestamp_unix_ms,
+            &actor,
+            &revision_note,
+            snapshot_serialized_bytes,
+            snapshot_digest,
+        )?;
+        self.revision_history.records.push(ReportRevisionRecord {
+            revision_identity,
+            document_id: self.id,
+            revision: self.revision,
+            prior_revision_identity,
+            prior_record_digest,
+            timestamp_unix_ms,
+            actor,
+            revision_note,
+            snapshot_serialized_bytes,
+            snapshot_digest,
+            record_digest,
+            snapshot,
+        });
+        Ok(())
+    }
+
     fn migrate(&mut self) -> Result<(), ReportError> {
         match self.schema_version {
             Self::SCHEMA_VERSION => Ok(()),
@@ -1474,6 +2094,32 @@ impl ReportDocument {
                     })
                     .collect();
                 self.schema_version = Self::SCHEMA_VERSION;
+                self.revision_history.origin =
+                    ReportRevisionHistoryOrigin::ImportedSchemaOneBaseline;
+                self.append_migrated_revision_record(
+                    1,
+                    0,
+                    "Import schema 1 report source baseline".to_owned(),
+                )?;
+                Ok(())
+            }
+            2 => {
+                // Schema two validates a complete current source plus a
+                // contiguous mutation-receipt chain, but it did not retain
+                // the prior source bodies. Preserve only the exact source it
+                // actually contains and identify it as an imported baseline.
+                self.schema_version = Self::SCHEMA_VERSION;
+                self.revision_history.origin =
+                    ReportRevisionHistoryOrigin::ImportedSchemaTwoBaseline;
+                let timestamp_unix_ms = self
+                    .receipts
+                    .last()
+                    .map_or(0, |receipt| receipt.timestamp_unix_ms);
+                self.append_migrated_revision_record(
+                    2,
+                    timestamp_unix_ms,
+                    "Import schema 2 report source baseline".to_owned(),
+                )?;
                 Ok(())
             }
             version => Err(ReportError::UnsupportedSchemaVersion(version)),
@@ -2082,11 +2728,165 @@ impl ReportDocument {
         if self.schema_version != Self::SCHEMA_VERSION {
             return Err(ReportError::UnsupportedSchemaVersion(self.schema_version));
         }
-        validate_label("report-document.title", &self.title, 512)?;
+        self.validate_content()?;
+        self.validate_revision_history()
+    }
+
+    fn validate_content(&self) -> Result<(), ReportError> {
+        ReportDocumentContentView::from_document(self).validate()
+    }
+
+    fn validate_revision_history(&self) -> Result<(), ReportError> {
+        let records = &self.revision_history.records;
+        if records.is_empty() || records.len() > MAX_REPORT_REVISION_HISTORY_RECORDS {
+            return Err(invalid_revision_history());
+        }
+        let baseline_revision = match self.revision_history.origin {
+            ReportRevisionHistoryOrigin::Native
+            | ReportRevisionHistoryOrigin::ImportedSchemaOneBaseline => ObjectRevision::INITIAL,
+            ReportRevisionHistoryOrigin::ImportedSchemaTwoBaseline => records[0].revision,
+        };
+        if records[0].revision != baseline_revision
+            || records[0].prior_revision_identity.is_some()
+            || records[0].prior_record_digest.is_some()
+            || records.last().map(|record| record.revision) != Some(self.revision)
+        {
+            return Err(invalid_revision_history());
+        }
+
+        let mut revision_identities = HashSet::with_capacity(records.len());
+        let mut prior_revision_identity = None;
+        let mut prior_record_digest = None;
+        let mut aggregate_snapshot_bytes = 0_u64;
+        for (index, record) in records.iter().enumerate() {
+            let expected_revision = ObjectRevision::new(
+                baseline_revision
+                    .get()
+                    .checked_add(
+                        u64::try_from(index).map_err(|_| ReportError::RevisionSpaceExhausted)?,
+                    )
+                    .ok_or(ReportError::RevisionSpaceExhausted)?,
+            )?;
+            validate_label("report-revision.actor", &record.actor, 256)?;
+            validate_label("report-revision.note", &record.revision_note, 4_096)?;
+            if record.document_id != self.id
+                || record.revision != expected_revision
+                || record.prior_revision_identity != prior_revision_identity
+                || record.prior_record_digest != prior_record_digest
+                || !revision_identities.insert(record.revision_identity)
+                || record.snapshot.document_id != self.id
+                || record.snapshot.revision != record.revision
+            {
+                return Err(invalid_revision_history());
+            }
+
+            ReportDocumentContentView::from_snapshot(&record.snapshot).validate()?;
+
+            let (snapshot_digest, snapshot_serialized_bytes) =
+                report_snapshot_digest_and_size(&record.snapshot)?;
+            aggregate_snapshot_bytes = aggregate_snapshot_bytes
+                .checked_add(snapshot_serialized_bytes)
+                .ok_or(ReportError::CapacityExceeded(
+                    "report source revision snapshot bytes",
+                ))?;
+            let record_digest = report_revision_record_digest(
+                record.revision_identity,
+                record.document_id,
+                record.revision,
+                self.revision_history.origin,
+                record.prior_revision_identity,
+                record.prior_record_digest,
+                record.timestamp_unix_ms,
+                &record.actor,
+                &record.revision_note,
+                snapshot_serialized_bytes,
+                snapshot_digest,
+            )?;
+            if snapshot_serialized_bytes != record.snapshot_serialized_bytes
+                || aggregate_snapshot_bytes > MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES
+                || snapshot_digest != record.snapshot_digest
+                || record_digest != record.record_digest
+            {
+                return Err(invalid_revision_history());
+            }
+
+            if record.revision == ObjectRevision::INITIAL {
+                if record.timestamp_unix_ms != 0 {
+                    return Err(invalid_revision_history());
+                }
+            } else if record.snapshot.receipts.last().is_none_or(|receipt| {
+                receipt.committed_document_revision != record.revision
+                    || receipt.timestamp_unix_ms != record.timestamp_unix_ms
+            }) {
+                return Err(invalid_revision_history());
+            }
+
+            prior_revision_identity = Some(record.revision_identity);
+            prior_record_digest = Some(record.record_digest);
+        }
+        if records.last().is_none_or(|record| {
+            let snapshot = &record.snapshot;
+            snapshot.document_id != self.id
+                || snapshot.revision != self.revision
+                || snapshot.title != self.title
+                || snapshot.template != self.template
+                || snapshot.pages != self.pages
+                || snapshot.receipts != self.receipts
+                || snapshot.tombstones != self.tombstones
+                || snapshot.legacy_origin_entities != self.legacy_origin_entities
+        }) {
+            return Err(invalid_revision_history());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ReportDocumentContentView<'a> {
+    revision: ObjectRevision,
+    title: &'a str,
+    pages: &'a [ReportPage],
+    receipts: &'a [ReportMutationReceipt],
+    tombstones: &'a [ReportTombstone],
+    legacy_origin_entities: &'a [ReportEntityRef],
+}
+
+impl<'a> ReportDocumentContentView<'a> {
+    fn from_document(document: &'a ReportDocument) -> Self {
+        Self {
+            revision: document.revision,
+            title: &document.title,
+            pages: &document.pages,
+            receipts: &document.receipts,
+            tombstones: &document.tombstones,
+            legacy_origin_entities: &document.legacy_origin_entities,
+        }
+    }
+
+    fn from_snapshot(snapshot: &'a ReportDocumentSnapshot) -> Self {
+        Self {
+            revision: snapshot.revision,
+            title: &snapshot.title,
+            pages: &snapshot.pages,
+            receipts: &snapshot.receipts,
+            tombstones: &snapshot.tombstones,
+            legacy_origin_entities: &snapshot.legacy_origin_entities,
+        }
+    }
+
+    fn validate(self) -> Result<(), ReportError> {
+        validate_label("report-document.title", self.title, 512)?;
         if self.pages.len() > MAX_PAGES {
             return Err(ReportError::CapacityExceeded("report pages"));
         }
-        if self.block_count() > MAX_BLOCKS_TOTAL {
+        let block_count = self
+            .pages
+            .iter()
+            .flat_map(|page| page.sections.iter())
+            .map(|section| section.blocks.len())
+            .try_fold(0_usize, usize::checked_add)
+            .ok_or(ReportError::CapacityExceeded("report content blocks"))?;
+        if block_count > MAX_BLOCKS_TOTAL {
             return Err(ReportError::CapacityExceeded("report content blocks"));
         }
         validate_aggregate_frozen_payload_bytes(
@@ -2098,30 +2898,26 @@ impl ReportDocument {
                 .filter_map(ReportReferenceMode::frozen_artifact)
                 .map(|artifact| artifact.payload().len()),
         )?;
+
         let mut live = HashSet::new();
-        for page in &self.pages {
-            if !live.insert(ReportEntityRef::Page(page.id)) {
-                return Err(ReportError::DuplicateIdentity(ReportEntityRef::Page(
-                    page.id,
-                )));
+        for page in self.pages {
+            let page_entity = ReportEntityRef::Page(page.id);
+            if !live.insert(page_entity) {
+                return Err(ReportError::DuplicateIdentity(page_entity));
             }
             validate_label("report-page.title", &page.title, 512)?;
-            self.validate_entity_creation(
-                ReportEntityRef::Page(page.id),
-                page.created_at_document_revision,
-            )?;
+            self.validate_entity_creation(page_entity, page.created_at_document_revision)?;
             if page.sections.len() > MAX_SECTIONS_PER_PAGE {
                 return Err(ReportError::CapacityExceeded("sections per report page"));
             }
             for section in &page.sections {
-                if !live.insert(ReportEntityRef::Section(section.id)) {
-                    return Err(ReportError::DuplicateIdentity(ReportEntityRef::Section(
-                        section.id,
-                    )));
+                let section_entity = ReportEntityRef::Section(section.id);
+                if !live.insert(section_entity) {
+                    return Err(ReportError::DuplicateIdentity(section_entity));
                 }
                 validate_label("report-section.title", &section.title, 512)?;
                 self.validate_entity_creation(
-                    ReportEntityRef::Section(section.id),
+                    section_entity,
                     section.created_at_document_revision,
                 )?;
                 if section.blocks.len() > MAX_BLOCKS_PER_SECTION {
@@ -2130,13 +2926,12 @@ impl ReportDocument {
                     ));
                 }
                 for block in &section.blocks {
-                    if !live.insert(ReportEntityRef::Block(block.id)) {
-                        return Err(ReportError::DuplicateIdentity(ReportEntityRef::Block(
-                            block.id,
-                        )));
+                    let block_entity = ReportEntityRef::Block(block.id);
+                    if !live.insert(block_entity) {
+                        return Err(ReportError::DuplicateIdentity(block_entity));
                     }
                     self.validate_entity_creation(
-                        ReportEntityRef::Block(block.id),
+                        block_entity,
                         block.created_at_document_revision,
                     )?;
                     block.kind.validate()?;
@@ -2149,7 +2944,7 @@ impl ReportDocument {
     }
 
     fn validate_entity_creation(
-        &self,
+        self,
         entity: ReportEntityRef,
         created_at: ObjectRevision,
     ) -> Result<(), ReportError> {
@@ -2165,14 +2960,14 @@ impl ReportDocument {
         Ok(())
     }
 
-    fn validate_legacy_origins(&self, live: &HashSet<ReportEntityRef>) -> Result<(), ReportError> {
+    fn validate_legacy_origins(self, live: &HashSet<ReportEntityRef>) -> Result<(), ReportError> {
         let tombstoned: HashSet<_> = self
             .tombstones
             .iter()
             .map(|tombstone| tombstone.entity)
             .collect();
         let mut origins = HashSet::with_capacity(self.legacy_origin_entities.len());
-        for entity in &self.legacy_origin_entities {
+        for entity in self.legacy_origin_entities {
             if !origins.insert(*entity) || (!live.contains(entity) && !tombstoned.contains(entity))
             {
                 return Err(ReportError::InvalidValue {
@@ -2186,9 +2981,9 @@ impl ReportDocument {
         Ok(())
     }
 
-    fn validate_tombstones(&self, live: &HashSet<ReportEntityRef>) -> Result<(), ReportError> {
+    fn validate_tombstones(self, live: &HashSet<ReportEntityRef>) -> Result<(), ReportError> {
         let mut tombstoned = HashSet::with_capacity(self.tombstones.len());
-        for tombstone in &self.tombstones {
+        for tombstone in self.tombstones {
             if !tombstoned.insert(tombstone.entity)
                 || live.contains(&tombstone.entity)
                 || tombstone.created_at_document_revision > tombstone.removed_at_document_revision
@@ -2208,7 +3003,7 @@ impl ReportDocument {
         Ok(())
     }
 
-    fn validate_receipts(&self, live: &HashSet<ReportEntityRef>) -> Result<(), ReportError> {
+    fn validate_receipts(self, live: &HashSet<ReportEntityRef>) -> Result<(), ReportError> {
         let expected_count = self
             .revision
             .get()
@@ -2292,9 +3087,6 @@ impl ReportDocument {
         if receipt_tombstones.len() != tombstones.len() {
             return Err(invalid_receipt());
         }
-        // Entities present in a post-creation document must have exactly one
-        // creation receipt. Version-one snapshots may contain initial entities
-        // without receipts and are migrated only at document revision one.
         if self.revision != ObjectRevision::INITIAL {
             for entity in live.iter().chain(tombstones.keys()) {
                 if !created_ids.contains(entity) && !legacy_origins.contains(entity) {
@@ -2305,19 +3097,28 @@ impl ReportDocument {
         Ok(())
     }
 
-    fn entity_created_at(&self, entity: ReportEntityRef) -> Option<ObjectRevision> {
-        match entity {
-            ReportEntityRef::Page(id) => {
-                self.page(id).map(|page| page.created_at_document_revision)
-            }
+    fn entity_created_at(self, entity: ReportEntityRef) -> Option<ObjectRevision> {
+        let live_created_at = match entity {
+            ReportEntityRef::Page(id) => self
+                .pages
+                .iter()
+                .find(|page| page.id == id)
+                .map(|page| page.created_at_document_revision),
             ReportEntityRef::Section(id) => self
-                .section(id)
+                .pages
+                .iter()
+                .flat_map(|page| page.sections.iter())
+                .find(|section| section.id == id)
                 .map(|section| section.created_at_document_revision),
             ReportEntityRef::Block(id) => self
-                .block(id)
+                .pages
+                .iter()
+                .flat_map(|page| page.sections.iter())
+                .flat_map(|section| section.blocks.iter())
+                .find(|block| block.id == id)
                 .map(|block| block.created_at_document_revision),
-        }
-        .or_else(|| {
+        };
+        live_created_at.or_else(|| {
             self.tombstones
                 .iter()
                 .find(|tombstone| tombstone.entity == entity)
@@ -2325,7 +3126,7 @@ impl ReportDocument {
         })
     }
 
-    fn entity_removed_at(&self, entity: ReportEntityRef) -> Option<ObjectRevision> {
+    fn entity_removed_at(self, entity: ReportEntityRef) -> Option<ObjectRevision> {
         self.tombstones
             .iter()
             .find(|tombstone| tombstone.entity == entity)
@@ -2372,6 +3173,141 @@ fn deduplicate_entity_receipt(entities: &mut Vec<ReportEntityRef>) {
     entities.retain(|entity| seen.insert(*entity));
 }
 
+fn report_snapshot_digest_and_size(
+    snapshot: &ReportDocumentSnapshot,
+) -> Result<(ContentDigest, u64), ReportError> {
+    struct DigestWriter {
+        hasher: Sha256,
+        serialized_bytes: u64,
+        exceeded_capacity: bool,
+    }
+
+    impl DigestWriter {
+        fn new() -> Self {
+            let mut hasher = Sha256::new();
+            hasher.update(b"rspice-report-source-snapshot-v1\0");
+            Self {
+                hasher,
+                serialized_bytes: 0,
+                exceeded_capacity: false,
+            }
+        }
+    }
+
+    impl io::Write for DigestWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let length = u64::try_from(bytes.len()).map_err(|_| {
+                self.exceeded_capacity = true;
+                io::Error::other("report revision snapshot exceeds addressable size")
+            })?;
+            let Some(next_size) = self.serialized_bytes.checked_add(length) else {
+                self.exceeded_capacity = true;
+                return Err(io::Error::other("report revision snapshot size overflowed"));
+            };
+            if next_size > MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES {
+                self.exceeded_capacity = true;
+                return Err(io::Error::other(
+                    "report revision snapshot exceeds history capacity",
+                ));
+            }
+            self.hasher.update(bytes);
+            self.serialized_bytes = next_size;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut writer = DigestWriter::new();
+    if let Err(error) = serde_json::to_writer(&mut writer, snapshot) {
+        if writer.exceeded_capacity {
+            return Err(ReportError::CapacityExceeded(
+                "report source revision snapshot bytes",
+            ));
+        }
+        return Err(ReportError::HistorySerialization(error));
+    }
+    Ok((
+        ContentDigest::from_bytes(writer.hasher.finalize().into()),
+        writer.serialized_bytes,
+    ))
+}
+
+fn validate_revision_history_snapshot_capacity(
+    snapshot_lengths: impl IntoIterator<Item = u64>,
+) -> Result<(), ReportError> {
+    let mut aggregate = 0_u64;
+    for length in snapshot_lengths {
+        aggregate = aggregate
+            .checked_add(length)
+            .ok_or(ReportError::CapacityExceeded(
+                "report source revision snapshot bytes",
+            ))?;
+        if aggregate > MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES {
+            return Err(ReportError::CapacityExceeded(
+                "report source revision snapshot bytes",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn migrated_report_revision_id(identity_material: &[u8]) -> Result<ReportRevisionId, ReportError> {
+    ReportRevisionId::try_from_uuid(Uuid::new_v5(
+        &REPORT_MIGRATION_REVISION_ID_NAMESPACE,
+        identity_material,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn report_revision_record_digest(
+    revision_identity: ReportRevisionId,
+    document_id: ResultDocumentId,
+    revision: ObjectRevision,
+    history_origin: ReportRevisionHistoryOrigin,
+    prior_revision_identity: Option<ReportRevisionId>,
+    prior_record_digest: Option<ContentDigest>,
+    timestamp_unix_ms: u64,
+    actor: &str,
+    revision_note: &str,
+    snapshot_serialized_bytes: u64,
+    snapshot_digest: ContentDigest,
+) -> Result<ContentDigest, ReportError> {
+    #[derive(Serialize)]
+    struct RecordDigestMaterial<'a> {
+        domain: &'static str,
+        revision_identity: ReportRevisionId,
+        document_id: ResultDocumentId,
+        revision: ObjectRevision,
+        history_origin: ReportRevisionHistoryOrigin,
+        prior_revision_identity: Option<ReportRevisionId>,
+        prior_record_digest: Option<ContentDigest>,
+        timestamp_unix_ms: u64,
+        actor: &'a str,
+        revision_note: &'a str,
+        snapshot_serialized_bytes: u64,
+        snapshot_digest: ContentDigest,
+    }
+    let bytes = serde_json::to_vec(&RecordDigestMaterial {
+        domain: "rspice-report-source-revision-record-v1",
+        revision_identity,
+        document_id,
+        revision,
+        history_origin,
+        prior_revision_identity,
+        prior_record_digest,
+        timestamp_unix_ms,
+        actor,
+        revision_note,
+        snapshot_serialized_bytes,
+        snapshot_digest,
+    })
+    .map_err(ReportError::HistorySerialization)?;
+    Ok(ContentDigest::from_bytes(Sha256::digest(bytes).into()))
+}
+
 fn audit_digest(
     document_id: ResultDocumentId,
     document_revision: ObjectRevision,
@@ -2398,6 +3334,13 @@ fn invalid_receipt() -> ReportError {
     ReportError::InvalidValue {
         field: "report-document.receipts",
         message: "mutation receipts must be complete, contiguous, unique, and agree with live identities and tombstones".to_owned(),
+    }
+}
+
+fn invalid_revision_history() -> ReportError {
+    ReportError::InvalidValue {
+        field: "report-document.revision-history",
+        message: "revision records must be bounded, contiguous, digest-authenticated complete snapshots linked by unique immutable identities".to_owned(),
     }
 }
 
@@ -2452,6 +3395,13 @@ pub enum ReportError {
     CapacityExceeded(&'static str),
     #[error("report revision space is exhausted")]
     RevisionSpaceExhausted,
+    #[error("report source revision {revision:?} is not retained for document {document_id}")]
+    RevisionNotRetained {
+        document_id: ResultDocumentId,
+        revision: ObjectRevision,
+    },
+    #[error("failed to serialize report revision-history digest material: {0}")]
+    HistorySerialization(serde_json::Error),
     #[error("failed to serialize reference audit digest material: {0}")]
     AuditSerialization(serde_json::Error),
 }
@@ -3536,9 +4486,10 @@ mod tests {
         );
         assert!(first.entries[0].frozen_artifact_digest.is_some());
 
-        let mut changed = document.clone();
-        let (_, _, _, _, block) = changed.block_mut(block_id).unwrap();
-        let ReportBlockKind::PlotFigure(figure) = &mut block.kind else {
+        let block = document.block(block_id).unwrap();
+        let block_revision = block.revision();
+        let mut changed_kind = block.kind().clone();
+        let ReportBlockKind::PlotFigure(figure) = &mut changed_kind else {
             unreachable!()
         };
         let ReportReferenceMode::Frozen { artifact, .. } = &mut figure.reference else {
@@ -3549,7 +4500,18 @@ mod tests {
             b"<svg xmlns=\"http://www.w3.org/2000/svg\"><path/></svg>".to_vec(),
         )
         .unwrap();
-        changed.validate().unwrap();
+        let mut changed = document.clone();
+        changed
+            .transact(
+                changed.revision(),
+                vec![ReportEdit::ReplaceBlock {
+                    block_id,
+                    expected_block_revision: block_revision,
+                    kind: changed_kind,
+                }],
+                78,
+            )
+            .unwrap();
         let second = changed
             .audit_references(&ReportReferenceInventory::default())
             .unwrap();
@@ -3591,9 +4553,17 @@ mod tests {
             receipts: Vec::new(),
             tombstones: Vec::new(),
             legacy_origin_entities: Vec::new(),
+            revision_history: ReportRevisionHistory {
+                origin: ReportRevisionHistoryOrigin::Native,
+                records: Vec::new(),
+            },
         };
-        let mut migrated: ReportDocument =
-            serde_json::from_value(serde_json::to_value(&legacy).unwrap()).unwrap();
+        let mut legacy_value = serde_json::to_value(&legacy).unwrap();
+        legacy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("revision_history");
+        let mut migrated: ReportDocument = serde_json::from_value(legacy_value).unwrap();
         assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
         assert_eq!(migrated.legacy_origin_entities.len(), 3);
         migrated
@@ -3607,8 +4577,292 @@ mod tests {
             .unwrap();
 
         let mut unsafe_legacy = serde_json::to_value(&legacy).unwrap();
+        unsafe_legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("revision_history");
         unsafe_legacy["revision"] = serde_json::json!(2);
         assert!(serde_json::from_value::<ReportDocument>(unsafe_legacy).is_err());
+    }
+
+    #[test]
+    fn revision_history_reconstructs_complete_source_at_every_native_revision() {
+        let mut document = ReportDocument::new("Verification report").unwrap();
+        let initial_id = document.revision_history().records()[0].revision_identity();
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::AddPage {
+                    title: "Summary".to_owned(),
+                }],
+                101,
+                "james@example.com",
+                "Add governed report summary page",
+            )
+            .unwrap();
+        document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::SetDocumentTitle {
+                    title: "Release verification".to_owned(),
+                }],
+                102,
+                "james@example.com",
+                "Name the release report",
+            )
+            .unwrap();
+
+        let records = document.revision_history().records();
+        assert_eq!(
+            document.revision_history().origin(),
+            ReportRevisionHistoryOrigin::Native
+        );
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].prior_revision_identity(), None);
+        assert_eq!(records[1].prior_revision_identity(), Some(initial_id));
+        assert_eq!(
+            records[1].prior_record_digest(),
+            Some(records[0].record_digest())
+        );
+        assert_eq!(
+            records[2].prior_revision_identity(),
+            Some(records[1].revision_identity())
+        );
+        assert_eq!(
+            records[2].prior_record_digest(),
+            Some(records[1].record_digest())
+        );
+        assert_eq!(records[1].actor(), "james@example.com");
+        assert_eq!(
+            records[1].revision_note(),
+            "Add governed report summary page"
+        );
+        assert_eq!(records[1].timestamp_unix_ms(), 101);
+        assert!(records[1].snapshot_serialized_bytes() > 0);
+        assert_ne!(records[1].snapshot_digest(), records[2].snapshot_digest());
+
+        let initial = document
+            .reconstruct_revision(document.id(), ObjectRevision::INITIAL)
+            .unwrap();
+        assert_eq!(initial.title(), "Verification report");
+        assert!(initial.pages().is_empty());
+        assert!(initial.receipts().is_empty());
+        assert_eq!(initial.revision_history().records().len(), 1);
+
+        let revision_two = document
+            .reconstruct_revision(document.id(), ObjectRevision::new(2).unwrap())
+            .unwrap();
+        assert_eq!(revision_two.title(), "Verification report");
+        assert_eq!(revision_two.pages().len(), 1);
+        assert_eq!(revision_two.receipts().len(), 1);
+        assert_eq!(revision_two.revision_history().records().len(), 2);
+
+        let wrong_document = ResultDocumentId::new();
+        assert!(
+            document
+                .revision_record(wrong_document, ObjectRevision::INITIAL)
+                .is_none()
+        );
+        assert!(matches!(
+            document.reconstruct_revision(wrong_document, ObjectRevision::INITIAL),
+            Err(ReportError::RevisionNotRetained { .. })
+        ));
+
+        let encoded = serde_json::to_vec(&document).unwrap();
+        let restored: ReportDocument = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(restored, document);
+        assert_eq!(
+            restored.revision_history().records()[2].record_digest(),
+            records[2].record_digest()
+        );
+    }
+
+    #[test]
+    fn revision_history_deserialization_fails_closed_on_snapshot_or_chain_tampering() {
+        let mut document = ReportDocument::new("Audit report").unwrap();
+        document
+            .transact(
+                document.revision(),
+                vec![ReportEdit::AddPage {
+                    title: "Evidence".to_owned(),
+                }],
+                200,
+            )
+            .unwrap();
+        let value = serde_json::to_value(&document).unwrap();
+
+        let mut changed_snapshot = value.clone();
+        changed_snapshot["revision_history"]["records"][1]["snapshot"]["title"] =
+            serde_json::json!("Tampered report");
+        assert!(serde_json::from_value::<ReportDocument>(changed_snapshot).is_err());
+
+        let mut changed_actor = value.clone();
+        changed_actor["revision_history"]["records"][1]["actor"] = serde_json::json!("other-actor");
+        assert!(serde_json::from_value::<ReportDocument>(changed_actor).is_err());
+
+        let mut falsified_origin = value.clone();
+        falsified_origin["revision_history"]["origin"] =
+            serde_json::json!("imported-schema-one-baseline");
+        assert!(serde_json::from_value::<ReportDocument>(falsified_origin).is_err());
+
+        let mut broken_chain = value.clone();
+        broken_chain["revision_history"]["records"][1]["prior_revision_identity"] =
+            serde_json::json!(ReportRevisionId::new());
+        assert!(serde_json::from_value::<ReportDocument>(broken_chain).is_err());
+
+        let mut false_size = value.clone();
+        false_size["revision_history"]["records"][1]["snapshot_serialized_bytes"] =
+            serde_json::json!(1);
+        assert!(serde_json::from_value::<ReportDocument>(false_size).is_err());
+
+        let mut unknown_current_field = value.clone();
+        unknown_current_field["future_history_contract"] = serde_json::json!({"version": 4});
+        assert!(serde_json::from_value::<ReportDocument>(unknown_current_field).is_err());
+
+        let mut missing_history = value;
+        missing_history
+            .as_object_mut()
+            .unwrap()
+            .remove("revision_history");
+        assert!(serde_json::from_value::<ReportDocument>(missing_history).is_err());
+
+        let mut downgraded_with_null_history = serde_json::to_value(&document).unwrap();
+        downgraded_with_null_history["schema_version"] = serde_json::json!(2);
+        downgraded_with_null_history["revision_history"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<ReportDocument>(downgraded_with_null_history).is_err());
+    }
+
+    #[test]
+    fn schema_two_migration_retains_an_explicit_current_source_baseline() {
+        let (document, _, _) = document_with_section();
+        assert_eq!(document.revision().get(), 3);
+        let expected_pages = document.pages().to_vec();
+        let expected_receipts = document.receipts().to_vec();
+        let mut schema_two = serde_json::to_value(&document).unwrap();
+        schema_two["schema_version"] = serde_json::json!(2);
+        schema_two
+            .as_object_mut()
+            .unwrap()
+            .remove("revision_history");
+
+        let first_migration: ReportDocument = serde_json::from_value(schema_two.clone()).unwrap();
+        let second_migration: ReportDocument = serde_json::from_value(schema_two).unwrap();
+        assert_eq!(first_migration, second_migration);
+        assert_eq!(
+            serde_json::to_vec(&first_migration).unwrap(),
+            serde_json::to_vec(&second_migration).unwrap()
+        );
+        let mut migrated = first_migration;
+        assert_eq!(migrated.schema_version(), ReportDocument::SCHEMA_VERSION);
+        assert_eq!(migrated.pages(), expected_pages);
+        assert_eq!(migrated.receipts(), expected_receipts);
+        assert_eq!(
+            migrated.revision_history().origin(),
+            ReportRevisionHistoryOrigin::ImportedSchemaTwoBaseline
+        );
+        assert_eq!(migrated.revision_history().records().len(), 1);
+        assert_eq!(
+            migrated.revision_history().records()[0].revision(),
+            migrated.revision()
+        );
+        assert_eq!(
+            migrated
+                .reconstruct_revision(migrated.id(), migrated.revision())
+                .unwrap()
+                .pages(),
+            expected_pages
+        );
+
+        migrated
+            .transact_with_context(
+                migrated.revision(),
+                vec![ReportEdit::SetDocumentTitle {
+                    title: "Migrated and edited".to_owned(),
+                }],
+                300,
+                "migration-reviewer",
+                "Continue editing from imported baseline",
+            )
+            .unwrap();
+        assert_eq!(migrated.revision_history().records().len(), 2);
+        assert_eq!(
+            migrated.revision_history().records()[1].prior_revision_identity(),
+            Some(migrated.revision_history().records()[0].revision_identity())
+        );
+    }
+
+    #[test]
+    fn revision_history_snapshot_capacity_uses_checked_aggregate_bytes() {
+        assert!(
+            validate_revision_history_snapshot_capacity([
+                MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES / 2,
+                MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES / 2,
+            ])
+            .is_ok()
+        );
+        assert!(matches!(
+            validate_revision_history_snapshot_capacity([
+                MAX_REPORT_REVISION_HISTORY_SNAPSHOT_BYTES,
+                1,
+            ]),
+            Err(ReportError::CapacityExceeded(
+                "report source revision snapshot bytes"
+            ))
+        ));
+        assert!(matches!(
+            validate_revision_history_snapshot_capacity([u64::MAX, 1]),
+            Err(ReportError::CapacityExceeded(
+                "report source revision snapshot bytes"
+            ))
+        ));
+    }
+
+    #[test]
+    fn streaming_snapshot_digest_matches_canonical_json_bytes() {
+        let document = ReportDocument::new("Streaming digest").unwrap();
+        let snapshot = document.current_snapshot();
+        let canonical = serde_json::to_vec(&snapshot).unwrap();
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice-report-source-snapshot-v1\0");
+        hasher.update(&canonical);
+        let (digest, serialized_bytes) = report_snapshot_digest_and_size(&snapshot).unwrap();
+        assert_eq!(serialized_bytes, canonical.len() as u64);
+        assert_eq!(digest, ContentDigest::from_bytes(hasher.finalize().into()));
+    }
+
+    #[test]
+    fn revision_history_sequence_deserializer_enforces_record_limit() {
+        let document = ReportDocument::new("Bounded history").unwrap();
+        let mut value = serde_json::to_value(&document).unwrap();
+        let record = value["revision_history"]["records"][0].clone();
+        value["revision_history"]["records"] =
+            serde_json::Value::Array(vec![record; MAX_REPORT_REVISION_HISTORY_RECORDS + 1]);
+        assert!(serde_json::from_value::<ReportDocument>(value).is_err());
+    }
+
+    #[test]
+    fn revision_context_validation_fails_atomically() {
+        let mut document = ReportDocument::new("Atomic report").unwrap();
+        let before = document.clone();
+        let error = document
+            .transact_with_context(
+                document.revision(),
+                vec![ReportEdit::SetDocumentTitle {
+                    title: "Must not commit".to_owned(),
+                }],
+                400,
+                " ",
+                "Invalid actor must reject the transaction",
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ReportError::InvalidValue {
+                field: "report-revision.actor",
+                ..
+            }
+        ));
+        assert_eq!(document, before);
     }
 
     #[test]

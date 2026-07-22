@@ -1045,6 +1045,14 @@ pub struct ReportAuthoringState {
     #[serde(default)]
     pub selected_page: Option<crate::results::report_document::ReportPageId>,
     #[serde(skip)]
+    pub create_document_open: bool,
+    #[serde(skip)]
+    pub create_document_title: String,
+    #[serde(skip)]
+    pub create_document_template: usize,
+    #[serde(skip)]
+    pub preview_block_page: usize,
+    #[serde(skip)]
     pub add_page_open: bool,
     #[serde(skip)]
     pub add_page_title: String,

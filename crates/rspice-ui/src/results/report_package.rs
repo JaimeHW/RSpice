@@ -18,11 +18,13 @@ use super::report_document::{
     ReportReferenceCurrentness, ReportReferenceMode,
 };
 use super::report_pdfa::{
-    ReportPdfAArtifact, ReportPdfAError, ReportPdfAOptions, serialize_report_pdfa_2b,
+    ReportPdfAArtifact, ReportPdfAError, ReportPdfAOptions,
+    serialize_report_pdfa_2b_with_disclosure,
 };
 use super::report_publication::{
-    ReportPublicationArtifact, ReportPublicationError, ReportPublicationFormat,
-    publish_canonical_json, publish_selected_table_csv, publish_standalone_html,
+    ReportPayloadDisclosure, ReportPublicationArtifact, ReportPublicationError,
+    ReportPublicationFormat, publish_canonical_json, publish_selected_table_csv,
+    publish_standalone_html_with_disclosure,
 };
 
 /// Aggregate byte ceiling for payloads, manifest, and receipt.
@@ -96,10 +98,38 @@ impl ReportPackageWatermark {
                 MAX_WATERMARK_BYTES,
                 ReportPackageError::InvalidWatermark,
             )?;
+            if !label.is_ascii() {
+                return Err(ReportPackageError::InvalidWatermark);
+            }
+            // Custom marks are classifications, not an alternate channel for
+            // declaring publication authority. Restricting the semantic check
+            // to normalized ASCII status vocabulary keeps neutral labels such
+            // as "EXPORT CONTROLLED" available while closing punctuation and
+            // case variants such as "D.R.A.F.T" and "release-approved".
+            let compact = normalized_claim_text(label).replace(' ', "");
+            if RESERVED_CUSTOM_MARK_CLAIMS
+                .iter()
+                .any(|claim| compact.contains(claim))
+            {
+                return Err(ReportPackageError::InvalidWatermark);
+            }
         }
         Ok(())
     }
 }
+
+const RESERVED_CUSTOM_MARK_CLAIMS: [&str; 10] = [
+    "draft",
+    "review",
+    "release",
+    "approved",
+    "approval",
+    "candidate",
+    "signoff",
+    "final",
+    "preliminary",
+    "pending",
+];
 
 /// Governed package gate represented in the authenticated manifest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -107,6 +137,9 @@ impl ReportPackageWatermark {
 pub enum ReportPublicationGate {
     EngineeringReview,
     SignOffCandidate,
+    /// Reserved for Release Closure. `publish_report_package` rejects this
+    /// caller-selected value until an authenticated release-authority proof is
+    /// part of its inputs.
     Released,
 }
 
@@ -140,7 +173,8 @@ impl ReportGateDisclosure {
             &self.statement,
             MAX_GATE_DISCLOSURE_BYTES,
             ReportPackageError::InvalidGateDisclosure,
-        )
+        )?;
+        validate_gate_statement(self.gate, &self.statement)
     }
 
     #[must_use]
@@ -156,10 +190,9 @@ impl ReportGateDisclosure {
 
 /// Deterministic package policy bound into the manifest.
 ///
-/// `watermark` is a cryptographically bound package-classification mark. It
-/// does not claim that every heterogeneous payload format contains a visual
-/// overlay; consumers must display the manifest mark when presenting the
-/// package as a governed set.
+/// `watermark` is a cryptographically bound package-classification mark. HTML
+/// and PDF/A payloads also carry the gate disclosure and mark visibly so those
+/// human-readable files remain unambiguous when detached from the manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReportPublicationProfile {
     name: String,
@@ -233,6 +266,28 @@ impl ReportPublicationProfile {
     #[must_use]
     pub fn revision_note(&self) -> &str {
         &self.revision_note
+    }
+
+    fn payload_disclosure(&self) -> ReportPayloadDisclosure {
+        let (gate_label, released) = match self.gate_disclosure.gate {
+            ReportPublicationGate::EngineeringReview => {
+                ("ENGINEERING REVIEW - NOT RELEASED", false)
+            }
+            ReportPublicationGate::SignOffCandidate => ("SIGN-OFF CANDIDATE - NOT RELEASED", false),
+            ReportPublicationGate::Released => ("RELEASED", true),
+        };
+        let package_mark = match &self.watermark {
+            ReportPackageWatermark::None => None,
+            ReportPackageWatermark::Draft => Some("DRAFT".to_owned()),
+            ReportPackageWatermark::Confidential => Some("CONFIDENTIAL".to_owned()),
+            ReportPackageWatermark::Custom(label) => Some(label.clone()),
+        };
+        ReportPayloadDisclosure::new(
+            gate_label,
+            self.gate_disclosure.statement.clone(),
+            package_mark,
+            released,
+        )
     }
 }
 
@@ -689,6 +744,7 @@ pub fn publish_report_package(
     profile.validate()?;
     validate_reference_audit(document, reference_audit)?;
     validate_gate(profile, reference_audit)?;
+    let payload_disclosure = profile.payload_disclosure();
     match (profile.formats.pdfa_2b, pdfa_options) {
         (true, None) => return Err(ReportPackageError::MissingPdfAOptions),
         (false, Some(_)) => return Err(ReportPackageError::UnexpectedPdfAOptions),
@@ -699,16 +755,17 @@ pub fn publish_report_package(
     // stable package contract, independent of caller selection order.
     let mut payloads = Vec::new();
     if profile.formats.pdfa_2b {
-        let pdf = serialize_report_pdfa_2b(
+        let pdf = serialize_report_pdfa_2b_with_disclosure(
             document,
             pdfa_options.ok_or(ReportPackageError::MissingPdfAOptions)?,
+            &payload_disclosure,
         )?;
         payloads.push(ReportPackageFile::from_pdfa(document, pdf)?);
     }
     if profile.formats.standalone_html {
         payloads.push(ReportPackageFile::from_standard(
             ReportPackageFileKind::StandaloneHtml,
-            publish_standalone_html(document)?,
+            publish_standalone_html_with_disclosure(document, &payload_disclosure)?,
         )?);
     }
     if profile.formats.canonical_json {
@@ -933,6 +990,12 @@ fn validate_gate(
     profile: &ReportPublicationProfile,
     audit: &ReportReferenceAudit,
 ) -> Result<(), ReportPackageError> {
+    if profile.gate_disclosure.gate == ReportPublicationGate::Released {
+        // This package layer has no authenticated Release Closure authority
+        // input. A caller-selected enum is not sufficient proof to mint a
+        // detached artifact that visibly claims RELEASED status.
+        return Err(ReportPackageError::ReleasedGateRequiresAuthenticatedAuthority);
+    }
     if profile.gate_disclosure.gate.requires_current_references()
         && !audit.is_current_for_sign_off()
     {
@@ -1057,6 +1120,134 @@ fn validate_text(
     Ok(())
 }
 
+fn validate_gate_statement(
+    gate: ReportPublicationGate,
+    statement: &str,
+) -> Result<(), ReportPackageError> {
+    // Publication authority statements are machine-governed contract text.
+    // Restricting them to ASCII prevents visually confusable Unicode status
+    // claims from bypassing the authenticated gate vocabulary.
+    if !statement.is_ascii() {
+        return Err(ReportPackageError::InvalidGateDisclosure);
+    }
+    let normalized = normalized_claim_text(statement);
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    let obfuscated_status_claim = ["released", "approved"]
+        .iter()
+        .any(|claim| contains_obfuscated_claim(&normalized, &tokens, claim));
+    let invalid = match gate {
+        ReportPublicationGate::Released => {
+            obfuscated_status_claim
+                || contains_any_token(
+                    &tokens,
+                    &[
+                        "draft",
+                        "candidate",
+                        "unapproved",
+                        "unreleased",
+                        "preliminary",
+                    ],
+                )
+                || contains_phrase(&tokens, &["review", "only"])
+                || contains_negated_claim(&tokens, "released")
+                || contains_negated_claim(&tokens, "approved")
+                || contains_phrase(&tokens, &["pending", "release"])
+                || contains_phrase(&tokens, &["pending", "approval"])
+                || contains_phrase(&tokens, &["approval", "pending"])
+                || contains_phrase(&tokens, &["not", "release", "approved"])
+                || contains_phrase(&tokens, &["not", "for", "release"])
+                || contains_phrase(&tokens, &["non", "release"])
+                || contains_phrase(&tokens, &["pre", "release"])
+        }
+        ReportPublicationGate::EngineeringReview | ReportPublicationGate::SignOffCandidate => {
+            obfuscated_status_claim
+                || contains_unnegated_claim(&tokens, "released")
+                || contains_unnegated_claim(&tokens, "approved")
+                || contains_phrase(&tokens, &["final", "release"])
+                || contains_phrase(&tokens, &["official", "release"])
+                || contains_phrase(&tokens, &["release", "complete"])
+                || contains_phrase(&tokens, &["release", "completed"])
+                || contains_phrase(&tokens, &["release", "approval", "complete"])
+                || contains_phrase(&tokens, &["release", "approval", "completed"])
+        }
+    };
+    if invalid {
+        Err(ReportPackageError::InvalidGateDisclosure)
+    } else {
+        Ok(())
+    }
+}
+
+fn normalized_claim_text(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    let mut previous_was_separator = true;
+    for character in value.chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() {
+            normalized.push(character);
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            normalized.push(' ');
+            previous_was_separator = true;
+        }
+    }
+    if normalized.ends_with(' ') {
+        normalized.pop();
+    }
+    normalized
+}
+
+fn contains_any_token(tokens: &[&str], claims: &[&str]) -> bool {
+    tokens.iter().any(|token| claims.contains(token))
+}
+
+fn contains_phrase(tokens: &[&str], phrase: &[&str]) -> bool {
+    tokens.windows(phrase.len()).any(|window| window == phrase)
+}
+
+fn contains_obfuscated_claim(normalized: &str, tokens: &[&str], claim: &str) -> bool {
+    normalized.replace(' ', "").contains(claim) && !tokens.contains(&claim)
+}
+
+fn contains_unnegated_claim(tokens: &[&str], claim: &str) -> bool {
+    tokens
+        .iter()
+        .enumerate()
+        .any(|(index, token)| *token == claim && !claim_is_negated(tokens, index))
+}
+
+fn contains_negated_claim(tokens: &[&str], claim: &str) -> bool {
+    tokens
+        .iter()
+        .enumerate()
+        .any(|(index, token)| *token == claim && claim_is_negated(tokens, index))
+}
+
+fn claim_is_negated(tokens: &[&str], claim_index: usize) -> bool {
+    const NEGATORS: [&str; 4] = ["not", "no", "never", "without"];
+    const MODIFIERS: [&str; 7] = [
+        "a",
+        "an",
+        "yet",
+        "currently",
+        "formally",
+        "fully",
+        "officially",
+    ];
+    for distance in 1..=3 {
+        let Some(negator_index) = claim_index.checked_sub(distance) else {
+            break;
+        };
+        if NEGATORS.contains(&tokens[negator_index])
+            && tokens[negator_index + 1..claim_index]
+                .iter()
+                .all(|token| MODIFIERS.contains(token))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn sha256(bytes: &[u8]) -> ContentDigest {
     ContentDigest::from_bytes(Sha256::digest(bytes).into())
 }
@@ -1085,6 +1276,10 @@ pub enum ReportPackageError {
     InvalidRevisionNote,
     #[error("a draft watermark is incompatible with a sign-off or released package")]
     DraftWatermarkAtSignOff,
+    #[error(
+        "released report packages require authenticated Release Closure authority, which this publication layer does not accept"
+    )]
+    ReleasedGateRequiresAuthenticatedAuthority,
     #[error("PDF/A-2b was requested without exact publication options")]
     MissingPdfAOptions,
     #[error("PDF/A options were supplied even though PDF/A-2b was not requested")]
@@ -1137,6 +1332,8 @@ pub enum ReportPackageError {
 
 #[cfg(test)]
 mod tests {
+    use lopdf::Document as ParsedPdf;
+
     use super::*;
     use crate::product::{DatasetBinding, DatasetId};
     use crate::results::report_document::{
@@ -1424,6 +1621,99 @@ mod tests {
     }
 
     #[test]
+    fn review_gate_and_package_mark_remain_visible_in_detached_html_and_pdf() {
+        let report = simple_report();
+        let audit = report
+            .audit_references(&ReportReferenceInventory::default())
+            .unwrap();
+        let selection = ReportPackageFormatSelection {
+            pdfa_2b: true,
+            standalone_html: true,
+            canonical_json: false,
+            selected_table_csv: None,
+        };
+        let profile = ReportPublicationProfile::new(
+            "Engineering review",
+            selection,
+            ReportPackageWatermark::Confidential,
+            ReportGateDisclosure::new(
+                ReportPublicationGate::EngineeringReview,
+                "Engineering review package; not an approved release record.",
+            )
+            .unwrap(),
+            "Review issue",
+        )
+        .unwrap();
+        let options =
+            ReportPdfAOptions::new(ReportPublicationDate::new(2026, 7, 17, 14, 30, 0).unwrap());
+
+        let package = publish_report_package(&report, &audit, &profile, Some(&options)).unwrap();
+        let repeated = publish_report_package(&report, &audit, &profile, Some(&options)).unwrap();
+        assert_eq!(package, repeated);
+
+        let html_file = package
+            .payloads()
+            .iter()
+            .find(|file| matches!(file.kind(), ReportPackageFileKind::StandaloneHtml))
+            .unwrap();
+        let html = std::str::from_utf8(html_file.bytes()).unwrap();
+        assert!(html.contains("publication-disclosure not-released"));
+        assert!(html.contains("ENGINEERING REVIEW - NOT RELEASED"));
+        assert!(html.contains("Package mark: <strong>CONFIDENTIAL</strong>"));
+        assert!(html.contains("Engineering review package; not an approved release record."));
+        assert!(
+            html.contains("Publication status: <strong>ENGINEERING REVIEW - NOT RELEASED</strong>")
+        );
+
+        let pdf_file = package
+            .payloads()
+            .iter()
+            .find(|file| matches!(file.kind(), ReportPackageFileKind::PdfA2b))
+            .unwrap();
+        let parsed = ParsedPdf::load_mem(pdf_file.bytes()).unwrap();
+        let text = parsed
+            .extract_text(&parsed.get_pages().keys().copied().collect::<Vec<_>>())
+            .unwrap();
+        assert!(text.contains("ENGINEERING REVIEW - NOT RELEASED"), "{text}");
+        assert!(text.contains("Package mark: CONFIDENTIAL"), "{text}");
+        assert!(
+            text.contains("Engineering review package; not an approved release record."),
+            "{text}"
+        );
+        for page_number in parsed.get_pages().keys() {
+            let page_text = parsed.extract_text(&[*page_number]).unwrap();
+            assert!(
+                page_text.contains("ENGINEERING REVIEW - NOT RELEASED"),
+                "detached PDF page {page_number} omitted the non-release gate: {page_text}"
+            );
+        }
+    }
+
+    #[test]
+    fn released_gate_fails_closed_without_authenticated_release_authority() {
+        let report = simple_report();
+        let audit = report
+            .audit_references(&ReportReferenceInventory::default())
+            .unwrap();
+        let profile = ReportPublicationProfile::new(
+            "Approved release",
+            formats(true, true),
+            ReportPackageWatermark::Confidential,
+            ReportGateDisclosure::new(
+                ReportPublicationGate::Released,
+                "Approved release publication.",
+            )
+            .unwrap(),
+            "Approved release issue",
+        )
+        .unwrap();
+        assert!(matches!(
+            publish_report_package(&report, &audit, &profile, None),
+            Err(ReportPackageError::ReleasedGateRequiresAuthenticatedAuthority)
+        ));
+    }
+
+    #[test]
     fn format_options_and_gate_profile_cannot_be_ambiguous() {
         let report = simple_report();
         let audit = report
@@ -1483,6 +1773,88 @@ mod tests {
             ),
             Err(ReportPackageError::DraftWatermarkAtSignOff)
         ));
+    }
+
+    #[test]
+    fn custom_marks_and_disclosures_cannot_smuggle_gate_claims() {
+        let review_disclosure = || {
+            ReportGateDisclosure::new(
+                ReportPublicationGate::EngineeringReview,
+                "Engineering review package; not an approved release record.",
+            )
+            .unwrap()
+        };
+        for mark in [
+            "DRAFT",
+            "d.r.a.f.t",
+            "ＤＲＡＦＴ",
+            "NOT-RELEASED",
+            "release_approved",
+            "SIGN-OFF CANDIDATE",
+            "Final",
+            "Review copy",
+        ] {
+            assert!(matches!(
+                ReportPublicationProfile::new(
+                    "Unsafe custom mark",
+                    formats(true, false),
+                    ReportPackageWatermark::Custom(mark.to_owned()),
+                    review_disclosure(),
+                    "Review issue",
+                ),
+                Err(ReportPackageError::InvalidWatermark)
+            ));
+        }
+        assert!(
+            ReportPublicationProfile::new(
+                "Neutral custom mark",
+                formats(true, false),
+                ReportPackageWatermark::Custom("EXPORT CONTROLLED".to_owned()),
+                review_disclosure(),
+                "Review issue",
+            )
+            .is_ok()
+        );
+
+        for statement in [
+            "Approved for release.",
+            "ＡＰＰＲＯＶＥＤ for release.",
+            "APP.ROVED for release.",
+            "The package was RELEASED.",
+            "Final release record.",
+            "Release approval complete.",
+        ] {
+            assert!(matches!(
+                ReportGateDisclosure::new(ReportPublicationGate::EngineeringReview, statement),
+                Err(ReportPackageError::InvalidGateDisclosure)
+            ));
+        }
+        for statement in [
+            "Draft package.",
+            "This is not an approved release.",
+            "This is not re-leased.",
+            "Release approval pending.",
+            "Engineering review only.",
+        ] {
+            assert!(matches!(
+                ReportGateDisclosure::new(ReportPublicationGate::Released, statement),
+                Err(ReportPackageError::InvalidGateDisclosure)
+            ));
+        }
+        assert!(
+            ReportGateDisclosure::new(
+                ReportPublicationGate::SignOffCandidate,
+                "Sign-off candidate; not yet released and not formally approved.",
+            )
+            .is_ok()
+        );
+        assert!(
+            ReportGateDisclosure::new(
+                ReportPublicationGate::Released,
+                "Released after completed engineering review and approval.",
+            )
+            .is_ok()
+        );
     }
 
     #[test]

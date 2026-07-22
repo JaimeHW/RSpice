@@ -36,6 +36,58 @@ pub const MAX_REPORT_CSV_BUNDLE_BYTES: usize = 64 * 1_048_576;
 /// Maximum number of tables accepted by one CSV publication request.
 pub const MAX_REPORT_CSV_TABLES: usize = 1_024;
 
+/// Visible governance state embedded in human-readable package payloads.
+///
+/// This is deliberately package-owned input rather than report-document state:
+/// the same immutable report revision may be published through different
+/// governed gates. Keeping the exact disclosure in each human-readable payload
+/// prevents a detached HTML or PDF file from being mistaken for a released
+/// record after it is separated from its authenticated package manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReportPayloadDisclosure {
+    gate_label: &'static str,
+    statement: String,
+    package_mark: Option<String>,
+    released: bool,
+}
+
+impl ReportPayloadDisclosure {
+    #[must_use]
+    pub(crate) fn new(
+        gate_label: &'static str,
+        statement: impl Into<String>,
+        package_mark: Option<String>,
+        released: bool,
+    ) -> Self {
+        Self {
+            gate_label,
+            statement: statement.into(),
+            package_mark,
+            released,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn gate_label(&self) -> &'static str {
+        self.gate_label
+    }
+
+    #[must_use]
+    pub(crate) fn statement(&self) -> &str {
+        &self.statement
+    }
+
+    #[must_use]
+    pub(crate) fn package_mark(&self) -> Option<&str> {
+        self.package_mark.as_deref()
+    }
+
+    #[must_use]
+    pub(crate) const fn is_released(&self) -> bool {
+        self.released
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportPublicationFormat {
     CanonicalJson,
@@ -230,9 +282,23 @@ pub fn publish_canonical_json(
 pub fn publish_standalone_html(
     document: &ReportDocument,
 ) -> Result<ReportPublicationArtifact, ReportPublicationError> {
+    publish_standalone_html_impl(document, None)
+}
+
+pub(crate) fn publish_standalone_html_with_disclosure(
+    document: &ReportDocument,
+    disclosure: &ReportPayloadDisclosure,
+) -> Result<ReportPublicationArtifact, ReportPublicationError> {
+    publish_standalone_html_impl(document, Some(disclosure))
+}
+
+fn publish_standalone_html_impl(
+    document: &ReportDocument,
+    disclosure: Option<&ReportPayloadDisclosure>,
+) -> Result<ReportPublicationArtifact, ReportPublicationError> {
     document.validate()?;
     let mut html = HtmlWriter::new(MAX_REPORT_ARTIFACT_BYTES);
-    render_html_document(&mut html, document)?;
+    render_html_document(&mut html, document, disclosure)?;
     let bytes = html.finish()?;
     ReportPublicationArtifact::new(
         ReportPublicationFormat::StandaloneHtml,
@@ -404,6 +470,7 @@ fn write_csv_field(writer: &mut BoundedWriter, value: &str) -> Result<(), Report
 fn render_html_document(
     html: &mut HtmlWriter,
     document: &ReportDocument,
+    disclosure: Option<&ReportPayloadDisclosure>,
 ) -> Result<(), ReportPublicationError> {
     html.raw("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")?;
     html.raw("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")?;
@@ -412,9 +479,11 @@ fn render_html_document(
     html.text(document.title())?;
     html.raw(" · RSpice report</title><style>")?;
     html.raw(HTML_STYLE)?;
-    html.raw(
-        "</style></head><body><header><p class=\"eyebrow\">RSPICE ENGINEERING REPORT</p><h1>",
-    )?;
+    html.raw("</style></head><body>")?;
+    if let Some(disclosure) = disclosure {
+        render_html_disclosure(html, disclosure)?;
+    }
+    html.raw("<header><p class=\"eyebrow\">RSPICE ENGINEERING REPORT</p><h1>")?;
     html.text(document.title())?;
     html.raw("</h1><dl class=\"metadata\"><div><dt>Document</dt><dd><code>")?;
     html.text(&document.id().to_string())?;
@@ -466,7 +535,37 @@ fn render_html_document(
     html.text(&document.id().to_string())?;
     html.raw("</code>, revision ")?;
     html.text(&document.revision().get().to_string())?;
-    html.raw(".</p></footer></body></html>")
+    html.raw(".</p>")?;
+    if let Some(disclosure) = disclosure {
+        html.raw("<p class=\"publication-footer-status\">Publication status: <strong>")?;
+        html.text(disclosure.gate_label())?;
+        html.raw("</strong></p>")?;
+    }
+    html.raw("</footer></body></html>")
+}
+
+fn render_html_disclosure(
+    html: &mut HtmlWriter,
+    disclosure: &ReportPayloadDisclosure,
+) -> Result<(), ReportPublicationError> {
+    let state_class = if disclosure.is_released() {
+        "released"
+    } else {
+        "not-released"
+    };
+    html.raw("<aside class=\"publication-disclosure ")?;
+    html.attr(state_class)?;
+    html.raw("\" role=\"note\" aria-label=\"Publication status\"><p class=\"publication-gate\">")?;
+    html.text(disclosure.gate_label())?;
+    html.raw("</p>")?;
+    if let Some(package_mark) = disclosure.package_mark() {
+        html.raw("<p class=\"publication-mark\">Package mark: <strong>")?;
+        html.text(package_mark)?;
+        html.raw("</strong></p>")?;
+    }
+    html.raw("<p class=\"publication-statement\">")?;
+    html.text(disclosure.statement())?;
+    html.raw("</p></aside>")
 }
 
 fn render_html_block(
@@ -821,7 +920,7 @@ const fn review_status_label(status: ReviewNoteStatus) -> &'static str {
     }
 }
 
-const HTML_STYLE: &str = r#":root{color-scheme:light;--ink:#172129;--muted:#52606a;--line:#c9d0d5;--panel:#f4f6f7;--accent:#a86f00}*{box-sizing:border-box}body{max-width:1120px;margin:0 auto;padding:2rem;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:#fff}header,footer,main{width:100%}h1,h2,h3,h4{line-height:1.2}.eyebrow,.page-number,.content-label{font-size:.75rem;font-weight:700;letter-spacing:.08em;color:var(--muted)}.metadata,.reference-metadata,.datasheet{display:grid;gap:.35rem}.metadata>div,.reference-metadata>div,.datasheet>div{display:grid;grid-template-columns:minmax(10rem,15rem) 1fr;gap:1rem}.metadata dt,.reference-metadata dt,.datasheet dt{font-weight:600;color:var(--muted)}dd{margin:0}.report-page{margin:2rem 0;padding:1.5rem;border:1px solid var(--line);break-after:page}.report-page:last-child{break-after:auto}.policy,.empty,.not-provided,.unit,.sizing,.timestamp{color:var(--muted)}section{margin-top:1.5rem}.report-block{margin:1rem 0;padding:1rem;border-left:3px solid var(--line);background:var(--panel)}table{width:100%;border-collapse:collapse;background:#fff}caption{text-align:left;font-weight:700;padding:.5rem 0}th,td{padding:.55rem;text-align:left;vertical-align:top;border:1px solid var(--line)}.table-scroll{overflow-x:auto}.reference,.review-note{margin-top:1rem;padding:.75rem;border:1px solid var(--line);background:#fff}.reference-status{margin-top:0}.linked strong{color:#7b5700}.frozen strong{color:#17653a}.bindings{overflow-wrap:anywhere}.embedded-artifact{overflow-wrap:anywhere}.prose pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.prose-warning{border-left:3px solid #b2382f;padding-left:.75rem}.alternative-text{padding:2rem;border:1px dashed var(--line);background:#fff}.figure-content img{display:block;max-width:100%;height:auto}code{overflow-wrap:anywhere}footer{padding-top:1rem;border-top:1px solid var(--line);color:var(--muted)}@media(max-width:640px){body{padding:.75rem}.report-page{padding:.85rem}.metadata>div,.reference-metadata>div,.datasheet>div{grid-template-columns:1fr;gap:0}}@media print{body{max-width:none;padding:0}.report-page{border:0;padding:0}.embedded-artifact{display:none}}"#;
+const HTML_STYLE: &str = r#":root{color-scheme:light;--ink:#172129;--muted:#52606a;--line:#c9d0d5;--panel:#f4f6f7;--accent:#a86f00;--danger:#8c211b;--danger-bg:#fff0ee;--release:#17653a;--release-bg:#edf8f1}*{box-sizing:border-box}body{max-width:1120px;margin:0 auto;padding:2rem;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:#fff}header,footer,main{width:100%}h1,h2,h3,h4{line-height:1.2}.publication-disclosure{margin:0 0 1.5rem;padding:1rem 1.25rem;border:3px solid}.publication-disclosure.not-released{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}.publication-disclosure.released{color:var(--release);border-color:var(--release);background:var(--release-bg)}.publication-gate{margin:0;font-size:1.1rem;font-weight:800;letter-spacing:.08em}.publication-mark,.publication-statement{margin:.35rem 0 0}.publication-footer-status{color:var(--ink)}.eyebrow,.page-number,.content-label{font-size:.75rem;font-weight:700;letter-spacing:.08em;color:var(--muted)}.metadata,.reference-metadata,.datasheet{display:grid;gap:.35rem}.metadata>div,.reference-metadata>div,.datasheet>div{display:grid;grid-template-columns:minmax(10rem,15rem) 1fr;gap:1rem}.metadata dt,.reference-metadata dt,.datasheet dt{font-weight:600;color:var(--muted)}dd{margin:0}.report-page{margin:2rem 0;padding:1.5rem;border:1px solid var(--line);break-after:page}.report-page:last-child{break-after:auto}.policy,.empty,.not-provided,.unit,.sizing,.timestamp{color:var(--muted)}section{margin-top:1.5rem}.report-block{margin:1rem 0;padding:1rem;border-left:3px solid var(--line);background:var(--panel)}table{width:100%;border-collapse:collapse;background:#fff}caption{text-align:left;font-weight:700;padding:.5rem 0}th,td{padding:.55rem;text-align:left;vertical-align:top;border:1px solid var(--line)}.table-scroll{overflow-x:auto}.reference,.review-note{margin-top:1rem;padding:.75rem;border:1px solid var(--line);background:#fff}.reference-status{margin-top:0}.linked strong{color:#7b5700}.frozen strong{color:#17653a}.bindings{overflow-wrap:anywhere}.embedded-artifact{overflow-wrap:anywhere}.prose pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.prose-warning{border-left:3px solid #b2382f;padding-left:.75rem}.alternative-text{padding:2rem;border:1px dashed var(--line);background:#fff}.figure-content img{display:block;max-width:100%;height:auto}code{overflow-wrap:anywhere}footer{padding-top:1rem;border-top:1px solid var(--line);color:var(--muted)}@media(max-width:640px){body{padding:.75rem}.report-page{padding:.85rem}.metadata>div,.reference-metadata>div,.datasheet>div{grid-template-columns:1fr;gap:0}}@media print{body{max-width:none;padding:0}.publication-disclosure{break-inside:avoid}.report-page{border:0;padding:0}.embedded-artifact{display:none}}"#;
 
 #[derive(Debug)]
 struct BoundedWriter {
@@ -1073,8 +1172,11 @@ mod tests {
 
     #[test]
     fn canonical_json_matches_stable_fixture_and_round_trips() {
-        let fixture = r#"{"schema_version":2,"id":"8e125f25-73b3-4b13-9d50-77c66f9b6a9a","revision":1,"title":"Fixture report","template":"release-verification42","pages":[],"receipts":[],"tombstones":[],"legacy_origin_entities":[]}"#;
-        let report: ReportDocument = serde_json::from_str(fixture).unwrap();
+        let legacy_fixture = r#"{"schema_version":2,"id":"8e125f25-73b3-4b13-9d50-77c66f9b6a9a","revision":1,"title":"Fixture report","template":"release-verification42","pages":[],"receipts":[],"tombstones":[],"legacy_origin_entities":[]}"#;
+        let fixture = r#"{"schema_version":3,"id":"8e125f25-73b3-4b13-9d50-77c66f9b6a9a","revision":1,"title":"Fixture report","template":"release-verification42","pages":[],"receipts":[],"tombstones":[],"legacy_origin_entities":[],"revision_history":{"origin":"imported-schema-two-baseline","records":[{"revision_identity":"0c1f79ab-46d0-582f-937f-3380ab5d817e","document_id":"8e125f25-73b3-4b13-9d50-77c66f9b6a9a","revision":1,"prior_revision_identity":null,"prior_record_digest":null,"timestamp_unix_ms":0,"actor":"rspice-schema-migration","revision_note":"Import schema 2 report source baseline","snapshot_serialized_bytes":197,"snapshot_digest":"b9200e2511325c6fe2418d287a9a7515b10b19cd5a4a5dcbdcae23ffc9e7fd81","record_digest":"2c2a6b4607f13b8f1db052cf61ed53d1ba048e01a88d14695af884b46898f535","snapshot":{"document_id":"8e125f25-73b3-4b13-9d50-77c66f9b6a9a","revision":1,"title":"Fixture report","template":"release-verification42","pages":[],"receipts":[],"tombstones":[],"legacy_origin_entities":[]}}]}}"#;
+        let report: ReportDocument = serde_json::from_str(legacy_fixture).unwrap();
+        let repeated: ReportDocument = serde_json::from_str(legacy_fixture).unwrap();
+        assert_eq!(report, repeated, "legacy migration must be deterministic");
         let artifact = publish_canonical_json(&report).unwrap();
 
         assert_eq!(artifact.bytes(), fixture.as_bytes());

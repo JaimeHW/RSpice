@@ -23,6 +23,7 @@ use super::report_document::{
     ReportPage, ReportReferenceMode, ReportSourceId, RequirementDisposition, ReviewNoteStatus,
     SpecificationDisposition, TableCell,
 };
+use super::report_publication::ReportPayloadDisclosure;
 use crate::product::{ContentDigest, ObjectRevision};
 
 const PAGE_WIDTH: f32 = 595.28;
@@ -236,11 +237,27 @@ pub fn serialize_report_pdfa_2b(
     report: &ReportDocument,
     options: &ReportPdfAOptions,
 ) -> Result<ReportPdfAArtifact, ReportPdfAError> {
+    serialize_report_pdfa_2b_impl(report, options, None)
+}
+
+pub(crate) fn serialize_report_pdfa_2b_with_disclosure(
+    report: &ReportDocument,
+    options: &ReportPdfAOptions,
+    disclosure: &ReportPayloadDisclosure,
+) -> Result<ReportPdfAArtifact, ReportPdfAError> {
+    serialize_report_pdfa_2b_impl(report, options, Some(disclosure))
+}
+
+fn serialize_report_pdfa_2b_impl(
+    report: &ReportDocument,
+    options: &ReportPdfAOptions,
+    disclosure: Option<&ReportPayloadDisclosure>,
+) -> Result<ReportPdfAArtifact, ReportPdfAError> {
     report
         .validate()
         .map_err(|error| ReportPdfAError::InvalidReport(error.to_string()))?;
     options.validate()?;
-    preflight(report)?;
+    preflight(report, disclosure)?;
 
     let configuration = ConfigurationBuilder::new()
         .with_archival_validator(Archival::A2_B)
@@ -262,11 +279,19 @@ pub fn serialize_report_pdfa_2b(
     let mut document = Document::new_with(settings);
     let mut metadata = Metadata::new()
         .title(report.title().to_owned())
-        .description(format!(
-            "RSpice governed engineering report, document {} revision {}",
-            report.id(),
-            report.revision().get()
-        ))
+        .description(match disclosure {
+            Some(disclosure) => format!(
+                "RSpice governed engineering report, document {} revision {}; publication status: {}",
+                report.id(),
+                report.revision().get(),
+                disclosure.gate_label()
+            ),
+            None => format!(
+                "RSpice governed engineering report, document {} revision {}",
+                report.id(),
+                report.revision().get()
+            ),
+        })
         .creator("RSpice Report Composer".to_owned())
         .producer("RSpice standards-enforced PDF/A writer".to_owned())
         .document_id(format!("rspice-report-{}", report.id()))
@@ -285,6 +310,7 @@ pub fn serialize_report_pdfa_2b(
             page_settings,
             report.title(),
             options.publication_date,
+            disclosure,
         );
         render_cover(&mut paginator, report);
         for page in report.pages() {
@@ -302,9 +328,19 @@ pub fn serialize_report_pdfa_2b(
     Ok(ReportPdfAArtifact { bytes, digest })
 }
 
-fn preflight(report: &ReportDocument) -> Result<(), ReportPdfAError> {
+fn preflight(
+    report: &ReportDocument,
+    disclosure: Option<&ReportPayloadDisclosure>,
+) -> Result<(), ReportPdfAError> {
     let mut workload = PublicationWorkload::default();
     workload.add_text(report.title())?;
+    if let Some(disclosure) = disclosure {
+        workload.add_text(disclosure.gate_label())?;
+        workload.add_text(disclosure.statement())?;
+        if let Some(package_mark) = disclosure.package_mark() {
+            workload.add_text(package_mark)?;
+        }
+    }
     for page in report.pages() {
         workload.add_text(page.title())?;
         for section in page.sections() {
@@ -518,6 +554,8 @@ enum LineStyle {
     Detail,
     Mono,
     Warning,
+    ReviewGate,
+    Released,
 }
 
 impl LineStyle {
@@ -526,7 +564,7 @@ impl LineStyle {
             Self::Title => 22.0,
             Self::PageTitle => 15.0,
             Self::Section => 10.5,
-            Self::Body | Self::Warning => 9.0,
+            Self::Body | Self::Warning | Self::ReviewGate | Self::Released => 9.0,
             Self::Detail | Self::Mono => 7.6,
         }
     }
@@ -536,7 +574,7 @@ impl LineStyle {
             Self::Title => 30.0,
             Self::PageTitle => 23.0,
             Self::Section => 17.0,
-            Self::Body | Self::Warning => 13.5,
+            Self::Body | Self::Warning | Self::ReviewGate | Self::Released => 13.5,
             Self::Detail | Self::Mono => 11.5,
         }
     }
@@ -586,6 +624,7 @@ struct Paginator<'a> {
     report_title: &'a str,
     logical_page_title: String,
     publication_date: ReportPublicationDate,
+    disclosure: Option<ReportPayloadDisclosure>,
     lines: Vec<PlacedLine>,
     images: Vec<PlacedImage>,
     next_y: f32,
@@ -599,6 +638,7 @@ impl<'a> Paginator<'a> {
         page_settings: PageSettings,
         report_title: &'a str,
         publication_date: ReportPublicationDate,
+        disclosure: Option<&ReportPayloadDisclosure>,
     ) -> Self {
         Self {
             document,
@@ -607,6 +647,7 @@ impl<'a> Paginator<'a> {
             report_title,
             logical_page_title: "Cover".to_owned(),
             publication_date,
+            disclosure: disclosure.cloned(),
             lines: Vec::new(),
             images: Vec::new(),
             next_y: BODY_TOP,
@@ -700,6 +741,8 @@ impl<'a> Paginator<'a> {
                 }
                 LineStyle::Mono => (&self.fonts.mono, Ink::Text),
                 LineStyle::Warning => (&self.fonts.regular, Ink::Warning),
+                LineStyle::ReviewGate => (&self.fonts.semibold, Ink::Warning),
+                LineStyle::Released => (&self.fonts.semibold, Ink::Released),
                 LineStyle::Body | LineStyle::Detail => (&self.fonts.regular, Ink::Text),
             };
             draw_text(
@@ -710,6 +753,21 @@ impl<'a> Paginator<'a> {
                 line.y,
                 &line.text,
                 ink,
+            );
+        }
+        if let Some(disclosure) = &self.disclosure {
+            draw_text(
+                &mut surface,
+                &self.fonts.semibold,
+                7.4,
+                MARGIN_X,
+                811.0,
+                disclosure.gate_label(),
+                if disclosure.is_released() {
+                    Ink::Released
+                } else {
+                    Ink::Warning
+                },
             );
         }
         draw_text(
@@ -770,6 +828,21 @@ fn render_cover(paginator: &mut Paginator<'_>, report: &ReportDocument) {
         &format!("Report pages: {}", report.pages().len()),
         LineStyle::Detail,
     );
+    if let Some(disclosure) = paginator.disclosure.clone() {
+        paginator.spacer(12.0);
+        paginator.emit(
+            disclosure.gate_label(),
+            if disclosure.is_released() {
+                LineStyle::Released
+            } else {
+                LineStyle::ReviewGate
+            },
+        );
+        if let Some(package_mark) = disclosure.package_mark() {
+            paginator.emit(&format!("Package mark: {package_mark}"), LineStyle::Section);
+        }
+        paginator.emit(disclosure.statement(), LineStyle::Body);
+    }
 }
 
 fn render_report_page(
@@ -1135,6 +1208,7 @@ enum Ink {
     Text,
     Muted,
     Warning,
+    Released,
 }
 
 impl Ink {
@@ -1143,6 +1217,7 @@ impl Ink {
             Self::Text => rgb::Color::new(25, 32, 38),
             Self::Muted => rgb::Color::new(88, 99, 108),
             Self::Warning => rgb::Color::new(153, 45, 35),
+            Self::Released => rgb::Color::new(23, 101, 58),
         }
     }
 }

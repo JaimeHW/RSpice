@@ -3649,6 +3649,7 @@ pub const PROJECT_FILTER: (&str, &[&str]) = ("RSpice Project", &["rspiceproj", "
 /// files from causing unbounded allocation while retaining ample headroom for
 /// large retained result histories.
 pub const MAX_PROJECT_FILE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_LEGACY_PROJECT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn show_open_project_dialog() -> Result<PathBuf, ProjectIoError> {
@@ -3767,23 +3768,31 @@ pub(crate) fn load_project_text(
     contents: &str,
     source_path: Option<&Path>,
 ) -> Result<ProjectFile, ProjectIoError> {
-    let mut value: serde_json::Value =
-        serde_json::from_str(contents).map_err(|e| ProjectIoError::ParseError(e.to_string()))?;
-    if let Some(descriptor) = value
-        .get_mut("workspace")
-        .and_then(|workspace| workspace.get_mut("project"))
-        .and_then(serde_json::Value::as_object_mut)
-        && !descriptor.contains_key("schema_version")
-        && !descriptor.contains_key("id")
-    {
-        let legacy_id = ProjectId::from_namespace(LEGACY_PROJECT_ID_NAMESPACE, contents.as_bytes());
-        descriptor.insert(
-            "id".to_owned(),
-            serde_json::Value::String(legacy_id.to_string()),
-        );
-    }
-    let mut project: ProjectFile =
-        serde_json::from_value(value).map_err(|e| ProjectIoError::ParseError(e.to_string()))?;
+    validate_project_text_size(contents.len())?;
+    let load_route = project_text_load_route(contents)?;
+    let mut project: ProjectFile = match load_route {
+        ProjectTextLoadRoute::Direct => serde_json::from_str(contents)
+            .map_err(|error| ProjectIoError::ParseError(error.to_string()))?,
+        ProjectTextLoadRoute::LegacyProjectIdInjection => {
+            validate_legacy_project_text_size(contents.len())?;
+            let mut value: serde_json::Value = serde_json::from_str(contents)
+                .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
+            if let Some(descriptor) = value
+                .get_mut("workspace")
+                .and_then(|workspace| workspace.get_mut("project"))
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                let legacy_id =
+                    ProjectId::from_namespace(LEGACY_PROJECT_ID_NAMESPACE, contents.as_bytes());
+                descriptor.insert(
+                    "id".to_owned(),
+                    serde_json::Value::String(legacy_id.to_string()),
+                );
+            }
+            serde_json::from_value(value)
+                .map_err(|error| ProjectIoError::ParseError(error.to_string()))?
+        }
+    };
     let project_id = project.workspace.project.id();
     if let Some(context) = &mut project.execution_context {
         context.migrate_to_current(project_id).map_err(|error| {
@@ -3822,6 +3831,69 @@ pub(crate) fn load_project_text(
         None => project.workspace.project.path = None,
     }
     Ok(project)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProjectTextLoadRoute {
+    Direct,
+    LegacyProjectIdInjection,
+}
+
+#[derive(Deserialize, Default)]
+struct ProjectTextLoadProbe {
+    #[serde(default)]
+    workspace: PersistedField<ProjectTextWorkspaceProbe>,
+}
+
+#[derive(Deserialize, Default)]
+struct ProjectTextWorkspaceProbe {
+    #[serde(default)]
+    project: PersistedField<ProjectTextDescriptorProbe>,
+}
+
+#[derive(Deserialize, Default)]
+struct ProjectTextDescriptorProbe {
+    #[serde(default)]
+    schema_version: PersistedField<serde::de::IgnoredAny>,
+    #[serde(default)]
+    id: PersistedField<serde::de::IgnoredAny>,
+}
+
+fn project_text_load_route(contents: &str) -> Result<ProjectTextLoadRoute, ProjectIoError> {
+    let probe: ProjectTextLoadProbe = serde_json::from_str(contents)
+        .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
+    let legacy = probe
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.project.as_ref())
+        .is_some_and(|descriptor| {
+            descriptor.schema_version.is_missing() && descriptor.id.is_missing()
+        });
+    Ok(if legacy {
+        ProjectTextLoadRoute::LegacyProjectIdInjection
+    } else {
+        ProjectTextLoadRoute::Direct
+    })
+}
+
+fn validate_project_text_size(byte_len: usize) -> Result<(), ProjectIoError> {
+    if byte_len as u64 > MAX_PROJECT_FILE_BYTES {
+        return Err(ProjectIoError::InvalidData(format!(
+            "project text is {} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes",
+            byte_len
+        )));
+    }
+    Ok(())
+}
+
+fn validate_legacy_project_text_size(byte_len: usize) -> Result<(), ProjectIoError> {
+    if byte_len as u64 > MAX_LEGACY_PROJECT_FILE_BYTES {
+        return Err(ProjectIoError::InvalidData(format!(
+            "legacy project text is {} bytes; migration requiring identity injection is limited to {MAX_LEGACY_PROJECT_FILE_BYTES} bytes",
+            byte_len
+        )));
+    }
+    Ok(())
 }
 
 pub fn load_project_file(path: &Path) -> Result<ProjectFile, ProjectIoError> {
@@ -3910,6 +3982,42 @@ mod tests {
         PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRun,
         SimulationRunProvenance, SimulationState, WaveformData,
     };
+
+    #[test]
+    fn in_memory_project_text_is_size_checked_before_parsing() {
+        assert!(validate_project_text_size(MAX_PROJECT_FILE_BYTES as usize).is_ok());
+        let error = validate_project_text_size(MAX_PROJECT_FILE_BYTES as usize + 1)
+            .expect_err("oversized project text is rejected");
+        assert!(matches!(error, ProjectIoError::InvalidData(_)));
+        assert!(error.to_string().contains("supported maximum"));
+        assert!(validate_legacy_project_text_size(MAX_LEGACY_PROJECT_FILE_BYTES as usize).is_ok());
+        let legacy_error =
+            validate_legacy_project_text_size(MAX_LEGACY_PROJECT_FILE_BYTES as usize + 1)
+                .expect_err("oversized legacy materialization is rejected");
+        assert!(matches!(legacy_error, ProjectIoError::InvalidData(_)));
+        assert!(legacy_error.to_string().contains("identity injection"));
+    }
+
+    #[test]
+    fn current_project_text_routes_to_direct_deserialization() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new(workspace, libraries);
+        let json = serialize_project_file(&project).expect("current project serializes");
+
+        assert_eq!(
+            project_text_load_route(&json).expect("current route probes"),
+            ProjectTextLoadRoute::Direct
+        );
+        assert_eq!(
+            project_text_load_route(
+                r#"{"workspace":{"project":{"schema_version":null,"id":null}}}"#
+            )
+            .expect("present null fields still probe"),
+            ProjectTextLoadRoute::Direct,
+            "legacy ID injection is permitted only when both keys are absent"
+        );
+    }
 
     fn seal_legacy_unattributed(run: &mut SimulationRun) {
         run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
@@ -4414,6 +4522,22 @@ mod tests {
         let restored = load_project_text(&json, None).expect("project reloads");
 
         assert_eq!(restored.workspace.report_documents, vec![report]);
+        let restored_report = &restored.workspace.report_documents[0];
+        assert_eq!(restored_report.revision_history().records().len(), 3);
+        assert_eq!(
+            restored_report
+                .reconstruct_revision(restored_report.id(), ObjectRevision::INITIAL)
+                .expect("initial report source is reconstructable")
+                .title(),
+            "Verification report"
+        );
+        assert!(
+            restored_report
+                .reconstruct_revision(restored_report.id(), ObjectRevision::INITIAL)
+                .expect("initial report source is reconstructable")
+                .pages()
+                .is_empty()
+        );
         assert!(!restored.workspace.report_documents_dirty);
     }
 
@@ -7511,6 +7635,11 @@ mod tests {
         legacy_plan.insert("analysis_order".to_owned(), serde_json::json!([1]));
         let legacy = serde_json::to_string_pretty(&value).expect("legacy fixture serializes");
 
+        assert_eq!(
+            project_text_load_route(&legacy).expect("legacy route probes"),
+            ProjectTextLoadRoute::LegacyProjectIdInjection
+        );
+
         let migrated = load_project_text(&legacy, None).expect("legacy project migrates");
         let replay =
             load_project_text(&legacy, None).expect("identical legacy bytes migrate again");
@@ -7555,6 +7684,10 @@ mod tests {
 
         let migrated_json =
             serialize_project_file(&migrated).expect("migrated identity persists on save");
+        assert_eq!(
+            project_text_load_route(&migrated_json).expect("migrated route probes"),
+            ProjectTextLoadRoute::Direct
+        );
         let reloaded = load_project_text(&migrated_json, None).expect("migrated project reloads");
         assert_eq!(
             reloaded.workspace.project.id(),
