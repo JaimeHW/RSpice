@@ -373,7 +373,7 @@ impl Engine {
     }
 
     fn split_device_parameter_override(name: &str) -> Option<(String, String)> {
-        let (device_name, param_name) = name.split_once(':')?;
+        let (device_name, param_name) = name.rsplit_once(':')?;
         let device_name = device_name.trim();
         let param_name = param_name.trim();
         (!device_name.is_empty() && !param_name.is_empty())

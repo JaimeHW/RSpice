@@ -52035,11 +52035,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || source.eq_ignore_ascii_case("TEMP")
             || source.eq_ignore_ascii_case("TEMPER")
             || Self::scalar_parameter_sweep_source_is_supported(netlist, source)
+            || Engine::canonical_device_parameter_sweep_source(netlist, source).is_some()
         {
             return Ok(());
         }
         Err(format!(
-            "DC sweep source '{}' is not a supported top-level independent source, scalar parameter, or TEMP sweep",
+            "DC sweep source '{}' is not a supported top-level independent source, scalar parameter, passive device parameter, or TEMP sweep",
             source
         ))
     }
@@ -52052,12 +52053,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut overrides = Vec::new();
         if Self::scalar_parameter_sweep_source_is_supported(netlist, &dc.source) {
             overrides.push((dc.source.clone(), sweep_point.primary));
+        } else if let Some(device_parameter) =
+            Engine::canonical_device_parameter_sweep_source(netlist, &dc.source)
+        {
+            overrides.push((device_parameter, sweep_point.primary));
         }
         if let Some(sweep2) = &dc.sweep2
-            && Self::scalar_parameter_sweep_source_is_supported(netlist, &sweep2.source)
             && let Some(secondary) = sweep_point.secondary
         {
-            overrides.push((sweep2.source.clone(), secondary));
+            if Self::scalar_parameter_sweep_source_is_supported(netlist, &sweep2.source) {
+                overrides.push((sweep2.source.clone(), secondary));
+            } else if let Some(device_parameter) =
+                Engine::canonical_device_parameter_sweep_source(netlist, &sweep2.source)
+            {
+                overrides.push((device_parameter, secondary));
+            }
         }
         if overrides.is_empty() {
             return Ok(None);
@@ -57681,6 +57691,22 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if had_source_text && bindings == 0 {
                 return Err(SimulationError::Circuit(format!(
                     "DC sweep parameter '{}' is not bound to any netlist expression",
+                    dimension.source
+                )));
+            }
+            *netlist = updated;
+            return Ok(());
+        }
+
+        if let Some(device_parameter) =
+            Engine::canonical_device_parameter_sweep_source(netlist, &dimension.source)
+        {
+            let had_source_text = netlist.source_text.is_some();
+            let (updated, bindings) =
+                Engine::create_perturbed_netlist_multi(netlist, &[(device_parameter, value)])?;
+            if had_source_text && bindings == 0 {
+                return Err(SimulationError::Circuit(format!(
+                    "DC sweep device parameter '{}' is not bound to any netlist element",
                     dimension.source
                 )));
             }

@@ -74,6 +74,110 @@ enum DcSweepSource {
     },
 }
 
+/// Resolve a Xyce device-parameter `.DC` source to the canonical override
+/// spelling consumed by the engine's AST perturbation path.
+///
+/// Xyce accepts both a bare passive instance (for example `R1`) and an
+/// explicit device parameter (`R1:R`).  The former means the element's
+/// primary value parameter.  Keeping this resolution in the engine makes the
+/// direct DC API and the regression wrapper agree on the same semantics.
+pub(crate) fn canonical_device_parameter_sweep_source(
+    netlist: &Netlist,
+    source_name: &str,
+) -> Option<String> {
+    let source_name = source_name.trim();
+    let (device_name, requested_parameter) = source_name
+        .rsplit_once(':')
+        .map_or((source_name, None), |(device, parameter)| {
+            (device.trim(), Some(parameter.trim()))
+        });
+    if device_name.is_empty() || requested_parameter.is_some_and(str::is_empty) {
+        return None;
+    }
+
+    let element = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case(device_name))?;
+    let parameter = match &element.kind {
+        crate::netlist::ElementKind::Resistor { .. } => {
+            // Resistor models expose additional numeric instance parameters;
+            // the generic STEP/DC perturbation path validates and applies
+            // those parameters when the deck requests one explicitly.
+            requested_parameter.unwrap_or("R")
+        }
+        crate::netlist::ElementKind::Capacitor { .. } => {
+            let parameter = requested_parameter.unwrap_or("C");
+            if [
+                "C",
+                "CAP",
+                "VALUE",
+                "CAPACITANCE",
+                "IC",
+                "L",
+                "LENGTH",
+                "W",
+                "WIDTH",
+                "M",
+                "MULT",
+                "SCALE",
+                "TEMP",
+                "DTEMP",
+                "TC1",
+                "TC2",
+            ]
+            .iter()
+            .any(|alias| parameter.eq_ignore_ascii_case(alias))
+            {
+                parameter
+            } else {
+                return None;
+            }
+        }
+        crate::netlist::ElementKind::Inductor { .. } => {
+            let parameter = requested_parameter.unwrap_or("L");
+            if [
+                "L",
+                "IND",
+                "VALUE",
+                "INDUCTANCE",
+                "M",
+                "MULT",
+                "SCALE",
+                "TEMP",
+                "DTEMP",
+                "TC1",
+                "TC2",
+            ]
+            .iter()
+            .any(|alias| parameter.eq_ignore_ascii_case(alias))
+            {
+                parameter
+            } else {
+                return None;
+            }
+        }
+        crate::netlist::ElementKind::JilesAthertonInductor { .. } => {
+            let parameter = requested_parameter.unwrap_or("L");
+            if ["L", "VALUE", "INDUCTANCE"]
+                .iter()
+                .any(|alias| parameter.eq_ignore_ascii_case(alias))
+            {
+                parameter
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+
+    Some(format!(
+        "{}:{}",
+        element.name,
+        parameter.to_ascii_uppercase()
+    ))
+}
+
 impl DcSweepSource {
     fn set_value(&self, circuit: &mut CircuitData, value: Value) {
         match self {
@@ -109,6 +213,15 @@ impl DcSweepSource {
 }
 
 impl Engine {
+    /// Resolve a Xyce device-parameter `.DC` source to the canonical AST
+    /// override spelling used by the engine and regression wrapper.
+    pub(crate) fn canonical_device_parameter_sweep_source(
+        netlist: &Netlist,
+        source_name: &str,
+    ) -> Option<String> {
+        canonical_device_parameter_sweep_source(netlist, source_name)
+    }
+
     fn populate_dc_observables(
         circuit: &mut CircuitData,
         solution: &[Value],
@@ -575,6 +688,8 @@ impl Engine {
         let outer_is_temp = sweep2.source.eq_ignore_ascii_case("TEMP")
             || sweep2.source.eq_ignore_ascii_case("TEMPER");
         let outer_is_parameter = Self::netlist_has_numeric_parameter(netlist, &sweep2.source);
+        let outer_device_parameter =
+            canonical_device_parameter_sweep_source(netlist, &sweep2.source);
 
         let mut results = Vec::new();
         let mut retained_values = 0usize;
@@ -605,6 +720,16 @@ impl Engine {
                 )?;
                 any_outer_parameter_binding |= bindings > 0;
                 swept
+            } else if let Some(device_parameter) = &outer_device_parameter {
+                let (swept, bindings) = Self::create_perturbed_netlist_with_limits_and_abort(
+                    netlist,
+                    device_parameter,
+                    outer_value,
+                    engine.config.resource_limits,
+                    abort,
+                )?;
+                any_outer_parameter_binding |= bindings > 0;
+                swept
             } else {
                 let mut swept = netlist.clone();
                 Self::override_independent_source_dc(&mut swept, &sweep2.source, outer_value)?;
@@ -618,7 +743,10 @@ impl Engine {
             engine.ensure_result_values(retained_values)?;
             results.extend(inner);
         }
-        if outer_is_parameter && netlist.source_text.is_some() && !any_outer_parameter_binding {
+        if (outer_is_parameter || outer_device_parameter.is_some())
+            && netlist.source_text.is_some()
+            && !any_outer_parameter_binding
+        {
             return Err(SimulationError::Circuit(format!(
                 "Second DC sweep parameter '{}' is not bound to any netlist expression",
                 sweep2.source
@@ -741,6 +869,17 @@ impl Engine {
             return self.run_dc_parameter_sweep_spec_with_report_and_abort(
                 netlist,
                 source_name,
+                &sweep_points,
+                abort,
+            );
+        }
+
+        if let Some(device_parameter) =
+            canonical_device_parameter_sweep_source(netlist, source_name)
+        {
+            return self.run_dc_parameter_sweep_spec_with_report_and_abort(
+                netlist,
+                &device_parameter,
                 &sweep_points,
                 abort,
             );
@@ -1042,6 +1181,75 @@ mod tests {
             (actual - expected).abs() <= 1.0e-10,
             "expected V({node})={expected:.17e}, got {actual:.17e}"
         );
+    }
+
+    #[test]
+    fn passive_device_parameter_dc_sweep_uses_canonical_ast_overrides() {
+        let netlist = Netlist::parse(
+            "passive device parameter sweep\n\
+             V1 in 0 10\n\
+             R1 in out 1\n\
+             R2 out 0 1\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        assert_eq!(
+            Engine::canonical_device_parameter_sweep_source(&netlist, "R1"),
+            Some("R1:R".to_string())
+        );
+        assert_eq!(
+            Engine::canonical_device_parameter_sweep_source(&netlist, "r2:r"),
+            Some("R2:R".to_string())
+        );
+
+        let points = xyce_engine()
+            .run_dc_sweep2_spec_with_report_and_abort(
+                &netlist,
+                "R1:R",
+                &crate::netlist::DcSweepSpec::linear(1.0, 3.0, 1.0),
+                Some(&crate::netlist::DcSecondSweep::linear(
+                    "R2:R".to_string(),
+                    1.0,
+                    2.0,
+                    1.0,
+                )),
+                &NoAbort,
+            )
+            .expect("passive device sweep solves");
+
+        assert_eq!(points.len(), 6);
+        assert_voltage(&points[0].result, "out", 5.0);
+        assert_voltage(&points[1].result, "out", 10.0 / 3.0);
+        assert_voltage(&points[2].result, "out", 2.5);
+        assert_voltage(&points[3].result, "out", 20.0 / 3.0);
+        assert_voltage(&points[4].result, "out", 5.0);
+        assert_voltage(&points[5].result, "out", 4.0);
+    }
+
+    #[test]
+    fn bare_passive_device_dc_sweep_defaults_to_primary_value_parameter() {
+        let netlist = Netlist::parse(
+            "bare passive device parameter sweep\n\
+             V1 in 0 10\n\
+             R1 in out 1\n\
+             R2 out 0 1\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let points = xyce_engine()
+            .run_dc_sweep_spec_with_report_and_abort(
+                &netlist,
+                "R1",
+                &crate::netlist::DcSweepSpec::linear(1.0, 2.0, 1.0),
+                &NoAbort,
+            )
+            .expect("bare passive device sweep solves");
+
+        assert_eq!(points.len(), 2);
+        assert_voltage(&points[0].result, "out", 5.0);
+        assert_voltage(&points[1].result, "out", 10.0 / 3.0);
     }
 
     #[test]
