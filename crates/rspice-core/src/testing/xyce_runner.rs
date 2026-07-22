@@ -23341,6 +23341,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         enabled
     }
 
+    fn source_requests_ac_print_headerless(source: &str) -> bool {
+        let mut enabled = false;
+        for line in Self::logical_netlist_lines(source) {
+            let normalized = Self::strip_netlist_comment(&line)
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if !normalized.starts_with(".options") || !normalized.contains("printheader") {
+                continue;
+            }
+            if normalized.contains("printheader=false")
+                || normalized.contains("printheader=0")
+                || normalized.contains("printheader=no")
+                || normalized.contains("printheader=off")
+            {
+                enabled = true;
+                continue;
+            }
+            if normalized.contains("printheader=true")
+                || normalized.contains("printheader=1")
+                || normalized.contains("printheader=yes")
+                || normalized.contains("printheader=on")
+            {
+                enabled = false;
+            }
+        }
+        enabled
+    }
+
     fn static_tran_contract_for_print_format(
         requires_wrapper: bool,
         format: Option<&str>,
@@ -45827,7 +45857,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         source: &str,
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
-        let reference = Self::parse_prn_file(&plan.reference_path)?;
+        let reference = if Self::source_requests_ac_print_headerless(source) {
+            Self::parse_headerless_ac_sensitivity_prn_file(plan)?
+        } else {
+            Self::parse_prn_file(&plan.reference_path)?
+        };
         if reference.columns.len() < 3 {
             return Err(
                 "AC sensitivity oracle must contain Index, FREQ, and data columns".to_string(),
@@ -46102,6 +46136,87 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
         Ok(mismatches)
+    }
+
+    fn parse_headerless_ac_sensitivity_prn_file(
+        plan: &XyceStaticAcSensitivityPlan,
+    ) -> Result<XycePrnTable, String> {
+        let content = fs::read_to_string(&plan.reference_path).map_err(|err| {
+            format!(
+                "failed to read headerless AC sensitivity oracle {}: {err}",
+                plan.reference_path.display()
+            )
+        })?;
+        let columns = Self::xyce_ac_sensitivity_reference_columns(plan);
+        let mut rows = Vec::new();
+        for (line_number, line) in content.lines().enumerate() {
+            let line_number = line_number + 1;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if line.to_ascii_lowercase().starts_with("end of xyce")
+                || Self::is_prn_footer_line(line)
+            {
+                break;
+            }
+            let values = line
+                .split_whitespace()
+                .map(|token| {
+                    Self::parse_xyce_numeric_token(token).map_err(|err| {
+                        format!(
+                            "invalid numeric token '{}' on headerless data line {}: {err}",
+                            token, line_number
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if values.len() != columns.len() {
+                return Err(format!(
+                    "headerless AC sensitivity data line {} has {} values, expected {}",
+                    line_number,
+                    values.len(),
+                    columns.len()
+                ));
+            }
+            rows.push(values);
+        }
+        if rows.is_empty() {
+            return Err("headerless AC sensitivity oracle has no data rows".to_string());
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn xyce_ac_sensitivity_reference_columns(plan: &XyceStaticAcSensitivityPlan) -> Vec<String> {
+        let mut columns = vec!["Index".to_string(), "FREQ".to_string()];
+        columns.extend(plan.print.probes.iter().cloned());
+        for objective in &plan.objectives {
+            let objective_probe = Self::xyce_sensitivity_objective_probe(&objective.spec);
+            for component in ["re", "im", "mag", "ph"] {
+                columns.push(Self::xyce_sensitivity_column_name(
+                    component,
+                    &objective_probe,
+                    None,
+                    None,
+                ));
+            }
+            for mode in [plan.direct.then_some("dir"), plan.adjoint.then_some("adj")]
+                .into_iter()
+                .flatten()
+            {
+                for parameter in &plan.parameters {
+                    for component in ["re", "im", "mag", "ph"] {
+                        columns.push(Self::xyce_sensitivity_column_name(
+                            component,
+                            &objective_probe,
+                            Some(parameter),
+                            Some(mode),
+                        ));
+                    }
+                }
+            }
+        }
+        columns
     }
 
     fn is_ac_sensitivity_generated_column(column: &str) -> bool {
@@ -84331,6 +84446,38 @@ Q1 c b 0 QN
         assert!(plan.print.is_none());
         assert!(plan.sensitivity.is_some());
         assert_eq!(plan.contract, XyceStaticAcContract::WrapperStatic);
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_headerless_schema_is_derived_from_the_print_contract() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Output/AC-SENS/ac-sens-no-headerfooter.cir";
+        let deck = XyceDeck {
+            path: root.join(relative),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let source = fs::read_to_string(&deck.path).expect("read headerless sensitivity deck");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = runner
+            .static_ac_plan_for_deck(&deck)
+            .expect("headerless sensitivity plan is supported");
+
+        assert!(XyceTestRunner::source_requests_ac_print_headerless(&source));
+        let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+        let columns = XyceTestRunner::xyce_ac_sensitivity_reference_columns(sensitivity);
+        assert_eq!(columns.len(), 49);
+        assert_eq!(columns.first().map(String::as_str), Some("Index"));
+        assert_eq!(columns.get(1).map(String::as_str), Some("FREQ"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column.eq_ignore_ascii_case("d_re({v(b)})/d_r1:r_adj"))
+        );
     }
 
     #[test]
