@@ -62,7 +62,10 @@ pub mod options;
 pub use ac::AcConfig;
 pub use dc::DcConfig;
 pub use noise::NoiseConfig;
-pub use op::{OpConfig, OpDialogState};
+pub use op::{
+    OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpDialogState, OpHomotopy, OpInitialGuess,
+    OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+};
 pub use transient::TransientConfig;
 
 // Re-exports - Steady-State

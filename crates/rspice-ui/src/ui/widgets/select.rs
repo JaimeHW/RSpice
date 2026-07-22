@@ -24,6 +24,31 @@ pub fn select(
     select_with_response(ui, id_salt, accessible_label, selected, options, width).picked
 }
 
+/// Select control with individually unavailable choices. Disabled options
+/// remain visible to preserve the authored domain and expose a precise reason,
+/// but cannot be selected by pointer or keyboard.
+pub(crate) fn select_with_disabled(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    disabled: &[(usize, &'static str)],
+    width: f32,
+) -> Option<usize> {
+    select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        false,
+        disabled,
+    )
+    .picked
+}
+
 pub(crate) fn select_with_response(
     ui: &mut Ui,
     id_salt: &str,
@@ -40,6 +65,7 @@ pub(crate) fn select_with_response(
         options,
         width,
         false,
+        &[],
     )
 }
 
@@ -62,6 +88,7 @@ pub(crate) fn select_mono_with_response(
         options,
         width,
         true,
+        &[],
     )
 }
 
@@ -73,6 +100,7 @@ fn select_with_font(
     options: &[String],
     width: f32,
     mono: bool,
+    disabled: &[(usize, &'static str)],
 ) -> SelectOutput {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -127,7 +155,7 @@ fn select_with_font(
         ui.memory_mut(|memory| memory.toggle_popup(popup_id));
     }
 
-    let mut picked = keyboard_selection(ui, &response, popup_id, selected, options);
+    let mut picked = keyboard_selection(ui, &response, popup_id, selected, options, disabled);
     let popup_open = ui.memory(|memory| memory.is_popup_open(popup_id));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_value(selected);
@@ -144,18 +172,30 @@ fn select_with_font(
             let listbox = ui.scope(|ui| {
                 for (index, option) in options.iter().enumerate() {
                     let is_current = option == selected;
+                    let unavailable = disabled
+                        .iter()
+                        .find_map(|(candidate, reason)| (*candidate == index).then_some(*reason));
                     // The owning surface may raise `ctl_h` for a coarse pointer;
                     // option rows must honor the same target rather than falling
                     // back to a mouse-only 24 px hit area.
                     let option_height = t.metrics.ctl_h.max(24.0);
                     let (row, row_response) = ui.allocate_exact_size(
                         vec2(ui.available_width(), option_height),
-                        Sense::click(),
+                        if unavailable.is_some() {
+                            Sense::hover()
+                        } else {
+                            Sense::click()
+                        },
                     );
+                    let row_response = if let Some(reason) = unavailable {
+                        row_response.on_hover_text(reason)
+                    } else {
+                        row_response
+                    };
                     row_response.widget_info(|| {
                         WidgetInfo::selected(
                             WidgetType::SelectableLabel,
-                            ui.is_enabled(),
+                            ui.is_enabled() && unavailable.is_none(),
                             is_current,
                             option,
                         )
@@ -173,12 +213,19 @@ fn select_with_font(
                         egui::Align2::LEFT_CENTER,
                         option,
                         value_font.clone(),
-                        if is_current { c.accent } else { c.text },
+                        if unavailable.is_some() {
+                            c.text_faint
+                        } else if is_current {
+                            c.accent
+                        } else {
+                            c.text
+                        },
                     );
                     theme::paint_focus_ring(ui, &row_response, row);
-                    if row_response
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
+                    if unavailable.is_none()
+                        && row_response
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
                     {
                         picked = Some(index);
                     }
@@ -200,6 +247,7 @@ fn keyboard_selection(
     state_id: Id,
     selected: &str,
     options: &[String],
+    disabled: &[(usize, &'static str)],
 ) -> Option<usize> {
     if !response.has_focus() || options.is_empty() {
         return None;
@@ -210,27 +258,40 @@ fn keyboard_selection(
         .unwrap_or_default();
     if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
         clear_typeahead(ui, state_id);
-        return Some((current + 1).min(options.len() - 1));
+        return next_available_index(options.len(), current, true, disabled);
     }
     if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
         clear_typeahead(ui, state_id);
-        return Some(current.saturating_sub(1));
+        return next_available_index(options.len(), current, false, disabled);
     }
     if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Home)) {
         clear_typeahead(ui, state_id);
-        return Some(0);
+        return (0..options.len()).find(|index| option_is_available(*index, disabled));
     }
     if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::End)) {
         clear_typeahead(ui, state_id);
-        return Some(options.len() - 1);
+        return (0..options.len())
+            .rev()
+            .find(|index| option_is_available(*index, disabled));
     }
     if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown)) {
         clear_typeahead(ui, state_id);
-        return Some((current + 10).min(options.len() - 1));
+        let target = (current + 10).min(options.len() - 1);
+        return (target..options.len())
+            .find(|index| option_is_available(*index, disabled))
+            .or_else(|| {
+                (current + 1..target)
+                    .rev()
+                    .find(|index| option_is_available(*index, disabled))
+            });
     }
     if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp)) {
         clear_typeahead(ui, state_id);
-        return Some(current.saturating_sub(10));
+        let target = current.saturating_sub(10);
+        return (0..=target)
+            .rev()
+            .find(|index| option_is_available(*index, disabled))
+            .or_else(|| (target + 1..current).find(|index| option_is_available(*index, disabled)));
     }
 
     let (typed, now) = ui.input(|input| {
@@ -266,7 +327,7 @@ fn keyboard_selection(
         }
         state.query.clone()
     });
-    matching_option(options, current, &query)
+    matching_option(options, current, &query, disabled)
 }
 
 const TYPEAHEAD_RESET_SECONDS: f64 = 0.75;
@@ -281,11 +342,38 @@ fn clear_typeahead(ui: &Ui, state_id: Id) {
     ui.data_mut(|data| data.remove::<SelectTypeahead>(state_id));
 }
 
-fn matching_option(options: &[String], current: usize, query: &str) -> Option<usize> {
+fn option_is_available(index: usize, disabled: &[(usize, &'static str)]) -> bool {
+    !disabled.iter().any(|(candidate, _)| *candidate == index)
+}
+
+fn next_available_index(
+    len: usize,
+    current: usize,
+    forward: bool,
+    disabled: &[(usize, &'static str)],
+) -> Option<usize> {
+    if forward {
+        (current.saturating_add(1)..len).find(|index| option_is_available(*index, disabled))
+    } else {
+        (0..current)
+            .rev()
+            .find(|index| option_is_available(*index, disabled))
+    }
+}
+
+fn matching_option(
+    options: &[String],
+    current: usize,
+    query: &str,
+    disabled: &[(usize, &'static str)],
+) -> Option<usize> {
     let query = query.to_lowercase();
     (1..=options.len())
         .map(|offset| (current + offset) % options.len())
-        .find(|index| options[*index].to_lowercase().starts_with(&query))
+        .find(|index| {
+            option_is_available(*index, disabled)
+                && options[*index].to_lowercase().starts_with(&query)
+        })
 }
 
 #[cfg(test)]
@@ -301,13 +389,29 @@ mod tests {
 
     #[test]
     fn typeahead_search_wraps_after_the_current_option() {
-        assert_eq!(matching_option(&options(), 3, "c"), Some(1));
-        assert_eq!(matching_option(&options(), 1, "c"), Some(2));
+        assert_eq!(matching_option(&options(), 3, "c", &[]), Some(1));
+        assert_eq!(matching_option(&options(), 1, "c", &[]), Some(2));
     }
 
     #[test]
     fn typeahead_search_is_case_insensitive_and_fail_closed() {
-        assert_eq!(matching_option(&options(), 0, "SyS"), Some(3));
-        assert_eq!(matching_option(&options(), 0, "missing"), None);
+        assert_eq!(matching_option(&options(), 0, "SyS", &[]), Some(3));
+        assert_eq!(matching_option(&options(), 0, "missing", &[]), None);
+    }
+
+    #[test]
+    fn keyboard_and_typeahead_navigation_skip_unavailable_choices() {
+        let disabled = [(1, "requires retained evidence")];
+        assert_eq!(next_available_index(4, 0, true, &disabled), Some(2));
+        assert_eq!(next_available_index(4, 2, false, &disabled), Some(0));
+        assert_eq!(matching_option(&options(), 0, "c", &disabled), Some(2));
+        let all_c_choices_disabled = [
+            (1, "requires retained evidence"),
+            (2, "requires retained evidence"),
+        ];
+        assert_eq!(
+            matching_option(&options(), 0, "c", &all_c_choices_disabled),
+            None
+        );
     }
 }

@@ -44,7 +44,9 @@ mod browser {
     use crate::simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
-        WorkerRequestTransportMetadata, validate_worker_response_id, worker_response_from_value,
+        WorkerRequestTransportMetadata, take_worker_request_op_previous_state,
+        validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
+        worker_response_from_value,
     };
     use crate::simulation::runner::{NetlistInput, SimulationError, SimulationRequest};
     use crate::simulation::status::{SimulationProgress, SimulationStatus};
@@ -451,6 +453,15 @@ mod browser {
         mut request: WorkerRequest,
     ) -> Result<PreparedWorkerMessage, SimulationError> {
         let request_id = request.id;
+        // Extract every owned numerical request payload before allocating any
+        // JavaScript typed array so the combined dependency + OP-state budget
+        // can fail closed without a large transient allocation.
+        let (op_previous_state, op_buffers) = take_worker_request_op_previous_state(&mut request)
+            .map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "failed to prepare OP previous-state transfer: {error}"
+            ))
+        })?;
         let (dependency_metadata, dependency_buffers) = request
             .dependencies
             .encode_transfer_borrowed()
@@ -459,6 +470,18 @@ mod browser {
                     "failed to prepare simulation request transfer: {error}"
                 ))
             })?;
+        let dependency_buffer_count = dependency_buffers.len();
+        validate_worker_request_transfer_buffer_lengths(
+            dependency_buffers
+                .iter()
+                .map(|values| values.len())
+                .chain(op_buffers.iter().map(Vec::len)),
+        )
+        .map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "failed to prepare simulation request transfer: {error}"
+            ))
+        })?;
 
         let buffers = Array::new();
         let transfer = Array::new();
@@ -474,6 +497,19 @@ mod browser {
             buffers.push(&view);
         }
 
+        for (offset, values) in op_buffers.into_iter().enumerate() {
+            let index = dependency_buffer_count + offset;
+            let length = u32::try_from(values.len()).map_err(|_| {
+                SimulationError::InvalidConfig(format!(
+                    "simulation request transfer buffer {index} exceeds browser typed-array limits"
+                ))
+            })?;
+            let view = js_sys::Float64Array::new_with_length(length);
+            view.copy_from(&values);
+            transfer.push(&view.buffer());
+            buffers.push(&view);
+        }
+
         // Numerical dependencies have already been copied once into detached,
         // transferable browser buffers. Remove the authenticated Rust payload
         // before serializing request metadata so samples cannot be duplicated
@@ -482,6 +518,8 @@ mod browser {
         let transport = WorkerRequestTransportMetadata {
             request,
             dependency_metadata,
+            dependency_buffer_count,
+            op_previous_state,
         };
 
         let message = Object::new();

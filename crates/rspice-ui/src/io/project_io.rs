@@ -1008,7 +1008,8 @@ const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
 const CONTENT_DIGEST_RESULTS_SCHEMA_VERSION: u32 = 8;
 const TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION: u32 = 9;
 const RELIABILITY_SOA_RESULTS_SCHEMA_VERSION: u32 = 10;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 11;
+const TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION: u32 = 11;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 12;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
@@ -1270,8 +1271,10 @@ impl ProjectSimulationResults {
     /// with their original encoding before payload absence is migrated. Schema
     /// v9 digests are likewise authenticated before Reliability/SOA evidence
     /// absence is preserved. Schema-v10 digests are authenticated before TF
-    /// evidence absence is preserved. Each migrated result is then resealed
-    /// with the current encoding.
+    /// evidence absence is preserved. Schema-v11 digests are authenticated
+    /// with their required scalar output-noise encoding before optional output
+    /// and input-referred totals are admitted. Each migrated result is then
+    /// resealed with the current encoding.
     pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
@@ -1284,6 +1287,14 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema == TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION {
+            for run in &mut self.runs {
+                validate_v11_result_digests(run)?;
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema == RELIABILITY_SOA_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v10_result_digests(run)?;
@@ -1812,6 +1823,7 @@ fn validate_result_fields_for_source_schema(
     run: &ProjectSimulationRun,
     source_schema: u32,
 ) -> Result<(), String> {
+    validate_legacy_noise_summary_shape(run, source_schema)?;
     for analysis in &run.analyses {
         if source_schema < FAMILY_METADATA_RESULTS_SCHEMA_VERSION
             && analysis.family_metadata.is_some()
@@ -1836,6 +1848,7 @@ fn validate_result_fields_for_source_schema(
 /// Authenticate a schema-v8 run with the exact digest encoding that wrote it.
 /// This must run before any v9 fields are introduced or digests are resealed.
 fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    validate_legacy_noise_summary_shape(run, CONTENT_DIGEST_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         if analysis.result_payload.is_present() {
             return Err(format!(
@@ -1888,6 +1901,8 @@ fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(), String> 
 /// Authenticate a schema-v9 run with the exact typed-payload digest encoding
 /// that wrote it before schema-v10 Reliability/SOA evidence is admitted.
 fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    validate_legacy_noise_summary_shape(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_operating_point_evidence(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         if matches!(
             analysis.result_payload.as_ref(),
@@ -1954,6 +1969,8 @@ fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> 
 /// digest encoding that wrote it. Typed TF evidence is a schema-v11 field and
 /// must be rejected before the authenticated v10 document is resealed.
 fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    validate_legacy_noise_summary_shape(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_operating_point_evidence(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         if matches!(
             analysis.result_payload.as_ref(),
@@ -2002,6 +2019,96 @@ fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<(), String>
             "schema-v10 simulation run {} dataset content digest does not match retained content",
             run.id
         ));
+    }
+    Ok(())
+}
+
+/// Authenticate a schema-v11 run before admitting schema-v12 operating-point
+/// payloads and optional/input-referred integrated noise evidence.
+fn validate_v11_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    validate_legacy_noise_summary_shape(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_operating_point_evidence(run, TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION)?;
+    for analysis in &run.analyses {
+        let retained = analysis
+            .result_data_digest
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "schema-v11 analysis {} is missing its result data digest",
+                    analysis.id
+                )
+            })?;
+        let computed = analysis
+            .clone()
+            .into_analysis()?
+            .legacy_v4_result_data_digest();
+        if retained != computed {
+            return Err(format!(
+                "schema-v11 analysis {} result data digest does not match retained content",
+                analysis.id
+            ));
+        }
+    }
+
+    let retained = run
+        .dataset_content_digest
+        .as_ref()
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "schema-v11 simulation run {} is missing its dataset content digest",
+                run.id
+            )
+        })?;
+    let computed = run.clone().into_run()?.legacy_v4_dataset_content_digest();
+    if retained != computed {
+        return Err(format!(
+            "schema-v11 simulation run {} dataset content digest does not match retained content",
+            run.id
+        ));
+    }
+    Ok(())
+}
+
+fn reject_legacy_operating_point_evidence(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if let Some(analysis) = run.analyses.iter().find(|analysis| {
+        matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::OperatingPoint { .. })
+        )
+    }) {
+        return Err(format!(
+            "schema-v{source_schema} analysis {} contains operating-point evidence introduced by schema v12",
+            analysis.id
+        ));
+    }
+    Ok(())
+}
+
+fn validate_legacy_noise_summary_shape(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    for analysis in &run.analyses {
+        let Some(summary) = analysis.noise_summary.as_ref() else {
+            continue;
+        };
+        if summary.total_rms.is_none() {
+            return Err(format!(
+                "schema-v{source_schema} analysis {} is missing required noise_summary.total_rms",
+                analysis.id
+            ));
+        }
+        if summary.input_rms.is_some() {
+            return Err(format!(
+                "schema-v{source_schema} analysis {} contains noise_summary.input_rms introduced by schema v12",
+                analysis.id
+            ));
+        }
     }
     Ok(())
 }
@@ -2510,7 +2617,7 @@ impl ProjectSimulationRun {
             receipt.validate_result_prefix(&analyses)?;
         }
         let retained_digest = self.dataset_content_digest.as_ref().copied().ok_or_else(|| {
-            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v11")
+            format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v12")
         })?;
         let computed_digest = self
             .clone()
@@ -2629,6 +2736,8 @@ pub struct ProjectAnalysisResultProvenance {
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub source_domain: PersistedField<AnalysisResultSourceDomain>,
     pub source_instance_id: AnalysisInstanceId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_source_instance_id: Option<AnalysisInstanceId>,
     pub source_revision: ObjectRevision,
     pub prepared_snapshot_digest: ContentDigest,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2637,11 +2746,13 @@ pub struct ProjectAnalysisResultProvenance {
 
 impl ProjectAnalysisResultProvenance {
     fn into_provenance(self) -> Result<AnalysisResultProvenance, String> {
-        AnalysisResultProvenance::new_with_source_domain(
+        AnalysisResultProvenance::new_with_authored_source_domain(
             self.source_domain
                 .into_value()
                 .ok_or_else(|| "prepared result source_domain is missing or null".to_owned())?,
             self.source_instance_id,
+            self.authored_source_instance_id
+                .unwrap_or(self.source_instance_id),
             self.source_revision,
             self.prepared_snapshot_digest,
             self.dependency_ids,
@@ -2649,12 +2760,14 @@ impl ProjectAnalysisResultProvenance {
     }
 
     fn validate(&self) -> Result<(), String> {
-        AnalysisResultProvenance::new_with_source_domain(
+        AnalysisResultProvenance::new_with_authored_source_domain(
             self.source_domain
                 .as_ref()
                 .copied()
                 .ok_or_else(|| "prepared result source_domain is missing or null".to_owned())?,
             self.source_instance_id,
+            self.authored_source_instance_id
+                .unwrap_or(self.source_instance_id),
             self.source_revision,
             self.prepared_snapshot_digest,
             self.dependency_ids.clone(),
@@ -2668,6 +2781,9 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
         Self {
             source_domain: PersistedField::Value(provenance.source_domain()),
             source_instance_id: provenance.source_instance_id(),
+            authored_source_instance_id: (provenance.authored_source_instance_id()
+                != provenance.source_instance_id())
+            .then_some(provenance.authored_source_instance_id()),
             source_revision: provenance.source_revision(),
             prepared_snapshot_digest: provenance.prepared_snapshot_digest(),
             dependency_ids: provenance.dependency_ids().to_vec(),
@@ -2898,7 +3014,7 @@ impl ProjectAnalysisResult {
                 .map_err(|error| format!("{prefix}.provenance is invalid: {error}"))?;
         }
         let retained_digest = self.result_data_digest.as_ref().copied().ok_or_else(|| {
-            format!("{prefix}.result_data_digest is required by simulation results schema v11")
+            format!("{prefix}.result_data_digest is required by simulation results schema v12")
         })?;
         let analysis = self
             .clone()
@@ -3140,7 +3256,10 @@ impl From<&OperatingPointValue> for ProjectOperatingPointValue {
 pub struct ProjectNoiseSummary {
     #[serde(default)]
     pub rows: Vec<ProjectNoiseContributorRow>,
-    pub total_rms: f64,
+    #[serde(default)]
+    pub total_rms: Option<f64>,
+    #[serde(default)]
+    pub input_rms: Option<f64>,
     pub band: (f64, f64),
 }
 
@@ -3153,12 +3272,18 @@ impl ProjectNoiseSummary {
                 .map(ProjectNoiseContributorRow::into_row)
                 .collect(),
             total_rms: self.total_rms,
+            input_rms: self.input_rms,
             band: self.band,
         }
     }
 
     fn validate(&self, prefix: &str) -> Result<(), String> {
-        require_finite(self.total_rms, &format!("{prefix}.total_rms"))?;
+        if let Some(total_rms) = self.total_rms {
+            require_finite(total_rms, &format!("{prefix}.total_rms"))?;
+        }
+        if let Some(input_rms) = self.input_rms {
+            require_finite(input_rms, &format!("{prefix}.input_rms"))?;
+        }
         require_finite(self.band.0, &format!("{prefix}.band.0"))?;
         require_finite(self.band.1, &format!("{prefix}.band.1"))?;
         for (idx, row) in self.rows.iter().enumerate() {
@@ -3177,6 +3302,7 @@ impl From<&NoiseSummary> for ProjectNoiseSummary {
                 .map(ProjectNoiseContributorRow::from)
                 .collect(),
             total_rms: summary.total_rms,
+            input_rms: summary.input_rms,
             band: summary.band,
         }
     }
@@ -3194,7 +3320,7 @@ impl ProjectNoiseContributorRow {
     fn into_row(self) -> NoiseContributorRow {
         NoiseContributorRow {
             device: self.device,
-            mechanism: intern_static_label(self.mechanism),
+            mechanism: self.mechanism,
             power: self.power,
             share_pct: self.share_pct,
         }
@@ -3788,6 +3914,34 @@ mod tests {
     fn seal_legacy_unattributed(run: &mut SimulationRun) {
         run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
             .expect("legacy fixture seals explicitly");
+    }
+
+    fn operating_point_payload_fixture() -> AnalysisResultPayload {
+        AnalysisResultPayload::OperatingPoint {
+            temperature_mode: crate::state::OperatingPointTemperatureEvidence::PvtRunSet,
+            temperature_celsius: 27.0,
+            initial_guess: crate::state::OperatingPointInitialGuessEvidence::Automatic,
+            node_initialization:
+                crate::state::OperatingPointNodeInitializationEvidence::UseIcAndNodeset,
+            homotopy: crate::state::OperatingPointHomotopyEvidence::Adaptive,
+            annotation: crate::state::OperatingPointAnnotationEvidence::VoltagesAndCurrents,
+            device_detail: crate::state::OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+            save_device_op: crate::state::OperatingPointSaveDeviceEvidence::Enabled,
+            accuracy: crate::state::OperatingPointAccuracyEvidence::Balanced,
+            selected_devices: Vec::new(),
+            violation_devices: Vec::new(),
+            violation_source_content_digest: None,
+            validated_startup_directives: 0,
+            mna_node_names: vec!["out".to_owned()],
+            mna_branch_names: Vec::new(),
+            mna_solution: vec![1.0],
+            effective_source_content_digest: Some(ContentDigest::from_bytes([0x70; 32])),
+            run_point_index: 0,
+            run_point_count: 1,
+            run_point_process: crate::state::OperatingPointProcessEvidence::TT,
+            run_point_supply_voltage: None,
+            run_point_nominal_supply_voltage: None,
+        }
     }
 
     fn clear_v6_execution_fields(results: &mut ProjectSimulationResults) {
@@ -4917,6 +5071,40 @@ mod tests {
                     }],
                 }),
         );
+        run.add_analysis(
+            AnalysisResult::new(6, AnalysisType::DcOp, "OP").with_result_payload(
+                AnalysisResultPayload::OperatingPoint {
+                    temperature_mode: crate::state::OperatingPointTemperatureEvidence::PvtRunSet,
+                    temperature_celsius: 27.0,
+                    initial_guess:
+                        crate::state::OperatingPointInitialGuessEvidence::PreviousConverged,
+                    node_initialization:
+                        crate::state::OperatingPointNodeInitializationEvidence::UseIcAndNodeset,
+                    homotopy: crate::state::OperatingPointHomotopyEvidence::Adaptive,
+                    annotation: crate::state::OperatingPointAnnotationEvidence::VoltagesAndDeviceOp,
+                    device_detail: crate::state::OperatingPointDeviceDetailEvidence::ViolationsOnly,
+                    save_device_op: crate::state::OperatingPointSaveDeviceEvidence::FinalPointOnly,
+                    accuracy: crate::state::OperatingPointAccuracyEvidence::Robust,
+                    selected_devices: vec!["M1".to_owned()],
+                    violation_devices: vec!["M1".to_owned()],
+                    violation_source_content_digest: Some(
+                        crate::product::ContentDigest::from_bytes([0x61; 32]),
+                    ),
+                    validated_startup_directives: 2,
+                    mna_node_names: vec!["in".to_owned(), "out".to_owned()],
+                    mna_branch_names: vec!["V1".to_owned()],
+                    mna_solution: vec![1.0, 0.5, -0.5e-3],
+                    effective_source_content_digest: Some(
+                        crate::product::ContentDigest::from_bytes([0x62; 32]),
+                    ),
+                    run_point_index: 1,
+                    run_point_count: 2,
+                    run_point_process: crate::state::OperatingPointProcessEvidence::SS,
+                    run_point_supply_voltage: Some(0.9),
+                    run_point_nominal_supply_voltage: Some(1.0),
+                },
+            ),
+        );
         seal_legacy_unattributed(&mut run);
         let dataset_id = run.dataset_id;
         let mut simulation = SimulationState::default();
@@ -4970,6 +5158,10 @@ mod tests {
             restored.runs[0].analyses[4].result_payload,
             simulation.runs[0].analyses[4].result_payload
         );
+        assert_eq!(
+            restored.runs[0].analyses[5].result_payload,
+            simulation.runs[0].analyses[5].result_payload
+        );
 
         let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
         tampered["runs"][0]["analyses"][0]["result_payload"]["gain"] =
@@ -4980,6 +5172,18 @@ mod tests {
             tampered
                 .validate()
                 .expect_err("payload tampering invalidates the result digest")
+                .contains("result_data_digest does not match retained analysis content")
+        );
+
+        let mut op_tampered: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
+        op_tampered["runs"][0]["analyses"][5]["result_payload"]["mna_solution"][1] =
+            serde_json::json!(0.500_000_000_000_000_1_f64);
+        let op_tampered: ProjectSimulationResults =
+            serde_json::from_value(op_tampered).expect("tampered OP payload remains structural");
+        assert!(
+            op_tampered
+                .validate()
+                .expect_err("OP MNA tampering invalidates the result digest")
                 .contains("result_data_digest does not match retained analysis content")
         );
 
@@ -5185,7 +5389,7 @@ mod tests {
                 .contains("schema-v9 analysis 1 result data digest")
         );
 
-        let mut injected = v9;
+        let mut injected = v9.clone();
         injected.runs[0].analyses[0].result_payload =
             PersistedField::Value(AnalysisResultPayload::Reliability {
                 devices: vec![crate::state::ReliabilityDeviceEvidence {
@@ -5204,6 +5408,16 @@ mod tests {
                 .migrate_to_current(ProjectId::new())
                 .expect_err("schema-v9 cannot inject v10 evidence")
                 .contains("Reliability/SOA evidence introduced by schema v10")
+        );
+
+        let mut injected_op = v9;
+        injected_op.runs[0].analyses[0].result_payload =
+            PersistedField::Value(operating_point_payload_fixture());
+        assert!(
+            injected_op
+                .migrate_to_current(ProjectId::new())
+                .expect_err("schema-v9 cannot inject v12 operating-point evidence")
+                .contains("operating-point evidence introduced by schema v12")
         );
     }
 
@@ -5295,7 +5509,7 @@ mod tests {
                 .contains("schema-v10 analysis 1 result data digest")
         );
 
-        let mut injected = v10;
+        let mut injected = v10.clone();
         injected.runs[0].analyses[1].result_payload =
             PersistedField::Value(AnalysisResultPayload::TransferFunction {
                 input_source: "VIN".to_owned(),
@@ -5319,6 +5533,16 @@ mod tests {
                 .migrate_to_current(ProjectId::new())
                 .expect_err("schema-v10 cannot inject v11 transfer-function evidence")
                 .contains("transfer-function evidence introduced by schema v11")
+        );
+
+        let mut injected_op = v10;
+        injected_op.runs[0].analyses[0].result_payload =
+            PersistedField::Value(operating_point_payload_fixture());
+        assert!(
+            injected_op
+                .migrate_to_current(ProjectId::new())
+                .expect_err("schema-v10 cannot inject v12 operating-point evidence")
+                .contains("operating-point evidence introduced by schema v12")
         );
     }
 
@@ -6484,6 +6708,153 @@ mod tests {
     }
 
     #[test]
+    fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseline() {
+        let mut project = project_with_execution_context();
+        let (plan_id, source_id, source_revision, dependencies) = {
+            let plan = project
+                .execution_context
+                .as_ref()
+                .expect("execution context")
+                .simulation_plan
+                .stable_analysis_plan()
+                .expect("stable plan");
+            let source = plan
+                .instances()
+                .iter()
+                .find(|instance| instance.kind() == AnalysisKind::Noise)
+                .expect("noise fixture instance");
+            (
+                plan.id(),
+                source.id(),
+                source.modified_revision(),
+                source
+                    .dependencies()
+                    .iter()
+                    .map(|dependency| dependency.target())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let snapshot = ContentDigest::from_bytes([0xd1; 32]);
+        let summary = NoiseSummary {
+            rows: vec![NoiseContributorRow {
+                device: "R1".to_owned(),
+                mechanism: "thermal".to_owned(),
+                power: 2.5e-12,
+                share_pct: 100.0,
+            }],
+            total_rms: Some(1.25e-6),
+            input_rms: None,
+            band: (1.0, 1.0e6),
+        };
+        let mut run = SimulationRun::new(72);
+        run.mark_running().expect("fixture run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("fixture run completes");
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Noise, "NOISE")
+                .with_noise_summary(summary.clone())
+                .with_provenance(
+                    AnalysisResultProvenance::new(
+                        source_id,
+                        source_revision,
+                        snapshot,
+                        dependencies,
+                    )
+                    .expect("noise provenance"),
+                ),
+        );
+        seal_prepared_run(
+            &mut run,
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(plan_id),
+            project.workspace.project.revision(),
+            ContentDigest::from_bytes([0xd2; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xd3; 32])),
+            &[analysis_kind_tag_for_plan_kind(AnalysisKind::Noise)],
+        );
+        let baseline_id = run.run_id;
+        let legacy_analysis_digest = run.analyses[0].legacy_v4_result_data_digest();
+        let legacy_dataset_digest = run.legacy_v4_dataset_content_digest();
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run];
+        simulation.next_run_id = 72;
+        simulation.active_run_idx = Some(0);
+        simulation.active_analysis_idx = Some(0);
+        project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+        project
+            .workspace
+            .active_plan_data_mut(plan_id)
+            .expect("active plan payload")
+            .regression_baseline_run = Some(baseline_id);
+
+        let current_json = serialize_project_file(&project).expect("current project serializes");
+        let mut v11: serde_json::Value = serde_json::from_str(&current_json).expect("project JSON");
+        v11["simulation_results"]["schema_version"] =
+            serde_json::json!(TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION);
+        v11["simulation_results"]["runs"][0]["analyses"][0]["result_data_digest"] =
+            serde_json::to_value(legacy_analysis_digest).expect("legacy analysis digest");
+        v11["simulation_results"]["runs"][0]["dataset_content_digest"] =
+            serde_json::to_value(legacy_dataset_digest).expect("legacy dataset digest");
+        v11["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]
+            .as_object_mut()
+            .expect("noise summary object")
+            .remove("input_rms");
+
+        let loaded = load_project_text(&v11.to_string(), None)
+            .expect("authentic schema-v11 project remains loadable");
+
+        assert_eq!(
+            loaded.simulation_results.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        assert_eq!(loaded.simulation_results.runs.len(), 1);
+        assert!(loaded.simulation_results_warning.is_none());
+        assert_eq!(
+            loaded
+                .workspace
+                .active_plan_data(plan_id)
+                .expect("active plan payload")
+                .regression_baseline_run,
+            Some(baseline_id)
+        );
+        let restored = loaded.simulation_results.runs[0]
+            .clone()
+            .into_run()
+            .expect("migrated result restores");
+        assert_eq!(restored.analyses[0].noise_summary, Some(summary));
+        assert_ne!(
+            restored.analyses[0].result_data_digest(),
+            legacy_analysis_digest,
+            "v11 evidence must be resealed in the v12 digest domain"
+        );
+        serialize_project_file(&loaded).expect("migrated project reserializes");
+
+        let mut tampered_v11 = v11;
+        tampered_v11["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]["total_rms"] =
+            serde_json::json!(1.250_000_000_000_000_3e-6_f64);
+        let rejected = load_project_text(&tampered_v11.to_string(), None)
+            .expect("a bad result digest must not reject unrelated project documents");
+        assert!(rejected.simulation_results.is_empty());
+        assert!(
+            rejected
+                .workspace
+                .active_plan_data(plan_id)
+                .expect("active plan payload")
+                .regression_baseline_run
+                .is_none()
+        );
+        assert!(
+            rejected
+                .simulation_results_warning
+                .as_deref()
+                .unwrap_or_default()
+                .contains(
+                    "schema-v11 analysis 1 result data digest does not match retained content"
+                )
+        );
+    }
+
+    #[test]
     fn project_load_clears_dangling_regression_baseline_without_rejecting_project() {
         let mut project = project_with_execution_context();
         let plan_id = project
@@ -6983,6 +7354,16 @@ mod tests {
     }
 
     #[test]
+    fn legacy_noise_total_rms_migrates_losslessly_to_optional_evidence() {
+        let legacy = r#"{"rows":[],"total_rms":1.25e-6,"band":[1.0,1000.0]}"#;
+        let restored: ProjectNoiseSummary =
+            serde_json::from_str(legacy).expect("legacy noise summary decodes");
+        assert_eq!(restored.total_rms, Some(1.25e-6));
+        assert_eq!(restored.input_rms, None);
+        assert_eq!(restored.into_noise_summary().total_rms, Some(1.25e-6));
+    }
+
+    #[test]
     fn project_results_preserve_core_noise_mechanism_labels() {
         let run_id = RunId::new();
         let dataset_id = DatasetId::new();
@@ -7021,7 +7402,8 @@ mod tests {
                                 share_pct: 40.0,
                             },
                         ],
-                        total_rms: 1.0e-6,
+                        total_rms: Some(1.0e-6),
+                        input_rms: None,
                         band: (1.0, 1.0e6),
                     }),
                     family_metadata: None,

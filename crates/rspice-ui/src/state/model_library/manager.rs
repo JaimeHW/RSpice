@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
@@ -17,6 +17,8 @@ use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
 #[derive(Debug, Clone)]
 pub struct SealedModelExecutionSources {
     bundle: rspice_core::netlist::SealedSourceBundle,
+    sources: Vec<(PathBuf, String)>,
+    edges: Vec<rspice_core::netlist::SealedSourceEdge>,
     libraries: Vec<SealedExecutionLibrary>,
 }
 
@@ -28,6 +30,143 @@ struct SealedExecutionLibrary {
 }
 
 impl SealedModelExecutionSources {
+    /// Build a source bundle that adds one active root buffer to the exact
+    /// authenticated model-library closure.
+    ///
+    /// Root include edges are accepted only when their portable lexical target
+    /// names one retained source exactly. This deliberately does not guess by
+    /// basename or consult a host search path: unresolved and ambiguous deck
+    /// references fail closed in browser execution.
+    pub(crate) fn bundle_for_root(
+        &self,
+        root_path: &Path,
+        root_source: &str,
+    ) -> Result<rspice_core::netlist::SealedSourceBundle, String> {
+        if !super::is_portable_absolute_path(root_path) {
+            return Err(format!(
+                "Authenticated browser source root must have an absolute portable identity: {}",
+                root_path.display()
+            ));
+        }
+
+        let root_key = portable_path_key(root_path);
+        let matching_roots = self
+            .sources
+            .iter()
+            .filter(|(path, _)| portable_path_key(path) == root_key)
+            .collect::<Vec<_>>();
+        if matching_roots.len() > 1 {
+            return Err(format!(
+                "Authenticated model sources contain an ambiguous root identity '{}'",
+                root_path.display()
+            ));
+        }
+
+        let mut sources = self.sources.clone();
+        let mut edges = self.edges.clone();
+        if let Some((accepted_path, accepted_source)) = matching_roots.first().copied() {
+            if accepted_source != root_source {
+                return Err(format!(
+                    "Active source '{}' conflicts with an authenticated model-source member",
+                    root_path.display()
+                ));
+            }
+            if accepted_path != root_path {
+                for (path, _) in &mut sources {
+                    if path == accepted_path {
+                        *path = root_path.to_path_buf();
+                    }
+                }
+                for edge in &mut edges {
+                    if edge.owner == *accepted_path {
+                        edge.owner = root_path.to_path_buf();
+                    }
+                    if edge.target == *accepted_path {
+                        edge.target = root_path.to_path_buf();
+                    }
+                }
+            }
+        } else {
+            sources.push((root_path.to_path_buf(), root_source.to_owned()));
+        }
+
+        let mut root_edge_keys = HashSet::new();
+        for requested_path in root_external_source_paths(root_source) {
+            let requested_path = rspice_core::netlist::normalize_source_path_literal(
+                &requested_path,
+            )
+            .map_err(|error| {
+                format!(
+                    "Source '{}' has an invalid external dependency path: {error}",
+                    root_path.display()
+                )
+            })?;
+            if !root_edge_keys.insert(requested_path.clone()) {
+                continue;
+            }
+            if edges.iter().any(|edge| {
+                portable_path_key(&edge.owner) == root_key && edge.requested_path == requested_path
+            }) {
+                continue;
+            }
+
+            let target_key = portable_dependency_target_key(root_path, &requested_path)?;
+            let candidates = self
+                .sources
+                .iter()
+                .filter(|(path, _)| portable_path_key(path) == target_key)
+                .map(|(path, _)| path)
+                .collect::<Vec<_>>();
+            let target = match candidates.as_slice() {
+                [target] => (*target).clone(),
+                [] => {
+                    return Err(format!(
+                        "Dependency '{}' referenced by '{}' is not present in the authenticated model-source closure",
+                        requested_path,
+                        root_path.display()
+                    ));
+                }
+                _ => {
+                    return Err(format!(
+                        "Dependency '{}' referenced by '{}' has an ambiguous authenticated source identity",
+                        requested_path,
+                        root_path.display()
+                    ));
+                }
+            };
+            edges.push(rspice_core::netlist::SealedSourceEdge {
+                owner: root_path.to_path_buf(),
+                requested_path,
+                target,
+            });
+        }
+
+        rspice_core::netlist::SealedSourceBundle::try_new_with_edges(sources, edges)
+            .map_err(|error| format!("Failed to authorize active source dependencies: {error}"))
+    }
+
+    /// Expand an active root through the authenticated model source closure
+    /// without consulting a filesystem.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn expand_root_dependencies(
+        &self,
+        root_path: &Path,
+        root_source: &str,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), String> {
+        let bundle = self.bundle_for_root(root_path, root_source)?;
+        let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(root_path, bundle);
+        let expanded = processor
+            .expand_content_with_abort(root_source, root_path, abort)
+            .map_err(|error| {
+                format!(
+                    "Could not expand authenticated dependencies for '{}': {error}",
+                    root_path.display()
+                )
+            })?;
+        Ok((expanded, processor.resolved_dependencies().to_vec()))
+    }
+
     /// Materialize the exact model cards for the nominal/reference process.
     pub fn reference_process_model_cards(
         &self,
@@ -126,6 +265,137 @@ impl SealedModelExecutionSources {
         }
         Ok(bindings)
     }
+}
+
+fn root_external_source_paths(source: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut inline_library_depth = 0usize;
+    for line in source.lines() {
+        let directive = line.trim().split_whitespace().next().unwrap_or_default();
+        if directive.eq_ignore_ascii_case(".endl") {
+            inline_library_depth = inline_library_depth.saturating_sub(1);
+            continue;
+        }
+        if let Some((path, section)) = rspice_core::netlist::parse_lib_directive(line) {
+            if section.is_none() {
+                inline_library_depth = inline_library_depth.saturating_add(1);
+            } else if inline_library_depth == 0 {
+                paths.push(path);
+            }
+            continue;
+        }
+        if inline_library_depth == 0
+            && let Some(path) = rspice_core::netlist::parse_include_directive(line)
+        {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+fn portable_dependency_target_key(
+    root_path: &Path,
+    requested_path: &str,
+) -> Result<String, String> {
+    let requested = normalize_portable_path_text(requested_path)?;
+    if is_portable_absolute_text(&requested) {
+        return Ok(portable_text_key(&requested));
+    }
+    let root = normalize_portable_path_text(&root_path.to_string_lossy())?;
+    let mut parent = root.rsplit_once('/').map_or("", |(parent, _)| parent);
+    if parent.is_empty() && root.starts_with('/') {
+        parent = "/";
+    }
+    let joined = if parent.is_empty() {
+        requested
+    } else if parent == "/" {
+        format!("/{requested}")
+    } else {
+        format!("{parent}/{requested}")
+    };
+    normalize_portable_path_text(&joined).map(|path| portable_text_key(&path))
+}
+
+fn portable_path_key(path: &Path) -> String {
+    normalize_portable_path_text(&path.to_string_lossy())
+        .map(|path| portable_text_key(&path))
+        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
+}
+
+fn portable_text_key(path: &str) -> String {
+    let mut key = path.to_owned();
+    if is_windows_absolute_text(path) {
+        key.make_ascii_lowercase();
+    }
+    key
+}
+
+fn is_portable_absolute_text(path: &str) -> bool {
+    path.starts_with('/') || is_windows_absolute_text(path)
+}
+
+fn is_windows_absolute_text(path: &str) -> bool {
+    let candidate = path
+        .strip_prefix("//?/")
+        .or_else(|| path.strip_prefix("//./"))
+        .unwrap_or(path);
+    let candidate = candidate
+        .strip_prefix("UNC/")
+        .or_else(|| candidate.strip_prefix("unc/"))
+        .unwrap_or(candidate);
+    let bytes = candidate.as_bytes();
+    (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/')
+        || (path.starts_with("//")
+            && candidate
+                .split('/')
+                .filter(|component| !component.is_empty())
+                .take(2)
+                .count()
+                == 2)
+}
+
+fn normalize_portable_path_text(path: &str) -> Result<String, String> {
+    let mut path = path.trim().replace('\\', "/");
+    if path.is_empty() || path.chars().any(char::is_control) {
+        return Err("source path is empty or contains a control character".to_owned());
+    }
+    if let Some(unprefixed) = path.strip_prefix("//?/") {
+        path = if let Some(unc) = unprefixed.strip_prefix("UNC/") {
+            format!("//{unc}")
+        } else {
+            unprefixed.to_owned()
+        };
+    }
+
+    let prefix_len = if path.starts_with("//") {
+        2
+    } else if path.starts_with('/') {
+        1
+    } else if is_windows_absolute_text(&path) {
+        3
+    } else {
+        0
+    };
+    let prefix = &path[..prefix_len];
+    let mut components = Vec::new();
+    for component in path[prefix_len..].split('/') {
+        match component {
+            "" | "." => {}
+            ".." if components.pop().is_some() => {}
+            ".." if prefix_len == 0 => components.push(component),
+            ".." => {
+                return Err(format!("absolute source path escapes its root: {path}"));
+            }
+            _ => components.push(component),
+        }
+    }
+    let body = components.join("/");
+    Ok(match prefix {
+        "//" => format!("//{body}"),
+        "/" => format!("/{body}"),
+        _ if prefix_len == 3 => format!("{prefix}{body}"),
+        _ => body,
+    })
 }
 
 /// Manager for all model libraries
@@ -817,14 +1087,17 @@ impl ModelLibraryManager {
                     requested_path,
                     target,
                 },
-            );
+            )
+            .collect::<Vec<_>>();
         let bundle = rspice_core::netlist::SealedSourceBundle::try_new_with_edges(
-            authenticated_sources,
-            edges,
+            authenticated_sources.clone(),
+            edges.clone(),
         )
         .map_err(|error| format!("Failed to seal model source bundle: {error}"))?;
         Ok(SealedModelExecutionSources {
             bundle,
+            sources: authenticated_sources,
+            edges,
             libraries: sealed_libraries,
         })
     }
@@ -1002,6 +1275,83 @@ mod tests {
         manager
             .validate_attached_technology(Some(&binding))
             .expect("unchanged byte-backed catalog matches attachment");
+    }
+
+    #[test]
+    fn authenticated_root_expands_retained_model_include_closure_without_filesystem_lookup() {
+        let (directory, path) = model_fixture();
+        let child = directory.join("device.inc");
+        fs::write(&child, ".model sealed_n NMOS (LEVEL=1 KP=7e-3)\n")
+            .expect("write nested model source");
+        fs::write(
+            &path,
+            ".include device.inc\n.lib TT\n.model root_n NMOS (LEVEL=1)\n.endl TT\n",
+        )
+        .expect("write model root");
+
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .load_library_file(&path, Some("TT"))
+            .expect("import authenticated model closure");
+        let sealed = manager
+            .seal_execution_sources()
+            .expect("seal exact model bytes");
+        let deck = directory.join("browser-root.cir");
+        let source = "browser root\n.lib \"foundry.lib\" TT\nM1 d g 0 0 sealed_n\n.end\n";
+
+        let (expanded, dependencies) = sealed
+            .expand_root_dependencies(&deck, source, &rspice_core::abort_signal::NoAbort)
+            .expect("expand through authenticated bundle");
+
+        assert!(expanded.contains("sealed_n"), "{expanded}");
+        assert!(expanded.lines().all(|line| {
+            rspice_core::netlist::parse_include_directive(line).is_none()
+                && !rspice_core::netlist::parse_lib_directive(line)
+                    .is_some_and(|(_, section)| section.is_some())
+        }));
+        assert_eq!(dependencies.len(), 2);
+
+        fs::remove_dir_all(directory).expect("remove authenticated expansion fixture");
+    }
+
+    #[test]
+    fn authenticated_root_rejects_missing_or_tampered_retained_sources() {
+        let (directory, path) = model_fixture();
+        let mut manager = ModelLibraryManager::new();
+        let name = manager
+            .load_library_file(&path, None)
+            .expect("import authenticated model source");
+        manager
+            .get_library_mut(&name)
+            .expect("library exists")
+            .source_contents[0]
+            .bytes
+            .push(b' ');
+        let tamper = manager
+            .seal_execution_sources()
+            .expect_err("retained byte tamper must fail closed");
+        assert!(
+            tamper.contains("do not match the accepted digest"),
+            "{tamper}"
+        );
+
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .load_library_file(&path, None)
+            .expect("re-import clean source");
+        let sealed = manager.seal_execution_sources().expect("seal clean source");
+        let missing = sealed
+            .bundle_for_root(
+                &directory.join("browser-root.cir"),
+                "browser root\n.include missing.lib\n.end\n",
+            )
+            .expect_err("unretained dependency must fail closed");
+        assert!(
+            missing.contains("not present in the authenticated"),
+            "{missing}"
+        );
+
+        fs::remove_dir_all(directory).expect("remove authenticated failure fixture");
     }
 
     #[test]

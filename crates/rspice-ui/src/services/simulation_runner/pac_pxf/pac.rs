@@ -144,6 +144,24 @@ pub(super) fn run_pac_internal_with_abort(
     config: &PacRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacInternalResult> {
+    run_pac_internal_impl(netlist, config, None, abort)
+}
+
+pub(super) fn run_pac_internal_from_pss_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
+    run_pac_internal_impl(netlist, config, Some(operating_point), abort)
+}
+
+fn run_pac_internal_impl(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
     use rspice_core::analysis::advanced::pac::PacConfig;
 
     ensure_not_aborted(abort)?;
@@ -177,10 +195,14 @@ pub(super) fn run_pac_internal_with_abort(
 
     // The engine solves the periodic operating point with harmonic balance
     // and the sideband-coupled small-signal system around it.
-    let pac_result = engine
-        .run_pac_with_abort(netlist, pac_config, abort)
-        .map_err(|error| ServiceRunError::from_core("PAC error", error))?
-        .result;
+    let pac_result = match operating_point {
+        Some(operating_point) => {
+            engine.run_pac_from_pss_with_abort(netlist, pac_config, operating_point, abort)
+        }
+        None => engine.run_pac_with_abort(netlist, pac_config, abort),
+    }
+    .map_err(|error| ServiceRunError::from_core("PAC error", error))?
+    .result;
 
     let output_node_idx =
         resolve_pac_output_node_with_abort(&pac_result, &config.output_node, abort)?.ok_or_else(
@@ -219,6 +241,41 @@ pub fn run_pac_analysis_with_abort(
     run_pac_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
 }
 
+/// Run PAC from the exact authenticated numerical state produced by the
+/// prerequisite PSS task.
+pub fn run_pac_analysis_from_pss_with_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    run_pac_analysis_from_pss_with_source_path_and_abort(
+        netlist_text,
+        config,
+        operating_point,
+        None,
+        abort,
+    )
+}
+
+/// Run PAC from an exact retained PSS state with direct-call source-relative
+/// include and model resolution.
+pub fn run_pac_analysis_from_pss_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pac_analysis_for_netlist_with_operating_point_abort(
+        &netlist,
+        config,
+        Some(operating_point),
+        abort,
+    )
+}
+
 /// Run PAC analysis by first solving PSS and then linearizing around the
 /// periodic solution, resolving relative includes from the source path when
 /// provided.
@@ -247,7 +304,21 @@ fn run_pac_analysis_for_netlist_with_abort(
     config: &PacRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
-    let pac_internal = run_pac_internal_with_abort(netlist, config, abort)?;
+    run_pac_analysis_for_netlist_with_operating_point_abort(netlist, config, None, abort)
+}
+
+fn run_pac_analysis_for_netlist_with_operating_point_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let pac_internal = match operating_point {
+        Some(operating_point) => {
+            run_pac_internal_from_pss_with_abort(netlist, config, operating_point, abort)?
+        }
+        None => run_pac_internal_with_abort(netlist, config, abort)?,
+    };
     let output_node_idx = pac_internal.output_node_idx;
     let pac_result = pac_internal.pac_result;
 

@@ -238,6 +238,51 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
+    run_pnoise_analysis_impl(netlist_text, config, source_path, None, abort)
+}
+
+/// Run PNOISE from the exact authenticated numerical state produced by the
+/// prerequisite PSS task.
+pub fn run_pnoise_analysis_from_pss_with_abort(
+    netlist_text: &str,
+    config: &PnoiseRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    run_pnoise_analysis_from_pss_with_source_path_and_abort(
+        netlist_text,
+        config,
+        operating_point,
+        None,
+        abort,
+    )
+}
+
+/// Run PNOISE from an exact retained PSS state while resolving any unsealed
+/// direct-call source references relative to `source_path`.
+pub fn run_pnoise_analysis_from_pss_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PnoiseRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    run_pnoise_analysis_impl(
+        netlist_text,
+        config,
+        source_path,
+        Some(operating_point),
+        abort,
+    )
+}
+
+fn run_pnoise_analysis_impl(
+    netlist_text: &str,
+    config: &PnoiseRunConfig,
+    source_path: Option<&Path>,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
     ensure_not_aborted(abort)?;
     config.validate()?;
     ensure_not_aborted(abort)?;
@@ -255,8 +300,33 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
         }
     }
 
-    // PNOISE requires a periodic operating point. We run PSS first and reuse
-    // its carrier for phase-noise normalization.
+    let mut sim_config = build_engine_config(&netlist, None);
+    sim_config.tolerance = config.pss_tolerance;
+    let noise_temperature = sim_config.temperature;
+    let engine = Engine::new(sim_config);
+
+    let frequencies = generate_freq_points_with_abort(
+        config.start_freq,
+        config.stop_freq,
+        config.points_per_unit,
+        config.sweep.keyword(),
+        abort,
+    )?;
+
+    if let Some(operating_point) = operating_point {
+        return run_pnoise_from_retained_state(
+            &engine,
+            &netlist,
+            config,
+            frequencies,
+            operating_point,
+            abort,
+        );
+    }
+
+    // Legacy direct service calls retain their historical self-contained
+    // PSS solve and explicitly documented approximation fallback. Prepared
+    // execution returns above and can never enter this branch.
     let pss_data = run_pss_analysis_with_source_path_and_abort(
         netlist_text,
         config.pss_fundamental_freq,
@@ -265,11 +335,6 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
         source_path,
         abort,
     )?;
-
-    let mut sim_config = build_engine_config(&netlist, None);
-    sim_config.tolerance = config.pss_tolerance;
-    let noise_temperature = sim_config.temperature;
-    let engine = Engine::new(sim_config);
 
     let dc_result = engine
         .run_dc_op_with_abort(&netlist, abort)
@@ -308,14 +373,6 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
         )
         .into());
     }
-
-    let frequencies = generate_freq_points_with_abort(
-        config.start_freq,
-        config.stop_freq,
-        config.points_per_unit,
-        config.sweep.keyword(),
-        abort,
-    )?;
 
     let sideband_stride = resolve_pnoise_sideband_stride_with_abort(config.max_sideband, abort)?;
     let sideband_factor = sideband_stride;
@@ -362,7 +419,7 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
         .then(|| config.input_source.trim())
         .filter(|name| !name.is_empty());
     let mut exact_input_noise: Option<Vec<Value>> = None;
-    match engine.run_pnoise_with_abort(
+    let exact_result = engine.run_pnoise_with_abort(
         &netlist,
         pss_data.frequency,
         &frequencies,
@@ -371,7 +428,8 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
         pnoise_input,
         config.max_sideband.max(1),
         abort,
-    ) {
+    );
+    match exact_result {
         Ok(exact) => {
             if config.noise_summary {
                 let mut total = 0.0;
@@ -454,8 +512,9 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
                 .with_tstab_periods(30)
                 .with_tolerance(config.pss_tolerance)
                 .with_max_iterations(60);
-            match engine.run_pnoise_oscillator_with_abort(&netlist, osc_config, &frequencies, abort)
-            {
+            let oscillator_result =
+                engine.run_pnoise_oscillator_with_abort(&netlist, osc_config, &frequencies, abort);
+            match oscillator_result {
                 Ok(osc) => {
                     return Ok(PnoiseData {
                         frequencies,
@@ -665,6 +724,190 @@ pub fn run_pnoise_analysis_with_source_path_and_abort(
     )
 }
 
+fn run_pnoise_from_retained_state(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    config: &PnoiseRunConfig,
+    frequencies: Vec<Value>,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    let sideband_factor = resolve_pnoise_sideband_stride_with_abort(config.max_sideband, abort)?;
+    let output_ref = config
+        .output_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|node| !node.is_empty() && !is_ground_like(node));
+
+    if config.noise_ref == PnoiseReference::Phase {
+        let oscillator = engine
+            .run_pnoise_oscillator_from_pss_with_abort(
+                netlist,
+                operating_point.config().clone(),
+                &frequencies,
+                operating_point,
+                abort,
+            )
+            .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
+        ensure_not_aborted(abort)?;
+        return Ok(PnoiseData {
+            frequencies,
+            output_noise: oscillator.phase_noise_dbc,
+            input_noise: None,
+            total_output_noise: None,
+            contributors: Vec::new(),
+            carrier_frequency: 1.0 / oscillator.period,
+            sideband_factor,
+            reference: config.noise_ref,
+            warnings: Vec::new(),
+        });
+    }
+
+    let input_source = (config.noise_ref == PnoiseReference::Input)
+        .then(|| config.input_source.trim())
+        .filter(|name| !name.is_empty());
+    let exact = engine
+        .run_pnoise_from_pss_with_abort(
+            netlist,
+            &frequencies,
+            config.output_node.trim(),
+            output_ref,
+            input_source,
+            config.max_sideband.max(1),
+            operating_point,
+            abort,
+        )
+        .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
+
+    let input_noise = match config.noise_ref {
+        PnoiseReference::Input => Some(exact.input_noise.ok_or_else(|| {
+            PnoiseRunError::Data(
+                "exact retained-state PNOISE did not produce the requested input-referred spectrum"
+                    .to_owned(),
+            )
+        })?),
+        PnoiseReference::Output => None,
+        PnoiseReference::Phase => unreachable!("phase reference returned through the PPV path"),
+    };
+    let total_output_noise = if config.integrated_noise {
+        Some(integrate_noise_rms_with_abort(
+            &frequencies,
+            &exact.output_noise,
+            abort,
+        )?)
+    } else {
+        None
+    };
+    let contributors = if config.noise_summary {
+        contributor_percentages_with_abort(
+            &frequencies,
+            &exact.contributors,
+            &exact.output_noise,
+            abort,
+        )?
+    } else {
+        Vec::new()
+    };
+    ensure_not_aborted(abort)?;
+    Ok(PnoiseData {
+        frequencies,
+        output_noise: exact.output_noise,
+        input_noise,
+        total_output_noise,
+        contributors,
+        carrier_frequency: operating_point.analysis().result.frequency,
+        sideband_factor,
+        reference: config.noise_ref,
+        warnings: Vec::new(),
+    })
+}
+
+fn contributor_percentages_with_abort(
+    frequencies: &[Value],
+    contributors: &[(String, Vec<Value>)],
+    output_noise: &[Value],
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Vec<(String, Value)>> {
+    let total = integrate_psd_power_with_abort(
+        frequencies,
+        output_noise,
+        "exact PNOISE output spectrum",
+        abort,
+    )?;
+    let mut percentages = Vec::with_capacity(contributors.len());
+    for (contributor_index, (name, values)) in contributors.iter().enumerate() {
+        poll_periodically(abort, contributor_index)?;
+        let share = integrate_psd_power_with_abort(
+            frequencies,
+            values,
+            &format!("exact PNOISE contributor '{name}'"),
+            abort,
+        )?;
+        percentages.push((
+            name.clone(),
+            if total > 0.0 {
+                100.0 * share / total
+            } else {
+                0.0
+            },
+        ));
+    }
+    percentages.sort_by(|lhs, rhs| {
+        rhs.1
+            .partial_cmp(&lhs.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| lhs.0.cmp(&rhs.0))
+    });
+    ensure_not_aborted(abort)?;
+    Ok(percentages)
+}
+
+fn integrate_psd_power_with_abort(
+    frequencies: &[Value],
+    psd: &[Value],
+    label: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Value> {
+    ensure_not_aborted(abort)?;
+    if frequencies.len() != psd.len() || frequencies.is_empty() {
+        return Err(PnoiseRunError::Data(format!(
+            "{label} has {} samples for {} frequency points",
+            psd.len(),
+            frequencies.len()
+        ))
+        .into());
+    }
+    if frequencies
+        .iter()
+        .any(|frequency| !frequency.is_finite() || *frequency < 0.0)
+        || psd.iter().any(|value| !value.is_finite() || *value < 0.0)
+        || frequencies.windows(2).any(|pair| pair[1] <= pair[0])
+    {
+        return Err(PnoiseRunError::Data(format!(
+            "{label} contains non-finite, negative, or non-monotonic numerical data"
+        ))
+        .into());
+    }
+    if frequencies.len() == 1 {
+        return Ok(psd[0]);
+    }
+
+    let mut power = 0.0;
+    for (index, (frequency_pair, psd_pair)) in
+        frequencies.windows(2).zip(psd.windows(2)).enumerate()
+    {
+        poll_periodically(abort, index)?;
+        power += 0.5 * (psd_pair[0] + psd_pair[1]) * (frequency_pair[1] - frequency_pair[0]);
+    }
+    if !power.is_finite() || power < 0.0 {
+        return Err(
+            PnoiseRunError::Data(format!("{label} integration produced an invalid power")).into(),
+        );
+    }
+    ensure_not_aborted(abort)?;
+    Ok(power)
+}
+
 fn find_pss_waveform_by_node_with_abort<'a>(
     pss_data: &'a PssData,
     node: &str,
@@ -816,5 +1059,19 @@ mod tests {
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.count() > 1);
+    }
+
+    #[test]
+    fn exact_contributor_percentages_integrate_on_the_nonuniform_frequency_axis() {
+        let frequencies = vec![1.0, 2.0, 10.0];
+        let output = vec![2.0, 2.0, 2.0];
+        let contributors = vec![("M1".to_owned(), vec![0.0, 0.0, 2.0])];
+
+        let percentages =
+            contributor_percentages_with_abort(&frequencies, &contributors, &output, &NoAbort)
+                .expect("valid nonuniform spectra integrate");
+
+        assert_eq!(percentages.len(), 1);
+        assert!((percentages[0].1 - 100.0 * 8.0 / 18.0).abs() < 1.0e-12);
     }
 }

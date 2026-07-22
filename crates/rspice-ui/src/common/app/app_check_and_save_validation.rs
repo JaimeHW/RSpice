@@ -255,6 +255,7 @@ impl CheckAndSaveValidationReport {
                 match crate::simulation::controller::prepared_run::expand_generated_dependencies(
                     &generated_source,
                     root.current_file.as_deref(),
+                    &state.model_library_manager,
                 ) {
                     Ok((sealed_source, sealed_dependencies)) => {
                         dependencies.insert(

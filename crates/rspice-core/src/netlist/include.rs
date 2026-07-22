@@ -99,8 +99,11 @@ pub const DEFAULT_MAX_INCLUDE_DEPTH: usize = 64;
 pub struct SealedSourceBundle {
     sources: BTreeMap<PathBuf, Arc<str>>,
     edges: BTreeMap<(PathBuf, String), PathBuf>,
-    #[cfg(windows)]
-    windows_identities: BTreeMap<String, PathBuf>,
+    /// Portable source identity used to recognize Windows paths after a
+    /// project is restored in a browser or on another desktop platform.
+    /// Native Unix paths remain case-sensitive; Windows drive/UNC identities
+    /// are separator-normalized and case-folded.
+    portable_identities: BTreeMap<String, PathBuf>,
 }
 
 impl std::fmt::Debug for SealedSourceBundle {
@@ -145,7 +148,7 @@ impl SealedSourceBundle {
     ) -> Result<Self, ParseError> {
         let mut bundle = Self::default();
         for (path, content) in sources {
-            if !path.is_absolute() {
+            if !is_portable_absolute_source_path(&path) {
                 return Err(ParseError::Syntax {
                     line: 0,
                     message: format!(
@@ -162,21 +165,18 @@ impl SealedSourceBundle {
                 });
             }
 
-            #[cfg(windows)]
-            {
-                let identity = windows_path_identity(&path);
-                if let Some(existing) = bundle.windows_identities.get(&identity) {
-                    return Err(ParseError::Syntax {
-                        line: 0,
-                        message: format!(
-                            "Duplicate sealed source identity: {} and {}",
-                            existing.display(),
-                            path.display()
-                        ),
-                    });
-                }
-                bundle.windows_identities.insert(identity, path.clone());
+            let identity = portable_source_path_identity(&path);
+            if let Some(existing) = bundle.portable_identities.get(&identity) {
+                return Err(ParseError::Syntax {
+                    line: 0,
+                    message: format!(
+                        "Duplicate sealed source identity: {} and {}",
+                        existing.display(),
+                        path.display()
+                    ),
+                });
             }
+            bundle.portable_identities.insert(identity, path.clone());
 
             bundle.sources.insert(path, Arc::from(content));
         }
@@ -239,15 +239,9 @@ impl SealedSourceBundle {
             return Some(path.clone());
         }
 
-        #[cfg(windows)]
-        {
-            self.windows_identities
-                .get(&windows_path_identity(&candidate))
-                .cloned()
-        }
-
-        #[cfg(not(windows))]
-        None
+        self.portable_identities
+            .get(&portable_source_path_identity(&candidate))
+            .cloned()
     }
 
     fn content(&self, path: &Path) -> Option<Arc<str>> {
@@ -1383,8 +1377,7 @@ fn lexically_normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-#[cfg(windows)]
-fn windows_path_identity(path: &Path) -> String {
+fn portable_source_path_identity(path: &Path) -> String {
     let mut identity = lexically_normalize_path(path)
         .to_string_lossy()
         .replace('\\', "/");
@@ -1395,8 +1388,37 @@ fn windows_path_identity(path: &Path) -> String {
             unprefixed.to_owned()
         };
     }
-    identity.make_ascii_lowercase();
+    if is_windows_source_path_literal(&identity) {
+        identity.make_ascii_lowercase();
+    }
     identity
+}
+
+fn is_portable_absolute_source_path(path: &Path) -> bool {
+    if path.is_absolute() {
+        return true;
+    }
+    is_windows_source_path_literal(&path.to_string_lossy().replace('\\', "/"))
+}
+
+fn is_windows_source_path_literal(path: &str) -> bool {
+    let candidate = path
+        .strip_prefix("//?/")
+        .or_else(|| path.strip_prefix("//./"))
+        .unwrap_or(path);
+    let candidate = candidate
+        .strip_prefix("UNC/")
+        .or_else(|| candidate.strip_prefix("unc/"))
+        .unwrap_or(candidate);
+    let bytes = candidate.as_bytes();
+    (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/')
+        || (path.starts_with("//")
+            && candidate
+                .split('/')
+                .filter(|component| !component.is_empty())
+                .take(2)
+                .count()
+                == 2)
 }
 
 //=============================================================================
@@ -1954,6 +1976,30 @@ R1 1 0 {selected}
     ) -> SealedSourceBundle {
         SealedSourceBundle::try_new_with_edges(sources, edges)
             .expect("sealed fixture is internally consistent")
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn sealed_bundle_accepts_restored_windows_source_identities_off_host() {
+        let root = PathBuf::from(r"C:\projects\rspice\models\root.lib");
+        let child = PathBuf::from(r"C:\projects\rspice\models\child.inc");
+        let bundle = sealed_bundle(
+            vec![
+                (root.clone(), ".include child.inc\n".to_owned()),
+                (child.clone(), ".model DPORT D\n".to_owned()),
+            ],
+            vec![SealedSourceEdge {
+                owner: root.clone(),
+                requested_path: "child.inc".to_owned(),
+                target: child,
+            }],
+        );
+
+        let expanded = IncludeProcessor::new_sealed(&root, bundle)
+            .process_sealed_root(&root, None)
+            .expect("foreign desktop identity resolves entirely in memory");
+
+        assert!(expanded.contains("DPORT"), "{expanded}");
     }
 
     #[test]

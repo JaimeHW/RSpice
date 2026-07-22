@@ -395,7 +395,7 @@ impl SimulationRunner {
     #[allow(dead_code)]
     #[cfg(test)]
     fn run_dc_op(&mut self, netlist: String) -> Result<(), SimulationError> {
-        self.start(AnalysisConfig::DcOp, netlist)
+        self.start(AnalysisConfig::dc_op(), netlist)
     }
 
     /// Run DC operating point analysis with a source path for relative include
@@ -407,7 +407,7 @@ impl SimulationRunner {
         netlist: String,
         source_path: Option<PathBuf>,
     ) -> Result<(), SimulationError> {
-        self.start_with_source_path(AnalysisConfig::DcOp, netlist, source_path)
+        self.start_with_source_path(AnalysisConfig::dc_op(), netlist, source_path)
     }
 }
 
@@ -459,7 +459,7 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
 fn initial_status_for_request(request: &SimulationRequest) -> SimulationStatus {
     match request {
         SimulationRequest::Config(config) => match config.as_ref() {
-            AnalysisConfig::DcOp => SimulationStatus::DcOperatingPoint,
+            AnalysisConfig::DcOp(_) => SimulationStatus::DcOperatingPoint,
             AnalysisConfig::DcSweep(dc) => SimulationStatus::DcSweep {
                 source: dc.source.clone(),
                 progress: 0.0,
@@ -488,7 +488,7 @@ fn initial_status_for_spec(
     options: &SpecExecutionOptions,
 ) -> SimulationStatus {
     match spec {
-        AnalysisSpec::DcOp => SimulationStatus::DcOperatingPoint,
+        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => SimulationStatus::DcOperatingPoint,
         AnalysisSpec::DcSweep { source_name, .. } => SimulationStatus::DcSweep {
             source: source_name.clone(),
             progress: 0.0,
@@ -921,7 +921,7 @@ mod tests {
             )))
             .expect("stores pending error");
 
-        let start_result = runner.start(AnalysisConfig::DcOp, String::new());
+        let start_result = runner.start(AnalysisConfig::dc_op(), String::new());
         assert_eq!(start_result, Err(SimulationError::AlreadyRunning));
 
         let pending = runner
@@ -950,7 +950,7 @@ mod tests {
             std::thread::yield_now();
         }
 
-        let start_result = runner.start(AnalysisConfig::DcOp, String::new());
+        let start_result = runner.start(AnalysisConfig::dc_op(), String::new());
         assert_eq!(start_result, Err(SimulationError::AlreadyRunning));
 
         let pending = runner
@@ -995,6 +995,7 @@ mod tests {
                 num_points: 10,
                 start_freq: 12.0,
                 stop_freq: 34.0,
+                ..crate::simulation::config::NoiseAnalysisConfig::default()
             },
         )));
         assert_eq!(

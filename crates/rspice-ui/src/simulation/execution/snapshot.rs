@@ -333,6 +333,7 @@ impl RunSourceReceipt {
 #[derive(Debug, Clone)]
 pub(in crate::simulation) struct PreparedTask {
     instance_id: AnalysisInstanceId,
+    authored_instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
     dependency_bindings: Vec<PreparedDependencyBinding>,
@@ -343,6 +344,9 @@ pub(in crate::simulation) struct PreparedTask {
     /// Explicit per-instance override. Stable plan tasks always set this for
     /// S-parameter analyses; manual-deck tasks inherit the run-level policy.
     touchstone_export: Option<TouchstoneExportPolicy>,
+    /// Exact per-point source after process-model binding. `None` selects the
+    /// run-level executable source verbatim.
+    executable_netlist_override: Option<String>,
 }
 
 impl PreparedTask {
@@ -361,6 +365,7 @@ impl PreparedTask {
         );
         Self {
             instance_id,
+            authored_instance_id: instance_id,
             source_revision,
             dependencies,
             dependency_bindings: Vec::new(),
@@ -369,6 +374,7 @@ impl PreparedTask {
             task,
             saved_output_contracts: Vec::new(),
             touchstone_export: None,
+            executable_netlist_override: None,
         }
     }
 
@@ -444,6 +450,9 @@ struct PreparedPvtPoint {
     process: ProcessCorner,
     voltage: Option<f64>,
     temperature_celsius: f64,
+    /// Exact corner contract that owns process-model and nominal-voltage
+    /// semantics for this point. Temperature-only axes do not carry one.
+    corner_contract: Option<crate::services::simulation_runner::CornerRunConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -536,6 +545,7 @@ pub(in crate::simulation) struct AuthorizedRunDispatch {
 pub(in crate::simulation) struct AuthorizedTaskDispatch {
     snapshot_digest: ContentDigest,
     instance_id: AnalysisInstanceId,
+    authored_instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
     dependency_bindings: Vec<PreparedDependencyBinding>,
@@ -639,6 +649,10 @@ impl AuthorizedTaskDispatch {
         self.instance_id
     }
 
+    pub(in crate::simulation) const fn authored_instance_id(&self) -> AnalysisInstanceId {
+        self.authored_instance_id
+    }
+
     pub(in crate::simulation) const fn source_revision(&self) -> ObjectRevision {
         self.source_revision
     }
@@ -685,6 +699,10 @@ impl AuthorizedTaskDispatch {
 
     pub(in crate::simulation) fn saved_output_contracts(&self) -> &[PreparedSavedOutput] {
         &self.saved_output_contracts
+    }
+
+    pub(in crate::simulation) fn executable_netlist(&self) -> &str {
+        &self.executable_netlist
     }
 }
 
@@ -820,6 +838,27 @@ impl PreparedRunSnapshot {
                 "Prepared task graph cannot mix source revisions in one frozen run",
             ));
         }
+        for (index, task) in parts.tasks.iter().enumerate() {
+            validate_prepared_task_integrity(
+                task,
+                index,
+                parts.source_digest,
+                &parts.executable_netlist,
+            )?;
+        }
+
+        // Resolve the run-level PVT set before authenticating the task graph.
+        // An OP configured for the PVT/run-set axis is one solve per exact
+        // point, not one nominal solve accompanied by descriptive metadata.
+        // Expansion also rewires downstream ordering edges to the final OP
+        // point so dispatch cannot observe a partially completed sequence.
+        let pvt_points = derive_pvt_points(
+            &parts.tasks,
+            parts.reference_process,
+            parts.reference_temperature_celsius,
+        )?;
+        parts.tasks =
+            expand_operating_point_tasks(parts.tasks, &pvt_points, &parts.executable_netlist)?;
 
         let mut positions = HashMap::with_capacity(parts.tasks.len());
         for (index, task) in parts.tasks.iter().enumerate() {
@@ -832,43 +871,12 @@ impl PreparedRunSnapshot {
                     ),
                 ));
             }
-            if task.config_digest != task.payload_digest() {
-                return Err(PreparationError::new(
-                    PreparationStage::AnalysisPlan,
-                    format!(
-                        "Prepared task {} configuration digest does not authenticate its actual dispatch payload",
-                        index + 1
-                    ),
-                ));
-            }
-            let mut output_ids = HashSet::with_capacity(task.saved_output_contracts.len());
-            let mut output_names = HashSet::with_capacity(task.saved_output_contracts.len());
-            let mut output_digests = HashSet::with_capacity(task.saved_output_contracts.len());
-            for contract in &task.saved_output_contracts {
-                if contract.analysis_id() != task.instance_id {
-                    return Err(PreparationError::new(
-                        PreparationStage::AnalysisPlan,
-                        format!(
-                            "Prepared saved output {} targets analysis {}, not its owning task {}",
-                            contract.output_id(),
-                            contract.analysis_id(),
-                            task.instance_id
-                        ),
-                    ));
-                }
-                if !output_ids.insert(contract.output_id())
-                    || !output_names.insert(contract.name())
-                    || !output_digests.insert(contract.digest())
-                {
-                    return Err(PreparationError::new(
-                        PreparationStage::AnalysisPlan,
-                        format!(
-                            "Prepared task {} contains duplicate saved-output identity, name, or contract digest",
-                            task.instance_id
-                        ),
-                    ));
-                }
-            }
+            validate_prepared_task_integrity(
+                task,
+                index,
+                parts.source_digest,
+                &parts.executable_netlist,
+            )?;
         }
 
         for task in &parts.tasks {
@@ -923,8 +931,19 @@ impl PreparedRunSnapshot {
                 }
             }
 
-            let expected_binding_count =
-                usize::from(matches!(task.task.spec, AnalysisSpec::Fourier { .. }));
+            let expected_artifact_kind = match task.task.spec {
+                AnalysisSpec::Fourier { .. } => Some(ExecutionArtifactKind::TransientTrajectory),
+                AnalysisSpec::Pss {
+                    method: crate::simulation::multi_run::PssMethod::Shooting,
+                    ..
+                } => Some(ExecutionArtifactKind::DcOperatingPointSeed),
+                AnalysisSpec::Pac
+                | AnalysisSpec::Pxf
+                | AnalysisSpec::Pnoise
+                | AnalysisSpec::Pstb => Some(ExecutionArtifactKind::PeriodicState),
+                _ => None,
+            };
+            let expected_binding_count = usize::from(expected_artifact_kind.is_some());
             if task.dependency_bindings.len() != expected_binding_count {
                 return Err(PreparationError::new(
                     PreparationStage::AnalysisPlan,
@@ -958,8 +977,20 @@ impl PreparedRunSnapshot {
                     ));
                 }
                 let producer = &parts.tasks[positions[&producer_id]];
-                if binding.kind() != ExecutionArtifactKind::TransientTrajectory
-                    || !matches!(producer.task.spec, AnalysisSpec::Transient { .. })
+                let producer_kind_matches = match binding.kind() {
+                    ExecutionArtifactKind::TransientTrajectory => {
+                        matches!(producer.task.spec, AnalysisSpec::Transient { .. })
+                    }
+                    ExecutionArtifactKind::PeriodicState => {
+                        matches!(producer.task.spec, AnalysisSpec::Pss { .. })
+                    }
+                    ExecutionArtifactKind::DcOperatingPointSeed => matches!(
+                        producer.task.spec,
+                        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
+                    ),
+                };
+                if Some(binding.kind()) != expected_artifact_kind
+                    || !producer_kind_matches
                     || binding.producer_source_revision() != producer.source_revision
                     || binding.producer_config_digest() != producer.config_digest
                 {
@@ -1079,12 +1110,6 @@ impl PreparedRunSnapshot {
         parts.model_identities.sort_unstable();
         parts.model_identities.dedup();
 
-        let pvt_points = derive_pvt_points(
-            &parts.tasks,
-            parts.reference_process,
-            parts.reference_temperature_celsius,
-        )?;
-
         let digest = snapshot_digest(
             parts.intent,
             parts.simulation_plan_id,
@@ -1192,6 +1217,7 @@ impl PreparedRunSnapshot {
                 AuthorizedTaskDispatch {
                     snapshot_digest: self.digest,
                     instance_id: prepared.instance_id,
+                    authored_instance_id: prepared.authored_instance_id,
                     source_revision: prepared.source_revision,
                     dependencies: prepared.dependencies,
                     dependency_bindings: prepared.dependency_bindings,
@@ -1199,7 +1225,10 @@ impl PreparedRunSnapshot {
                     config_digest: prepared.config_digest,
                     task: prepared.task,
                     saved_output_contracts: prepared.saved_output_contracts,
-                    executable_netlist: Arc::clone(&executable_netlist),
+                    executable_netlist: prepared
+                        .executable_netlist_override
+                        .map(Arc::<str>::from)
+                        .unwrap_or_else(|| Arc::clone(&executable_netlist)),
                     project_veriloga_runtimes: project_veriloga_runtimes.clone(),
                     touchstone_export,
                 }
@@ -1219,6 +1248,412 @@ impl PreparedRunSnapshot {
             cross_probe: self.cross_probe,
         })
     }
+}
+
+fn validate_prepared_task_integrity(
+    task: &PreparedTask,
+    index: usize,
+    source_digest: ContentDigest,
+    executable_netlist: &str,
+) -> Result<(), PreparationError> {
+    if task.config_digest != task.payload_digest() {
+        return Err(PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            format!(
+                "Prepared task {} configuration digest does not authenticate its actual dispatch payload",
+                index + 1
+            ),
+        ));
+    }
+    let exact_source = task
+        .executable_netlist_override
+        .as_deref()
+        .unwrap_or(executable_netlist);
+    let exact_source_digest = if task.executable_netlist_override.is_some() {
+        crate::workbench::netlist_document::source_content_digest(exact_source)
+    } else {
+        source_digest
+    };
+    validate_retained_operating_point_contract(&task.task, exact_source_digest, exact_source)
+        .map_err(|message| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Prepared operating-point task {} is invalid: {message}",
+                    task.instance_id
+                ),
+            )
+        })?;
+
+    let mut output_ids = HashSet::with_capacity(task.saved_output_contracts.len());
+    let mut output_names = HashSet::with_capacity(task.saved_output_contracts.len());
+    let mut output_digests = HashSet::with_capacity(task.saved_output_contracts.len());
+    for contract in &task.saved_output_contracts {
+        if contract.analysis_id() != task.instance_id {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Prepared saved output {} targets analysis {}, not its owning task {}",
+                    contract.output_id(),
+                    contract.analysis_id(),
+                    task.instance_id
+                ),
+            ));
+        }
+        if !output_ids.insert(contract.output_id())
+            || !output_names.insert(contract.name())
+            || !output_digests.insert(contract.digest())
+        {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!(
+                    "Prepared task {} contains duplicate saved-output identity, name, or contract digest",
+                    task.instance_id
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn expand_operating_point_tasks(
+    tasks: Vec<PreparedTask>,
+    pvt_points: &[PreparedPvtPoint],
+    executable_netlist: &str,
+) -> Result<Vec<PreparedTask>, PreparationError> {
+    use crate::simulation::AnalysisConfig;
+    use crate::simulation::dialog::{OpRunPointContext, OpTemperatureMode};
+
+    let mut expanded = Vec::with_capacity(tasks.len().saturating_add(pvt_points.len()));
+    let mut final_task = HashMap::<
+        AnalysisInstanceId,
+        (
+            AnalysisInstanceId,
+            ObjectRevision,
+            ContentDigest,
+            Option<String>,
+        ),
+    >::new();
+
+    for mut prepared in tasks {
+        let original_identity = prepared.instance_id;
+        prepared.dependencies = prepared
+            .dependencies
+            .iter()
+            .map(|dependency| {
+                final_task
+                    .get(dependency)
+                    .map_or(*dependency, |(identity, _, _, _)| *identity)
+            })
+            .collect();
+        let inherited_op_source_override = prepared
+            .dependency_bindings
+            .iter()
+            .find(|binding| binding.kind() == ExecutionArtifactKind::DcOperatingPointSeed)
+            .and_then(|binding| final_task.get(&binding.producer_instance_id()))
+            .and_then(|(_, _, _, source)| source.clone());
+        for binding in &mut prepared.dependency_bindings {
+            if let Some((identity, revision, digest, _)) =
+                final_task.get(&binding.producer_instance_id())
+            {
+                binding.rebind_producer(*identity, *revision, *digest);
+            }
+        }
+        if matches!(
+            prepared.task.spec,
+            AnalysisSpec::Pss {
+                method: crate::simulation::multi_run::PssMethod::Shooting,
+                ..
+            }
+        ) {
+            prepared.executable_netlist_override = inherited_op_source_override;
+        }
+
+        let Some(base_config) = operating_point_config(&prepared.task.spec) else {
+            final_task.insert(
+                original_identity,
+                (
+                    original_identity,
+                    prepared.source_revision,
+                    prepared.config_digest,
+                    prepared.executable_netlist_override.clone(),
+                ),
+            );
+            expanded.push(prepared);
+            continue;
+        };
+        if !matches!(
+            base_config.temperature_mode,
+            OpTemperatureMode::PvtRunSet | OpTemperatureMode::ActiveRunSetAxis
+        ) {
+            final_task.insert(
+                original_identity,
+                (
+                    original_identity,
+                    prepared.source_revision,
+                    prepared.config_digest,
+                    prepared.executable_netlist_override.clone(),
+                ),
+            );
+            expanded.push(prepared);
+            continue;
+        }
+
+        let base_dependencies = prepared.dependencies.clone();
+        let original_label = prepared.label.clone();
+        let mut previous_point_identity = None;
+        for (index, point) in pvt_points.iter().enumerate() {
+            let instance_id = if pvt_points.len() == 1 {
+                original_identity
+            } else {
+                let corner_digest = point
+                    .corner_contract
+                    .as_ref()
+                    .map(corner_contract_digest)
+                    .map_or_else(|| "none".to_owned(), |digest| digest.to_string());
+                AnalysisInstanceId::from_namespace(
+                    original_identity.as_uuid(),
+                    format!(
+                        "rspice-op-run-point/v2/{index}/{}/{}/{:016x}/{:016x}/{corner_digest}",
+                        pvt_points.len(),
+                        process_tag(point.process),
+                        point.voltage.map(f64::to_bits).unwrap_or_default(),
+                        point.temperature_celsius.to_bits(),
+                    )
+                    .as_bytes(),
+                )
+            };
+            let mut point_task = prepared.clone();
+            point_task.instance_id = instance_id;
+            point_task.dependencies = base_dependencies.clone();
+            if let Some(previous) = previous_point_identity {
+                point_task.dependencies.push(previous);
+            }
+
+            let mut config = base_config.clone();
+            config.temperature_celsius = point.temperature_celsius;
+            let (source_override, nominal_supply_voltage) =
+                prepare_pvt_point_source(executable_netlist, point)?;
+            config.run_point = OpRunPointContext {
+                index,
+                count: pvt_points.len(),
+                process: point.process,
+                supply_voltage: point.voltage,
+                nominal_supply_voltage,
+            };
+            point_task.executable_netlist_override = source_override;
+            point_task.task.spec = operating_point_spec(&config);
+            point_task.task.config = Some(AnalysisConfig::DcOp(config));
+            if pvt_points.len() > 1 {
+                point_task.label = format!(
+                    "{original_label} \u{00b7} point {}/{} \u{00b7} {} \u{00b0}C",
+                    index + 1,
+                    pvt_points.len(),
+                    point.temperature_celsius
+                );
+            }
+            point_task.saved_output_contracts = prepared
+                .saved_output_contracts
+                .iter()
+                .map(|contract| {
+                    contract
+                        .rebind_analysis(instance_id, &point_task.task.spec)
+                        .map_err(|error| {
+                            PreparationError::new(
+                                PreparationStage::AnalysisPlan,
+                                format!(
+                                    "Failed to bind saved output to operating-point run point {}/{}: {error}",
+                                    index + 1,
+                                    pvt_points.len()
+                                ),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            point_task.config_digest = point_task.payload_digest();
+            previous_point_identity = Some(instance_id);
+            expanded.push(point_task);
+        }
+        let final_identity = previous_point_identity.expect("validated PVT point set is non-empty");
+        let final_prepared = expanded
+            .last()
+            .expect("expanded operating-point task retains its final point");
+        final_task.insert(
+            original_identity,
+            (
+                final_identity,
+                final_prepared.source_revision,
+                final_prepared.config_digest,
+                final_prepared.executable_netlist_override.clone(),
+            ),
+        );
+    }
+
+    Ok(expanded)
+}
+
+fn prepare_pvt_point_source(
+    executable_netlist: &str,
+    point: &PreparedPvtPoint,
+) -> Result<(Option<String>, Option<f64>), PreparationError> {
+    let Some(contract) = point.corner_contract.as_ref() else {
+        if point.voltage.is_some() {
+            return Err(PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                "Operating-point PVT voltage is missing its authenticated corner contract",
+            ));
+        }
+        return Ok((None, None));
+    };
+
+    let source = crate::services::simulation_runner::materialize_corner_process_source(
+        executable_netlist,
+        contract,
+        process_to_corner_runner(point.process),
+        &rspice_core::NoAbort,
+    )
+    .map_err(|error| {
+        PreparationError::new(
+            PreparationStage::ModelBindings,
+            format!(
+                "Failed to materialize {} operating-point process corner: {error}",
+                point.process.short_name()
+            ),
+        )
+    })?;
+
+    let nominal_supply_voltage = if point.voltage.is_some() {
+        let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::Netlist,
+                format!("Prepared operating-point corner source is invalid: {error}"),
+            )
+        })?;
+        Some(match contract.nominal_voltage {
+            Some(voltage) => voltage,
+            None => crate::services::simulation_runner::infer_nominal_supply_voltage(
+                &parsed,
+                &rspice_core::NoAbort,
+            )
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!("Failed to resolve nominal PVT supply voltage: {error}"),
+                )
+            })?
+            .ok_or_else(|| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    "Operating-point PVT voltage axis requires a non-zero independent DC supply or an explicit nominal voltage",
+                )
+            })?,
+        })
+    } else {
+        None
+    };
+
+    let source_override = (source != executable_netlist).then_some(source);
+    Ok((source_override, nominal_supply_voltage))
+}
+
+fn operating_point_config(spec: &AnalysisSpec) -> Option<crate::simulation::dialog::OpConfig> {
+    use crate::simulation::dialog::OpConfig;
+
+    match spec {
+        AnalysisSpec::LegacyDcOp => Some(OpConfig::default()),
+        AnalysisSpec::DcOp {
+            temperature_mode,
+            temperature_celsius,
+            initial_guess,
+            node_initialization,
+            homotopy,
+            annotation,
+            device_detail,
+            save_device_op,
+            accuracy,
+            selected_devices,
+            previous_state,
+            violation_devices,
+            violation_source_content_digest,
+            run_point,
+        } => Some(OpConfig {
+            temperature_mode: *temperature_mode,
+            temperature_celsius: *temperature_celsius,
+            initial_guess: *initial_guess,
+            node_initialization: *node_initialization,
+            homotopy: *homotopy,
+            annotation: *annotation,
+            device_detail: *device_detail,
+            save_device_op: *save_device_op,
+            accuracy: *accuracy,
+            selected_devices: selected_devices.clone(),
+            previous_state: previous_state.clone(),
+            violation_devices: violation_devices.clone(),
+            violation_source_content_digest: *violation_source_content_digest,
+            run_point: *run_point,
+        }),
+        _ => None,
+    }
+}
+
+fn operating_point_spec(config: &crate::simulation::dialog::OpConfig) -> AnalysisSpec {
+    AnalysisSpec::DcOp {
+        temperature_mode: config.temperature_mode,
+        temperature_celsius: config.temperature_celsius,
+        initial_guess: config.initial_guess,
+        node_initialization: config.node_initialization,
+        homotopy: config.homotopy,
+        annotation: config.annotation,
+        device_detail: config.device_detail,
+        save_device_op: config.save_device_op,
+        accuracy: config.accuracy,
+        selected_devices: config.selected_devices.clone(),
+        previous_state: config.previous_state.clone(),
+        violation_devices: config.violation_devices.clone(),
+        violation_source_content_digest: config.violation_source_content_digest,
+        run_point: config.run_point,
+    }
+}
+
+fn validate_retained_operating_point_contract(
+    task: &QueuedAnalysis,
+    source_digest: ContentDigest,
+    executable_source: &str,
+) -> Result<(), String> {
+    let spec_config = operating_point_config(&task.spec);
+    let Some(spec_config) = spec_config else {
+        return Ok(());
+    };
+    spec_config.validate_for_execution()?;
+    let effective_source_digest = super::canonical::operating_point_effective_source_digest(
+        executable_source,
+        spec_config.run_point,
+    );
+    if let Some(previous) = spec_config.previous_state.as_ref()
+        && previous.source_content_digest != effective_source_digest
+    {
+        return Err(
+            "the retained previous solution belongs to different executable source content"
+                .to_owned(),
+        );
+    }
+    if let Some(soa_source_digest) = spec_config.violation_source_content_digest
+        && soa_source_digest != source_digest
+    {
+        return Err(
+            "the retained SOA violation evidence belongs to different executable source content"
+                .to_owned(),
+        );
+    }
+    if let Some(crate::simulation::AnalysisConfig::DcOp(config)) = task.config.as_ref() {
+        if config != &spec_config {
+            return Err(
+                "the operating-point spec and engine configuration carry different contracts"
+                    .to_owned(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn dependency_cycle(
@@ -1283,10 +1718,12 @@ fn derive_pvt_points(
 
     let max_pvt_points = rspice_core::ResourceLimits::default().max_batch_runs;
     let mut expanded = Vec::new();
+    let mut found_explicit_axis = false;
     for prepared in tasks {
         let task = prepared.queued_analysis();
         match &task.spec {
             AnalysisSpec::Corner => {
+                found_explicit_axis = true;
                 let default_corner;
                 let corner = match task.spec_options.corner.as_ref() {
                     Some(corner) => corner,
@@ -1296,23 +1733,12 @@ fn derive_pvt_points(
                         &default_corner
                     }
                 };
-                if corner.process_corners.is_empty()
-                    || corner.voltages.is_empty()
-                    || corner.temperatures_c.is_empty()
-                    || corner
-                        .voltages
-                        .iter()
-                        .any(|voltage| !voltage.is_finite() || *voltage <= 0.0)
-                    || corner
-                        .temperatures_c
-                        .iter()
-                        .any(|temperature| !temperature.is_finite())
-                {
-                    return Err(PreparationError::new(
+                corner.validate().map_err(|error| {
+                    PreparationError::new(
                         PreparationStage::AnalysisPlan,
-                        "Corner PVT expansion requires non-empty process, positive finite voltage, and finite temperature inputs",
-                    ));
-                }
+                        format!("Corner PVT contract is invalid: {error}"),
+                    )
+                })?;
                 let expanded_corner =
                     crate::services::simulation_runner::expand_corner_pvt_points(corner);
                 let points = expanded_corner.map_err(|error| {
@@ -1327,11 +1753,13 @@ fn derive_pvt_points(
                         process: process_from_corner_runner(process),
                         voltage: Some(voltage),
                         temperature_celsius,
+                        corner_contract: Some(corner.clone()),
                     },
                 ));
             }
             AnalysisSpec::Parametric => {
                 if let Some(temp) = task.spec_options.temp.as_ref() {
+                    found_explicit_axis = true;
                     if temp.temperatures_c.is_empty()
                         || temp
                             .temperatures_c
@@ -1353,24 +1781,25 @@ fn derive_pvt_points(
                             process: reference_process,
                             voltage: None,
                             temperature_celsius,
+                            corner_contract: None,
                         },
-                    ));
-                } else {
-                    ensure_pvt_point_capacity(expanded.len(), 1, max_pvt_points)?;
-                    expanded.push(reference_pvt_point(
-                        reference_process,
-                        reference_temperature_celsius,
                     ));
                 }
             }
-            _ => {
-                ensure_pvt_point_capacity(expanded.len(), 1, max_pvt_points)?;
-                expanded.push(reference_pvt_point(
-                    reference_process,
-                    reference_temperature_celsius,
-                ));
-            }
+            _ => {}
         }
+    }
+
+    // Ordinary analyses do not create an axis point. The reference point is
+    // the fallback only when the run has no explicit corner/temperature axis;
+    // otherwise it would silently add a nominal solve the authored run set
+    // never requested.
+    if !found_explicit_axis {
+        ensure_pvt_point_capacity(expanded.len(), 1, max_pvt_points)?;
+        expanded.push(reference_pvt_point(
+            reference_process,
+            reference_temperature_celsius,
+        ));
     }
 
     let mut seen = HashSet::new();
@@ -1379,6 +1808,7 @@ fn derive_pvt_points(
             process_tag(point.process),
             point.voltage.map(f64::to_bits),
             point.temperature_celsius.to_bits(),
+            point.corner_contract.as_ref().map(corner_contract_digest),
         ))
     });
     if expanded.is_empty() {
@@ -1413,7 +1843,33 @@ fn reference_pvt_point(process: ProcessCorner, temperature_celsius: f64) -> Prep
         process,
         voltage: None,
         temperature_celsius,
+        corner_contract: None,
     }
+}
+
+fn corner_contract_digest(
+    contract: &crate::services::simulation_runner::CornerRunConfig,
+) -> ContentDigest {
+    let mut writer = CanonicalWriter::new("rspice.op-pvt-corner-contract/v1");
+    writer.option(contract.nominal_voltage.as_ref(), |writer, voltage| {
+        writer.f64(*voltage);
+    });
+    writer.sequence(contract.model_bindings.len());
+    for binding in &contract.model_bindings {
+        writer.u8(match binding.process {
+            crate::services::simulation_runner::CornerProcess::TT => 0,
+            crate::services::simulation_runner::CornerProcess::SS => 1,
+            crate::services::simulation_runner::CornerProcess::FF => 2,
+            crate::services::simulation_runner::CornerProcess::SF => 3,
+            crate::services::simulation_runner::CornerProcess::FS => 4,
+        });
+        writer.string(&binding.source_label);
+        writer.option(binding.section.as_ref(), |writer, section| {
+            writer.string(section);
+        });
+        writer.string(&binding.materialized_model_cards);
+    }
+    writer.finish()
 }
 
 fn process_from_corner_runner(
@@ -1426,6 +1882,19 @@ fn process_from_corner_runner(
         CornerProcess::FF => ProcessCorner::FF,
         CornerProcess::SF => ProcessCorner::SF,
         CornerProcess::FS => ProcessCorner::FS,
+    }
+}
+
+fn process_to_corner_runner(
+    process: ProcessCorner,
+) -> crate::services::simulation_runner::CornerProcess {
+    use crate::services::simulation_runner::CornerProcess;
+    match process {
+        ProcessCorner::TT => CornerProcess::TT,
+        ProcessCorner::SS => CornerProcess::SS,
+        ProcessCorner::FF => CornerProcess::FF,
+        ProcessCorner::SF => CornerProcess::SF,
+        ProcessCorner::FS => CornerProcess::FS,
     }
 }
 
@@ -1476,11 +1945,16 @@ fn snapshot_digest(
     writer.sequence(tasks.len());
     for task in tasks {
         writer.uuid(task.instance_id.as_uuid());
+        writer.uuid(task.authored_instance_id.as_uuid());
         writer.u64(task.source_revision.get());
         writer.digest(task.config_digest);
         writer.option(task.touchstone_export.as_ref(), |writer, policy| {
             policy.encode(writer);
         });
+        writer.option(
+            task.executable_netlist_override.as_ref(),
+            |writer, source| writer.string(source),
+        );
         writer.string(&task.label);
         writer.sequence(task.dependencies.len());
         for dependency in &task.dependencies {
@@ -1547,8 +2021,17 @@ mod tests {
 
     fn task() -> QueuedAnalysis {
         QueuedAnalysis {
-            spec: AnalysisSpec::DcOp,
-            config: Some(AnalysisConfig::DcOp),
+            spec: AnalysisSpec::dc_op(),
+            config: Some(AnalysisConfig::dc_op()),
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: ".op".to_owned(),
+        }
+    }
+
+    fn configured_op_task(config: crate::simulation::dialog::OpConfig) -> QueuedAnalysis {
+        QueuedAnalysis {
+            spec: operating_point_spec(&config),
+            config: Some(AnalysisConfig::DcOp(config)),
             spec_options: SpecExecutionOptions::default(),
             analysis_line: ".op".to_owned(),
         }
@@ -1613,6 +2096,19 @@ mod tests {
                 ..SpecExecutionOptions::default()
             },
             analysis_line: ".corner".to_owned(),
+        }
+    }
+
+    fn corner_binding(
+        process: crate::services::simulation_runner::CornerProcess,
+        source_label: &str,
+        saturation_current: &str,
+    ) -> crate::services::simulation_runner::CornerModelBinding {
+        crate::services::simulation_runner::CornerModelBinding {
+            process,
+            source_label: source_label.to_owned(),
+            section: Some(process.as_keyword().to_owned()),
+            materialized_model_cards: format!(".model DPROCESS D (IS={saturation_current})"),
         }
     }
 
@@ -1941,6 +2437,101 @@ mod tests {
     }
 
     #[test]
+    fn retained_op_state_must_match_the_prepared_executable_source() {
+        use crate::simulation::dialog::{OpInitialGuess, OpNodeInitialization, OpPreviousState};
+
+        let mut matching = parts();
+        let previous = OpPreviousState {
+            source_content_digest: super::super::canonical::operating_point_effective_source_digest(
+                &matching.executable_netlist,
+                crate::simulation::dialog::OpRunPointContext::default(),
+            ),
+            producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
+            producer_result_digest: ContentDigest::from_bytes([3; 32]),
+            node_names: vec!["out".to_owned()],
+            branch_names: Vec::new(),
+            solution: vec![1.25],
+        };
+        let mut config = crate::simulation::dialog::OpConfig::default();
+        config.initial_guess = OpInitialGuess::PreviousConverged;
+        config.node_initialization = OpNodeInitialization::IgnoreIcAndNodeset;
+        config.previous_state = Some(previous.clone());
+        let mut spec = AnalysisSpec::dc_op();
+        let AnalysisSpec::DcOp {
+            initial_guess,
+            node_initialization,
+            previous_state,
+            ..
+        } = &mut spec
+        else {
+            unreachable!("current OP constructor returns the configured variant");
+        };
+        *initial_guess = OpInitialGuess::PreviousConverged;
+        *node_initialization = OpNodeInitialization::IgnoreIcAndNodeset;
+        *previous_state = Some(previous);
+        let retained_task = QueuedAnalysis {
+            spec,
+            config: Some(AnalysisConfig::DcOp(config)),
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: ".op".to_owned(),
+        };
+
+        matching.tasks = vec![prepared("op", "DC Operating Point", retained_task.clone())];
+        PreparedRunSnapshot::new(matching).expect("matching source-bound state");
+
+        let mut changed = parts();
+        changed.executable_netlist = "deck\nR1 out 0 1k\n.op\n.end\n".to_owned();
+        changed.source_digest = ContentDigest::from_bytes([9; 32]);
+        changed.tasks = vec![prepared("op", "DC Operating Point", retained_task)];
+        let error = PreparedRunSnapshot::new(changed)
+            .expect_err("stale retained state must fail before dispatch");
+        assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
+        assert!(error.message().contains("different executable source"));
+    }
+
+    #[test]
+    fn retained_soa_context_must_match_the_prepared_executable_source() {
+        use crate::simulation::dialog::OpDeviceDetail;
+
+        let soa_source = ContentDigest::from_bytes([1; 32]);
+        let mut config = crate::simulation::dialog::OpConfig::default();
+        config.device_detail = OpDeviceDetail::ViolationsOnly;
+        config.violation_devices = vec!["M1".to_owned()];
+        config.violation_source_content_digest = Some(soa_source);
+        let mut spec = AnalysisSpec::dc_op();
+        let AnalysisSpec::DcOp {
+            device_detail,
+            violation_devices,
+            violation_source_content_digest,
+            ..
+        } = &mut spec
+        else {
+            unreachable!("current OP constructor returns the configured variant");
+        };
+        *device_detail = OpDeviceDetail::ViolationsOnly;
+        *violation_devices = vec!["M1".to_owned()];
+        *violation_source_content_digest = Some(soa_source);
+        let retained_task = QueuedAnalysis {
+            spec,
+            config: Some(AnalysisConfig::DcOp(config)),
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: ".op".to_owned(),
+        };
+
+        let mut matching = parts();
+        matching.tasks = vec![prepared("op", "DC Operating Point", retained_task.clone())];
+        PreparedRunSnapshot::new(matching).expect("matching source-bound SOA context");
+
+        let mut changed = parts();
+        changed.source_digest = ContentDigest::from_bytes([9; 32]);
+        changed.tasks = vec![prepared("op", "DC Operating Point", retained_task)];
+        let error = PreparedRunSnapshot::new(changed)
+            .expect_err("stale retained SOA evidence must fail before dispatch");
+        assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
+        assert!(error.message().contains("SOA violation evidence"));
+    }
+
+    #[test]
     fn target_capability_change_changes_snapshot_identity() {
         let first = PreparedRunSnapshot::new(parts()).expect("first snapshot");
         let mut changed = parts();
@@ -2024,16 +2615,19 @@ mod tests {
     fn pvt_metadata_counts_the_exact_full_corner_matrix_inside_one_task() {
         use crate::services::simulation_runner::CornerProcess;
         let mut matrix = parts();
-        matrix.tasks = vec![prepared(
-            "corner",
-            "Corner",
-            corner_task(
-                vec![CornerProcess::TT, CornerProcess::FF],
-                vec![0.9, 1.1],
-                vec![-40.0, 125.0],
-                true,
-            ),
-        )];
+        let mut corner = corner_task(
+            vec![CornerProcess::TT, CornerProcess::FF],
+            vec![0.9, 1.1],
+            vec![-40.0, 125.0],
+            true,
+        );
+        corner
+            .spec_options
+            .corner
+            .as_mut()
+            .expect("corner config")
+            .model_bindings = vec![corner_binding(CornerProcess::FF, "ff.lib", "1e-11")];
+        matrix.tasks = vec![prepared("corner", "Corner", corner)];
 
         let snapshot = PreparedRunSnapshot::new(matrix).expect("full corner matrix snapshot");
         assert_eq!(snapshot.pvt_points.len(), 8);
@@ -2045,16 +2639,22 @@ mod tests {
     fn pvt_metadata_uses_the_runners_diagonal_corner_expansion_order() {
         use crate::services::simulation_runner::CornerProcess;
         let mut diagonal = parts();
-        diagonal.tasks = vec![prepared(
-            "corner",
-            "Corner",
-            corner_task(
-                vec![CornerProcess::SS, CornerProcess::FF],
-                vec![0.9, 1.0, 1.1],
-                vec![-40.0, 125.0],
-                false,
-            ),
-        )];
+        let mut corner = corner_task(
+            vec![CornerProcess::SS, CornerProcess::FF],
+            vec![0.9, 1.0, 1.1],
+            vec![-40.0, 125.0],
+            false,
+        );
+        corner
+            .spec_options
+            .corner
+            .as_mut()
+            .expect("corner config")
+            .model_bindings = vec![
+            corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+            corner_binding(CornerProcess::FF, "ff.lib", "1e-11"),
+        ];
+        diagonal.tasks = vec![prepared("corner", "Corner", corner)];
 
         let snapshot = PreparedRunSnapshot::new(diagonal).expect("diagonal corner snapshot");
         assert_eq!(snapshot.pvt_points.len(), 3);
@@ -2082,8 +2682,257 @@ mod tests {
         assert_eq!(snapshot.pvt_points.len(), 2);
         assert_eq!(snapshot.pvt_points[0].temperature_celsius, 27.0);
         assert_eq!(snapshot.pvt_points[1].temperature_celsius, 85.0);
-        assert_eq!(snapshot.tasks.len(), 2);
+        assert_eq!(snapshot.tasks.len(), 3);
         assert_eq!(snapshot.metadata().pvt_point_count, 2);
+    }
+
+    #[test]
+    fn pvt_operating_point_dispatches_three_exact_temperatures_and_retains_only_final_report() {
+        use crate::simulation::dialog::{OpConfig, OpSaveDevice};
+
+        let mut swept = parts();
+        swept.executable_netlist =
+            "diode\nV1 in 0 0.7\nD1 in 0 DTEST\n.model DTEST D\n.op\n.end\n".to_owned();
+        swept.tasks = vec![
+            prepared(
+                "op",
+                "DC Operating Point",
+                configured_op_task(OpConfig {
+                    save_device_op: OpSaveDevice::FinalPointOnly,
+                    ..OpConfig::default()
+                }),
+            ),
+            prepared(
+                "temperature",
+                "Temperature",
+                temperature_task(vec![-40.0, 27.0, 85.0]),
+            ),
+        ];
+
+        let snapshot = PreparedRunSnapshot::new(swept).expect("three-point OP snapshot");
+        let op_configs = snapshot
+            .tasks
+            .iter()
+            .filter_map(|task| match task.queued_analysis().config.as_ref() {
+                Some(AnalysisConfig::DcOp(config)) => Some(config.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(op_configs.len(), 3);
+        assert_eq!(
+            op_configs
+                .iter()
+                .map(|config| config.temperature_celsius)
+                .collect::<Vec<_>>(),
+            vec![-40.0, 27.0, 85.0]
+        );
+
+        for (index, config) in op_configs.into_iter().enumerate() {
+            assert_eq!(config.run_point.index, index);
+            assert_eq!(config.run_point.count, 3);
+            let result = crate::simulation::EngineBridge::new()
+                .run(
+                    &AnalysisConfig::DcOp(config),
+                    "diode\nV1 in 0 0.7\nD1 in 0 DTEST\n.model DTEST D\n.op\n.end\n",
+                )
+                .expect("exact PVT OP point solves");
+            let crate::simulation::SimulationResult::DcOp(result) = result else {
+                panic!("OP result")
+            };
+            assert_eq!(result.device_report.is_some(), index == 2);
+        }
+    }
+
+    #[test]
+    fn op_plus_ss_corner_has_no_unrequested_reference_point() {
+        use crate::services::simulation_runner::CornerProcess;
+
+        let mut ss_corner = corner_task(vec![CornerProcess::SS], vec![0.9], vec![125.0], true);
+        ss_corner
+            .spec_options
+            .corner
+            .as_mut()
+            .expect("corner config")
+            .model_bindings = vec![corner_binding(CornerProcess::SS, "ss.lib", "1e-13")];
+        let mut ss_only = parts();
+        ss_only.tasks.push(prepared("ss", "SS Corner", ss_corner));
+
+        let snapshot = PreparedRunSnapshot::new(ss_only).expect("SS-only PVT snapshot");
+        assert_eq!(snapshot.pvt_points.len(), 1);
+        assert_eq!(snapshot.pvt_points[0].process, ProcessCorner::SS);
+        assert_eq!(snapshot.pvt_points[0].temperature_celsius, 125.0);
+        let config = snapshot.tasks[0]
+            .queued_analysis()
+            .config
+            .as_ref()
+            .and_then(|config| match config {
+                AnalysisConfig::DcOp(config) => Some(config),
+                _ => None,
+            })
+            .expect("expanded OP config");
+        assert_eq!(config.run_point.process, ProcessCorner::SS);
+        assert_eq!(config.run_point.count, 1);
+    }
+
+    #[test]
+    fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
+        use crate::services::simulation_runner::CornerProcess;
+
+        let mut corner = corner_task(
+            vec![CornerProcess::TT, CornerProcess::SS],
+            vec![1.0, 1.2],
+            vec![27.0],
+            true,
+        );
+        corner
+            .spec_options
+            .corner
+            .as_mut()
+            .expect("corner config")
+            .model_bindings = vec![
+            corner_binding(CornerProcess::TT, "tt.lib", "1e-12"),
+            corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+        ];
+        let mut pvt = parts();
+        pvt.executable_netlist = "pvt\nVDD in 0 1\nR1 in 0 1k\n.op\n.end\n".to_owned();
+        pvt.tasks.push(prepared("corner", "Corner", corner));
+        let snapshot = PreparedRunSnapshot::new(pvt).expect("PVT snapshot");
+        assert_eq!(snapshot.pvt_points.len(), 4);
+        assert_eq!(
+            snapshot
+                .tasks
+                .iter()
+                .filter(|task| {
+                    matches!(task.task.config.as_ref(), Some(AnalysisConfig::DcOp(_)))
+                })
+                .count(),
+            4
+        );
+
+        let digest = snapshot.digest();
+        let permit = crate::simulation::execution::ExecutionPermitIssuer::default()
+            .issue(digest)
+            .expect("permit");
+        let proof = permit.consume(digest, digest).expect("consume permit");
+        let dispatch = snapshot.authorize_dispatch(proof).expect("authorize PVT");
+        let mut seen_contracts = HashSet::new();
+        let mut seen_process_sources = HashMap::new();
+        let mut seen_supplies = HashSet::new();
+        for task in dispatch.into_tasks().into_iter().take(4) {
+            assert_eq!(task.authored_instance_id(), instance_id("op"));
+            let config_digest = task.config_digest();
+            let resolved = task
+                .resolve_dependency_artifacts(&HashMap::new())
+                .expect("OP has no typed dependencies");
+            let (queued, source, _, _) = resolved.into_runner_parts();
+            let Some(AnalysisConfig::DcOp(config)) = queued.config else {
+                panic!("OP config")
+            };
+            seen_contracts.insert(config_digest);
+            seen_supplies.insert(config.run_point.supply_voltage.unwrap().to_bits());
+            seen_process_sources
+                .entry(config.run_point.process)
+                .or_insert_with(|| source.to_string());
+            let result = crate::simulation::EngineBridge::new()
+                .run(&AnalysisConfig::DcOp(config.clone()), &source)
+                .expect("corner OP solve");
+            let crate::simulation::SimulationResult::DcOp(result) = result else {
+                panic!("OP result")
+            };
+            assert!(
+                (result.voltage("in").expect("supply node")
+                    - config.run_point.supply_voltage.unwrap())
+                .abs()
+                    <= 1.0e-10
+            );
+        }
+        assert_eq!(seen_contracts.len(), 4);
+        assert_eq!(seen_supplies.len(), 2);
+        assert!(seen_process_sources[&ProcessCorner::TT].contains("tt.lib"));
+        assert!(seen_process_sources[&ProcessCorner::SS].contains("ss.lib"));
+        assert_ne!(
+            seen_process_sources[&ProcessCorner::TT],
+            seen_process_sources[&ProcessCorner::SS]
+        );
+    }
+
+    #[test]
+    fn downstream_ordering_dependency_targets_the_final_expanded_op_point() {
+        let mut graph = parts();
+        let original_op = instance_id("op");
+        graph.tasks = vec![
+            prepared("op", "DC Operating Point", task()),
+            prepared(
+                "temperature",
+                "Temperature",
+                temperature_task(vec![-40.0, 85.0]),
+            ),
+            prepared_with(
+                "tran",
+                ObjectRevision::INITIAL,
+                vec![original_op],
+                "Transient",
+                transient_task(),
+            ),
+        ];
+
+        let snapshot = PreparedRunSnapshot::new(graph).expect("expanded dependency graph");
+        let op_tasks = snapshot
+            .tasks
+            .iter()
+            .filter(|task| matches!(task.task.config.as_ref(), Some(AnalysisConfig::DcOp(_))))
+            .collect::<Vec<_>>();
+        assert_eq!(op_tasks.len(), 2);
+        assert_eq!(op_tasks[1].dependencies(), &[op_tasks[0].instance_id()]);
+        let transient = snapshot
+            .tasks
+            .iter()
+            .find(|task| matches!(task.task.spec, AnalysisSpec::Transient { .. }))
+            .expect("transient task");
+        assert_eq!(transient.dependencies(), &[op_tasks[1].instance_id()]);
+    }
+
+    #[test]
+    fn identical_coordinates_with_different_model_contracts_do_not_deduplicate() {
+        use crate::services::simulation_runner::CornerProcess;
+
+        let corner_with = |label: &str, saturation_current: &str| {
+            let mut corner = corner_task(vec![CornerProcess::TT], vec![1.0], vec![27.0], true);
+            corner
+                .spec_options
+                .corner
+                .as_mut()
+                .expect("corner config")
+                .model_bindings =
+                vec![corner_binding(CornerProcess::TT, label, saturation_current)];
+            corner
+        };
+        let mut ambiguous_coordinates = parts();
+        ambiguous_coordinates.tasks.push(prepared(
+            "corner-a",
+            "Corner A",
+            corner_with("a.lib", "1e-12"),
+        ));
+        ambiguous_coordinates.tasks.push(prepared(
+            "corner-b",
+            "Corner B",
+            corner_with("b.lib", "2e-12"),
+        ));
+
+        let snapshot = PreparedRunSnapshot::new(ambiguous_coordinates)
+            .expect("distinct source contracts remain distinct points");
+        assert_eq!(snapshot.pvt_points.len(), 2);
+        let op_sources = snapshot
+            .tasks
+            .iter()
+            .filter_map(|task| {
+                matches!(task.task.config.as_ref(), Some(AnalysisConfig::DcOp(_)))
+                    .then(|| task.executable_netlist_override.as_deref())
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(op_sources.len(), 2);
+        assert_ne!(op_sources[0], op_sources[1]);
     }
 
     #[test]

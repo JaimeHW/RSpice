@@ -191,7 +191,7 @@ impl EngineBridge {
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort_flag)?;
         match config {
-            AnalysisConfig::DcOp => self.run_dc_op(netlist, abort_flag),
+            AnalysisConfig::DcOp(op_config) => self.run_dc_op(netlist, op_config, abort_flag),
             AnalysisConfig::DcSweep(dc_config) => self.run_dc_sweep(netlist, dc_config, abort_flag),
             AnalysisConfig::Transient(tran_config) => {
                 self.run_transient(netlist, tran_config, abort_flag)
@@ -281,7 +281,11 @@ mod cancellation_tests {
     fn dc_op_observes_counter_based_cancellation() {
         let signal = AbortOnPoll::new(2);
         assert_typed_abort(
-            EngineBridge::new().run_dc_op(&test_netlist(), &signal),
+            EngineBridge::new().run_dc_op(
+                &test_netlist(),
+                &crate::simulation::dialog::OpConfig::default(),
+                &signal,
+            ),
             &signal,
         );
     }
@@ -355,7 +359,7 @@ mod cancellation_tests {
     #[test]
     fn production_dispatch_threads_the_signal_to_every_config_family() {
         let cases = [
-            ("dc-op", AnalysisConfig::DcOp),
+            ("dc-op", AnalysisConfig::dc_op()),
             (
                 "dc-sweep",
                 AnalysisConfig::DcSweep(DcSweepConfig::default()),

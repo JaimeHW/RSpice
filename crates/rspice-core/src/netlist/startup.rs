@@ -69,6 +69,37 @@ fn validate_candidate(
 }
 
 impl Netlist {
+    /// Retain only the requested startup directive families in both their
+    /// executable vectors and immutable sidecar records.
+    pub fn retain_startup_kinds(&mut self, keep_ic: bool, keep_nodesets: bool) {
+        if !keep_ic {
+            self.initial_conditions.clear();
+        }
+        if !keep_nodesets {
+            self.node_sets.clear();
+        }
+        self.startup_directives.retain(|record| match record.kind {
+            StartupDirectiveKind::Ic => keep_ic,
+            StartupDirectiveKind::NodeSet => keep_nodesets,
+        });
+        fn recurse(
+            subcircuits: &mut [crate::netlist::SubcircuitDef],
+            keep_ic: bool,
+            keep_nodesets: bool,
+        ) {
+            for subcircuit in subcircuits {
+                if !keep_ic {
+                    subcircuit.initial_conditions.clear();
+                }
+                if !keep_nodesets {
+                    subcircuit.node_sets.clear();
+                }
+                recurse(&mut subcircuit.nested_subcircuits, keep_ic, keep_nodesets);
+            }
+        }
+        recurse(&mut self.subcircuits, keep_ic, keep_nodesets);
+    }
+
     /// Physical startup cards retained as immutable semantic provenance.
     pub fn startup_directives(&self) -> &[StartupDirectiveRecord] {
         &self.startup_directives
@@ -564,11 +595,13 @@ fn project_typed_diagnostics(netlist: &mut Netlist) {
                 diagnostic.canonical_nodes.join(", ")
             ),
         };
-        netlist.diagnostics.push(ParseDiagnostic::warning(
-            diagnostic.origins.first().map_or(0, |origin| origin.line),
-            diagnostic.code.as_str(),
-            message,
-        ));
+        let warning = match diagnostic.origins.first() {
+            Some(origin) => {
+                ParseDiagnostic::warning_at(origin.clone(), diagnostic.code.as_str(), message)
+            }
+            None => ParseDiagnostic::warning(0, diagnostic.code.as_str(), message),
+        };
+        netlist.diagnostics.push(warning);
     }
 }
 

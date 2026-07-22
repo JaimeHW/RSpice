@@ -50,6 +50,7 @@ pub struct AnalysisDependencyRepair {
     enabled: Vec<AnalysisInstanceId>,
     moved: Vec<AnalysisInstanceId>,
     bound: Vec<AnalysisDependency>,
+    removed: Vec<AnalysisDependency>,
 }
 
 impl AnalysisDependencyRepair {
@@ -60,6 +61,7 @@ impl AnalysisDependencyRepair {
             enabled: Vec::new(),
             moved: Vec::new(),
             bound: Vec::new(),
+            removed: Vec::new(),
         }
     }
 
@@ -89,11 +91,17 @@ impl AnalysisDependencyRepair {
     }
 
     #[must_use]
+    pub fn removed(&self) -> &[AnalysisDependency] {
+        &self.removed
+    }
+
+    #[must_use]
     pub fn changed(&self) -> bool {
         !self.inserted.is_empty()
             || !self.enabled.is_empty()
             || !self.moved.is_empty()
             || !self.bound.is_empty()
+            || !self.removed.is_empty()
     }
 
     fn sort_in_final_order(&mut self, instances: &[AnalysisInstance]) {
@@ -106,6 +114,8 @@ impl AnalysisDependencyRepair {
         self.enabled.sort_by_key(|id| positions.get(id).copied());
         self.moved.sort_by_key(|id| positions.get(id).copied());
         self.bound
+            .sort_by_key(|dependency| positions.get(&dependency.target).copied());
+        self.removed
             .sort_by_key(|dependency| positions.get(&dependency.target).copied());
     }
 }
@@ -1263,8 +1273,10 @@ impl SimulationPlan {
         dependent: AnalysisInstanceId,
         prerequisite: AnalysisKind,
     ) -> bool {
-        self.instance(dependent)
-            .is_some_and(|instance| prerequisite_draft_for(&instance.draft, prerequisite).is_ok())
+        self.instance(dependent).is_some_and(|instance| {
+            instance.prerequisite_roles().contains(&prerequisite)
+                && prerequisite_draft_for(&instance.draft, prerequisite).is_ok()
+        })
     }
 
     fn dependency_candidate_compatibility(
@@ -2301,6 +2313,25 @@ impl SimulationPlan {
         let prerequisites = self.instances[dependent_index]
             .prerequisite_roles()
             .to_vec();
+        let removed = self.instances[dependent_index]
+            .dependencies
+            .iter()
+            .copied()
+            .filter(|dependency| !prerequisites.contains(&dependency.prerequisite))
+            .collect::<Vec<_>>();
+        if !removed.is_empty() {
+            let instance = &mut self.instances[dependent_index];
+            instance
+                .dependencies
+                .retain(|dependency| prerequisites.contains(&dependency.prerequisite));
+            instance.modified_revision = revision;
+            instance.lifecycle = if instance.enabled {
+                AnalysisLifecycleState::Draft
+            } else {
+                AnalysisLifecycleState::Disabled
+            };
+            repair.removed.extend(removed);
+        }
 
         for prerequisite in prerequisites {
             let target = self.repair_target(dependent, prerequisite, revision, repair)?;
@@ -3190,6 +3221,149 @@ mod tests {
             &[AnalysisDependency::new(AnalysisKind::Qpss, qpss)]
         );
         assert!(plan.freeze().is_ok());
+    }
+
+    #[test]
+    fn every_declared_prerequisite_kind_repairs_to_an_exact_frozen_closure() {
+        let dependent_kinds = AnalysisKind::ALL
+            .into_iter()
+            .filter(|kind| !kind.prerequisites().is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(dependent_kinds.len(), 24);
+
+        for kind in dependent_kinds {
+            let mut plan = SimulationPlan::empty();
+            let (dependent, _) = plan.insert(kind).expect("dependent inserts");
+            let (repair, receipt) = plan
+                .repair_dependencies(dependent)
+                .unwrap_or_else(|error| panic!("{} prerequisite repair failed: {error}", kind));
+
+            assert_eq!(repair.dependent(), dependent, "{kind}");
+            assert_eq!(receipt.instance_id(), dependent, "{kind}");
+            assert_eq!(receipt.command(), AnalysisLifecycleCommand::Dependency);
+            assert!(plan.validation_issues().is_empty(), "{kind}");
+
+            for (position, instance) in plan.instances().iter().enumerate() {
+                assert_eq!(
+                    instance.dependencies().len(),
+                    instance.prerequisite_roles().len(),
+                    "{} must bind every declared role exactly once",
+                    instance.kind()
+                );
+                for prerequisite in instance.prerequisite_roles() {
+                    let bindings = instance
+                        .dependencies()
+                        .iter()
+                        .filter(|dependency| dependency.prerequisite() == *prerequisite)
+                        .collect::<Vec<_>>();
+                    assert_eq!(bindings.len(), 1, "{} -> {prerequisite}", instance.kind());
+                    let target_position = plan
+                        .instances()
+                        .iter()
+                        .position(|candidate| candidate.id() == bindings[0].target())
+                        .expect("repaired target remains present");
+                    assert!(
+                        target_position < position,
+                        "{} -> {prerequisite}",
+                        instance.kind()
+                    );
+                    assert_eq!(
+                        plan.instances()[target_position].kind(),
+                        *prerequisite,
+                        "{} -> {prerequisite}",
+                        instance.kind()
+                    );
+                    assert!(plan.instances()[target_position].enabled());
+                }
+            }
+            plan.freeze()
+                .unwrap_or_else(|error| panic!("{kind} repaired plan did not freeze: {error}"));
+        }
+    }
+
+    #[test]
+    fn dependency_repairability_rejects_roles_the_consumer_does_not_declare() {
+        let mut plan = SimulationPlan::empty();
+        let (op, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("OP inserts");
+        assert!(!plan.dependency_prerequisite_is_repairable(op, AnalysisKind::Ac));
+    }
+
+    #[test]
+    fn dependency_repair_replaces_self_dangling_wrong_kind_and_duplicate_bindings() {
+        fn assert_repaired(mut plan: SimulationPlan, dependent: AnalysisInstanceId) {
+            let (repair, _) = plan
+                .repair_dependencies(dependent)
+                .expect("recoverable corrupt binding repairs atomically");
+            assert!(repair.changed());
+            let instance = plan.instance(dependent).expect("dependent remains present");
+            assert_eq!(
+                instance.dependencies().len(),
+                instance.prerequisite_roles().len()
+            );
+            assert!(plan.validation_issues().is_empty());
+            assert!(plan.freeze().is_ok());
+        }
+
+        let mut self_bound = SimulationPlan::empty();
+        let (ac, _) = self_bound.insert(AnalysisKind::Ac).expect("AC inserts");
+        self_bound.instances[0]
+            .dependencies
+            .push(AnalysisDependency::new(AnalysisKind::OperatingPoint, ac));
+        assert_repaired(self_bound, ac);
+
+        let mut dangling = SimulationPlan::empty();
+        let (ac, _) = dangling.insert(AnalysisKind::Ac).expect("AC inserts");
+        dangling.instances[0]
+            .dependencies
+            .push(AnalysisDependency::new(
+                AnalysisKind::OperatingPoint,
+                AnalysisInstanceId::new(),
+            ));
+        assert_repaired(dangling, ac);
+
+        let mut wrong_kind = SimulationPlan::empty();
+        let (transient, _) = wrong_kind
+            .insert(AnalysisKind::Transient)
+            .expect("Transient inserts");
+        let (ac, _) = wrong_kind.insert(AnalysisKind::Ac).expect("AC inserts");
+        let ac_index = wrong_kind.index_of(ac).expect("AC index");
+        wrong_kind.instances[ac_index]
+            .dependencies
+            .push(AnalysisDependency::new(
+                AnalysisKind::OperatingPoint,
+                transient,
+            ));
+        assert_repaired(wrong_kind, ac);
+
+        let mut duplicate = SimulationPlan::empty();
+        let (first_op, _) = duplicate
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("first OP inserts");
+        let (second_op, _) = duplicate
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("second OP inserts");
+        let (ac, _) = duplicate.insert(AnalysisKind::Ac).expect("AC inserts");
+        let ac_index = duplicate.index_of(ac).expect("AC index");
+        duplicate.instances[ac_index].dependencies.extend([
+            AnalysisDependency::new(AnalysisKind::OperatingPoint, first_op),
+            AnalysisDependency::new(AnalysisKind::OperatingPoint, second_op),
+        ]);
+        assert_repaired(duplicate, ac);
+
+        let mut unexpected = SimulationPlan::empty();
+        let (ac, _) = unexpected.insert(AnalysisKind::Ac).expect("AC inserts");
+        unexpected.instances[0]
+            .dependencies
+            .push(AnalysisDependency::new(AnalysisKind::Transient, ac));
+        let (repair, _) = unexpected
+            .repair_dependencies(ac)
+            .expect("unexpected edge is removed while the required OP is repaired");
+        assert_eq!(repair.removed().len(), 1);
+        assert_eq!(repair.inserted().len(), 1);
+        assert!(unexpected.validation_issues().is_empty());
+        assert!(unexpected.freeze().is_ok());
     }
 
     #[test]

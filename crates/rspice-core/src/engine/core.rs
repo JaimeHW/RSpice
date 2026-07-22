@@ -4,6 +4,14 @@ use super::{
     SimulationConfig, SimulationConfigError, SimulationConfigOverrides, SimulationError,
     resolve_simulation_config,
 };
+
+#[derive(Clone, Copy)]
+pub(in crate::engine) enum DcOpStartup<'a> {
+    Automatic,
+    ForceInitialConditions,
+    PreviousSolution(&'a [Value]),
+    Zero,
+}
 use crate::netlist::{ElementKind, SubcircuitDef};
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{Netlist, Value};
@@ -13,6 +21,9 @@ use std::collections::{HashMap, HashSet};
 pub struct Engine {
     pub(crate) config: SimulationConfig,
     config_error: Option<SimulationConfigError>,
+    /// True when the configuration already includes the target netlist's
+    /// options and any higher-precedence runtime overrides.
+    config_is_resolved: bool,
     #[cfg(feature = "parallel")]
     parallel_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
 }
@@ -44,6 +55,7 @@ impl Engine {
         Self {
             config,
             config_error,
+            config_is_resolved: false,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
         }
@@ -60,6 +72,38 @@ impl Engine {
         Ok(Self {
             config,
             config_error: None,
+            config_is_resolved: false,
+            #[cfg(feature = "parallel")]
+            parallel_pool: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// Create an engine from a fully resolved authoritative configuration.
+    ///
+    /// Analyses will not apply `.OPTIONS` again. Frontends use this after
+    /// resolving `defaults < deck options < explicit run overrides`, which
+    /// prevents a second resolution pass from overwriting the explicit
+    /// temperature, tolerance, or other execution-owned values.
+    pub fn new_with_resolved_config(config: SimulationConfig) -> Self {
+        let config_error = config.validate().err();
+        Self {
+            config,
+            config_error,
+            config_is_resolved: true,
+            #[cfg(feature = "parallel")]
+            parallel_pool: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Validating form of [`Self::new_with_resolved_config`].
+    pub fn try_new_with_resolved_config(
+        config: SimulationConfig,
+    ) -> Result<Self, SimulationConfigError> {
+        config.validate()?;
+        Ok(Self {
+            config,
+            config_error: None,
+            config_is_resolved: true,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
         })
@@ -188,12 +232,15 @@ impl Engine {
     ///
     /// Applies `.OPTIONS` on top of the engine's base configuration.
     pub(crate) fn resolved_for_netlist(&self, netlist: &Netlist) -> Self {
+        if self.config_is_resolved {
+            return Self::new_with_resolved_config(self.config.clone());
+        }
         let resolved = resolve_simulation_config(
             &self.config,
             Some(&netlist.options),
             &SimulationConfigOverrides::default(),
         );
-        Self::new(resolved)
+        Self::new_with_resolved_config(resolved)
     }
 
     /// Refuse analyses that require native BSIM4 charge equations when a
@@ -886,18 +933,85 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn crate::abort_signal::AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
-            let hints = self.collect_node_voltage_hints(netlist, circuit);
-            if hints.is_empty() {
-                self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], abort)
-            } else {
-                self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &hints, abort)
+        self.solve_dc_operating_point_with_startup_and_abort(
+            netlist,
+            circuit,
+            matrix,
+            DcOpStartup::Automatic,
+            abort,
+        )
+    }
+
+    pub(in crate::engine) fn solve_dc_operating_point_with_startup_and_abort(
+        &self,
+        netlist: &Netlist,
+        circuit: &mut crate::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        startup: DcOpStartup<'_>,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        match startup {
+            DcOpStartup::ForceInitialConditions => {
+                let hints = self.collect_initial_condition_hints(netlist, circuit);
+                if hints.is_empty() {
+                    return Err(SimulationError::Circuit(
+                        "forced .IC operating point requires at least one valid .IC node voltage"
+                            .to_owned(),
+                    ));
+                }
+                let seed = vec![0.0; circuit.matrix_size()];
+                self.solve_nonlinear_nodeset_dc_startup_with_abort(
+                    circuit, matrix, &seed, &hints, abort,
+                )
             }
-        } else {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
+            DcOpStartup::PreviousSolution(solution) => {
+                if solution.len() != circuit.matrix_size()
+                    || solution.iter().any(|value| !value.is_finite())
+                {
+                    return Err(SimulationError::Circuit(
+                        "previous operating-point state is incompatible with the current circuit"
+                            .to_owned(),
+                    ));
+                }
+                if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                    self.solve_nonlinear_with_guess_and_abort(
+                        circuit,
+                        matrix,
+                        Some(solution),
+                        abort,
+                    )
+                } else {
+                    self.solve_linear(circuit, matrix)
+                }
             }
-            self.solve_linear(circuit, matrix)
+            DcOpStartup::Zero => {
+                if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                    let seed = vec![0.0; circuit.matrix_size()];
+                    self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&seed), abort)
+                } else {
+                    self.solve_linear(circuit, matrix)
+                }
+            }
+            DcOpStartup::Automatic => {
+                if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                    let hints = self.collect_node_voltage_hints(netlist, circuit);
+                    if hints.is_empty() {
+                        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], abort)
+                    } else {
+                        self.solve_nonlinear_with_node_hints_and_abort(
+                            circuit, matrix, &hints, abort,
+                        )
+                    }
+                } else {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    self.solve_linear(circuit, matrix)
+                }
+            }
         }
     }
 }

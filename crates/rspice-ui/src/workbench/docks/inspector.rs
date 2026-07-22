@@ -1808,10 +1808,20 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
 }
 
 fn diagnostic_location(diagnostic: &super::super::netlist_document::Diagnostic) -> String {
-    match (diagnostic.line, diagnostic.column) {
+    let location = match (
+        diagnostic.source_line.or(diagnostic.line),
+        diagnostic.column,
+    ) {
         (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
         (Some(line), None) => format!("line {}", line + 1),
         (None, _) => "document scope".to_owned(),
+    };
+    match diagnostic.source_path.as_deref() {
+        Some(path) if diagnostic.source_line.is_some() => {
+            format!("{} · {location}", path.display())
+        }
+        Some(path) => path.display().to_string(),
+        None => location,
     }
 }
 
@@ -1890,6 +1900,8 @@ mod tests {
     fn netlist_diagnostic_locations_are_one_based_and_exact() {
         let diagnostic = crate::workbench::netlist_document::Diagnostic {
             severity: crate::workbench::netlist_document::DiagnosticSeverity::Warning,
+            source_path: None,
+            source_line: Some(127),
             span: None,
             line: Some(127),
             column: Some(8),

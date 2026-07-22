@@ -216,7 +216,7 @@ impl Default for CornerRunConfig {
 }
 
 impl CornerRunConfig {
-    pub(super) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if self.process_corners.is_empty() {
             return Err("Corner analysis requires at least one process corner".to_string());
         }

@@ -29,7 +29,8 @@ use crate::Value;
 ///     .with_period_guess(1e-9)  // ~1 GHz expected
 ///     .with_harmonics(15);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct PssConfig {
     /// Fundamental frequency (Hz).
     /// Set to 0.0 for autonomous circuits (oscillators) where period

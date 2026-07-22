@@ -19,6 +19,7 @@ const RESULT_DIGEST_ENCODING_VERSION_V1: u16 = 1;
 const RESULT_DIGEST_ENCODING_VERSION_V2: u16 = 2;
 const RESULT_DIGEST_ENCODING_VERSION_V3: u16 = 3;
 const RESULT_DIGEST_ENCODING_VERSION_V4: u16 = 4;
+const RESULT_DIGEST_ENCODING_VERSION_V5: u16 = 5;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -118,7 +119,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
     }
 
     /// Schema-v8 digest retained solely for authenticated migration. New
@@ -140,12 +141,21 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
     }
 
+    /// Schema-v11 digest retained solely for authenticated migration. Its
+    /// noise-summary encoding predates optional output noise and
+    /// input-referred integrated noise evidence.
+    #[must_use]
+    pub(crate) fn legacy_v4_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
             RESULT_DIGEST_ENCODING_VERSION_V2 => "rspice.analysis-result-data/v2",
             RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.analysis-result-data/v3",
             RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.analysis-result-data/v4",
+            RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.analysis-result-data/v5",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -169,7 +179,9 @@ impl AnalysisResult {
 
         writer.option(self.dc_op.as_ref(), encode_dc_op);
         writer.option(self.device_op.as_ref(), encode_device_op);
-        writer.option(self.noise_summary.as_ref(), encode_noise_summary);
+        writer.option(self.noise_summary.as_ref(), |writer, summary| {
+            encode_noise_summary(writer, summary, version);
+        });
         writer.option(self.family_metadata.as_ref(), encode_family_metadata);
         if version >= RESULT_DIGEST_ENCODING_VERSION_V2 {
             writer.option(self.result_payload.as_ref(), encode_result_payload);
@@ -218,7 +230,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -235,9 +247,14 @@ impl SimulationRun {
 
     /// Schema-v10 dataset digest retained solely for authenticated migration.
     #[must_use]
-    #[allow(dead_code)] // Used by the schema-v10 migration once project I/O adopts result v4.
     pub(crate) fn legacy_v3_dataset_content_digest(&self) -> ContentDigest {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V3)
+    }
+
+    /// Schema-v11 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v4_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V4)
     }
 
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
@@ -246,6 +263,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V2 => "rspice.simulation-dataset-data/v2",
             RESULT_DIGEST_ENCODING_VERSION_V3 => "rspice.simulation-dataset-data/v3",
             RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.simulation-dataset-data/v4",
+            RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.simulation-dataset-data/v5",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -256,7 +274,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V1 => analysis.legacy_v1_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V2 => analysis.legacy_v2_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V3 => analysis.legacy_v3_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V4 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V4 => analysis.legacy_v4_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V5 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -266,6 +285,131 @@ impl SimulationRun {
 
 fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResultPayload) {
     match payload {
+        AnalysisResultPayload::OperatingPoint {
+            temperature_mode,
+            temperature_celsius,
+            initial_guess,
+            node_initialization,
+            homotopy,
+            annotation,
+            device_detail,
+            save_device_op,
+            accuracy,
+            selected_devices,
+            violation_devices,
+            violation_source_content_digest,
+            validated_startup_directives,
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+            effective_source_content_digest,
+            run_point_index,
+            run_point_count,
+            run_point_process,
+            run_point_supply_voltage,
+            run_point_nominal_supply_voltage,
+        } => {
+            writer.u8(6);
+            writer.u8(match temperature_mode {
+                OperatingPointTemperatureEvidence::PvtRunSet => 0,
+                OperatingPointTemperatureEvidence::Nominal27C => 1,
+                OperatingPointTemperatureEvidence::Explicit => 2,
+                OperatingPointTemperatureEvidence::ActiveRunSetAxis => 3,
+            });
+            writer.f64(*temperature_celsius);
+            writer.u8(match initial_guess {
+                OperatingPointInitialGuessEvidence::Automatic => 0,
+                OperatingPointInitialGuessEvidence::PreviousConverged => 1,
+                OperatingPointInitialGuessEvidence::UserNodeVoltages => 2,
+                OperatingPointInitialGuessEvidence::ZeroState => 3,
+            });
+            writer.u8(match node_initialization {
+                OperatingPointNodeInitializationEvidence::UseIcAndNodeset => 0,
+                OperatingPointNodeInitializationEvidence::IgnoreIcAndNodeset => 1,
+                OperatingPointNodeInitializationEvidence::ForceIcValues => 2,
+                OperatingPointNodeInitializationEvidence::ValidateOnly => 3,
+            });
+            writer.u8(match homotopy {
+                OperatingPointHomotopyEvidence::Adaptive => 0,
+                OperatingPointHomotopyEvidence::SourceStepping => 1,
+                OperatingPointHomotopyEvidence::GminStepping => 2,
+                OperatingPointHomotopyEvidence::PseudoTransient => 3,
+                OperatingPointHomotopyEvidence::None => 4,
+            });
+            writer.u8(match annotation {
+                OperatingPointAnnotationEvidence::VoltagesAndCurrents => 0,
+                OperatingPointAnnotationEvidence::VoltagesOnly => 1,
+                OperatingPointAnnotationEvidence::VoltagesAndDeviceOp => 2,
+                OperatingPointAnnotationEvidence::None => 3,
+            });
+            writer.u8(match device_detail {
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations => 0,
+                OperatingPointDeviceDetailEvidence::AllDevices => 1,
+                OperatingPointDeviceDetailEvidence::ViolationsOnly => 2,
+                OperatingPointDeviceDetailEvidence::None => 3,
+            });
+            writer.u8(match save_device_op {
+                OperatingPointSaveDeviceEvidence::Enabled => 0,
+                OperatingPointSaveDeviceEvidence::Disabled => 1,
+                OperatingPointSaveDeviceEvidence::FinalPointOnly => 2,
+            });
+            writer.u8(match accuracy {
+                OperatingPointAccuracyEvidence::Fast => 0,
+                OperatingPointAccuracyEvidence::Balanced => 1,
+                OperatingPointAccuracyEvidence::Accurate => 2,
+                OperatingPointAccuracyEvidence::Robust => 3,
+            });
+            writer.sequence(selected_devices.len());
+            for device in selected_devices {
+                writer.string(device);
+            }
+            writer.sequence(violation_devices.len());
+            for device in violation_devices {
+                writer.string(device);
+            }
+            writer.option(
+                violation_source_content_digest.as_ref(),
+                |writer, digest| writer.digest(*digest),
+            );
+            writer.u64(*validated_startup_directives);
+            writer.sequence(mna_node_names.len());
+            for name in mna_node_names {
+                writer.string(name);
+            }
+            writer.sequence(mna_branch_names.len());
+            for name in mna_branch_names {
+                writer.string(name);
+            }
+            writer.f64_slice(mna_solution);
+            writer.u64(*run_point_index);
+            writer.u64(*run_point_count);
+            // Keep the common nominal point compact while retaining exact
+            // process/supply evidence whenever a real corner is present.
+            if *run_point_process != OperatingPointProcessEvidence::TT
+                || run_point_supply_voltage.is_some()
+                || run_point_nominal_supply_voltage.is_some()
+            {
+                writer.u8(0xa5);
+                writer.u8(match run_point_process {
+                    OperatingPointProcessEvidence::TT => 0,
+                    OperatingPointProcessEvidence::SS => 1,
+                    OperatingPointProcessEvidence::FF => 2,
+                    OperatingPointProcessEvidence::SF => 3,
+                    OperatingPointProcessEvidence::FS => 4,
+                });
+                writer.option(run_point_supply_voltage.as_ref(), |writer, voltage| {
+                    writer.f64(*voltage);
+                });
+                writer.option(
+                    run_point_nominal_supply_voltage.as_ref(),
+                    |writer, voltage| writer.f64(*voltage),
+                );
+            }
+            if let Some(digest) = effective_source_content_digest {
+                writer.u8(0xa6);
+                writer.digest(*digest);
+            }
+        }
         AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
             writer.u8(0);
             encode_complex_result_values(writer, poles);
@@ -492,14 +636,30 @@ fn encode_device_op(
     }
 }
 
-fn encode_noise_summary(writer: &mut ResultDigestWriter, summary: &NoiseSummary) {
-    writer.f64(summary.total_rms);
+fn encode_noise_summary(
+    writer: &mut ResultDigestWriter,
+    summary: &NoiseSummary,
+    encoding_version: u16,
+) {
+    if encoding_version <= RESULT_DIGEST_ENCODING_VERSION_V4 {
+        // Schemas v1-v11 required this scalar and encoded it directly. The
+        // migration boundary rejects absence before invoking this legacy
+        // encoder; NaN keeps this helper total for digest-focused unit tests.
+        writer.f64(summary.total_rms.unwrap_or(f64::NAN));
+    } else {
+        writer.option(summary.total_rms.as_ref(), |writer, value| {
+            writer.f64(*value)
+        });
+        writer.option(summary.input_rms.as_ref(), |writer, value| {
+            writer.f64(*value)
+        });
+    }
     writer.f64(summary.band.0);
     writer.f64(summary.band.1);
     writer.sequence(summary.rows.len());
     for row in &summary.rows {
         writer.string(&row.device);
-        writer.string(row.mechanism);
+        writer.string(&row.mechanism);
         writer.f64(row.power);
         writer.f64(row.share_pct);
     }
@@ -687,6 +847,92 @@ const fn saved_output_streaming_tag(streaming: SavedOutputStreaming) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn operating_point_result() -> AnalysisResult {
+        AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_result_payload(
+            AnalysisResultPayload::OperatingPoint {
+                temperature_mode: OperatingPointTemperatureEvidence::PvtRunSet,
+                temperature_celsius: 27.0,
+                initial_guess: OperatingPointInitialGuessEvidence::Automatic,
+                node_initialization: OperatingPointNodeInitializationEvidence::UseIcAndNodeset,
+                homotopy: OperatingPointHomotopyEvidence::Adaptive,
+                annotation: OperatingPointAnnotationEvidence::VoltagesAndCurrents,
+                device_detail: OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+                save_device_op: OperatingPointSaveDeviceEvidence::Enabled,
+                accuracy: OperatingPointAccuracyEvidence::Balanced,
+                selected_devices: vec!["M1".to_owned()],
+                violation_devices: vec!["M2".to_owned()],
+                violation_source_content_digest: Some(ContentDigest::from_bytes([7; 32])),
+                validated_startup_directives: 2,
+                mna_node_names: vec!["in".to_owned(), "out".to_owned()],
+                mna_branch_names: vec!["V1".to_owned()],
+                mna_solution: vec![1.0, 0.5, -0.5e-3],
+                effective_source_content_digest: Some(ContentDigest::from_bytes([8; 32])),
+                run_point_index: 1,
+                run_point_count: 2,
+                run_point_process: OperatingPointProcessEvidence::TT,
+                run_point_supply_voltage: None,
+                run_point_nominal_supply_voltage: None,
+            },
+        )
+    }
+
+    #[test]
+    fn operating_point_mna_and_context_are_field_sensitive_content_identity() {
+        let source = operating_point_result();
+        let baseline = source.result_data_digest();
+        let mut changed = source.clone();
+        let Some(AnalysisResultPayload::OperatingPoint { mna_solution, .. }) =
+            changed.result_payload.as_mut()
+        else {
+            panic!("OP payload")
+        };
+        mna_solution[1] = 0.500_000_000_000_000_1;
+        assert_ne!(baseline, changed.result_data_digest());
+
+        let mut changed = source.clone();
+        let Some(AnalysisResultPayload::OperatingPoint {
+            violation_devices, ..
+        }) = changed.result_payload.as_mut()
+        else {
+            panic!("OP payload")
+        };
+        violation_devices.push("M3".to_owned());
+        assert_ne!(baseline, changed.result_data_digest());
+
+        let mut changed = source.clone();
+        let Some(AnalysisResultPayload::OperatingPoint {
+            run_point_index, ..
+        }) = changed.result_payload.as_mut()
+        else {
+            panic!("OP payload")
+        };
+        *run_point_index = 0;
+        assert_ne!(baseline, changed.result_data_digest());
+
+        let mut changed = source.clone();
+        let Some(AnalysisResultPayload::OperatingPoint {
+            run_point_process, ..
+        }) = changed.result_payload.as_mut()
+        else {
+            panic!("OP payload")
+        };
+        *run_point_process = OperatingPointProcessEvidence::SS;
+        assert_ne!(baseline, changed.result_data_digest());
+
+        let mut changed = source.clone();
+        let Some(AnalysisResultPayload::OperatingPoint {
+            run_point_supply_voltage,
+            run_point_nominal_supply_voltage,
+            ..
+        }) = changed.result_payload.as_mut()
+        else {
+            panic!("OP payload")
+        };
+        *run_point_supply_voltage = Some(0.9);
+        *run_point_nominal_supply_voltage = Some(1.0);
+        assert_ne!(baseline, changed.result_data_digest());
+    }
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
@@ -1053,7 +1299,7 @@ mod tests {
         assert_ne!(
             source.result_data_digest(),
             source.legacy_v3_result_data_digest(),
-            "current results must be sealed in the v4 domain"
+            "current results must be sealed in the v5 domain"
         );
     }
 

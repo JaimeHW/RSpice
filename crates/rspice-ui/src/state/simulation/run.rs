@@ -372,11 +372,10 @@ impl SimulationRun {
         &self,
         source_instance_id: AnalysisInstanceId,
     ) -> Option<&AnalysisResult> {
-        self.analyses.iter().find(|analysis| {
-            analysis
-                .provenance
-                .as_ref()
-                .is_some_and(|provenance| provenance.source_instance_id() == source_instance_id)
+        self.analyses.iter().rev().find(|analysis| {
+            analysis.provenance.as_ref().is_some_and(|provenance| {
+                provenance.authored_source_instance_id() == source_instance_id
+            })
         })
     }
 
@@ -517,6 +516,40 @@ mod tests {
                 .unwrap()
                 .dependency_ids(),
             &[first_id]
+        );
+    }
+
+    #[test]
+    fn authored_source_selection_returns_the_final_expanded_point() {
+        let authored = AnalysisInstanceId::new();
+        let first_point = AnalysisInstanceId::new();
+        let final_point = AnalysisInstanceId::new();
+        let snapshot = ContentDigest::from_bytes([0x5b; 32]);
+        let mut run = SimulationRun::new(9);
+        for (label, execution_id) in [("OP point 1/2", first_point), ("OP point 2/2", final_point)]
+        {
+            run.add_analysis(
+                AnalysisResult::new(1, AnalysisType::DcOp, label).with_provenance(
+                    AnalysisResultProvenance::new_with_authored_source_domain(
+                        AnalysisResultSourceDomain::SimulationPlan,
+                        execution_id,
+                        authored,
+                        ObjectRevision::INITIAL,
+                        snapshot,
+                        Vec::new(),
+                    )
+                    .expect("expanded provenance is valid"),
+                ),
+            );
+        }
+
+        let selected = run
+            .find_analysis_by_source_instance(authored)
+            .expect("authored OP selection");
+        assert_eq!(selected.label, "OP point 2/2");
+        assert_eq!(
+            selected.provenance.as_ref().unwrap().source_instance_id(),
+            final_point
         );
     }
 }

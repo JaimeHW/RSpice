@@ -82,6 +82,59 @@ impl Engine {
         max_sideband: i32,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        self.run_pnoise_impl(
+            netlist,
+            fundamental_freq,
+            offsets,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            None,
+            abort,
+        )
+    }
+
+    /// Run driven periodic noise from an exact retained shooting-PSS orbit.
+    /// No periodic operating-point solve is performed in this path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_pnoise_from_pss_with_abort(
+        &self,
+        netlist: &Netlist,
+        offsets: &[Value],
+        output_node: &str,
+        output_ref: Option<&str>,
+        input_source: Option<&str>,
+        max_sideband: i32,
+        operating_point: &super::super::PssOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        self.run_pnoise_impl(
+            netlist,
+            operating_point.analysis().result.frequency,
+            offsets,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            Some(operating_point),
+            abort,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_pnoise_impl(
+        &self,
+        netlist: &Netlist,
+        fundamental_freq: Value,
+        offsets: &[Value],
+        output_node: &str,
+        output_ref: Option<&str>,
+        input_source: Option<&str>,
+        max_sideband: i32,
+        operating_point: Option<&super::super::PssOperatingPoint>,
+        abort: &dyn AbortSignal,
+    ) -> Result<PnoiseAnalysisResult, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -111,6 +164,14 @@ impl Engine {
 
         let span = (max_sideband as usize).saturating_mul(2);
         let op_harmonics = span.max(8);
+        if let Some(operating_point) = operating_point
+            && op_harmonics > operating_point.spectral_harmonic_capacity()
+        {
+            return Err(SimulationError::Circuit(format!(
+                "pnoise requires {op_harmonics} periodic harmonics for its sideband span, but the retained PSS time orbit has Nyquist capacity {}",
+                operating_point.spectral_harmonic_capacity()
+            )));
+        }
         let hb_config = HbConfig::new(fundamental_freq)
             .with_harmonics(op_harmonics)
             .with_oversample(4);
@@ -133,24 +194,29 @@ impl Engine {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
 
-        let mut state = HbSolverState::new(num_nodes, op_harmonics);
-        if has_nonlinear {
-            solver
-                .solve_newton_with_abort(&mut state, abort)
-                .map_err(|e| match e {
-                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
-                    _ => SimulationError::Circuit(format!(
-                        "pnoise operating-point solve failed: {e}"
-                    )),
-                })?;
+        let state = if let Some(operating_point) = operating_point {
+            self.hb_state_from_pss_operating_point(operating_point, &hb_config, &node_names)?
         } else {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
+            let mut state = HbSolverState::new(num_nodes, op_harmonics);
+            if has_nonlinear {
+                solver
+                    .solve_newton_with_abort(&mut state, abort)
+                    .map_err(|e| match e {
+                        crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                        _ => SimulationError::Circuit(format!(
+                            "pnoise operating-point solve failed: {e}"
+                        )),
+                    })?;
+            } else {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                solver.solve_linear(&mut state).map_err(|e| {
+                    SimulationError::Circuit(format!("pnoise operating-point solve failed: {e}"))
+                })?;
             }
-            solver.solve_linear(&mut state).map_err(|e| {
-                SimulationError::Circuit(format!("pnoise operating-point solve failed: {e}"))
-            })?;
-        }
+            state
+        };
 
         let out_idx = node_names
             .iter()

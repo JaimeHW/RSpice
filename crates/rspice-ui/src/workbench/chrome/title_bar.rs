@@ -456,6 +456,7 @@ struct MenuRowRecord {
     id: Id,
     label: String,
     enabled: bool,
+    response: Response,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -676,7 +677,12 @@ fn menu_trigger(
             node.set_label(format!("{} menu", key.label()));
         });
         begin_menu_render(ui.ctx(), popup_id);
-        contents(ui, app);
+        egui::ScrollArea::vertical()
+            .id_salt(("workbench.title_menu.scroll", key))
+            .max_height(menu_popup_max_height(ui))
+            .auto_shrink([false, true])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .show(ui, |ui| contents(ui, app));
         let render_state = finish_menu_render(ui.ctx());
         handle_popup_keyboard(ui.ctx(), popup_id, &response, &render_state.rows);
     });
@@ -763,6 +769,7 @@ fn record_menu_row(ctx: &Context, response: &Response, label: &str, enabled: boo
             id: response.id,
             label: label.to_owned(),
             enabled,
+            response: response.clone(),
         });
         data.insert_temp(id, state);
         request_row_focus
@@ -772,6 +779,7 @@ fn record_menu_row(ctx: &Context, response: &Response, label: &str, enabled: boo
     // native and WASM builds; apply the recorded focus request after release.
     if request_row_focus {
         response.request_focus();
+        response.scroll_to_me(Some(Align::Center));
     }
 }
 
@@ -808,7 +816,10 @@ fn handle_popup_keyboard(ctx: &Context, popup_id: Id, trigger: &Response, rows: 
         None
     };
     if let Some(index) = destination {
-        request_focus(ctx, enabled_rows[index].id);
+        enabled_rows[index].response.request_focus();
+        enabled_rows[index]
+            .response
+            .scroll_to_me(Some(Align::Center));
         return;
     }
 
@@ -833,7 +844,8 @@ fn handle_popup_keyboard(ctx: &Context, popup_id: Id, trigger: &Response, rows: 
             .take(enabled_rows.len())
             .find(|row| row.label.to_lowercase().starts_with(&query))
         {
-            request_focus(ctx, row.id);
+            row.response.request_focus();
+            row.response.scroll_to_me(Some(Align::Center));
         }
     }
 }
@@ -1273,8 +1285,28 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     menu_separator(ui);
     command_item(ui, app, Command::CloseActiveDocument);
     command_item(ui, app, Command::CloseProject);
-    menu_separator(ui);
-    command_item(ui, app, Command::Exit);
+    let platform = crate::common::app::runtime_command_platform(ui.ctx());
+    if file_menu_shows_exit(platform) {
+        menu_separator(ui);
+        command_item(ui, app, Command::Exit);
+    }
+}
+
+fn menu_popup_max_height(ui: &Ui) -> f32 {
+    menu_popup_height_for_viewport(ui.ctx().content_rect().height())
+}
+
+fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
+    // Preserve room for the title bar and a small bottom escape margin while
+    // guaranteeing enough space to navigate at least three standard rows.
+    (viewport_height - 64.0).clamp(MENU_ROW_HEIGHT * 3.0, 560.0)
+}
+
+const fn file_menu_shows_exit(platform: crate::workbench::commands::CommandPlatform) -> bool {
+    matches!(
+        platform,
+        crate::workbench::commands::CommandPlatform::Desktop
+    )
 }
 
 fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2301,6 +2333,27 @@ mod tests {
         );
         assert_eq!(DESCEND_MENU_LABEL, "Descend into selected instance…");
         assert_eq!(COMMAND_REFERENCE_MENU_LABEL, "Command reference");
+    }
+
+    #[test]
+    fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
+        use crate::workbench::commands::CommandPlatform;
+
+        assert!(file_menu_shows_exit(CommandPlatform::Desktop));
+        for platform in [
+            CommandPlatform::Browser,
+            CommandPlatform::Tablet,
+            CommandPlatform::Phone,
+        ] {
+            assert!(!file_menu_shows_exit(platform), "{}", platform.label());
+        }
+    }
+
+    #[test]
+    fn application_menu_height_is_viewport_bounded() {
+        assert_eq!(menu_popup_height_for_viewport(900.0), 560.0);
+        assert_eq!(menu_popup_height_for_viewport(600.0), 536.0);
+        assert_eq!(menu_popup_height_for_viewport(120.0), MENU_ROW_HEIGHT * 3.0);
     }
 
     #[test]

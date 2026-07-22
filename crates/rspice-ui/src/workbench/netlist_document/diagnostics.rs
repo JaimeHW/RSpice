@@ -1,6 +1,7 @@
 //! Structured diagnostics for the netlist editor.
 
 use std::ops::Range;
+use std::path::PathBuf;
 
 use rspice_core::netlist::{NetlistDefinition, NetlistReference, ReferenceKind};
 
@@ -24,6 +25,13 @@ pub struct DiagnosticFix {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
+    /// Physical source that owns this diagnostic. `None` identifies the
+    /// in-memory editor buffer. Included-source diagnostics retain their path
+    /// and deliberately do not masquerade as a line in the root buffer.
+    pub source_path: Option<PathBuf>,
+    /// Zero-based physical line in `source_path`, including for an included
+    /// source that is not the active editor buffer.
+    pub source_line: Option<usize>,
     /// Byte span in the editor buffer, when known.
     pub span: Option<Range<usize>>,
     /// 0-based buffer line, when localized.
@@ -38,6 +46,8 @@ impl Diagnostic {
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             severity: DiagnosticSeverity::Error,
+            source_path: None,
+            source_line: None,
             span: None,
             line: None,
             column: None,
@@ -48,7 +58,49 @@ impl Diagnostic {
 
     pub fn with_line(mut self, line: Option<usize>) -> Self {
         self.line = line;
+        self.source_line = line;
         self
+    }
+
+    pub fn with_source_location(
+        mut self,
+        origin: &rspice_core::netlist::NetlistSourceLocation,
+        editor_source_path: Option<&std::path::Path>,
+    ) -> Self {
+        self.source_path = origin.path.clone();
+        self.source_line = origin.line.checked_sub(1);
+        self.line = if origin.path.as_deref().is_none()
+            || same_source(origin.path.as_deref(), editor_source_path)
+        {
+            origin.line.checked_sub(1)
+        } else {
+            None
+        };
+        self
+    }
+}
+
+fn same_source(left: Option<&std::path::Path>, right: Option<&std::path::Path>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            left == right
+                || (left.is_absolute() != right.is_absolute()
+                    && std::env::current_dir().is_ok_and(|current| {
+                        let absolute_left = if left.is_absolute() {
+                            left.to_path_buf()
+                        } else {
+                            current.join(left)
+                        };
+                        let absolute_right = if right.is_absolute() {
+                            right.to_path_buf()
+                        } else {
+                            current.join(right)
+                        };
+                        absolute_left == absolute_right
+                    }))
+        }
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -106,6 +158,8 @@ pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
 
         diagnostics.push(Diagnostic {
             severity: DiagnosticSeverity::Error,
+            source_path: None,
+            source_line: Some(line),
             span: Some(reference.span),
             line: Some(line),
             column: Some(column),
@@ -117,19 +171,36 @@ pub(super) fn unknown_reference_diagnostics(buffer: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
-pub(super) fn parser_diagnostics(netlist: &rspice_core::Netlist) -> Vec<Diagnostic> {
+pub(super) fn parser_diagnostics(
+    netlist: &rspice_core::Netlist,
+    editor_source_path: Option<&std::path::Path>,
+) -> Vec<Diagnostic> {
     netlist
         .diagnostics
         .iter()
-        .map(|diagnostic| Diagnostic {
-            severity: match diagnostic.severity {
-                rspice_core::netlist::DiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
-            },
-            span: None,
-            line: diagnostic.line.checked_sub(1),
-            column: None,
-            message: diagnostic.message.clone(),
-            fix: None,
+        .map(|diagnostic| {
+            let fallback_origin = match &netlist.source_path {
+                Some(path) => {
+                    rspice_core::netlist::NetlistSourceLocation::in_file(path, diagnostic.line)
+                }
+                None => rspice_core::netlist::NetlistSourceLocation::in_memory(diagnostic.line),
+            };
+            let origin = diagnostic.origin.as_ref().unwrap_or(&fallback_origin);
+            Diagnostic {
+                severity: match diagnostic.severity {
+                    rspice_core::netlist::DiagnosticSeverity::Warning => {
+                        DiagnosticSeverity::Warning
+                    }
+                },
+                source_path: None,
+                source_line: None,
+                span: None,
+                line: None,
+                column: None,
+                message: diagnostic.message.clone(),
+                fix: None,
+            }
+            .with_source_location(origin, editor_source_path)
         })
         .collect()
 }
@@ -289,7 +360,7 @@ mod tests {
     fn parser_warnings_convert_to_editor_diagnostics() {
         let src = "deck\nV1 in 0 1\nR1 in 0 1k\n.options vendorcompat=1\n.end\n";
         let netlist = rspice_core::Netlist::parse(src).expect("deck parses with warning");
-        let diagnostics = parser_diagnostics(&netlist);
+        let diagnostics = parser_diagnostics(&netlist, None);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);

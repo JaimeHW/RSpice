@@ -27,6 +27,13 @@ impl SimulationController {
 
         match sim_result {
             SimulationResult::DcOp(dc_result) => {
+                let op_payload = operating_point_payload(
+                    &dc_result.configuration,
+                    dc_result.validated_startup_directives,
+                    dc_result.mna_node_names.clone(),
+                    dc_result.mna_branch_names.clone(),
+                    dc_result.mna_solution.clone(),
+                );
                 let node_voltages = dc_result
                     .node_voltages
                     .into_iter()
@@ -52,7 +59,8 @@ impl SimulationController {
                     power_dissipation: Vec::new(),
                 };
                 let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
-                    .with_dc_op(state_dc_op);
+                    .with_dc_op(state_dc_op)
+                    .with_result_payload(op_payload);
                 if let Some(report) = dc_result.device_report {
                     result = result.with_device_op(report);
                 }
@@ -83,6 +91,7 @@ impl SimulationController {
                 time,
                 waveforms,
                 measurements,
+                ..
             } => AnalysisResult::new(1, analysis_type, label.to_string())
                 .with_waveforms(self.build_sorted_waveforms_with_shared_x_owned(
                     time,
@@ -560,6 +569,13 @@ impl SimulationController {
         input_noise: Option<Vec<f64>>,
         contributors: HashMap<String, Vec<f64>>,
     ) -> Vec<crate::state::WaveformData> {
+        let (frequencies, output_noise, input_noise, contributors) =
+            Self::order_noise_series_for_retention(
+                frequencies,
+                output_noise,
+                input_noise,
+                contributors,
+            );
         let shared_freqs = Arc::new(frequencies);
         let freq_len = shared_freqs.len();
         let mut results = Vec::new();
@@ -599,6 +615,62 @@ impl SimulationController {
         }
 
         results
+    }
+
+    /// Normalize the retained plotting axis without changing authored DATA
+    /// execution order. A single stable permutation is applied to the axis and
+    /// every aligned series, preserving each physical frequency/value pair.
+    fn order_noise_series_for_retention(
+        frequencies: Vec<f64>,
+        output_noise: Vec<f64>,
+        input_noise: Option<Vec<f64>>,
+        contributors: HashMap<String, Vec<f64>>,
+    ) -> (
+        Vec<f64>,
+        Vec<f64>,
+        Option<Vec<f64>>,
+        HashMap<String, Vec<f64>>,
+    ) {
+        if frequencies
+            .windows(2)
+            .all(|pair| pair[0].total_cmp(&pair[1]) != std::cmp::Ordering::Greater)
+        {
+            return (frequencies, output_noise, input_noise, contributors);
+        }
+
+        let mut order = (0..frequencies.len()).collect::<Vec<_>>();
+        order.sort_by(|left, right| {
+            frequencies[*left]
+                .total_cmp(&frequencies[*right])
+                .then_with(|| left.cmp(right))
+        });
+        let frequencies = Self::permute_noise_samples(frequencies, &order);
+        let output_noise = Self::permute_noise_samples_if_aligned(output_noise, &order);
+        let input_noise =
+            input_noise.map(|samples| Self::permute_noise_samples_if_aligned(samples, &order));
+        let contributors = contributors
+            .into_iter()
+            .map(|(name, samples)| {
+                (
+                    name,
+                    Self::permute_noise_samples_if_aligned(samples, &order),
+                )
+            })
+            .collect();
+
+        (frequencies, output_noise, input_noise, contributors)
+    }
+
+    fn permute_noise_samples(samples: Vec<f64>, order: &[usize]) -> Vec<f64> {
+        order.iter().map(|index| samples[*index]).collect()
+    }
+
+    fn permute_noise_samples_if_aligned(samples: Vec<f64>, order: &[usize]) -> Vec<f64> {
+        if samples.len() == order.len() {
+            Self::permute_noise_samples(samples, order)
+        } else {
+            samples
+        }
     }
 
     fn build_monte_carlo_payload_owned(
@@ -758,6 +830,118 @@ impl SimulationController {
     }
 }
 
+fn operating_point_payload(
+    config: &crate::simulation::dialog::OpConfig,
+    validated_startup_directives: usize,
+    mna_node_names: Vec<String>,
+    mna_branch_names: Vec<String>,
+    mna_solution: Vec<f64>,
+) -> crate::state::AnalysisResultPayload {
+    use crate::simulation::dialog::*;
+    use crate::state::*;
+    AnalysisResultPayload::OperatingPoint {
+        temperature_mode: match config.temperature_mode {
+            OpTemperatureMode::PvtRunSet => OperatingPointTemperatureEvidence::PvtRunSet,
+            OpTemperatureMode::Nominal27C => OperatingPointTemperatureEvidence::Nominal27C,
+            OpTemperatureMode::Explicit => OperatingPointTemperatureEvidence::Explicit,
+            OpTemperatureMode::ActiveRunSetAxis => {
+                OperatingPointTemperatureEvidence::ActiveRunSetAxis
+            }
+        },
+        temperature_celsius: config.temperature_celsius,
+        initial_guess: match config.initial_guess {
+            OpInitialGuess::Automatic => OperatingPointInitialGuessEvidence::Automatic,
+            OpInitialGuess::PreviousConverged => {
+                OperatingPointInitialGuessEvidence::PreviousConverged
+            }
+            OpInitialGuess::UserNodeVoltages => {
+                OperatingPointInitialGuessEvidence::UserNodeVoltages
+            }
+            OpInitialGuess::ZeroState => OperatingPointInitialGuessEvidence::ZeroState,
+        },
+        node_initialization: match config.node_initialization {
+            OpNodeInitialization::UseIcAndNodeset => {
+                OperatingPointNodeInitializationEvidence::UseIcAndNodeset
+            }
+            OpNodeInitialization::IgnoreIcAndNodeset => {
+                OperatingPointNodeInitializationEvidence::IgnoreIcAndNodeset
+            }
+            OpNodeInitialization::ForceIcValues => {
+                OperatingPointNodeInitializationEvidence::ForceIcValues
+            }
+            OpNodeInitialization::ValidateOnly => {
+                OperatingPointNodeInitializationEvidence::ValidateOnly
+            }
+        },
+        homotopy: match config.homotopy {
+            OpHomotopy::Adaptive => OperatingPointHomotopyEvidence::Adaptive,
+            OpHomotopy::SourceStepping => OperatingPointHomotopyEvidence::SourceStepping,
+            OpHomotopy::GminStepping => OperatingPointHomotopyEvidence::GminStepping,
+            OpHomotopy::PseudoTransient => OperatingPointHomotopyEvidence::PseudoTransient,
+            OpHomotopy::None => OperatingPointHomotopyEvidence::None,
+        },
+        annotation: match config.annotation {
+            OpAnnotation::VoltagesAndCurrents => {
+                OperatingPointAnnotationEvidence::VoltagesAndCurrents
+            }
+            OpAnnotation::VoltagesOnly => OperatingPointAnnotationEvidence::VoltagesOnly,
+            OpAnnotation::VoltagesAndDeviceOp => {
+                OperatingPointAnnotationEvidence::VoltagesAndDeviceOp
+            }
+            OpAnnotation::None => OperatingPointAnnotationEvidence::None,
+        },
+        device_detail: match config.device_detail {
+            OpDeviceDetail::SelectedAndViolations => {
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations
+            }
+            OpDeviceDetail::AllDevices => OperatingPointDeviceDetailEvidence::AllDevices,
+            OpDeviceDetail::ViolationsOnly => OperatingPointDeviceDetailEvidence::ViolationsOnly,
+            OpDeviceDetail::None => OperatingPointDeviceDetailEvidence::None,
+        },
+        save_device_op: match config.save_device_op {
+            OpSaveDevice::Enabled => OperatingPointSaveDeviceEvidence::Enabled,
+            OpSaveDevice::Disabled => OperatingPointSaveDeviceEvidence::Disabled,
+            OpSaveDevice::FinalPointOnly => OperatingPointSaveDeviceEvidence::FinalPointOnly,
+        },
+        accuracy: match config.accuracy {
+            OpAccuracy::Fast => OperatingPointAccuracyEvidence::Fast,
+            OpAccuracy::Balanced => OperatingPointAccuracyEvidence::Balanced,
+            OpAccuracy::Accurate => OperatingPointAccuracyEvidence::Accurate,
+            OpAccuracy::Robust => OperatingPointAccuracyEvidence::Robust,
+        },
+        selected_devices: config.selected_devices.clone(),
+        violation_devices: config.violation_devices.clone(),
+        violation_source_content_digest: config.violation_source_content_digest,
+        validated_startup_directives: u64::try_from(validated_startup_directives)
+            .unwrap_or(u64::MAX),
+        mna_node_names,
+        mna_branch_names,
+        mna_solution,
+        effective_source_content_digest: None,
+        run_point_index: u64::try_from(config.run_point.index).unwrap_or(u64::MAX),
+        run_point_count: u64::try_from(config.run_point.count).unwrap_or(u64::MAX),
+        run_point_process: match config.run_point.process {
+            crate::simulation::dialog::corner::ProcessCorner::TT => {
+                OperatingPointProcessEvidence::TT
+            }
+            crate::simulation::dialog::corner::ProcessCorner::SS => {
+                OperatingPointProcessEvidence::SS
+            }
+            crate::simulation::dialog::corner::ProcessCorner::FF => {
+                OperatingPointProcessEvidence::FF
+            }
+            crate::simulation::dialog::corner::ProcessCorner::SF => {
+                OperatingPointProcessEvidence::SF
+            }
+            crate::simulation::dialog::corner::ProcessCorner::FS => {
+                OperatingPointProcessEvidence::FS
+            }
+        },
+        run_point_supply_voltage: config.run_point.supply_voltage,
+        run_point_nominal_supply_voltage: config.run_point.nominal_supply_voltage,
+    }
+}
+
 fn retain_soa_parameter(parameter: crate::services::safety::SoAParameter) -> SoaParameterEvidence {
     match parameter {
         crate::services::safety::SoAParameter::Vgs => SoaParameterEvidence::GateSourceVoltage,
@@ -770,5 +954,83 @@ fn retain_soa_parameter(parameter: crate::services::safety::SoAParameter) -> Soa
         crate::services::safety::SoAParameter::Ic => SoaParameterEvidence::CollectorCurrent,
         crate::services::safety::SoAParameter::Pdiss => SoaParameterEvidence::PowerDissipation,
         crate::services::safety::SoAParameter::Temp => SoaParameterEvidence::Temperature,
+    }
+}
+
+#[cfg(test)]
+mod operating_point_conversion_tests {
+    use super::*;
+
+    #[test]
+    fn branch_current_is_wrapped_exactly_once_in_retained_results() {
+        let sim_result =
+            crate::simulation::SimulationResult::DcOp(crate::simulation::results::DcOpResult {
+                configuration: crate::simulation::dialog::OpConfig::default(),
+                branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
+                ..Default::default()
+            });
+        let result = SimulationController::new()
+            .convert_to_analysis_result_owned(sim_result, &AnalysisConfig::dc_op());
+        let currents = &result.dc_op.as_ref().unwrap().branch_currents;
+        assert_eq!(currents.len(), 1);
+        assert_eq!(currents[0].name, "I(V1)");
+    }
+}
+
+#[cfg(test)]
+mod noise_conversion_tests {
+    use super::*;
+
+    #[test]
+    fn descending_data_axis_is_retained_monotonically_with_every_series_paired() {
+        let sim_result = crate::simulation::SimulationResult::Noise {
+            frequencies: vec![10.0, 1.0, 10.0],
+            output_noise: vec![100.0, 10.0, 101.0],
+            input_noise: Some(vec![200.0, 20.0, 201.0]),
+            contributors: HashMap::from([("R1:thermal".to_owned(), vec![300.0, 30.0, 301.0])]),
+            summary: None,
+        };
+
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Noise,
+            "NOISE DATA",
+        );
+
+        for waveform in &result.waveforms {
+            assert_eq!(waveform.x.as_ref(), &[1.0, 10.0, 10.0]);
+        }
+        let waveform = |name: &str| {
+            result
+                .waveforms
+                .iter()
+                .find(|waveform| waveform.name == name)
+                .unwrap_or_else(|| panic!("missing retained waveform {name}"))
+        };
+        assert_eq!(waveform("onoise").y.as_ref(), &[10.0, 100.0, 101.0]);
+        assert_eq!(waveform("inoise").y.as_ref(), &[20.0, 200.0, 201.0]);
+        assert_eq!(
+            waveform("noise(R1:thermal)").y.as_ref(),
+            &[30.0, 300.0, 301.0]
+        );
+    }
+
+    #[test]
+    fn descending_axis_with_misaligned_worker_series_fails_closed_without_panicking() {
+        let sim_result = crate::simulation::SimulationResult::Noise {
+            frequencies: vec![10.0, 1.0],
+            output_noise: vec![100.0],
+            input_noise: Some(vec![200.0]),
+            contributors: HashMap::from([("R1:thermal".to_owned(), vec![300.0])]),
+            summary: None,
+        };
+
+        let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Noise,
+            "NOISE DATA",
+        );
+
+        assert!(result.waveforms.is_empty());
     }
 }

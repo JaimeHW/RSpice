@@ -9,6 +9,7 @@ use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
+use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::plan::{
     AnalysisDraft, FrequencySweepDraft, NetworkPortDraft, PeriodicNetworkDraft,
 };
@@ -17,10 +18,131 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, check_row as inspector_check_row, choice_row as inspector_choice_row,
     input_row as inspector_input_row, mono_input, select, select_mono_with_response,
+    select_with_disabled,
 };
 use crate::workbench::design_system::property_row as inspector_property_row;
 
 const SWEEP_KINDS: &[&str] = &["dec", "oct", "lin"];
+const NOISE_FIELD_LABELS: [&str; 8] = [
+    "Sweep",
+    "Points / decade",
+    "Start frequency",
+    "Stop frequency",
+    "Output node",
+    "Input source",
+    "Contribution detail",
+    "Integrated noise",
+];
+const NOISE_SWEEP_CHOICES: [&str; 4] = NoiseSweepType::OPTIONS;
+const NOISE_OUTPUT_CHOICES: [&str; 4] = [
+    "afe_out",
+    "sensor_p,sensor_n",
+    "vref",
+    "Select output expression…",
+];
+const NOISE_INPUT_CHOICES: [&str; 3] = ["VIN_DIFF", "IIN_CAL", "Select independent source…"];
+const NOISE_CONTRIBUTION_CHOICES: [&str; 4] = NoiseContributionDetail::OPTIONS;
+const NOISE_INTEGRATION_CHOICES: [&str; 3] = NoiseIntegrationMode::OPTIONS;
+const OP_FIELD_LABELS: [&str; 8] = [
+    "Temperature",
+    "Initial guess",
+    "Node initialization",
+    "Homotopy strategy",
+    "Annotate schematic",
+    "Device detail",
+    "Save device OP",
+    "Accuracy preset",
+];
+const OP_TEMPERATURE_CHOICES: [&str; 4] = [
+    "PVT run set",
+    "Nominal temperature \u{00b7} 27 \u{00b0}C",
+    "Explicit temperature\u{2026}",
+    "Inherit active run-set axis",
+];
+const OP_INITIAL_GUESS_CHOICES: [&str; 4] = [
+    "Automatic",
+    "Previous converged solution",
+    "User node voltages",
+    "Zero state",
+];
+const OP_NODE_INITIALIZATION_CHOICES: [&str; 4] = [
+    "Use IC / nodeset",
+    "Ignore IC and nodeset",
+    "Force .ic values",
+    "Validate initialization only",
+];
+const OP_HOMOTOPY_CHOICES: [&str; 5] = [
+    "Adaptive",
+    "Source stepping",
+    "Gmin stepping",
+    "Pseudo-transient",
+    "None",
+];
+const OP_ANNOTATION_CHOICES: [&str; 4] = [
+    "Voltages + currents",
+    "Voltages only",
+    "Voltages + device OP",
+    "None",
+];
+const OP_DEVICE_DETAIL_CHOICES: [&str; 4] = [
+    "Selected + violations",
+    "All devices",
+    "Violations only",
+    "None",
+];
+const OP_SAVE_DEVICE_CHOICES: [&str; 3] = ["Enabled", "Disabled", "Final point only"];
+const OP_ACCURACY_CHOICES: [&str; 4] = ["Fast", "Balanced", "Accurate", "Robust"];
+const PSS_FIELD_LABELS: [&str; 9] = [
+    "Mode",
+    "Fundamental",
+    "Tones",
+    "Stabilization cycles",
+    "Shooting points",
+    "Period tolerance",
+    "Autonomous oscillator",
+    "Oscillator node",
+    "Save harmonics",
+];
+const PSS_MODE_CHOICES: [&str; 1] = ["Driven shooting"];
+const OP_STARTUP_CONFLICT: &str =
+    "This initial-guess and node-initialization combination is not executable";
+
+fn op_initial_guess_disabled(
+    node_initialization_idx: usize,
+    previous_state_available: bool,
+) -> Vec<(usize, &'static str)> {
+    let mut disabled = Vec::new();
+    for initial_guess_idx in 0..OP_INITIAL_GUESS_CHOICES.len() {
+        if !op_startup_indices_compatible(initial_guess_idx, node_initialization_idx) {
+            disabled.push((initial_guess_idx, OP_STARTUP_CONFLICT));
+        } else if initial_guess_idx == 1 && !previous_state_available {
+            disabled.push((
+                initial_guess_idx,
+                "Run and retain a source-compatible OP state before selecting this policy",
+            ));
+        }
+    }
+    disabled
+}
+
+fn op_node_initialization_disabled(initial_guess_idx: usize) -> Vec<(usize, &'static str)> {
+    (0..OP_NODE_INITIALIZATION_CHOICES.len())
+        .filter(|node_idx| !op_startup_indices_compatible(initial_guess_idx, *node_idx))
+        .map(|node_idx| (node_idx, OP_STARTUP_CONFLICT))
+        .collect()
+}
+
+const fn op_startup_indices_compatible(
+    initial_guess_idx: usize,
+    node_initialization_idx: usize,
+) -> bool {
+    match initial_guess_idx {
+        0 => true,
+        1 | 3 => matches!(node_initialization_idx, 1 | 3),
+        2 => matches!(node_initialization_idx, 0 | 2),
+        _ => false,
+    }
+}
 const XF_FIELD_LABELS: [&str; 8] = [
     "Input source",
     "Output expression",
@@ -55,9 +177,16 @@ const ENVELOPE_DECLARED_SOURCES_CHOICE: &str = "Declared list...";
 const ENVELOPE_EXTRACTION_PATH: &str = "Preview";
 const ENVELOPE_HARMONIC_ORDER_HELPER: &str = "positive integer";
 const ENVELOPE_INLINE_CONTROL_GAP: f32 = 6.0;
+const NOISE_SWEEP_CONTROL_COUNT: usize = 2;
 const FIELD_COLUMN_GAP: f32 = 14.0;
 const FIELD_ROW_GAP: f32 = 10.0;
 const FIELD_LABEL_HEIGHT: f32 = 15.0;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct OpContextAvailability {
+    pub previous_state: bool,
+    pub soa_violations: bool,
+}
 
 #[derive(Clone, Copy)]
 struct PendingCell(Rect);
@@ -110,6 +239,47 @@ fn field_cell<R>(
 ) -> R {
     let t = Tokens::get(ui.ctx());
     let rect = next_field_cell(ui);
+    let mut cell = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    cell.set_clip_rect(rect.intersect(ui.clip_rect()));
+    cell.spacing_mut().item_spacing.y = 5.0;
+    let (label_rect, _) = cell.allocate_exact_size(
+        vec2(cell.available_width(), FIELD_LABEL_HEIGHT),
+        egui::Sense::hover(),
+    );
+    cell.painter().text(
+        label_rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    if let Some(helper) = helper {
+        cell.painter().text(
+            label_rect.right_center(),
+            egui::Align2::RIGHT_CENTER,
+            helper,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        );
+    }
+    add_control(&mut cell)
+}
+
+fn full_width_field<R>(
+    ui: &mut Ui,
+    label: &str,
+    helper: Option<&str>,
+    control_height: f32,
+    add_control: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let t = Tokens::get(ui.ctx());
+    let row_height = FIELD_LABEL_HEIGHT + 5.0 + control_height;
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), row_height), egui::Sense::hover());
     let mut cell = ui.new_child(
         UiBuilder::new()
             .max_rect(rect)
@@ -262,6 +432,283 @@ fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {
         *enabled = selected == 0;
     }
     changed
+}
+
+fn noise_enum_choice_row(
+    ui: &mut Ui,
+    label: &str,
+    options: &[&str],
+    selected: usize,
+) -> Option<usize> {
+    let mut next = selected;
+    choice_row(ui, label, options, &mut next).then_some(next)
+}
+
+fn noise_custom_choice_control(
+    ui: &mut Ui,
+    label: &str,
+    options: &[&str],
+    preset_count: usize,
+    value: &mut String,
+) {
+    let preset = options[..preset_count]
+        .iter()
+        .position(|option| option.eq_ignore_ascii_case(value.trim()));
+    let custom_index = preset_count;
+    let selected = preset.unwrap_or(custom_index);
+    let mut custom_selected = selected == custom_index;
+    let current = options
+        .get(selected)
+        .copied()
+        .unwrap_or("Schema unavailable");
+    let string_options = options
+        .iter()
+        .map(|option| (*option).to_owned())
+        .collect::<Vec<_>>();
+    let width = ui.available_width();
+    let (selector_width, editor_width) = noise_sweep_control_widths(width);
+    ui.allocate_ui_with_layout(
+        vec2(width, Tokens::get(ui.ctx()).metrics.ctl_h),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
+            let salt = format!("analysis-noise-choice-{}-{label}", ui.id().value());
+            if let Some(index) = select_mono_with_response(
+                ui,
+                &salt,
+                label,
+                current,
+                &string_options,
+                selector_width,
+            )
+            .picked
+            {
+                if let Some(preset) = options.get(index).filter(|_| index < preset_count) {
+                    *value = (*preset).to_owned();
+                    custom_selected = false;
+                } else if selected != custom_index {
+                    value.clear();
+                    custom_selected = true;
+                }
+            }
+            ui.add_enabled_ui(custom_selected, |ui| {
+                mono_input(ui, value, editor_width);
+            });
+        },
+    );
+}
+
+fn noise_custom_choice_row(
+    ui: &mut Ui,
+    label: &str,
+    options: &[&str],
+    preset_count: usize,
+    value: &mut String,
+) {
+    if uses_two_column_fields(ui) {
+        field_cell(ui, label, Some("domain constrained"), |ui| {
+            noise_custom_choice_control(ui, label, options, preset_count, value);
+        });
+    } else {
+        full_width_field(
+            ui,
+            label,
+            Some("domain constrained"),
+            Tokens::get(ui.ctx()).metrics.ctl_h,
+            |ui| noise_custom_choice_control(ui, label, options, preset_count, value),
+        );
+    }
+}
+
+fn noise_sweep_control(ui: &mut Ui, sweep: &mut NoiseSweepType, explicit_frequencies: &mut String) {
+    ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
+    let selected = sweep.selection_index();
+    let current = selected
+        .and_then(|index| NOISE_SWEEP_CHOICES.get(index))
+        .copied()
+        .unwrap_or("Schema unavailable");
+    let options = NOISE_SWEEP_CHOICES.map(str::to_owned);
+    let width = ui.available_width();
+    let explicit = matches!(sweep, NoiseSweepType::ExplicitFrequencyList);
+    let (selector_width, editor_width) = noise_sweep_control_widths(width);
+    let salt = format!("analysis-noise-sweep-{}", ui.id().value());
+    if let Some(index) = select_mono_with_response(
+        ui,
+        &salt,
+        NOISE_FIELD_LABELS[0],
+        current,
+        &options,
+        selector_width,
+    )
+    .picked
+    {
+        *sweep = NoiseSweepType::from_selection_index(index);
+    }
+    ui.add_enabled_ui(explicit, |ui| {
+        mono_input(ui, explicit_frequencies, editor_width).on_hover_text(if explicit {
+            "Comma- or space-separated frequencies in Hz"
+        } else {
+            "Select Explicit frequency list to edit this retained axis"
+        });
+    });
+}
+
+fn noise_sweep_control_widths(available_width: f32) -> (f32, f32) {
+    let content_width =
+        (available_width - ENVELOPE_INLINE_CONTROL_GAP).max(NOISE_SWEEP_CONTROL_COUNT as f32);
+    let selector_width = content_width * 0.44;
+    (selector_width, content_width - selector_width)
+}
+
+fn noise_sweep_row(ui: &mut Ui, sweep: &mut NoiseSweepType, explicit_frequencies: &mut String) {
+    if uses_two_column_fields(ui) {
+        field_cell(
+            ui,
+            NOISE_FIELD_LABELS[0],
+            Some("domain constrained"),
+            |ui| {
+                ui.horizontal(|ui| noise_sweep_control(ui, sweep, explicit_frequencies));
+            },
+        );
+    } else {
+        full_width_field(
+            ui,
+            NOISE_FIELD_LABELS[0],
+            Some("domain constrained"),
+            Tokens::get(ui.ctx()).metrics.ctl_h,
+            |ui| ui.horizontal(|ui| noise_sweep_control(ui, sweep, explicit_frequencies)),
+        );
+    }
+}
+
+fn choice_row_with_disabled(
+    ui: &mut Ui,
+    label: &str,
+    options: &[&str],
+    value: &mut usize,
+    disabled: &[(usize, &'static str)],
+) -> bool {
+    if !uses_two_column_fields(ui) {
+        let options = options
+            .iter()
+            .map(|option| (*option).to_owned())
+            .collect::<Vec<_>>();
+        let current = options
+            .get(*value)
+            .map_or("Schema unavailable", String::as_str);
+        let salt = format!(
+            "analysis-field-disabled-stacked-{}-{label}",
+            ui.id().value()
+        );
+        return full_width_field(
+            ui,
+            label,
+            Some("domain constrained"),
+            Tokens::get(ui.ctx()).metrics.ctl_h,
+            |ui| {
+                if let Some(index) = select_with_disabled(
+                    ui,
+                    &salt,
+                    label,
+                    current,
+                    &options,
+                    disabled,
+                    ui.available_width(),
+                ) {
+                    *value = index;
+                    true
+                } else {
+                    false
+                }
+            },
+        );
+    }
+    field_cell(ui, label, Some("domain constrained"), |ui| {
+        let options = options
+            .iter()
+            .map(|option| (*option).to_owned())
+            .collect::<Vec<_>>();
+        let current = options
+            .get(*value)
+            .map_or("Schema unavailable", String::as_str);
+        let salt = format!("analysis-field-disabled-{}-{label}", ui.id().value());
+        if let Some(index) = select_with_disabled(
+            ui,
+            &salt,
+            label,
+            current,
+            &options,
+            disabled,
+            ui.available_width(),
+        ) {
+            *value = index;
+            true
+        } else {
+            false
+        }
+    })
+}
+
+fn op_temperature_row(ui: &mut Ui, setup: &mut crate::simulation::dialog::OpDialogState) {
+    if !uses_two_column_fields(ui) {
+        let control_height = Tokens::get(ui.ctx()).metrics.ctl_h * 2.0 + 6.0;
+        full_width_field(
+            ui,
+            OP_FIELD_LABELS[0],
+            Some("Celsius"),
+            control_height,
+            |ui| {
+                let current = OP_TEMPERATURE_CHOICES
+                    .get(setup.temperature_mode_idx)
+                    .copied()
+                    .unwrap_or("Schema unavailable");
+                if let Some(index) = select(
+                    ui,
+                    "op-temperature-mode-stacked",
+                    OP_FIELD_LABELS[0],
+                    current,
+                    &OP_TEMPERATURE_CHOICES.map(|value| value.to_owned()),
+                    ui.available_width(),
+                ) {
+                    setup.temperature_mode_idx = index;
+                    if index == 1 {
+                        setup.temperature = "27".to_owned();
+                    }
+                }
+                ui.add_enabled_ui(setup.temperature_mode_idx == 2, |ui| {
+                    mono_input(ui, &mut setup.temperature, ui.available_width())
+                });
+            },
+        );
+        return;
+    }
+    field_cell(ui, OP_FIELD_LABELS[0], Some("Celsius"), |ui| {
+        let input_width = 92.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let select_width = (ui.available_width() - input_width - 6.0).max(1.0);
+            let current = OP_TEMPERATURE_CHOICES
+                .get(setup.temperature_mode_idx)
+                .copied()
+                .unwrap_or("Schema unavailable");
+            if let Some(index) = select(
+                ui,
+                "op-temperature-mode",
+                OP_FIELD_LABELS[0],
+                current,
+                &OP_TEMPERATURE_CHOICES.map(|value| value.to_owned()),
+                select_width,
+            ) {
+                setup.temperature_mode_idx = index;
+                if index == 1 {
+                    setup.temperature = "27".to_owned();
+                }
+            }
+            ui.add_enabled_ui(setup.temperature_mode_idx == 2, |ui| {
+                mono_input(ui, &mut setup.temperature, input_width)
+            });
+        });
+    });
 }
 
 fn mono_input_with_suffix(ui: &mut Ui, value: &mut String, suffix: &'static str) -> Response {
@@ -417,7 +864,13 @@ fn envelope_modulation_control_widths(available_width: f32) -> (f32, f32) {
     (selector_width, content_width - selector_width)
 }
 
-fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sources: &[String]) {
+fn named_periodic_source_row(
+    ui: &mut Ui,
+    label: &str,
+    id_namespace: &str,
+    value: &mut String,
+    circuit_sources: &[String],
+) {
     let catalog_selection = circuit_sources
         .iter()
         .position(|source| source.eq_ignore_ascii_case(value.trim()));
@@ -436,16 +889,10 @@ fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sourc
             Layout::left_to_right(Align::Center),
             |ui| {
                 ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
-                let salt = format!("analysis-envelope-modulation-source-{}", ui.id().value());
-                if let Some(index) = select_mono_with_response(
-                    ui,
-                    &salt,
-                    "Modulation sources",
-                    current,
-                    &options,
-                    selector_width,
-                )
-                .picked
+                let salt = format!("analysis-{id_namespace}-source-{}", ui.id().value());
+                if let Some(index) =
+                    select_mono_with_response(ui, &salt, label, current, &options, selector_width)
+                        .picked
                 {
                     selected = index;
                     if let Some(source) = circuit_sources.get(index) {
@@ -464,12 +911,7 @@ fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sourc
     };
 
     if uses_two_column_fields(ui) {
-        field_cell(
-            ui,
-            ENVELOPE_FIELD_LABELS[4],
-            Some("domain constrained"),
-            add_control,
-        );
+        field_cell(ui, label, Some("domain constrained"), add_control);
         return;
     }
 
@@ -485,12 +927,22 @@ fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sourc
             ui.painter().text(
                 label_rect.left_center(),
                 egui::Align2::LEFT_CENTER,
-                ENVELOPE_FIELD_LABELS[4],
+                label,
                 theme::sans(tokens::FS_1, FontWeight::Regular),
                 color,
             );
             add_control(ui);
         },
+    );
+}
+
+fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sources: &[String]) {
+    named_periodic_source_row(
+        ui,
+        ENVELOPE_FIELD_LABELS[4],
+        "envelope-modulation",
+        value,
+        circuit_sources,
     );
 }
 
@@ -637,17 +1089,70 @@ pub(super) fn form(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
     envelope_modulation_sources: &[String],
+    op_context: OpContextAvailability,
 ) -> &'static str {
     clear_pending_cell(ui);
     ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;
     let note = match draft {
         AnalysisDraft::OperatingPoint(setup) => {
             setup.ensure_initialized();
-            property_row(ui, "Temperature", "PVT run set");
-            input_row(ui, "GMIN steps", &mut setup.gmin_steps);
-            check_row(ui, "Source stepping", &mut setup.source_stepping);
-            check_row(ui, "Save all signals", &mut setup.save_all);
-            check_row(ui, "Save OP details", &mut setup.save_op_info);
+            op_temperature_row(ui, setup);
+            let initial_guess_disabled =
+                op_initial_guess_disabled(setup.node_initialization_idx, op_context.previous_state);
+            choice_row_with_disabled(
+                ui,
+                OP_FIELD_LABELS[1],
+                &OP_INITIAL_GUESS_CHOICES,
+                &mut setup.initial_guess_idx,
+                &initial_guess_disabled,
+            );
+            let node_initialization_disabled =
+                op_node_initialization_disabled(setup.initial_guess_idx);
+            choice_row_with_disabled(
+                ui,
+                OP_FIELD_LABELS[2],
+                &OP_NODE_INITIALIZATION_CHOICES,
+                &mut setup.node_initialization_idx,
+                &node_initialization_disabled,
+            );
+            choice_row(
+                ui,
+                OP_FIELD_LABELS[3],
+                &OP_HOMOTOPY_CHOICES,
+                &mut setup.homotopy_idx,
+            );
+            choice_row(
+                ui,
+                OP_FIELD_LABELS[4],
+                &OP_ANNOTATION_CHOICES,
+                &mut setup.annotation_idx,
+            );
+            choice_row_with_disabled(
+                ui,
+                OP_FIELD_LABELS[5],
+                &OP_DEVICE_DETAIL_CHOICES,
+                &mut setup.device_detail_idx,
+                if op_context.soa_violations {
+                    &[]
+                } else {
+                    &[(
+                        2,
+                        "Run SOA checks with warning or violation evidence before selecting this policy",
+                    )]
+                },
+            );
+            choice_row(
+                ui,
+                OP_FIELD_LABELS[6],
+                &OP_SAVE_DEVICE_CHOICES,
+                &mut setup.save_device_op_idx,
+            );
+            choice_row(
+                ui,
+                OP_FIELD_LABELS[7],
+                &OP_ACCURACY_CHOICES,
+                &mut setup.accuracy_idx,
+            );
             "Solves the DC operating point; device bias lands in the OP inspector."
         }
         AnalysisDraft::Transient(setup) => {
@@ -729,27 +1234,65 @@ pub(super) fn form(
             "Sweeps a source over the operating range."
         }
         AnalysisDraft::Noise(setup) => {
-            input_row(ui, "Output", &mut setup.output);
-            input_row(ui, "Reference", &mut setup.reference);
-            input_row(ui, "Input src", &mut setup.input);
-            quantity_input_row(
+            noise_sweep_row(ui, &mut setup.sweep, &mut setup.explicit_frequencies);
+            let fixed_grid = !matches!(setup.sweep, NoiseSweepType::ExplicitFrequencyList);
+            input_row_enabled(ui, NOISE_FIELD_LABELS[1], &mut setup.points, fixed_grid);
+            quantity_input_row_enabled(
                 ui,
-                "Start",
+                NOISE_FIELD_LABELS[2],
                 &mut setup.fstart,
                 QuantityInputKind::Frequency,
                 policy,
                 locale,
+                fixed_grid,
             );
-            quantity_input_row(
+            quantity_input_row_enabled(
                 ui,
-                "Stop",
+                NOISE_FIELD_LABELS[3],
                 &mut setup.fstop,
                 QuantityInputKind::Frequency,
                 policy,
                 locale,
+                fixed_grid,
             );
-            input_row(ui, "Points", &mut setup.points);
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
+            let previous_output = setup.output.clone();
+            noise_custom_choice_row(
+                ui,
+                NOISE_FIELD_LABELS[4],
+                &NOISE_OUTPUT_CHOICES,
+                NOISE_OUTPUT_CHOICES.len() - 1,
+                &mut setup.output,
+            );
+            if setup.output != previous_output {
+                // Once the exact output-expression field is edited it owns
+                // both nodes; a hidden legacy reference must not leak into it.
+                setup.reference = "0".to_owned();
+            }
+            noise_custom_choice_row(
+                ui,
+                NOISE_FIELD_LABELS[5],
+                &NOISE_INPUT_CHOICES,
+                NOISE_INPUT_CHOICES.len() - 1,
+                &mut setup.input,
+            );
+            if let Some(selection) = noise_enum_choice_row(
+                ui,
+                NOISE_FIELD_LABELS[6],
+                &NOISE_CONTRIBUTION_CHOICES,
+                setup.contribution_detail.selection_index(),
+            ) && let Some(detail) = NoiseContributionDetail::from_selection_index(selection)
+            {
+                setup.contribution_detail = detail;
+            }
+            if let Some(selection) = noise_enum_choice_row(
+                ui,
+                NOISE_FIELD_LABELS[7],
+                &NOISE_INTEGRATION_CHOICES,
+                setup.integration_mode.selection_index(),
+            ) && let Some(mode) = NoiseIntegrationMode::from_selection_index(selection)
+            {
+                setup.integration_mode = mode;
+            }
             "Integrated and spot noise over its independent small-signal sweep."
         }
         AnalysisDraft::PoleZero(setup) => {
@@ -799,23 +1342,36 @@ pub(super) fn form(
             "Statistical sampling around the nominal design."
         }
         AnalysisDraft::Pss(setup) => {
+            choice_row(
+                ui,
+                PSS_FIELD_LABELS[0],
+                &PSS_MODE_CHOICES,
+                &mut setup.method_idx,
+            );
             quantity_input_row(
                 ui,
-                "Fundamental",
+                PSS_FIELD_LABELS[1],
                 &mut setup.fund_freq,
                 QuantityInputKind::Frequency,
                 policy,
                 locale,
             );
-            input_row(ui, "Harmonics", &mut setup.num_harmonics);
-            input_row(ui, "Max iters", &mut setup.max_iter);
-            choice_row(ui, "Method", &["shooting", "HB"], &mut setup.method_idx);
-            check_row(ui, "Autonomous oscillator", &mut setup.osc_mode);
+            named_periodic_source_row(
+                ui,
+                PSS_FIELD_LABELS[2],
+                "pss-tones",
+                &mut setup.tone_sources,
+                envelope_modulation_sources,
+            );
+            input_row(ui, PSS_FIELD_LABELS[3], &mut setup.tstab_periods);
+            input_row(ui, PSS_FIELD_LABELS[4], &mut setup.points_per_period);
+            engineering_input_row(ui, PSS_FIELD_LABELS[5], &mut setup.tolerance);
+            enabled_choice_row(ui, PSS_FIELD_LABELS[6], &mut setup.osc_mode);
             // The oscillator field is a stable member of the grid. Toggling
             // autonomous mode changes enablement, not the position of every
             // field that follows it.
-            input_row_enabled(ui, "Oscillator node", &mut setup.osc_node, setup.osc_mode);
-            check_row(ui, "Save harmonics", &mut setup.save_harmonics);
+            input_row_enabled(ui, PSS_FIELD_LABELS[7], &mut setup.osc_node, setup.osc_mode);
+            input_row(ui, PSS_FIELD_LABELS[8], &mut setup.num_harmonics);
             "Periodic steady state of the large-signal circuit."
         }
         AnalysisDraft::Stb(setup) => {
@@ -1418,7 +1974,28 @@ pub(super) fn form(
 mod tests {
     use super::*;
     use crate::simulation::dialog::{PssConfig, PssDialogState};
-    use crate::simulation::plan::AnalysisKind;
+    use crate::simulation::plan::{AnalysisKind, NoiseDraft};
+
+    #[test]
+    fn operating_point_startup_choices_match_the_execution_contract() {
+        for initial_guess in 0..OP_INITIAL_GUESS_CHOICES.len() {
+            let disabled = op_node_initialization_disabled(initial_guess);
+            for node_initialization in 0..OP_NODE_INITIALIZATION_CHOICES.len() {
+                assert_eq!(
+                    disabled
+                        .iter()
+                        .any(|(disabled_idx, _)| *disabled_idx == node_initialization),
+                    !op_startup_indices_compatible(initial_guess, node_initialization),
+                );
+            }
+        }
+        assert!(
+            op_initial_guess_disabled(1, false)
+                .iter()
+                .any(|(index, _)| *index == 1),
+            "previous-state policy remains disabled without bound evidence"
+        );
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn analysis_form_height(mut draft: AnalysisDraft) -> f32 {
@@ -1444,6 +2021,7 @@ mod tests {
                             QuantityPresentationPolicy::default(),
                             UiNumberLocale::default(),
                             &["VIN_AM".to_owned(), "VIN_IQ".to_owned()],
+                            OpContextAvailability::default(),
                         );
                         height = ui.cursor().top() - top;
                     });
@@ -1465,6 +2043,83 @@ mod tests {
         let driven_height = pss_form_height(false);
         let oscillator_height = pss_form_height(true);
         assert_eq!(driven_height, oscillator_height);
+    }
+
+    #[test]
+    fn pss_field_order_and_wording_match_the_canonical_mockup() {
+        assert_eq!(
+            PSS_FIELD_LABELS,
+            [
+                "Mode",
+                "Fundamental",
+                "Tones",
+                "Stabilization cycles",
+                "Shooting points",
+                "Period tolerance",
+                "Autonomous oscillator",
+                "Oscillator node",
+                "Save harmonics",
+            ]
+        );
+        assert_eq!(PSS_MODE_CHOICES, ["Driven shooting"]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pss_catalog_and_declared_tone_modes_preserve_form_geometry() {
+        let mut selected = PssDialogState::from_config(&PssConfig::default());
+        selected.tone_sources = "VIN_AM".to_owned();
+        let mut declared = selected.clone();
+        declared.tone_sources = "VIN_AM, VIN_IQ".to_owned();
+        assert_eq!(
+            analysis_form_height(AnalysisDraft::Pss(selected)),
+            analysis_form_height(AnalysisDraft::Pss(declared))
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn every_noise_selection_preserves_the_eight_field_geometry() {
+        let expected = analysis_form_height(AnalysisDraft::Noise(NoiseDraft::default()));
+        for sweep in [
+            NoiseSweepType::Decade,
+            NoiseSweepType::Octave,
+            NoiseSweepType::Linear,
+            NoiseSweepType::ExplicitFrequencyList,
+        ] {
+            for contribution_detail in [
+                NoiseContributionDetail::Top50,
+                NoiseContributionDetail::AllContributors,
+                NoiseContributionDetail::Top20,
+                NoiseContributionDetail::SummaryOnly,
+            ] {
+                for integration_mode in [
+                    NoiseIntegrationMode::Enabled,
+                    NoiseIntegrationMode::OutputNoiseOnly,
+                    NoiseIntegrationMode::Disabled,
+                ] {
+                    let draft = NoiseDraft {
+                        sweep,
+                        contribution_detail,
+                        integration_mode,
+                        ..NoiseDraft::default()
+                    };
+                    assert_eq!(expected, analysis_form_height(AnalysisDraft::Noise(draft)));
+                }
+            }
+        }
+
+        for (output, input) in [
+            ("sensor_p,sensor_n", "IIN_CAL"),
+            ("V(custom_p,custom_n)", "VCUSTOM"),
+        ] {
+            let draft = NoiseDraft {
+                output: output.to_owned(),
+                input: input.to_owned(),
+                ..NoiseDraft::default()
+            };
+            assert_eq!(expected, analysis_form_height(AnalysisDraft::Noise(draft)));
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1627,5 +2282,57 @@ mod tests {
             XF_ACCURACY_CHOICES,
             ["Fast", "Balanced", "Accurate", "Robust"]
         );
+    }
+
+    #[test]
+    fn noise_form_matches_mockup_owned_contract() {
+        assert_eq!(
+            NOISE_FIELD_LABELS,
+            [
+                "Sweep",
+                "Points / decade",
+                "Start frequency",
+                "Stop frequency",
+                "Output node",
+                "Input source",
+                "Contribution detail",
+                "Integrated noise",
+            ]
+        );
+        assert_eq!(
+            NOISE_SWEEP_CHOICES,
+            ["Decade", "Octave", "Linear", "Explicit frequency list"]
+        );
+        assert_eq!(
+            NOISE_OUTPUT_CHOICES,
+            [
+                "afe_out",
+                "sensor_p,sensor_n",
+                "vref",
+                "Select output expression…",
+            ]
+        );
+        assert_eq!(
+            NOISE_INPUT_CHOICES,
+            ["VIN_DIFF", "IIN_CAL", "Select independent source…"]
+        );
+        assert_eq!(
+            NOISE_CONTRIBUTION_CHOICES,
+            ["Top 50", "All contributors", "Top 20", "Summary only"]
+        );
+        assert_eq!(
+            NOISE_INTEGRATION_CHOICES,
+            ["Enabled", "Output noise only", "Disabled"]
+        );
+        assert_eq!(NOISE_SWEEP_CONTROL_COUNT, 2);
+        for available_width in [1.0, 120.0, 320.0, 640.0] {
+            let (selector, editor) = noise_sweep_control_widths(available_width);
+            assert!(selector > 0.0);
+            assert!(editor > 0.0);
+            assert_eq!(
+                selector + editor + ENVELOPE_INLINE_CONTROL_GAP,
+                available_width.max(ENVELOPE_INLINE_CONTROL_GAP + 2.0)
+            );
+        }
     }
 }

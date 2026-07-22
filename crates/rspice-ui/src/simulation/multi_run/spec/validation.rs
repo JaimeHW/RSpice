@@ -1,10 +1,44 @@
 use super::{AnalysisSpec, OptimizationGoal};
+use crate::simulation::config::{AcSweepType, NoiseAnalysisConfig, NoiseSweepType};
+use crate::simulation::dialog::OpConfig;
 
 impl AnalysisSpec {
     /// Validate analysis parameters.
     pub fn validate(&self) -> Result<(), String> {
         match self {
-            AnalysisSpec::DcOp => Ok(()),
+            AnalysisSpec::LegacyDcOp => Ok(()),
+            AnalysisSpec::DcOp {
+                temperature_mode,
+                temperature_celsius,
+                initial_guess,
+                node_initialization,
+                homotopy,
+                annotation,
+                device_detail,
+                save_device_op,
+                accuracy,
+                selected_devices,
+                previous_state,
+                violation_devices,
+                violation_source_content_digest,
+                run_point,
+            } => OpConfig {
+                temperature_mode: *temperature_mode,
+                temperature_celsius: *temperature_celsius,
+                initial_guess: *initial_guess,
+                node_initialization: *node_initialization,
+                homotopy: *homotopy,
+                annotation: *annotation,
+                device_detail: *device_detail,
+                save_device_op: *save_device_op,
+                accuracy: *accuracy,
+                selected_devices: selected_devices.clone(),
+                previous_state: previous_state.clone(),
+                violation_devices: violation_devices.clone(),
+                violation_source_content_digest: *violation_source_content_digest,
+                run_point: *run_point,
+            }
+            .validate(),
             AnalysisSpec::DcSweep {
                 source_name,
                 start,
@@ -153,52 +187,95 @@ impl AnalysisSpec {
             }
             AnalysisSpec::Noise {
                 output_node,
+                reference_node,
+                input_source,
                 start_freq,
                 stop_freq,
                 points_per_decade,
+                sweep,
+                explicit_frequencies,
+                data_table_name,
+                contribution_detail,
+                integration_mode,
                 temperature,
             } => {
-                if output_node.trim().is_empty() {
-                    return Err("Noise output_node is required".to_string());
+                let sweep_type = match sweep {
+                    NoiseSweepType::Decade | NoiseSweepType::ExplicitFrequencyList => {
+                        AcSweepType::Decade
+                    }
+                    NoiseSweepType::Octave => AcSweepType::Octave,
+                    NoiseSweepType::Linear => AcSweepType::Linear,
+                    NoiseSweepType::Unsupported(index) => {
+                        return Err(format!(
+                            "Noise sweep mode {index} is outside the supported schema"
+                        ));
+                    }
+                };
+                NoiseAnalysisConfig {
+                    output_node: output_node.clone(),
+                    reference_node: reference_node.clone(),
+                    input_source: input_source.clone(),
+                    sweep_type,
+                    num_points: *points_per_decade,
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                    explicit_frequencies: explicit_frequencies.clone(),
+                    data_table_name: data_table_name.clone(),
+                    contribution_detail: *contribution_detail,
+                    integration_mode: *integration_mode,
+                    temperature_kelvin: *temperature,
                 }
-                if *start_freq <= 0.0 {
-                    return Err("Noise start_freq must be > 0".to_string());
-                }
-                if *stop_freq <= 0.0 {
-                    return Err("Noise stop_freq must be > 0".to_string());
-                }
-                if *stop_freq <= *start_freq {
-                    return Err("Noise stop_freq must be > start_freq".to_string());
-                }
-                if *points_per_decade == 0 {
-                    return Err("Noise points_per_decade must be > 0".to_string());
-                }
-                if *temperature <= 0.0 {
-                    return Err("Noise temperature must be > 0 K".to_string());
-                }
-                Ok(())
+                .validate()
+                .map_err(|errors| format!("Noise configuration is invalid: {}", errors.join("; ")))
             }
             AnalysisSpec::Pss {
-                fundamental_freq,
-                num_harmonics,
-                tolerance,
-                max_iterations,
                 method,
+                fundamental_freq,
+                tone_sources,
+                tstab_periods: _,
+                points_per_period,
+                tolerance,
                 oscillator_mode,
                 oscillator_node,
-                ..
+                num_harmonics,
             } => {
+                if *method != super::PssMethod::Shooting {
+                    return Err(
+                        "Legacy HB-PSS mode is not executable; use a Harmonic Balance analysis"
+                            .to_owned(),
+                    );
+                }
                 if !fundamental_freq.is_finite() || *fundamental_freq <= 0.0 {
                     return Err("PSS fundamental_freq must be finite and > 0".to_string());
                 }
-                if *num_harmonics == 0 {
-                    return Err("PSS num_harmonics must be > 0".to_string());
+                if !*oscillator_mode && tone_sources.is_empty() {
+                    return Err("PSS must bind at least one periodic tone source".to_owned());
+                }
+                for (index, source) in tone_sources.iter().enumerate() {
+                    if source.trim().is_empty() || source.chars().any(char::is_control) {
+                        return Err(format!("PSS tone source {} is invalid", index + 1));
+                    }
+                    if tone_sources[..index]
+                        .iter()
+                        .any(|prior| prior.eq_ignore_ascii_case(source))
+                    {
+                        return Err(format!("PSS tone source '{source}' is duplicated"));
+                    }
+                }
+                if *points_per_period < 16 {
+                    return Err("PSS points_per_period must be at least 16".to_owned());
+                }
+                if num_harmonics
+                    .max(&1)
+                    .checked_mul(2)
+                    .is_none_or(|minimum| *points_per_period < minimum)
+                {
+                    return Err(
+                        "PSS points_per_period must be at least twice num_harmonics".to_owned()
+                    );
                 }
                 if !tolerance.is_finite() || *tolerance <= 0.0 {
                     return Err("PSS tolerance must be finite and > 0".to_string());
-                }
-                if *max_iterations == 0 {
-                    return Err("PSS max_iterations must be > 0".to_string());
                 }
                 if *oscillator_mode
                     && oscillator_node
@@ -206,12 +283,6 @@ impl AnalysisSpec {
                         .is_none_or(|node| node.trim().is_empty())
                 {
                     return Err("PSS oscillator_node must be set in oscillator mode".to_string());
-                }
-                if *oscillator_mode && *method == super::PssMethod::HarmonicBalance {
-                    return Err(
-                        "PSS oscillator mode requires the shooting method; harmonic balance requires a driven fundamental"
-                            .to_string(),
-                    );
                 }
                 Ok(())
             }
@@ -1040,14 +1111,15 @@ mod tests {
         assert_eq!(
             spec,
             AnalysisSpec::Pss {
-                fundamental_freq: 1.0e6,
-                num_harmonics: 9,
-                tolerance: 1.0e-6,
-                max_iterations: 50,
                 method: PssMethod::Shooting,
+                fundamental_freq: 1.0e6,
+                tone_sources: vec!["VIN_DIFF".to_owned()],
+                tstab_periods: 20,
+                points_per_period: 512,
+                tolerance: 1.0e-6,
                 oscillator_mode: false,
                 oscillator_node: None,
-                save_harmonics: true,
+                num_harmonics: 9,
             }
         );
     }
@@ -1055,14 +1127,15 @@ mod tests {
     #[test]
     fn pss_validation_requires_an_explicit_autonomous_probe() {
         let spec = AnalysisSpec::Pss {
-            fundamental_freq: 1.0e6,
-            num_harmonics: 9,
-            tolerance: 1.0e-6,
-            max_iterations: 50,
             method: PssMethod::Shooting,
+            fundamental_freq: 1.0e6,
+            tone_sources: vec!["VCLK".to_owned()],
+            tstab_periods: 20,
+            points_per_period: 512,
+            tolerance: 1.0e-6,
             oscillator_mode: true,
             oscillator_node: None,
-            save_harmonics: true,
+            num_harmonics: 9,
         };
 
         assert!(spec.validate().is_err());
@@ -1071,20 +1144,21 @@ mod tests {
     #[test]
     fn pss_validation_rejects_autonomous_harmonic_balance_before_dispatch() {
         let spec = AnalysisSpec::Pss {
-            fundamental_freq: 1.0e6,
-            num_harmonics: 9,
-            tolerance: 1.0e-6,
-            max_iterations: 50,
             method: PssMethod::HarmonicBalance,
+            fundamental_freq: 1.0e6,
+            tone_sources: vec!["VCLK".to_owned()],
+            tstab_periods: 20,
+            points_per_period: 512,
+            tolerance: 1.0e-6,
             oscillator_mode: true,
             oscillator_node: Some("out".to_owned()),
-            save_harmonics: true,
+            num_harmonics: 9,
         };
 
         let error = spec
             .validate()
             .expect_err("autonomous harmonic balance must fail validation");
-        assert!(error.contains("requires the shooting method"));
+        assert!(error.contains("HB-PSS"));
     }
 
     #[test]

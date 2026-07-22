@@ -433,15 +433,17 @@ fn parse_netlist_impl(
     let title = lines[0].to_string();
     let mut state = ParseState::new();
     for line in preprocess.replace_ground_extra_lines {
-        state.diagnostics.push(ParseDiagnostic::warning(
-            line,
+        let origin = root_physical_origin(source_schedule.as_ref(), lines.len(), line);
+        state.diagnostics.push(ParseDiagnostic::warning_at(
+            origin,
             "replaceground-extra-parameters",
             "Additional parameters in .PREPROCESS REPLACEGROUND statement; ignoring them",
         ));
     }
     for line in preprocess.add_resistors_extra_lines {
-        state.diagnostics.push(ParseDiagnostic::warning(
-            line,
+        let origin = root_physical_origin(source_schedule.as_ref(), lines.len(), line);
+        state.diagnostics.push(ParseDiagnostic::warning_at(
+            origin,
             "addresistors-extra-parameters",
             "Additional parameters in .PREPROCESS ADDRESISTORS statement; ignoring them",
         ));
@@ -710,6 +712,25 @@ fn parse_netlist_impl(
         root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
         abort,
     )
+}
+
+fn root_physical_origin(
+    source_schedule: Option<&SourceEventSchedule>,
+    expanded_line_count: usize,
+    physical_line: usize,
+) -> NetlistSourceLocation {
+    let Some(schedule) = source_schedule else {
+        return NetlistSourceLocation::in_memory(physical_line);
+    };
+    let root_path = schedule.origin(0).and_then(|origin| origin.path.as_deref());
+    (0..expanded_line_count)
+        .filter_map(|index| schedule.origin(index))
+        .find(|origin| origin.path.as_deref() == root_path && origin.line == physical_line)
+        .cloned()
+        .unwrap_or_else(|| NetlistSourceLocation {
+            path: root_path.map(std::path::Path::to_path_buf),
+            line: physical_line,
+        })
 }
 
 fn apply_root_preprocessing(
@@ -2345,10 +2366,125 @@ fn flush_pending_logical_line(
         continuation.clear();
         return Ok(());
     }
+    let first_new_diagnostic = state.diagnostics.len();
     process_line_gated(continuation, logical_line, &logical_origin, state)
+        .map_err(|error| source_map_logical_line_error(error, logical_line, &logical_origin))
         .map_err(ParseWithAbortError::from)?;
+    for diagnostic in &mut state.diagnostics[first_new_diagnostic..] {
+        if diagnostic.origin.is_none() {
+            diagnostic.line = logical_origin.line;
+            diagnostic.origin = Some(logical_origin.clone());
+        }
+    }
     continuation.clear();
     Ok(())
+}
+
+/// Preserve the physical owner of ordinary-card syntax failures after include
+/// expansion. `ParseError::Syntax::line` remains the source-local physical
+/// line, while the stable `path:line` prefix lets downstream diagnostics show
+/// an included source without projecting it onto the root editor gutter.
+fn source_map_logical_line_error(
+    error: ParseError,
+    expanded_line: usize,
+    origin: &NetlistSourceLocation,
+) -> ParseError {
+    let (line, message) = match error {
+        ParseError::Syntax { line, message } => (line, message),
+        other => return other,
+    };
+    if line != expanded_line || origin.path.is_none() {
+        return ParseError::Syntax { line, message };
+    }
+    let prefix = format!("{origin}: ");
+    ParseError::Syntax {
+        line: origin.line,
+        message: if message.starts_with(&prefix) {
+            message
+        } else {
+            format!("{prefix}{message}")
+        },
+    }
+}
+
+#[cfg(test)]
+mod source_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn included_card_syntax_error_retains_included_path_and_physical_line() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-parser-source-map-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create source-map fixture directory");
+        let root = directory.join("root.cir");
+        let child = directory.join("child.inc");
+        std::fs::write(&child, "R1 out 0 1k FIRST SECOND\n")
+            .expect("write invalid included source");
+
+        let error = Netlist::parse_with_path(
+            "included syntax mapping\n.include \"child.inc\"\n.end\n",
+            &root,
+        )
+        .expect_err("included malformed resistor must fail");
+        let canonical_child = child.canonicalize().expect("canonicalize included source");
+        let _ = std::fs::remove_dir_all(&directory);
+
+        match error {
+            ParseError::Syntax { line, message } => {
+                assert_eq!(line, 1, "source-local line must be retained: {message}");
+                assert!(
+                    message.starts_with(&format!("{}:1: ", canonical_child.display())),
+                    "included source identity was not retained: {message}"
+                );
+                assert!(
+                    message.contains("Unexpected trailing token"),
+                    "unexpected syntax detail: {message}"
+                );
+            }
+            other => panic!("expected a source-mapped syntax error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn included_card_warning_retains_included_path_and_physical_line() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-parser-warning-source-map-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create warning fixture directory");
+        let root = directory.join("root.cir");
+        let child = directory.join("child.inc");
+        std::fs::write(&child, "Rchild out 0\n").expect("write warning-producing include");
+
+        let netlist = Netlist::parse_with_path(
+            "included warning mapping\n.include \"child.inc\"\n.end\n",
+            &root,
+        )
+        .expect("missing resistor value is warning-only");
+        let canonical_child = child.canonicalize().expect("canonicalize included source");
+        let warning = netlist
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "xyce_resistor_missing_value")
+            .expect("included resistor warning is retained");
+
+        assert_eq!(warning.line, 1);
+        assert_eq!(
+            warning.origin,
+            Some(NetlistSourceLocation::in_file(&canonical_child, 1))
+        );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 }
 
 fn validate_source_subckt_depth(

@@ -19,47 +19,35 @@ pub(super) fn run_periodic_spec(
     super::ensure_not_aborted(abort)?;
     match spec {
         AnalysisSpec::Pss {
-            fundamental_freq,
-            num_harmonics,
-            tolerance,
-            max_iterations,
             method,
+            fundamental_freq,
+            tone_sources,
+            tstab_periods,
+            points_per_period,
+            tolerance,
             oscillator_mode,
             oscillator_node,
-            save_harmonics,
+            num_harmonics,
         } => match method {
             PssMethod::Shooting => run_pss(
                 netlist,
                 svc_runner::PssRunConfig {
                     fundamental_freq,
+                    tone_sources,
+                    tstab_periods,
+                    points_per_period,
                     num_harmonics,
                     tolerance,
-                    max_iterations,
                     oscillator_mode,
                     oscillator_node,
-                    save_harmonics,
                 },
                 source_path,
+                dependencies,
                 abort,
             ),
-            PssMethod::HarmonicBalance => {
-                if oscillator_mode {
-                    return Err(SimulationError::InvalidConfig(
-                        "autonomous PSS requires the shooting solver; harmonic balance needs a driven fundamental"
-                            .to_string(),
-                    ));
-                }
-                let hb_cfg = svc_runner::HbRunConfig {
-                    tones: vec![svc_runner::HbToneRunConfig::new(
-                        fundamental_freq,
-                        num_harmonics,
-                    )],
-                    reltol: tolerance,
-                    max_iterations,
-                    ..svc_runner::HbRunConfig::default()
-                };
-                run_harmonic_balance(netlist, &hb_cfg, save_harmonics, source_path, abort)
-            }
+            PssMethod::HarmonicBalance => Err(SimulationError::InvalidConfig(
+                "legacy HB-PSS mode is not executable; use a Harmonic Balance analysis".to_owned(),
+            )),
         },
         AnalysisSpec::HarmonicBalance {
             tones,
@@ -180,18 +168,42 @@ fn run_pss(
     netlist: &str,
     config: svc_runner::PssRunConfig,
     source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "shooting PSS operating-point dependency is unavailable: {error}"
+        ))
+    })?;
+    let actual_source_digest = crate::workbench::netlist_document::source_content_digest(netlist);
+    if artifact.effective_source_content_digest() != actual_source_digest {
+        return Err(SimulationError::InvalidConfig(format!(
+            "shooting PSS source identity {} does not match its bound operating-point source {}",
+            actual_source_digest,
+            artifact.effective_source_content_digest()
+        )));
+    }
+    let dc_seed = artifact.core_seed().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "shooting PSS operating-point seed is invalid: {error}"
+        ))
+    })?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pss_analysis_with_config_and_source_path_and_abort(
+        svc_runner::run_pss_analysis_with_dc_seed_and_source_path_and_abort(
             netlist,
             &config,
             source_path,
+            &dc_seed,
+            artifact.temperature_celsius(),
+            artifact.supply_voltage(),
+            artifact.nominal_supply_voltage(),
             abort,
         )
     })?;
 
     let time = data.time;
+    let periodic_state = data.operating_point;
     let mut waveforms = HashMap::with_capacity(data.waveforms.len());
     for (name, values) in data.waveforms {
         super::ensure_not_aborted(abort)?;
@@ -206,6 +218,7 @@ fn run_pss(
         time,
         waveforms,
         measurements: Vec::new(),
+        periodic_state: Some(periodic_state),
     })
 }
 
@@ -283,6 +296,7 @@ fn run_envelope(
         time: data.time,
         waveforms,
         measurements: Vec::new(),
+        periodic_state: None,
     })
 }
 

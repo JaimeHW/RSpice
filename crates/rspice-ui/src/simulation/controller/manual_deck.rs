@@ -597,8 +597,8 @@ fn command_to_queue_item(
     let spec_options = SpecExecutionOptions::default();
     match command {
         AnalysisCommand::Op => Ok(QueuedAnalysis {
-            spec: AnalysisSpec::DcOp,
-            config: Some(AnalysisConfig::DcOp),
+            spec: AnalysisSpec::dc_op(),
+            config: Some(AnalysisConfig::dc_op()),
             spec_options,
             analysis_line: ".op".to_string(),
         }),
@@ -679,9 +679,8 @@ fn command_to_queue_item(
             analysis_line: format!(".ac data={table_name}"),
         }),
         AnalysisCommand::Hb { frequencies } => {
-            let defaults = rspice_core::analysis::HbConfig::new(
-                frequencies.first().copied().unwrap_or(1.0),
-            );
+            let defaults =
+                rspice_core::analysis::HbConfig::new(frequencies.first().copied().unwrap_or(1.0));
             let order_for = |index: usize| {
                 netlist
                     .options
@@ -707,8 +706,7 @@ fn command_to_queue_item(
                         .checked_mul(2)
                         .and_then(|value| value.checked_add(1))
                         .ok_or_else(|| {
-                            "HB harmonic count exceeds the addressable collocation grid"
-                                .to_string()
+                            "HB harmonic count exceeds the addressable collocation grid".to_string()
                         })?,
                 )
             } else {
@@ -838,12 +836,29 @@ fn command_to_queue_item(
             stop_freq,
         } => {
             let reference_node = reference_node.clone().unwrap_or_else(|| "0".to_string());
+            let temperature = netlist
+                .options
+                .temp
+                .unwrap_or(state.sim_setup.reference_pvt.temperature_celsius)
+                + 273.15;
+            let sweep = match variation {
+                FreqVariation::Dec => NoiseSweepType::Decade,
+                FreqVariation::Oct => NoiseSweepType::Octave,
+                FreqVariation::Lin => NoiseSweepType::Linear,
+            };
             let spec = AnalysisSpec::Noise {
                 output_node: output_node.clone(),
+                reference_node: reference_node.clone(),
+                input_source: input_source.clone(),
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 points_per_decade: *points,
-                temperature: state.sim_setup.options.temp + 273.15,
+                sweep,
+                explicit_frequencies: None,
+                data_table_name: None,
+                contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
+                integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                temperature,
             };
             Ok(QueuedAnalysis {
                 config: Some(AnalysisConfig::Noise(NoiseAnalysisConfig {
@@ -854,16 +869,73 @@ fn command_to_queue_item(
                     num_points: *points,
                     start_freq: *start_freq,
                     stop_freq: *stop_freq,
+                    explicit_frequencies: None,
+                    data_table_name: None,
+                    contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
+                    integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                    temperature_kelvin: temperature,
                 })),
                 analysis_line: ".noise".to_string(),
                 spec,
                 spec_options,
             })
         }
-        AnalysisCommand::NoiseData { .. } => Err(
-            "Manual-deck .NOISE DATA requires row-local parameter contexts and cannot be represented by the fixed-grid UI noise queue"
-                .to_string(),
-        ),
+        AnalysisCommand::NoiseData {
+            output_node,
+            reference_node,
+            input_source,
+            table_name,
+        } => {
+            let reference_node = reference_node.clone().unwrap_or_else(|| "0".to_owned());
+            let points = netlist
+                .frequency_data_table_points(table_name)
+                .map_err(|error| format!(".NOISE DATA {error}"))?;
+            let frequencies = points
+                .into_iter()
+                .map(|point| point.frequency)
+                .collect::<Vec<_>>();
+            let start_freq = frequencies.first().copied().unwrap_or_default();
+            let stop_freq = frequencies.last().copied().unwrap_or_default();
+            let temperature = netlist
+                .options
+                .temp
+                .unwrap_or(state.sim_setup.reference_pvt.temperature_celsius)
+                + 273.15;
+            let config = NoiseAnalysisConfig {
+                output_node: output_node.clone(),
+                reference_node: reference_node.clone(),
+                input_source: input_source.clone(),
+                sweep_type: AcSweepType::Decade,
+                num_points: frequencies.len(),
+                start_freq,
+                stop_freq,
+                explicit_frequencies: Some(frequencies.clone()),
+                data_table_name: Some(table_name.clone()),
+                contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
+                integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                temperature_kelvin: temperature,
+            };
+            config.validate().map_err(|errors| errors.join("; "))?;
+            Ok(QueuedAnalysis {
+                spec: AnalysisSpec::Noise {
+                    output_node: output_node.clone(),
+                    reference_node,
+                    input_source: input_source.clone(),
+                    start_freq,
+                    stop_freq,
+                    points_per_decade: frequencies.len(),
+                    sweep: NoiseSweepType::ExplicitFrequencyList,
+                    explicit_frequencies: Some(frequencies),
+                    data_table_name: Some(table_name.clone()),
+                    contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
+                    integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                    temperature,
+                },
+                config: Some(AnalysisConfig::Noise(config)),
+                spec_options,
+                analysis_line: format!(".noise data={table_name}"),
+            })
+        }
         AnalysisCommand::PoleZero {
             input_pos,
             input_neg,
@@ -984,9 +1056,9 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: ".step".to_string(),
         }),
-        AnalysisCommand::Temp { .. } => {
-            Err(".temp directives must be planned as temperature sweeps before queueing".to_string())
-        }
+        AnalysisCommand::Temp { .. } => Err(
+            ".temp directives must be planned as temperature sweeps before queueing".to_string(),
+        ),
     }
 }
 
@@ -1145,7 +1217,7 @@ mod tests {
             "deck\nR1 out 0 1k\nV1 out 0 1 AC 1\n.op\n.ac dec 20 1 1g\n.tran 1n 1u\n.end\n",
         );
 
-        assert!(matches!(specs[0], AnalysisSpec::DcOp));
+        assert!(matches!(specs[0], AnalysisSpec::DcOp { .. }));
         assert!(matches!(
             specs[1],
             AnalysisSpec::Ac {
@@ -1425,6 +1497,43 @@ mod tests {
 
         assert!(matches!(queue[0].spec, AnalysisSpec::Ac { .. }));
         assert!(matches!(queue[1].config, Some(AnalysisConfig::Noise(_))));
+    }
+
+    #[test]
+    fn manual_noise_data_preserves_authored_axis_and_executes_row_contexts() {
+        let state = AppState::default();
+        let source = "noise data deck\n\
+.param rload=1k\n\
+V1 in 0 AC 1\n\
+R1 in out 1k\n\
+Rload out 0 {rload}\n\
+.noise V(out) V1 DATA=points\n\
+.DATA points\n\
++ rload HERTZ\n\
++ 1000 10\n\
++ 2000 1\n\
+.ENDDATA\n\
+.end\n";
+        let queue = build_manual_deck_queue(&state, source).expect("NOISE DATA queues");
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(
+            &queue[0].spec,
+            AnalysisSpec::Noise {
+                sweep: NoiseSweepType::ExplicitFrequencyList,
+                explicit_frequencies: Some(frequencies),
+                data_table_name: Some(table),
+                ..
+            } if frequencies == &[10.0, 1.0] && table.eq_ignore_ascii_case("points")
+        ));
+        let config = queue[0].config.as_ref().expect("exact config retained");
+        let result = crate::simulation::EngineBridge::new()
+            .run_with_abort(config, source, &rspice_core::abort_signal::NoAbort)
+            .expect("NOISE DATA executes through the ordinary config path");
+        assert!(matches!(
+            result,
+            crate::simulation::SimulationResult::Noise { frequencies, .. }
+                if frequencies == vec![10.0, 1.0]
+        ));
     }
 
     #[test]

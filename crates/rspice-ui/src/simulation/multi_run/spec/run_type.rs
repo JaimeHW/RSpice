@@ -6,7 +6,7 @@ impl AnalysisSpec {
     /// Get the corresponding run type.
     pub fn run_type(&self) -> AnalysisRunType {
         match self {
-            AnalysisSpec::DcOp => AnalysisRunType::DcOp,
+            AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => AnalysisRunType::DcOp,
             AnalysisSpec::DcSweep { .. } => AnalysisRunType::DcSweep,
             AnalysisSpec::Ac { .. } | AnalysisSpec::AcData { .. } => AnalysisRunType::Ac,
             AnalysisSpec::Disto { .. } => AnalysisRunType::Disto,

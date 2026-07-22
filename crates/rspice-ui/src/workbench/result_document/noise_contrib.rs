@@ -201,7 +201,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 );
 
                 // Mechanism chip in the matching trace hue.
-                let fg = mechanism_color(row.mechanism, &t);
+                let fg = mechanism_color(&row.mechanism, &t);
                 let galley = ui.painter().layout_no_wrap(
                     row.mechanism.to_owned(),
                     theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -283,7 +283,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         fmt_si(summary.band.0, "Hz", 3),
         fmt_si(summary.band.1, "Hz", 3)
     );
-    let total = fmt_si(summary.total_rms, "V rms", 3);
+    let total = summary
+        .total_rms
+        .map(|value| fmt_si(value, "V rms", 3))
+        .unwrap_or_else(|| "Not retained".to_owned());
+    let input = summary
+        .input_rms
+        .map(|value| fmt_si(value, "V rms", 3))
+        .unwrap_or_else(|| "Not retained".to_owned());
     let contributors = summary.rows.len().to_string();
     measurement_table(
         ui,
@@ -291,6 +298,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Analysis", label),
             ("Band", band.as_str()),
             ("Total output", total.as_str()),
+            ("Input referred", input.as_str()),
             ("Contributors", contributors.as_str()),
         ],
     );

@@ -247,7 +247,7 @@ mod tests {
             generator
                 .lines
                 .iter()
-                .any(|line| line == ".lib C:/models/foundry.lib tt")
+                .any(|line| line == ".lib \"C:/models/foundry.lib\" tt")
         );
     }
 

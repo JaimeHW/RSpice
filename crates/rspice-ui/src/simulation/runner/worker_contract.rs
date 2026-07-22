@@ -2,6 +2,46 @@
 mod tests {
     use super::*;
 
+    pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatingPoint {
+        let config = rspice_core::analysis::PssConfig::new(1.0)
+            .with_harmonics(4)
+            .with_points_per_period(16);
+        let time = (0..=16)
+            .map(|index| index as f64 / 16.0)
+            .collect::<Vec<_>>();
+        let waveform = time
+            .iter()
+            .map(|time| (2.0 * std::f64::consts::PI * time).sin())
+            .collect();
+        let result = rspice_core::analysis::advanced::pss::PssResult {
+            period: 1.0,
+            frequency: 1.0,
+            iterations: 2,
+            residual_norm: 1.0e-10,
+            time,
+            waveforms: vec![
+                rspice_core::analysis::advanced::pss::PeriodicWaveform::from_values(waveform),
+            ],
+            node_names: vec!["out".to_owned()],
+            period_detected: false,
+            floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],
+        };
+        rspice_core::engine::PssOperatingPoint::try_from_parts(
+            config,
+            rspice_core::engine::PssAnalysisResult {
+                result,
+                iterations: 2,
+                final_residual: 1.0e-10,
+                period: 1.0,
+                monodromy: vec![vec![0.9]],
+                floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],
+                is_stable: true,
+            },
+            vec![0.25],
+        )
+        .unwrap()
+    }
+
     fn tf_spec() -> AnalysisSpec {
         AnalysisSpec::Tf {
             input_source: "Vstim".to_owned(),
@@ -11,6 +51,42 @@ mod tests {
             output_resistance: true,
             normalization: TfNormalization::None,
             accuracy: TfAccuracy::Balanced,
+        }
+    }
+
+    pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
+        use crate::simulation::dialog::*;
+
+        OpConfig {
+            temperature_mode: OpTemperatureMode::Explicit,
+            temperature_celsius: 85.0,
+            initial_guess: OpInitialGuess::PreviousConverged,
+            node_initialization: OpNodeInitialization::IgnoreIcAndNodeset,
+            homotopy: OpHomotopy::PseudoTransient,
+            annotation: OpAnnotation::VoltagesAndDeviceOp,
+            device_detail: OpDeviceDetail::ViolationsOnly,
+            save_device_op: OpSaveDevice::FinalPointOnly,
+            accuracy: OpAccuracy::Robust,
+            selected_devices: vec!["M1".to_owned()],
+            previous_state: Some(OpPreviousState {
+                source_content_digest: crate::product::ContentDigest::from_bytes([1; 32]),
+                producer_snapshot_digest: crate::product::ContentDigest::from_bytes([2; 32]),
+                producer_result_digest: crate::product::ContentDigest::from_bytes([3; 32]),
+                node_names: vec!["out".to_owned()],
+                branch_names: vec!["V1".to_owned()],
+                solution: vec![1.25, -1.0e-3],
+            }),
+            violation_devices: vec!["M1".to_owned()],
+            violation_source_content_digest: Some(crate::product::ContentDigest::from_bytes(
+                [1; 32],
+            )),
+            run_point: OpRunPointContext {
+                index: 2,
+                count: 3,
+                process: crate::simulation::dialog::corner::ProcessCorner::SS,
+                supply_voltage: Some(0.9),
+                nominal_supply_voltage: Some(1.0),
+            },
         }
     }
 
@@ -62,6 +138,30 @@ mod tests {
         let decoded: WorkerRequest = serde_json::from_str(&encoded).expect("request deserializes");
 
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn legacy_dc_op_worker_requests_migrate_to_the_current_default_contract() {
+        let config: WorkerAnalysisConfig =
+            serde_json::from_str("\"DcOp\"").expect("legacy config wire value");
+        assert_analysis_configs_match(&AnalysisConfig::from(config), &AnalysisConfig::dc_op());
+
+        let spec: WorkerAnalysisSpec =
+            serde_json::from_str("\"DcOp\"").expect("legacy spec wire value");
+        assert_eq!(AnalysisSpec::from(spec), AnalysisSpec::LegacyDcOp);
+    }
+
+    #[test]
+    fn configured_dc_op_worker_contract_round_trips_every_context_field() {
+        let config = nondefault_op_config();
+        let worker = WorkerAnalysisConfig::from(&AnalysisConfig::DcOp(config.clone()));
+        let encoded = serde_json::to_vec(&worker).expect("configured OP serializes");
+        let restored: WorkerAnalysisConfig =
+            serde_json::from_slice(&encoded).expect("configured OP restores");
+        assert_analysis_configs_match(
+            &AnalysisConfig::from(restored),
+            &AnalysisConfig::DcOp(config),
+        );
     }
 
     #[test]
@@ -158,6 +258,7 @@ mod tests {
                 WaveformData::new_time_domain("V(out)", time, values),
             )]),
             measurements: Vec::new(),
+            periodic_state: None,
         };
         let artifact = ExecutionArtifactEnvelope::from_transient_result(
             snapshot_digest,
@@ -291,6 +392,62 @@ mod tests {
     }
 
     #[test]
+    fn worker_request_detaches_and_authenticates_op_previous_state() {
+        let config = nondefault_op_config();
+        let request = WorkerRequest {
+            id: 10,
+            request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)),
+            netlist: "V1 out 0 1\n.op\n.end\n".to_owned(),
+            source_path: None,
+            project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
+        };
+
+        let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
+        let metadata = serde_json::to_string(&transport.request).unwrap();
+        assert_eq!(transport.request.dependency_buffer_count, 0);
+        assert_eq!(transport.buffers, vec![vec![1.25, -1.0e-3]]);
+        assert!(metadata.contains("\"solution\":{\"Buffer\""));
+        assert!(!metadata.contains("\"solution\":[1.25"));
+        assert_eq!(transport.clone().into_request().unwrap(), request);
+
+        let mut tampered = transport.clone();
+        tampered.buffers[0][0] = 1.5;
+        assert!(
+            tampered
+                .into_request()
+                .unwrap_err()
+                .contains("solution digest")
+        );
+
+        let mut oversized = transport.clone();
+        oversized
+            .request
+            .op_previous_state
+            .as_mut()
+            .unwrap()
+            .solution = WorkerF64Series::Buffer {
+            buffer: 0,
+            len: MAX_WORKER_F64_VALUES + 1,
+        };
+        assert!(oversized.into_request().unwrap_err().contains("exceeding"));
+
+        let mut duplicate = transport;
+        let WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) =
+            &mut duplicate.request.request.request
+        else {
+            panic!("expected configured OP request")
+        };
+        config.previous_state = nondefault_op_config().previous_state;
+        assert!(
+            duplicate
+                .into_request()
+                .unwrap_err()
+                .contains("duplicate inline")
+        );
+    }
+
+    #[test]
     fn unavailable_manifest_spec_round_trips_without_losing_typed_fields() {
         let spec = AnalysisSpec::DcMismatch {
             output_expression: "V(out)".to_owned(),
@@ -305,6 +462,54 @@ mod tests {
         let restored: WorkerAnalysisSpec =
             serde_json::from_slice(&encoded).expect("worker spec restores");
         assert_eq!(AnalysisSpec::from(restored), spec);
+    }
+
+    #[test]
+    fn pss_worker_transport_preserves_every_exact_contract_field() {
+        let base = AnalysisSpec::Pss {
+            method: PssMethod::Shooting,
+            fundamental_freq: 1.0e6,
+            tone_sources: vec!["VCLK".to_owned()],
+            tstab_periods: 20,
+            points_per_period: 512,
+            tolerance: 1.0e-7,
+            oscillator_mode: false,
+            oscillator_node: None,
+            num_harmonics: 20,
+        };
+        let encode = |spec: &AnalysisSpec| {
+            let worker = WorkerAnalysisSpec::try_from(spec).expect("PSS worker conversion");
+            serde_json::to_vec(&worker).expect("PSS worker serialization")
+        };
+        let baseline = encode(&base);
+        let mut variants = Vec::new();
+        macro_rules! changed {
+            ($field:ident, $value:expr) => {{
+                let mut spec = base.clone();
+                let AnalysisSpec::Pss { $field, .. } = &mut spec else {
+                    unreachable!()
+                };
+                *$field = $value;
+                variants.push(spec);
+            }};
+        }
+        changed!(method, PssMethod::HarmonicBalance);
+        changed!(fundamental_freq, 2.0e6);
+        changed!(tone_sources, vec!["VLO".to_owned(), "VRF".to_owned()]);
+        changed!(tstab_periods, 31);
+        changed!(points_per_period, 1024);
+        changed!(tolerance, 2.0e-8);
+        changed!(oscillator_mode, true);
+        changed!(oscillator_node, Some("osc".to_owned()));
+        changed!(num_harmonics, 0);
+
+        for variant in variants {
+            let encoded = encode(&variant);
+            assert_ne!(baseline, encoded, "worker payload aliases {variant:?}");
+            let worker: WorkerAnalysisSpec =
+                serde_json::from_slice(&encoded).expect("PSS worker restores");
+            assert_eq!(AnalysisSpec::from(worker), variant);
+        }
     }
 
     #[test]
@@ -502,6 +707,7 @@ mod tests {
                 WaveformData::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
             )]),
             measurements: Vec::new(),
+            periodic_state: None,
         };
 
         let accepted = worker_outcome_from_result(Ok(result.clone()), 48);
@@ -527,6 +733,7 @@ mod tests {
                 WaveformData::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
             )]),
             measurements: Vec::new(),
+            periodic_state: None,
         };
 
         let legacy = worker_outcome_from_result(Ok(result.clone()), 47);
@@ -543,7 +750,7 @@ mod tests {
             );
         };
 
-        let transport = WorkerResponseTransport::from_response(transfer_response.clone());
+        let transport = WorkerResponseTransport::from_response(transfer_response.clone()).unwrap();
         assert!(!transport.buffers.is_empty());
         assert_eq!(
             transport.into_response().expect("transport reconstructs"),
@@ -570,7 +777,7 @@ mod tests {
             }),
         };
 
-        let transport = WorkerResponseTransport::from_response(response.clone());
+        let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
 
         assert_eq!(transport.protocol, WORKER_RESPONSE_TRANSPORT_PROTOCOL);
         assert_eq!(
@@ -626,7 +833,7 @@ mod tests {
             }),
         };
 
-        let transport = WorkerResponseTransport::from_response(response.clone());
+        let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
 
         assert_eq!(
             transport.into_response().expect("transport reconstructs"),
@@ -652,7 +859,7 @@ mod tests {
                 measurements: Vec::new(),
             }),
         };
-        let ac_transport = WorkerResponseTransport::from_response(ac.clone());
+        let ac_transport = WorkerResponseTransport::from_response(ac.clone()).unwrap();
         assert_eq!(ac_transport.buffers.len(), 4);
         assert_eq!(ac_transport.into_response().expect("ac reconstructs"), ac);
 
@@ -669,7 +876,7 @@ mod tests {
                 summary: None,
             }),
         };
-        let noise_transport = WorkerResponseTransport::from_response(noise.clone());
+        let noise_transport = WorkerResponseTransport::from_response(noise.clone()).unwrap();
         assert_eq!(noise_transport.buffers.len(), 5);
         assert_eq!(
             noise_transport.into_response().expect("noise reconstructs"),
@@ -696,14 +903,14 @@ mod tests {
             }),
         };
 
-        let mut missing = WorkerResponseTransport::from_response(response.clone());
+        let mut missing = WorkerResponseTransport::from_response(response.clone()).unwrap();
         missing.buffers.pop();
         let error = missing
             .into_response()
             .expect_err("missing buffer must fail");
         assert!(error.contains("missing transferable buffer 2"));
 
-        let mut mismatched = WorkerResponseTransport::from_response(response);
+        let mut mismatched = WorkerResponseTransport::from_response(response).unwrap();
         mismatched.buffers[0].push(2.0);
         let error = mismatched
             .into_response()
@@ -922,7 +1129,7 @@ mod tests {
     #[test]
     fn analysis_config_round_trips_supported_variants() {
         let configs = vec![
-            AnalysisConfig::DcOp,
+            AnalysisConfig::dc_op(),
             AnalysisConfig::DcSweep(DcSweepConfig {
                 source: "V1".to_string(),
                 start: 0.0,
@@ -951,9 +1158,14 @@ mod tests {
                 reference_node: "0".to_string(),
                 input_source: "VIN".to_string(),
                 sweep_type: AcSweepType::Linear,
-                num_points: 5,
+                num_points: 3,
                 start_freq: 1.0,
                 stop_freq: 100.0,
+                explicit_frequencies: Some(vec![1.0, 7.0, 100.0]),
+                data_table_name: Some("noise_points".to_owned()),
+                contribution_detail: NoiseContributionDetail::AllContributors,
+                integration_mode: NoiseIntegrationMode::OutputNoiseOnly,
+                temperature_kelvin: 398.15,
             }),
             AnalysisConfig::PoleZero(PoleZeroConfig {
                 input_node: "in".to_string(),
@@ -972,7 +1184,10 @@ mod tests {
 
         for config in configs {
             let worker = WorkerAnalysisConfig::from(&config);
-            let reconstructed = AnalysisConfig::from(worker);
+            let encoded = serde_json::to_string(&worker).expect("worker config serializes");
+            let decoded: WorkerAnalysisConfig =
+                serde_json::from_str(&encoded).expect("worker config deserializes");
+            let reconstructed = AnalysisConfig::from(decoded);
 
             assert_analysis_configs_match(&reconstructed, &config);
         }
@@ -981,7 +1196,7 @@ mod tests {
     #[test]
     fn analysis_spec_round_trips_supported_variants() {
         let specs = vec![
-            AnalysisSpec::DcOp,
+            AnalysisSpec::dc_op(),
             AnalysisSpec::DcSweep {
                 source_name: "V1".to_string(),
                 start: 0.0,
@@ -1011,9 +1226,16 @@ mod tests {
             },
             AnalysisSpec::Noise {
                 output_node: "out".to_string(),
+                reference_node: "0".to_string(),
+                input_source: "V1".to_string(),
                 start_freq: 10.0,
                 stop_freq: 1e6,
                 points_per_decade: 8,
+                sweep: NoiseSweepType::Decade,
+                explicit_frequencies: None,
+                data_table_name: None,
+                contribution_detail: NoiseContributionDetail::Top20,
+                integration_mode: NoiseIntegrationMode::OutputNoiseOnly,
                 temperature: 300.0,
             },
             AnalysisSpec::PoleZero {
@@ -1064,14 +1286,15 @@ mod tests {
                 f2_over_f1: Some(1.2),
             },
             AnalysisSpec::Pss {
-                fundamental_freq: 1e6,
-                num_harmonics: 5,
-                tolerance: 1e-6,
-                max_iterations: 75,
                 method: PssMethod::HarmonicBalance,
+                fundamental_freq: 1e6,
+                tone_sources: vec!["VIN".to_owned()],
+                tstab_periods: 27,
+                points_per_period: 1024,
+                tolerance: 1e-6,
                 oscillator_mode: false,
                 oscillator_node: None,
-                save_harmonics: true,
+                num_harmonics: 5,
             },
             AnalysisSpec::HarmonicBalance {
                 tones: vec![HbToneSpec::new(1e6, 3).with_source("VIN")],
@@ -1149,7 +1372,10 @@ mod tests {
 
         for spec in specs {
             let worker = WorkerAnalysisSpec::try_from(&spec).expect("spec is supported");
-            let reconstructed = AnalysisSpec::from(worker);
+            let encoded = serde_json::to_string(&worker).expect("worker spec serializes");
+            let decoded: WorkerAnalysisSpec =
+                serde_json::from_str(&encoded).expect("worker spec deserializes");
+            let reconstructed = AnalysisSpec::from(decoded);
 
             assert_eq!(reconstructed, spec);
         }
@@ -1500,6 +1726,11 @@ mod tests {
     #[test]
     fn worker_result_round_trip() {
         let dc_op = SimulationResult::DcOp(DcOpResult {
+            configuration: crate::simulation::dialog::OpConfig::default(),
+            validated_startup_directives: 0,
+            mna_node_names: vec!["out".to_owned()],
+            mna_branch_names: vec!["V1".to_owned()],
+            mna_solution: vec![1.2, -0.01],
             node_voltages: HashMap::from([("out".to_string(), 1.2)]),
             branch_currents: HashMap::from([("V1".to_string(), -0.01)]),
             device_ops: HashMap::new(),
@@ -1525,6 +1756,7 @@ mod tests {
                 "delay",
                 "target not found",
             )],
+            periodic_state: None,
         };
         let transient = round_trip_result(transient);
         match transient {
@@ -1532,6 +1764,7 @@ mod tests {
                 time,
                 waveforms,
                 measurements,
+                ..
             } => {
                 assert_eq!(time, vec![0.0, 1e-9]);
                 let waveform = waveforms.get("V(out)").expect("waveform is preserved");
@@ -1778,24 +2011,25 @@ mod tests {
             rows: vec![
                 crate::state::NoiseContributorRow {
                     device: "R1".to_string(),
-                    mechanism: "thermal",
+                    mechanism: "thermal".to_owned(),
                     power: 2.5e-18,
                     share_pct: 75.0,
                 },
                 crate::state::NoiseContributorRow {
                     device: "BNOISE1".to_string(),
-                    mechanism: "white",
+                    mechanism: "white".to_owned(),
                     power: 0.5e-18,
                     share_pct: 15.0,
                 },
                 crate::state::NoiseContributorRow {
                     device: "ATABLE1".to_string(),
-                    mechanism: "table",
+                    mechanism: "table".to_owned(),
                     power: 0.25e-18,
                     share_pct: 10.0,
                 },
             ],
-            total_rms: 1.2e-6,
+            total_rms: Some(1.2e-6),
+            input_rms: Some(8.0e-7),
             band: (1.0, 1.0e6),
         };
         let noise = SimulationResult::Noise {
@@ -1858,7 +2092,7 @@ mod tests {
 
     #[test]
     fn worker_request_from_runner_parts_preserves_payload() {
-        let request = SimulationRequest::Config(Box::new(AnalysisConfig::DcOp));
+        let request = SimulationRequest::Config(Box::new(AnalysisConfig::dc_op()));
         let input = NetlistInput {
             netlist: "V1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
             source_path: Some(std::path::PathBuf::from("deck.cir")),
@@ -1872,17 +2106,45 @@ mod tests {
         assert_eq!(worker.id, 41);
         assert!(matches!(
             worker.request,
-            WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp)
+            WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(_))
         ));
         assert_eq!(worker.netlist, input.netlist);
         assert_eq!(worker.source_path.as_deref(), Some("deck.cir"));
     }
 
     #[test]
+    fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
+        let expected_config = nondefault_op_config();
+        let result = SimulationResult::DcOp(DcOpResult {
+            configuration: expected_config.clone(),
+            validated_startup_directives: 2,
+            mna_node_names: vec!["out".to_owned()],
+            mna_branch_names: vec!["V1".to_owned()],
+            mna_solution: vec![1.25, -1.0e-3],
+            node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
+            branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
+            device_ops: HashMap::new(),
+            device_report: None,
+        });
+
+        let restored = round_trip_result(result);
+        let SimulationResult::DcOp(restored) = restored else {
+            panic!("expected OP result");
+        };
+        assert_eq!(restored.configuration, expected_config);
+        assert_eq!(restored.validated_startup_directives, 2);
+        assert_eq!(restored.mna_node_names, ["out"]);
+        assert_eq!(restored.mna_branch_names, ["V1"]);
+        assert_eq!(restored.mna_solution, [1.25, -1.0e-3]);
+    }
+
+    #[test]
     fn worker_request_runs_dc_op() {
         let request = WorkerRequest {
             id: 12,
-            request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp),
+            request: WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(
+                crate::simulation::dialog::OpConfig::default(),
+            )),
             netlist: "* worker op\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),
@@ -1970,7 +2232,7 @@ mod tests {
         let expected = WorkerSimulationResult::try_from(result.clone())
             .expect("TF result converts to worker contract");
         let response = WorkerResponse::from_result_for_transfer(313, Ok(result));
-        let transport = WorkerResponseTransport::from_response(response);
+        let transport = WorkerResponseTransport::from_response(response).unwrap();
         assert!(transport.buffers.is_empty(), "scalar TF must stay inline");
 
         let encoded = serde_json::to_string(&transport.response).expect("TF response serializes");
@@ -2002,7 +2264,9 @@ mod tests {
 
     fn assert_analysis_configs_match(actual: &AnalysisConfig, expected: &AnalysisConfig) {
         match (actual, expected) {
-            (AnalysisConfig::DcOp, AnalysisConfig::DcOp) => {}
+            (AnalysisConfig::DcOp(actual), AnalysisConfig::DcOp(expected)) => {
+                assert_eq!(actual, expected);
+            }
             (AnalysisConfig::DcSweep(actual), AnalysisConfig::DcSweep(expected)) => {
                 assert_eq!(actual.source, expected.source);
                 assert_eq!(actual.start, expected.start);
@@ -2034,6 +2298,11 @@ mod tests {
                 assert_eq!(actual.num_points, expected.num_points);
                 assert_eq!(actual.start_freq, expected.start_freq);
                 assert_eq!(actual.stop_freq, expected.stop_freq);
+                assert_eq!(actual.explicit_frequencies, expected.explicit_frequencies);
+                assert_eq!(actual.data_table_name, expected.data_table_name);
+                assert_eq!(actual.contribution_detail, expected.contribution_detail);
+                assert_eq!(actual.integration_mode, expected.integration_mode);
+                assert_eq!(actual.temperature_kelvin, expected.temperature_kelvin);
             }
             (AnalysisConfig::PoleZero(actual), AnalysisConfig::PoleZero(expected)) => {
                 assert_eq!(actual.input_node, expected.input_node);
@@ -2231,7 +2500,8 @@ use crate::services::safety::{
 };
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
-    PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
+    NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PoleZeroConfig, PzAnalysisType,
+    SensitivityConfig, TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
@@ -2260,7 +2530,7 @@ pub(crate) struct WorkerRequest {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 2;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 5;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -2274,11 +2544,32 @@ pub(crate) struct WorkerRequestTransport {
     pub buffers: Vec<Vec<f64>>,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerRequestTransportMetadata {
     pub request: WorkerRequest,
     pub dependency_metadata: String,
+    /// Number of leading buffers owned by `dependency_metadata`. Any
+    /// remaining buffer is reserved for the detached OP previous-state MNA
+    /// vector below.
+    pub dependency_buffer_count: usize,
+    #[serde(default)]
+    pub op_previous_state: Option<WorkerOpPreviousStateTransport>,
+}
+
+/// Authenticated scalar half of a retained OP initial guess. The numerical
+/// MNA state is always a single transferable Float64 buffer; accepting an
+/// inline representation here would silently reintroduce the browser JSON
+/// expansion this transport exists to prevent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerOpPreviousStateTransport {
+    source_content_digest: crate::product::ContentDigest,
+    producer_snapshot_digest: crate::product::ContentDigest,
+    producer_result_digest: crate::product::ContentDigest,
+    node_names: Vec<String>,
+    branch_names: Vec<String>,
+    solution: WorkerF64Series,
+    solution_digest: crate::product::ContentDigest,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -2286,14 +2577,20 @@ impl WorkerRequestTransport {
     #[cfg(test)]
     pub(crate) fn from_request(mut request: WorkerRequest) -> Result<Self, String> {
         let dependencies = std::mem::take(&mut request.dependencies);
-        let (dependency_metadata, buffers) = dependencies
+        let (dependency_metadata, mut buffers) = dependencies
             .encode_transfer()
             .map_err(|error| error.to_string())?;
+        let dependency_buffer_count = buffers.len();
+        let (op_previous_state, op_buffers) = take_worker_request_op_previous_state(&mut request)?;
+        buffers.extend(op_buffers);
+        validate_worker_request_transfer_buffers(&buffers)?;
         Ok(Self {
             protocol: WORKER_REQUEST_TRANSPORT_PROTOCOL,
             request: WorkerRequestTransportMetadata {
                 request,
                 dependency_metadata,
+                dependency_buffer_count,
+                op_previous_state,
             },
             buffers,
         })
@@ -2309,18 +2606,118 @@ impl WorkerRequestTransport {
         let WorkerRequestTransportMetadata {
             mut request,
             dependency_metadata,
+            dependency_buffer_count,
+            op_previous_state,
         } = self.request;
         if request.dependencies != Default::default() {
             return Err("worker request metadata carries duplicate inline dependencies".to_owned());
         }
+        reject_inline_worker_request_op_previous_state(&request)?;
+        validate_worker_request_transfer_buffers(&self.buffers)?;
+        if dependency_buffer_count > self.buffers.len() {
+            return Err(format!(
+                "worker request declares {dependency_buffer_count} dependency buffers but carries only {} total buffers",
+                self.buffers.len()
+            ));
+        }
+        let mut dependency_buffers = self.buffers;
+        let op_buffers = dependency_buffers.split_off(dependency_buffer_count);
         request.dependencies =
             crate::simulation::execution::ResolvedExecutionDependencies::decode_transfer(
                 &dependency_metadata,
-                self.buffers,
+                dependency_buffers,
             )
             .map_err(|error| error.to_string())?;
+        restore_worker_request_op_previous_state(&mut request, op_previous_state, &op_buffers)?;
         Ok(request)
     }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn worker_request_op_config_mut(
+    request: &mut WorkerRequest,
+) -> Option<&mut crate::simulation::dialog::OpConfig> {
+    match &mut request.request {
+        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+        WorkerSimulationRequest::Spec { spec, .. } => match spec.as_mut() {
+            WorkerAnalysisSpec::DcOp(config) => Some(config),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn worker_request_op_config(
+    request: &WorkerRequest,
+) -> Option<&crate::simulation::dialog::OpConfig> {
+    match &request.request {
+        WorkerSimulationRequest::Config(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+        WorkerSimulationRequest::Spec { spec, .. } => match spec.as_ref() {
+            WorkerAnalysisSpec::DcOp(config) => Some(config),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn take_worker_request_op_previous_state(
+    request: &mut WorkerRequest,
+) -> Result<(Option<WorkerOpPreviousStateTransport>, Vec<Vec<f64>>), String> {
+    let Some(config) = worker_request_op_config_mut(request) else {
+        return Ok((None, Vec::new()));
+    };
+    config.validate_for_execution()?;
+    let Some(previous_state) = config.previous_state.take() else {
+        return Ok((None, Vec::new()));
+    };
+    let mut buffers = Vec::with_capacity(1);
+    let transport =
+        WorkerOpPreviousStateTransport::from_previous_state(previous_state, &mut buffers)?;
+    Ok((Some(transport), buffers))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn reject_inline_worker_request_op_previous_state(request: &WorkerRequest) -> Result<(), String> {
+    if worker_request_op_config(request).is_some_and(|config| config.previous_state.is_some()) {
+        return Err(
+            "worker request metadata carries a duplicate inline OP previous-state solution"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn restore_worker_request_op_previous_state(
+    request: &mut WorkerRequest,
+    previous_state: Option<WorkerOpPreviousStateTransport>,
+    buffers: &[Vec<f64>],
+) -> Result<(), String> {
+    let expected_buffers = usize::from(previous_state.is_some());
+    if buffers.len() != expected_buffers {
+        return Err(format!(
+            "worker OP previous-state transfer carries {} buffers, expected {expected_buffers}",
+            buffers.len()
+        ));
+    }
+    let config = worker_request_op_config_mut(request);
+    match (config, previous_state) {
+        (Some(config), Some(previous_state)) => {
+            config.previous_state = Some(previous_state.into_previous_state(buffers)?);
+            config.validate_for_execution()?;
+        }
+        (Some(config), None) => config.validate_for_execution()?,
+        (None, Some(_)) => {
+            return Err(
+                "worker request carries OP previous-state metadata for a non-OP analysis"
+                    .to_owned(),
+            );
+        }
+        (None, None) => {}
+    }
+    Ok(())
 }
 
 impl WorkerRequest {
@@ -2886,7 +3283,10 @@ impl From<WorkerPstbRunConfig> for crate::services::simulation_runner::PstbRunCo
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerAnalysisConfig {
-    DcOp,
+    #[serde(rename = "DcOp")]
+    LegacyDcOp,
+    #[serde(rename = "DcOpConfigured")]
+    DcOp(crate::simulation::dialog::OpConfig),
     DcSweep {
         source: String,
         start: f64,
@@ -2918,6 +3318,16 @@ pub(crate) enum WorkerAnalysisConfig {
         num_points: usize,
         start_freq: f64,
         stop_freq: f64,
+        #[serde(default)]
+        explicit_frequencies: Option<Vec<f64>>,
+        #[serde(default)]
+        data_table_name: Option<String>,
+        #[serde(default)]
+        contribution_detail: NoiseContributionDetail,
+        #[serde(default)]
+        integration_mode: NoiseIntegrationMode,
+        #[serde(default = "worker_default_noise_temperature")]
+        temperature_kelvin: f64,
     },
     PoleZero {
         input_node: String,
@@ -2937,7 +3347,7 @@ pub(crate) enum WorkerAnalysisConfig {
 impl From<&AnalysisConfig> for WorkerAnalysisConfig {
     fn from(value: &AnalysisConfig) -> Self {
         match value {
-            AnalysisConfig::DcOp => Self::DcOp,
+            AnalysisConfig::DcOp(config) => Self::DcOp(config.clone()),
             AnalysisConfig::DcSweep(config) => Self::DcSweep {
                 source: config.source.clone(),
                 start: config.start,
@@ -2969,6 +3379,11 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 num_points: config.num_points,
                 start_freq: config.start_freq,
                 stop_freq: config.stop_freq,
+                explicit_frequencies: config.explicit_frequencies.clone(),
+                data_table_name: config.data_table_name.clone(),
+                contribution_detail: config.contribution_detail,
+                integration_mode: config.integration_mode,
+                temperature_kelvin: config.temperature_kelvin,
             },
             AnalysisConfig::PoleZero(config) => Self::PoleZero {
                 input_node: config.input_node.clone(),
@@ -2990,7 +3405,8 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
 impl From<WorkerAnalysisConfig> for AnalysisConfig {
     fn from(value: WorkerAnalysisConfig) -> Self {
         match value {
-            WorkerAnalysisConfig::DcOp => Self::DcOp,
+            WorkerAnalysisConfig::LegacyDcOp => Self::dc_op(),
+            WorkerAnalysisConfig::DcOp(config) => Self::DcOp(config),
             WorkerAnalysisConfig::DcSweep {
                 source,
                 start,
@@ -3042,6 +3458,11 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 num_points,
                 start_freq,
                 stop_freq,
+                explicit_frequencies,
+                data_table_name,
+                contribution_detail,
+                integration_mode,
+                temperature_kelvin,
             } => Self::Noise(NoiseAnalysisConfig {
                 output_node,
                 reference_node,
@@ -3050,6 +3471,11 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 num_points,
                 start_freq,
                 stop_freq,
+                explicit_frequencies,
+                data_table_name,
+                contribution_detail,
+                integration_mode,
+                temperature_kelvin,
             }),
             WorkerAnalysisConfig::PoleZero {
                 input_node,
@@ -3079,17 +3505,36 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
     }
 }
 
-const fn worker_default_pss_max_iterations() -> usize {
-    50
+fn worker_default_pss_tone_sources() -> Vec<String> {
+    vec!["VIN_DIFF".to_owned()]
+}
+
+const fn worker_default_pss_stabilization_cycles() -> usize {
+    20
+}
+
+const fn worker_default_pss_shooting_points() -> usize {
+    512
 }
 
 const fn worker_default_true() -> bool {
     true
 }
 
+const fn worker_default_noise_temperature() -> f64 {
+    rspice_core::constants::TEMP_REFERENCE
+}
+
+fn worker_default_noise_reference_node() -> String {
+    "0".to_owned()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerAnalysisSpec {
-    DcOp,
+    #[serde(rename = "DcOp")]
+    LegacyDcOp,
+    #[serde(rename = "DcOpConfigured")]
+    DcOp(crate::simulation::dialog::OpConfig),
     DcSweep {
         source_name: String,
         start: f64,
@@ -3119,9 +3564,23 @@ pub(crate) enum WorkerAnalysisSpec {
     },
     Noise {
         output_node: String,
+        #[serde(default = "worker_default_noise_reference_node")]
+        reference_node: String,
+        #[serde(default)]
+        input_source: String,
         start_freq: f64,
         stop_freq: f64,
         points_per_decade: usize,
+        #[serde(default)]
+        sweep: NoiseSweepType,
+        #[serde(default)]
+        explicit_frequencies: Option<Vec<f64>>,
+        #[serde(default)]
+        data_table_name: Option<String>,
+        #[serde(default)]
+        contribution_detail: NoiseContributionDetail,
+        #[serde(default)]
+        integration_mode: NoiseIntegrationMode,
         temperature: f64,
     },
     Sensitivity {
@@ -3208,19 +3667,22 @@ pub(crate) enum WorkerAnalysisSpec {
         f2_over_f1: Option<f64>,
     },
     Pss {
-        fundamental_freq: f64,
-        num_harmonics: usize,
-        tolerance: f64,
-        #[serde(default = "worker_default_pss_max_iterations")]
-        max_iterations: usize,
         #[serde(default)]
         method: PssMethod,
+        fundamental_freq: f64,
+        #[serde(default = "worker_default_pss_tone_sources")]
+        tone_sources: Vec<String>,
+        #[serde(default = "worker_default_pss_stabilization_cycles")]
+        tstab_periods: usize,
+        #[serde(default = "worker_default_pss_shooting_points")]
+        points_per_period: usize,
+        #[serde(alias = "period_tolerance")]
+        tolerance: f64,
         #[serde(default)]
         oscillator_mode: bool,
         #[serde(default)]
         oscillator_node: Option<String>,
-        #[serde(default = "worker_default_true")]
-        save_harmonics: bool,
+        num_harmonics: usize,
     },
     HarmonicBalance {
         tones: Vec<HbToneSpec>,
@@ -3277,7 +3739,38 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
 
     fn try_from(value: &AnalysisSpec) -> Result<Self, Self::Error> {
         match value {
-            AnalysisSpec::DcOp => Ok(Self::DcOp),
+            AnalysisSpec::LegacyDcOp => Ok(Self::LegacyDcOp),
+            AnalysisSpec::DcOp {
+                temperature_mode,
+                temperature_celsius,
+                initial_guess,
+                node_initialization,
+                homotopy,
+                annotation,
+                device_detail,
+                save_device_op,
+                accuracy,
+                selected_devices,
+                previous_state,
+                violation_devices,
+                violation_source_content_digest,
+                run_point,
+            } => Ok(Self::DcOp(crate::simulation::dialog::OpConfig {
+                temperature_mode: *temperature_mode,
+                temperature_celsius: *temperature_celsius,
+                initial_guess: *initial_guess,
+                node_initialization: *node_initialization,
+                homotopy: *homotopy,
+                annotation: *annotation,
+                device_detail: *device_detail,
+                save_device_op: *save_device_op,
+                accuracy: *accuracy,
+                selected_devices: selected_devices.clone(),
+                previous_state: previous_state.clone(),
+                violation_devices: violation_devices.clone(),
+                violation_source_content_digest: *violation_source_content_digest,
+                run_point: *run_point,
+            })),
             AnalysisSpec::DcSweep {
                 source_name,
                 start,
@@ -3330,15 +3823,29 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             }),
             AnalysisSpec::Noise {
                 output_node,
+                reference_node,
+                input_source,
                 start_freq,
                 stop_freq,
                 points_per_decade,
+                sweep,
+                explicit_frequencies,
+                data_table_name,
+                contribution_detail,
+                integration_mode,
                 temperature,
             } => Ok(Self::Noise {
                 output_node: output_node.clone(),
+                reference_node: reference_node.clone(),
+                input_source: input_source.clone(),
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 points_per_decade: *points_per_decade,
+                sweep: *sweep,
+                explicit_frequencies: explicit_frequencies.clone(),
+                data_table_name: data_table_name.clone(),
+                contribution_detail: *contribution_detail,
+                integration_mode: *integration_mode,
                 temperature: *temperature,
             }),
             AnalysisSpec::Sensitivity {
@@ -3492,23 +3999,25 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 f2_over_f1: *f2_over_f1,
             }),
             AnalysisSpec::Pss {
-                fundamental_freq,
-                num_harmonics,
-                tolerance,
-                max_iterations,
                 method,
+                fundamental_freq,
+                tone_sources,
+                tstab_periods,
+                points_per_period,
+                tolerance,
                 oscillator_mode,
                 oscillator_node,
-                save_harmonics,
+                num_harmonics,
             } => Ok(Self::Pss {
-                fundamental_freq: *fundamental_freq,
-                num_harmonics: *num_harmonics,
-                tolerance: *tolerance,
-                max_iterations: *max_iterations,
                 method: *method,
+                fundamental_freq: *fundamental_freq,
+                tone_sources: tone_sources.clone(),
+                tstab_periods: *tstab_periods,
+                points_per_period: *points_per_period,
+                tolerance: *tolerance,
                 oscillator_mode: *oscillator_mode,
                 oscillator_node: oscillator_node.clone(),
-                save_harmonics: *save_harmonics,
+                num_harmonics: *num_harmonics,
             }),
             AnalysisSpec::HarmonicBalance {
                 tones,
@@ -3593,7 +4102,23 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
 impl From<WorkerAnalysisSpec> for AnalysisSpec {
     fn from(value: WorkerAnalysisSpec) -> Self {
         match value {
-            WorkerAnalysisSpec::DcOp => Self::DcOp,
+            WorkerAnalysisSpec::LegacyDcOp => Self::LegacyDcOp,
+            WorkerAnalysisSpec::DcOp(config) => Self::DcOp {
+                temperature_mode: config.temperature_mode,
+                temperature_celsius: config.temperature_celsius,
+                initial_guess: config.initial_guess,
+                node_initialization: config.node_initialization,
+                homotopy: config.homotopy,
+                annotation: config.annotation,
+                device_detail: config.device_detail,
+                save_device_op: config.save_device_op,
+                accuracy: config.accuracy,
+                selected_devices: config.selected_devices,
+                previous_state: config.previous_state,
+                violation_devices: config.violation_devices,
+                violation_source_content_digest: config.violation_source_content_digest,
+                run_point: config.run_point,
+            },
             WorkerAnalysisSpec::DcSweep {
                 source_name,
                 start,
@@ -3646,15 +4171,29 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             },
             WorkerAnalysisSpec::Noise {
                 output_node,
+                reference_node,
+                input_source,
                 start_freq,
                 stop_freq,
                 points_per_decade,
+                sweep,
+                explicit_frequencies,
+                data_table_name,
+                contribution_detail,
+                integration_mode,
                 temperature,
             } => Self::Noise {
                 output_node,
+                reference_node,
+                input_source,
                 start_freq,
                 stop_freq,
                 points_per_decade,
+                sweep,
+                explicit_frequencies,
+                data_table_name,
+                contribution_detail,
+                integration_mode,
                 temperature,
             },
             WorkerAnalysisSpec::Sensitivity {
@@ -3808,23 +4347,25 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 f2_over_f1,
             },
             WorkerAnalysisSpec::Pss {
-                fundamental_freq,
-                num_harmonics,
-                tolerance,
-                max_iterations,
                 method,
+                fundamental_freq,
+                tone_sources,
+                tstab_periods,
+                points_per_period,
+                tolerance,
                 oscillator_mode,
                 oscillator_node,
-                save_harmonics,
+                num_harmonics,
             } => Self::Pss {
-                fundamental_freq,
-                num_harmonics,
-                tolerance,
-                max_iterations,
                 method,
+                fundamental_freq,
+                tone_sources,
+                tstab_periods,
+                points_per_period,
+                tolerance,
                 oscillator_mode,
                 oscillator_node,
-                save_harmonics,
+                num_harmonics,
             },
             WorkerAnalysisSpec::HarmonicBalance {
                 tones,
@@ -4451,6 +4992,14 @@ impl From<WorkerProgressStatus> for SimulationStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerSimulationResult {
     DcOp {
+        configuration: crate::simulation::dialog::OpConfig,
+        validated_startup_directives: usize,
+        #[serde(default)]
+        mna_node_names: Vec<String>,
+        #[serde(default)]
+        mna_branch_names: Vec<String>,
+        #[serde(default)]
+        mna_solution: Vec<f64>,
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
         device_ops: Vec<WorkerDeviceOpPoint>,
@@ -4466,6 +5015,13 @@ pub(crate) enum WorkerSimulationResult {
         time: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
+    },
+    /// PSS numerical evidence is transported once. Display waveforms are
+    /// deterministically reconstructed from this retained orbit by the
+    /// receiver instead of duplicating every sample across the worker edge.
+    Pss {
+        measurements: Vec<WorkerMeasurement>,
+        operating_point: rspice_core::engine::PssOperatingPoint,
     },
     Ac {
         frequencies: Vec<f64>,
@@ -4559,6 +5115,11 @@ impl WorkerSimulationResult {
     fn estimated_numeric_payload_bytes(&self) -> usize {
         match self {
             WorkerSimulationResult::DcOp {
+                configuration: _,
+                validated_startup_directives: _,
+                mna_node_names: _,
+                mna_branch_names: _,
+                mna_solution,
                 node_voltages,
                 branch_currents,
                 device_ops,
@@ -4566,6 +5127,7 @@ impl WorkerSimulationResult {
             } => sum_payload_bytes([
                 f64_payload_bytes(node_voltages.len()),
                 f64_payload_bytes(branch_currents.len()),
+                f64_payload_bytes(mna_solution.len()),
                 device_ops_payload_bytes(device_ops),
                 device_report
                     .as_ref()
@@ -4589,6 +5151,13 @@ impl WorkerSimulationResult {
                 f64_payload_bytes(time.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
+            ]),
+            WorkerSimulationResult::Pss {
+                measurements,
+                operating_point,
+            } => sum_payload_bytes([
+                measurements_payload_bytes(measurements),
+                pss_operating_point_payload_bytes(operating_point),
             ]),
             WorkerSimulationResult::Ac {
                 frequencies,
@@ -4710,7 +5279,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 4;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 7;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -4720,17 +5289,19 @@ pub(crate) struct WorkerResponseTransport {
 }
 
 impl WorkerResponseTransport {
-    fn from_response(response: WorkerResponse) -> Self {
+    fn from_response(response: WorkerResponse) -> Result<Self, String> {
+        validate_worker_response_before_transport(&response)?;
         let mut buffers = Vec::new();
         let response = WorkerResponseTransportMetadata {
             id: response.id,
             outcome: WorkerOutcomeTransport::from_outcome(response.outcome, &mut buffers),
         };
-        Self {
+        validate_worker_transfer_buffers(&buffers)?;
+        Ok(Self {
             protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
             response,
             buffers,
-        }
+        })
     }
 
     fn into_response(self) -> Result<WorkerResponse, String> {
@@ -4740,12 +5311,119 @@ impl WorkerResponseTransport {
                 self.protocol
             ));
         }
+        validate_worker_transfer_buffers(&self.buffers)?;
 
         Ok(WorkerResponse {
             id: self.response.id,
             outcome: self.response.outcome.into_outcome(&self.buffers)?,
         })
     }
+}
+
+fn validate_worker_response_before_transport(response: &WorkerResponse) -> Result<(), String> {
+    if let WorkerOutcome::Success(WorkerSimulationResult::DcOp {
+        configuration,
+        mna_node_names,
+        mna_branch_names,
+        mna_solution,
+        ..
+    }) = &response.outcome
+    {
+        if let Some(previous_state) = configuration.previous_state.as_ref()
+            && previous_state.solution.len() > MAX_WORKER_F64_VALUES
+        {
+            return Err(format!(
+                "worker DC operating-point response contains {} previous-state MNA values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
+                previous_state.solution.len()
+            ));
+        }
+        if mna_solution.len() > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "worker DC operating-point response contains {} MNA values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
+                mna_solution.len()
+            ));
+        }
+        return validate_worker_dc_op_state(
+            configuration,
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+        );
+    }
+    let WorkerOutcome::Success(WorkerSimulationResult::Pss {
+        operating_point, ..
+    }) = &response.outcome
+    else {
+        return Ok(());
+    };
+    let analysis = operating_point.analysis();
+    let transfer_buffer_count = analysis
+        .result
+        .waveforms
+        .len()
+        .checked_add(analysis.monodromy.len())
+        .and_then(|count| count.checked_add(6))
+        .ok_or_else(|| "retained PSS response buffer count overflows this platform".to_owned())?;
+    if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(format!(
+            "retained PSS response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+        ));
+    }
+    let mut numeric_values = analysis.result.time.len();
+    for waveform in &analysis.result.waveforms {
+        numeric_values = numeric_values
+            .checked_add(waveform.values.len())
+            .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
+    }
+    for row in &analysis.monodromy {
+        numeric_values = numeric_values
+            .checked_add(row.len())
+            .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
+    }
+    numeric_values = numeric_values
+        .checked_add(
+            analysis
+                .result
+                .floquet_multipliers
+                .len()
+                .checked_mul(2)
+                .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?,
+        )
+        .and_then(|count| {
+            analysis
+                .floquet_multipliers
+                .len()
+                .checked_mul(2)
+                .and_then(|values| count.checked_add(values))
+        })
+        .and_then(|count| count.checked_add(operating_point.shooting_state().len()))
+        .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
+    if numeric_values > MAX_WORKER_F64_VALUES {
+        return Err(format!(
+            "retained PSS response contains {numeric_values} unique numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_worker_transfer_buffers(buffers: &[Vec<f64>]) -> Result<(), String> {
+    if buffers.len() > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(format!(
+            "worker response contains {} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit",
+            buffers.len()
+        ));
+    }
+    let numeric_values = buffers.iter().try_fold(0usize, |total, values| {
+        total
+            .checked_add(values.len())
+            .ok_or_else(|| "worker response numeric size overflows this platform".to_owned())
+    })?;
+    if numeric_values > MAX_WORKER_F64_VALUES {
+        return Err(format!(
+            "worker response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -4784,6 +5462,59 @@ pub(crate) enum WorkerF64Series {
     Buffer { buffer: usize, len: usize },
 }
 
+const MAX_WORKER_F64_VALUES: usize = 16_777_216;
+const MAX_WORKER_TRANSFER_BUFFERS: usize = 65_536;
+
+fn checked_worker_request_numeric_total(
+    current_total: usize,
+    buffer_index: usize,
+    buffer_len: usize,
+) -> Result<usize, String> {
+    if buffer_len > MAX_WORKER_F64_VALUES {
+        return Err(format!(
+            "worker request transport buffer {buffer_index} contains {buffer_len} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+        ));
+    }
+    let total = current_total
+        .checked_add(buffer_len)
+        .ok_or_else(|| "worker request numeric size overflows this platform".to_owned())?;
+    if total > MAX_WORKER_F64_VALUES {
+        return Err(format!(
+            "worker request contains more than {MAX_WORKER_F64_VALUES} numerical values"
+        ));
+    }
+    Ok(total)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_worker_request_transfer_buffers(buffers: &[Vec<f64>]) -> Result<(), String> {
+    validate_worker_request_transfer_buffer_lengths(buffers.iter().map(Vec::len))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn validate_worker_request_transfer_buffer_lengths(
+    lengths: impl IntoIterator<Item = usize>,
+) -> Result<(), String> {
+    let lengths = lengths.into_iter();
+    let (lower_bound, upper_bound) = lengths.size_hint();
+    let declared_count = upper_bound.unwrap_or(lower_bound);
+    if declared_count > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(format!(
+            "worker request contains {declared_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+        ));
+    }
+    let mut total = 0usize;
+    for (index, len) in lengths.enumerate() {
+        if index >= MAX_WORKER_TRANSFER_BUFFERS {
+            return Err(format!(
+                "worker request contains more than {MAX_WORKER_TRANSFER_BUFFERS} transfer buffers"
+            ));
+        }
+        total = checked_worker_request_numeric_total(total, index, len)?;
+    }
+    Ok(())
+}
+
 impl WorkerF64Series {
     fn from_vec(values: Vec<f64>, buffers: &mut Vec<Vec<f64>>) -> Self {
         let len = values.len();
@@ -4794,8 +5525,21 @@ impl WorkerF64Series {
 
     fn into_vec(self, buffers: &[Vec<f64>]) -> Result<Vec<f64>, String> {
         match self {
-            Self::Inline(values) => Ok(values),
+            Self::Inline(values) => {
+                if values.len() > MAX_WORKER_F64_VALUES {
+                    return Err(format!(
+                        "inline worker series contains {} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
+                        values.len()
+                    ));
+                }
+                Ok(values)
+            }
             Self::Buffer { buffer, len } => {
+                if len > MAX_WORKER_F64_VALUES {
+                    return Err(format!(
+                        "transferable buffer {buffer} declares {len} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+                    ));
+                }
                 let values = buffers
                     .get(buffer)
                     .ok_or_else(|| format!("missing transferable buffer {buffer}"))?;
@@ -4818,9 +5562,419 @@ impl WorkerF64Series {
     }
 }
 
+impl WorkerOpPreviousStateTransport {
+    fn from_previous_state(
+        previous_state: crate::simulation::dialog::OpPreviousState,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Result<Self, String> {
+        validate_worker_op_previous_state(
+            &previous_state.node_names,
+            &previous_state.branch_names,
+            &previous_state.solution,
+        )?;
+        if previous_state.solution.len() > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "OP previous-state solution contains {} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
+                previous_state.solution.len()
+            ));
+        }
+        Ok(Self::from_validated_previous_state(previous_state, buffers))
+    }
+
+    fn from_validated_previous_state(
+        previous_state: crate::simulation::dialog::OpPreviousState,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        let crate::simulation::dialog::OpPreviousState {
+            source_content_digest,
+            producer_snapshot_digest,
+            producer_result_digest,
+            node_names,
+            branch_names,
+            solution,
+        } = previous_state;
+        let solution_digest = crate::simulation::execution::f64_sequence_digest(
+            "rspice.worker-op-previous-state/v1",
+            &solution,
+        );
+        Self {
+            source_content_digest,
+            producer_snapshot_digest,
+            producer_result_digest,
+            node_names,
+            branch_names,
+            solution: WorkerF64Series::from_vec(solution, buffers),
+            solution_digest,
+        }
+    }
+
+    fn into_previous_state(
+        self,
+        buffers: &[Vec<f64>],
+    ) -> Result<crate::simulation::dialog::OpPreviousState, String> {
+        if !matches!(self.solution, WorkerF64Series::Buffer { .. }) {
+            return Err(
+                "worker OP previous-state solution must use a transferable Float64 buffer"
+                    .to_owned(),
+            );
+        }
+        let solution = self.solution.into_vec(buffers)?;
+        let actual_digest = crate::simulation::execution::f64_sequence_digest(
+            "rspice.worker-op-previous-state/v1",
+            &solution,
+        );
+        if actual_digest != self.solution_digest {
+            return Err(format!(
+                "worker OP previous-state solution digest is {actual_digest}, expected {}",
+                self.solution_digest
+            ));
+        }
+        validate_worker_op_previous_state(&self.node_names, &self.branch_names, &solution)?;
+        Ok(crate::simulation::dialog::OpPreviousState {
+            source_content_digest: self.source_content_digest,
+            producer_snapshot_digest: self.producer_snapshot_digest,
+            producer_result_digest: self.producer_result_digest,
+            node_names: self.node_names,
+            branch_names: self.branch_names,
+            solution,
+        })
+    }
+}
+
+fn validate_worker_op_previous_state(
+    node_names: &[String],
+    branch_names: &[String],
+    solution: &[f64],
+) -> Result<(), String> {
+    rspice_core::engine::PssDcOperatingPointSeed::try_new(
+        node_names.to_vec(),
+        branch_names.to_vec(),
+        solution.to_vec(),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("invalid worker OP previous-state payload: {error}"))
+}
+
+#[cfg(test)]
+#[test]
+fn worker_transport_extracts_every_retained_pss_numeric_array_from_metadata() {
+    let response = WorkerResponse {
+        id: 78,
+        outcome: WorkerOutcome::Success(WorkerSimulationResult::Pss {
+            measurements: Vec::new(),
+            operating_point: tests::retained_pss_operating_point(),
+        }),
+    };
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    let metadata = serde_json::to_string(&transport.response).unwrap();
+    assert!(
+        metadata.len() < 4_096,
+        "PSS samples leaked into worker metadata"
+    );
+    assert!(!metadata.contains("\"Inline\""));
+    assert_eq!(transport.buffers.len(), 8);
+
+    let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Pss {
+        operating_point: periodic,
+        ..
+    }) = &transport.response.outcome
+    else {
+        panic!("expected retained PSS transport metadata")
+    };
+    assert!(matches!(
+        periodic.result_time,
+        WorkerF64Series::Buffer { .. }
+    ));
+    assert!(matches!(
+        periodic.result_waveforms[0].values,
+        WorkerF64Series::Buffer { .. }
+    ));
+    assert!(matches!(
+        periodic.analysis_monodromy[0],
+        WorkerF64Series::Buffer { .. }
+    ));
+    assert!(matches!(
+        periodic.shooting_state,
+        WorkerF64Series::Buffer { .. }
+    ));
+
+    assert_eq!(transport.into_response().unwrap(), response);
+}
+
+#[cfg(test)]
+#[test]
+fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
+    let configuration = tests::nondefault_op_config();
+    let response = WorkerResponse {
+        id: 79,
+        outcome: WorkerOutcome::Success(WorkerSimulationResult::DcOp {
+            configuration,
+            validated_startup_directives: 0,
+            mna_node_names: vec!["out".to_owned()],
+            mna_branch_names: vec!["V1".to_owned()],
+            mna_solution: vec![1.25, -0.001],
+            node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
+            branch_currents: HashMap::from([("V1".to_owned(), -0.001)]),
+            device_ops: Vec::new(),
+            device_report: None,
+        }),
+    };
+    let mut transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    let metadata = serde_json::to_string(&transport.response).unwrap();
+    assert!(!metadata.contains("\"Inline\""));
+    assert!(
+        metadata.contains("\"mna_solution\":{\"Buffer\""),
+        "MNA state must be represented only by a transferable buffer reference"
+    );
+    assert!(metadata.contains("\"previous_state\":{"));
+    assert!(!metadata.contains("\"solution\":[1.25"));
+    assert_eq!(
+        transport.buffers,
+        vec![vec![1.25, -0.001], vec![1.25, -0.001]]
+    );
+    assert_eq!(transport.clone().into_response().unwrap(), response);
+
+    let mut tampered = transport.clone();
+    tampered.buffers[1][0] = 1.5;
+    assert!(
+        tampered
+            .into_response()
+            .unwrap_err()
+            .contains("payload digest")
+    );
+
+    let mut nonfinite = transport.clone();
+    nonfinite.buffers[1][0] = f64::NAN;
+    assert!(nonfinite.into_response().is_err());
+
+    let mut previous_state_tamper = transport.clone();
+    previous_state_tamper.buffers[0][0] = 1.5;
+    assert!(
+        previous_state_tamper
+            .into_response()
+            .unwrap_err()
+            .contains("previous-state solution digest")
+    );
+
+    let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::DcOp {
+        mna_solution, ..
+    }) = &mut transport.response.outcome
+    else {
+        panic!("expected DC OP transport")
+    };
+    *mna_solution = WorkerF64Series::Buffer {
+        buffer: 1,
+        len: MAX_WORKER_F64_VALUES + 1,
+    };
+    assert!(transport.into_response().unwrap_err().contains("exceeding"));
+}
+
+#[cfg(test)]
+#[test]
+fn worker_request_ingress_limits_are_checked_before_copy() {
+    assert_eq!(checked_worker_request_numeric_total(10, 0, 20).unwrap(), 30);
+    assert!(
+        checked_worker_request_numeric_total(0, 0, MAX_WORKER_F64_VALUES + 1)
+            .unwrap_err()
+            .contains("buffer 0")
+    );
+    assert!(
+        checked_worker_request_numeric_total(MAX_WORKER_F64_VALUES, 1, 1)
+            .unwrap_err()
+            .contains("more than")
+    );
+    assert!(
+        validate_worker_request_transfer_buffer_lengths([MAX_WORKER_F64_VALUES, 1])
+            .unwrap_err()
+            .contains("more than")
+    );
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerPeriodicWaveformTransport {
+    node_name: String,
+    values: WorkerF64Series,
+}
+
+/// Scalar metadata plus transferable numerical arrays for a retained PSS
+/// operating point. No orbit, monodromy, Floquet, or shooting-state array is
+/// serialized into the browser worker's JSON response metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerPssOperatingPointTransport {
+    config: rspice_core::analysis::PssConfig,
+    result_period: f64,
+    result_frequency: f64,
+    result_iterations: usize,
+    result_residual_norm: f64,
+    result_time: WorkerF64Series,
+    result_waveforms: Vec<WorkerPeriodicWaveformTransport>,
+    result_period_detected: bool,
+    result_floquet_real: WorkerF64Series,
+    result_floquet_imag: WorkerF64Series,
+    analysis_iterations: usize,
+    analysis_final_residual: f64,
+    analysis_period: f64,
+    analysis_monodromy: Vec<WorkerF64Series>,
+    analysis_floquet_real: WorkerF64Series,
+    analysis_floquet_imag: WorkerF64Series,
+    analysis_is_stable: bool,
+    shooting_state: WorkerF64Series,
+}
+
+impl WorkerPssOperatingPointTransport {
+    fn from_operating_point(
+        operating_point: rspice_core::engine::PssOperatingPoint,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        let config = operating_point.config().clone();
+        let analysis = operating_point.analysis();
+        let result = &analysis.result;
+        let result_waveforms = result
+            .node_names
+            .iter()
+            .cloned()
+            .zip(result.waveforms.iter())
+            .map(|(node_name, waveform)| WorkerPeriodicWaveformTransport {
+                node_name,
+                values: WorkerF64Series::from_vec(waveform.values.clone(), buffers),
+            })
+            .collect();
+        let (result_floquet_real, result_floquet_imag): (Vec<_>, Vec<_>) = result
+            .floquet_multipliers
+            .iter()
+            .map(|value| (value.re, value.im))
+            .unzip();
+        let (analysis_floquet_real, analysis_floquet_imag): (Vec<_>, Vec<_>) = analysis
+            .floquet_multipliers
+            .iter()
+            .map(|value| (value.re, value.im))
+            .unzip();
+        Self {
+            config,
+            result_period: result.period,
+            result_frequency: result.frequency,
+            result_iterations: result.iterations,
+            result_residual_norm: result.residual_norm,
+            result_time: WorkerF64Series::from_vec(result.time.clone(), buffers),
+            result_waveforms,
+            result_period_detected: result.period_detected,
+            result_floquet_real: WorkerF64Series::from_vec(result_floquet_real, buffers),
+            result_floquet_imag: WorkerF64Series::from_vec(result_floquet_imag, buffers),
+            analysis_iterations: analysis.iterations,
+            analysis_final_residual: analysis.final_residual,
+            analysis_period: analysis.period,
+            analysis_monodromy: analysis
+                .monodromy
+                .iter()
+                .cloned()
+                .map(|row| WorkerF64Series::from_vec(row, buffers))
+                .collect(),
+            analysis_floquet_real: WorkerF64Series::from_vec(analysis_floquet_real, buffers),
+            analysis_floquet_imag: WorkerF64Series::from_vec(analysis_floquet_imag, buffers),
+            analysis_is_stable: analysis.is_stable,
+            shooting_state: WorkerF64Series::from_vec(
+                operating_point.shooting_state().to_vec(),
+                buffers,
+            ),
+        }
+    }
+
+    fn into_operating_point(
+        self,
+        buffers: &[Vec<f64>],
+    ) -> Result<rspice_core::engine::PssOperatingPoint, String> {
+        if self.result_waveforms.len() > 65_536 || self.analysis_monodromy.len() > 65_536 {
+            return Err("retained PSS worker metadata exceeds structural limits".to_owned());
+        }
+        let mut node_names = Vec::with_capacity(self.result_waveforms.len());
+        let mut waveforms = Vec::with_capacity(self.result_waveforms.len());
+        for waveform in self.result_waveforms {
+            node_names.push(waveform.node_name);
+            waveforms.push(
+                rspice_core::analysis::advanced::pss::PeriodicWaveform::from_values(
+                    waveform.values.into_vec(buffers)?,
+                ),
+            );
+        }
+        let result_floquet_multipliers = worker_join_complex(
+            "PSS result Floquet",
+            self.result_floquet_real.into_vec(buffers)?,
+            self.result_floquet_imag.into_vec(buffers)?,
+        )?;
+        let analysis_floquet_multipliers = worker_join_complex(
+            "PSS analysis Floquet",
+            self.analysis_floquet_real.into_vec(buffers)?,
+            self.analysis_floquet_imag.into_vec(buffers)?,
+        )?;
+        let monodromy = self
+            .analysis_monodromy
+            .into_iter()
+            .map(|row| row.into_vec(buffers))
+            .collect::<Result<Vec<_>, _>>()?;
+        let shooting_state = self.shooting_state.into_vec(buffers)?;
+        let result = rspice_core::analysis::advanced::pss::PssResult {
+            period: self.result_period,
+            frequency: self.result_frequency,
+            iterations: self.result_iterations,
+            residual_norm: self.result_residual_norm,
+            time: self.result_time.into_vec(buffers)?,
+            waveforms,
+            node_names,
+            period_detected: self.result_period_detected,
+            floquet_multipliers: result_floquet_multipliers,
+        };
+        let analysis = rspice_core::engine::PssAnalysisResult {
+            result,
+            iterations: self.analysis_iterations,
+            final_residual: self.analysis_final_residual,
+            period: self.analysis_period,
+            monodromy,
+            floquet_multipliers: analysis_floquet_multipliers,
+            is_stable: self.analysis_is_stable,
+        };
+        rspice_core::engine::PssOperatingPoint::try_from_parts(
+            self.config,
+            analysis,
+            shooting_state,
+        )
+        .map_err(|error| format!("invalid retained PSS worker payload: {error}"))
+    }
+}
+
+fn worker_join_complex(
+    label: &str,
+    real: Vec<f64>,
+    imaginary: Vec<f64>,
+) -> Result<Vec<num_complex::Complex64>, String> {
+    if real.len() != imaginary.len() {
+        return Err(format!(
+            "{label} real/imaginary lengths differ ({} versus {})",
+            real.len(),
+            imaginary.len()
+        ));
+    }
+    Ok(real
+        .into_iter()
+        .zip(imaginary)
+        .map(|(re, im)| num_complex::Complex64::new(re, im))
+        .collect())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerSimulationResultTransport {
     Inline(WorkerSimulationResult),
+    DcOp {
+        configuration: WorkerOpConfigTransport,
+        validated_startup_directives: usize,
+        mna_node_names: Vec<String>,
+        mna_branch_names: Vec<String>,
+        mna_solution: WorkerF64Series,
+        mna_solution_digest: crate::product::ContentDigest,
+        node_voltages: HashMap<String, f64>,
+        branch_currents: HashMap<String, f64>,
+        device_ops: Vec<WorkerDeviceOpPoint>,
+        device_report: Option<WorkerDeviceOpReport>,
+    },
     DcSweep {
         sweep_var: String,
         sweep_values: WorkerF64Series,
@@ -4831,6 +5985,10 @@ pub(crate) enum WorkerSimulationResultTransport {
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
+    },
+    Pss {
+        measurements: Vec<WorkerMeasurement>,
+        operating_point: WorkerPssOperatingPointTransport,
     },
     Ac {
         frequencies: WorkerF64Series,
@@ -4880,9 +6038,76 @@ pub(crate) enum WorkerSimulationResultTransport {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerOpConfigTransport {
+    config: crate::simulation::dialog::OpConfig,
+    #[serde(default)]
+    previous_state: Option<WorkerOpPreviousStateTransport>,
+}
+
+impl WorkerOpConfigTransport {
+    fn from_config(
+        mut config: crate::simulation::dialog::OpConfig,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        debug_assert!(config.validate_for_execution().is_ok());
+        let previous_state = config.previous_state.take().map(|state| {
+            WorkerOpPreviousStateTransport::from_validated_previous_state(state, buffers)
+        });
+        Self {
+            config,
+            previous_state,
+        }
+    }
+
+    fn into_config(
+        mut self,
+        buffers: &[Vec<f64>],
+    ) -> Result<crate::simulation::dialog::OpConfig, String> {
+        if self.config.previous_state.is_some() {
+            return Err(
+                "worker DC operating-point response carries a duplicate inline previous-state solution"
+                    .to_owned(),
+            );
+        }
+        self.config.previous_state = self
+            .previous_state
+            .map(|state| state.into_previous_state(buffers))
+            .transpose()?;
+        self.config.validate_for_execution()?;
+        Ok(self.config)
+    }
+}
+
 impl WorkerSimulationResultTransport {
     fn from_result(result: WorkerSimulationResult, buffers: &mut Vec<Vec<f64>>) -> Self {
         match result {
+            WorkerSimulationResult::DcOp {
+                configuration,
+                validated_startup_directives,
+                mna_node_names,
+                mna_branch_names,
+                mna_solution,
+                node_voltages,
+                branch_currents,
+                device_ops,
+                device_report,
+            } => Self::DcOp {
+                configuration: WorkerOpConfigTransport::from_config(configuration, buffers),
+                validated_startup_directives,
+                mna_node_names,
+                mna_branch_names,
+                mna_solution_digest: crate::simulation::execution::f64_sequence_digest(
+                    "rspice.worker-dc-op-mna/v1",
+                    &mna_solution,
+                ),
+                mna_solution: WorkerF64Series::from_vec(mna_solution, buffers),
+                node_voltages,
+                branch_currents,
+                device_ops,
+                device_report,
+            },
             WorkerSimulationResult::DcSweep {
                 sweep_var,
                 sweep_values,
@@ -4902,6 +6127,16 @@ impl WorkerSimulationResultTransport {
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
+            },
+            WorkerSimulationResult::Pss {
+                measurements,
+                operating_point,
+            } => Self::Pss {
+                measurements,
+                operating_point: WorkerPssOperatingPointTransport::from_operating_point(
+                    operating_point,
+                    buffers,
+                ),
             },
             WorkerSimulationResult::Ac {
                 frequencies,
@@ -4996,6 +6231,47 @@ impl WorkerSimulationResultTransport {
     fn into_result(self, buffers: &[Vec<f64>]) -> Result<WorkerSimulationResult, String> {
         match self {
             Self::Inline(result) => Ok(result),
+            Self::DcOp {
+                configuration,
+                validated_startup_directives,
+                mna_node_names,
+                mna_branch_names,
+                mna_solution,
+                mna_solution_digest,
+                node_voltages,
+                branch_currents,
+                device_ops,
+                device_report,
+            } => {
+                let configuration = configuration.into_config(buffers)?;
+                let mna_solution = mna_solution.into_vec(buffers)?;
+                let actual_digest = crate::simulation::execution::f64_sequence_digest(
+                    "rspice.worker-dc-op-mna/v1",
+                    &mna_solution,
+                );
+                if actual_digest != mna_solution_digest {
+                    return Err(format!(
+                        "worker DC operating-point MNA payload digest is {actual_digest}, expected {mna_solution_digest}"
+                    ));
+                }
+                validate_worker_dc_op_state(
+                    &configuration,
+                    &mna_node_names,
+                    &mna_branch_names,
+                    &mna_solution,
+                )?;
+                Ok(WorkerSimulationResult::DcOp {
+                    configuration,
+                    validated_startup_directives,
+                    mna_node_names,
+                    mna_branch_names,
+                    mna_solution,
+                    node_voltages,
+                    branch_currents,
+                    device_ops,
+                    device_report,
+                })
+            }
             Self::DcSweep {
                 sweep_var,
                 sweep_values,
@@ -5015,6 +6291,13 @@ impl WorkerSimulationResultTransport {
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,
+            }),
+            Self::Pss {
+                measurements,
+                operating_point,
+            } => Ok(WorkerSimulationResult::Pss {
+                measurements,
+                operating_point: operating_point.into_operating_point(buffers)?,
             }),
             Self::Ac {
                 frequencies,
@@ -5106,6 +6389,22 @@ impl WorkerSimulationResultTransport {
             }),
         }
     }
+}
+
+fn validate_worker_dc_op_state(
+    configuration: &crate::simulation::dialog::OpConfig,
+    node_names: &[String],
+    branch_names: &[String],
+    solution: &[f64],
+) -> Result<(), String> {
+    configuration.validate_for_execution()?;
+    rspice_core::engine::PssDcOperatingPointSeed::try_new(
+        node_names.to_vec(),
+        branch_names.to_vec(),
+        solution.to_vec(),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("worker DC operating-point state is invalid: {error}"))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -5209,6 +6508,11 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
     fn try_from(value: SimulationResult) -> Result<Self, Self::Error> {
         match value {
             SimulationResult::DcOp(result) => Ok(Self::DcOp {
+                configuration: result.configuration,
+                validated_startup_directives: result.validated_startup_directives,
+                mna_node_names: result.mna_node_names,
+                mna_branch_names: result.mna_branch_names,
+                mna_solution: result.mna_solution,
                 node_voltages: result.node_voltages,
                 branch_currents: result.branch_currents,
                 device_ops: result
@@ -5233,11 +6537,21 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 time,
                 waveforms,
                 measurements,
-            } => Ok(Self::Transient {
-                time,
-                waveforms: worker_waveforms(waveforms),
-                measurements: worker_measurements(measurements),
-            }),
+                periodic_state,
+            } => match periodic_state {
+                Some(operating_point) => {
+                    validate_pss_display_contract(&time, &waveforms, &operating_point)?;
+                    Ok(Self::Pss {
+                        measurements: worker_measurements(measurements),
+                        operating_point: std::sync::Arc::unwrap_or_clone(operating_point),
+                    })
+                }
+                None => Ok(Self::Transient {
+                    time,
+                    waveforms: worker_waveforms(waveforms),
+                    measurements: worker_measurements(measurements),
+                }),
+            },
             SimulationResult::Ac {
                 frequencies,
                 waveforms,
@@ -5406,11 +6720,21 @@ impl From<WorkerSimulationResult> for SimulationResult {
     fn from(value: WorkerSimulationResult) -> Self {
         match value {
             WorkerSimulationResult::DcOp {
+                configuration,
+                validated_startup_directives,
+                mna_node_names,
+                mna_branch_names,
+                mna_solution,
                 node_voltages,
                 branch_currents,
                 device_ops,
                 device_report,
             } => Self::DcOp(DcOpResult {
+                configuration,
+                validated_startup_directives,
+                mna_node_names,
+                mna_branch_names,
+                mna_solution,
                 node_voltages,
                 branch_currents,
                 device_ops: device_ops
@@ -5438,7 +6762,12 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 time,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
+                periodic_state: None,
             },
+            WorkerSimulationResult::Pss {
+                measurements,
+                operating_point,
+            } => simulation_result_from_worker_pss(measurements, operating_point),
             WorkerSimulationResult::Ac {
                 frequencies,
                 waveforms,
@@ -5651,7 +6980,10 @@ impl From<WorkerTransferFunctionScalar> for TransferFunctionScalar {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerNoiseSummary {
     pub rows: Vec<WorkerNoiseContributorRow>,
-    pub total_rms: f64,
+    #[serde(default)]
+    pub total_rms: Option<f64>,
+    #[serde(default)]
+    pub input_rms: Option<f64>,
     pub band: (f64, f64),
 }
 
@@ -5677,6 +7009,7 @@ impl From<NoiseSummary> for WorkerNoiseSummary {
                 .map(WorkerNoiseContributorRow::from)
                 .collect(),
             total_rms: value.total_rms,
+            input_rms: value.input_rms,
             band: value.band,
         }
     }
@@ -5691,6 +7024,7 @@ impl From<WorkerNoiseSummary> for NoiseSummary {
                 .map(NoiseContributorRow::from)
                 .collect(),
             total_rms: value.total_rms,
+            input_rms: value.input_rms,
             band: value.band,
         }
     }
@@ -5726,7 +7060,7 @@ impl From<WorkerNoiseContributorRow> for NoiseContributorRow {
     fn from(value: WorkerNoiseContributorRow) -> Self {
         Self {
             device: value.device,
-            mechanism: intern_static_label(value.mechanism),
+            mechanism: value.mechanism,
             power: value.power,
             share_pct: value.share_pct,
         }
@@ -6450,7 +7784,31 @@ fn worker_request_from_value(
         .map_err(worker_request_js_error)?
         .dyn_into::<js_sys::Array>()
         .map_err(|_| JsValue::from_str("worker request transport buffers must be an array"))?;
-    let mut decoded_buffers = Vec::with_capacity(buffers.length() as usize);
+    let buffer_count = buffers.length() as usize;
+    if buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(JsValue::from_str(&format!(
+            "worker request contains {buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+        )));
+    }
+    let mut numeric_values = 0usize;
+    for index in 0..buffers.length() {
+        let view = buffers
+            .get(index)
+            .dyn_into::<js_sys::Float64Array>()
+            .map_err(|_| {
+                JsValue::from_str(&format!(
+                    "worker request transport buffer {index} is not a Float64Array"
+                ))
+            })?;
+        numeric_values = checked_worker_request_numeric_total(
+            numeric_values,
+            index as usize,
+            view.length() as usize,
+        )
+        .map_err(|error| JsValue::from_str(&error))?;
+    }
+
+    let mut decoded_buffers = Vec::with_capacity(buffer_count);
     for index in 0..buffers.length() {
         let view = buffers
             .get(index)
@@ -6485,7 +7843,8 @@ pub(crate) fn worker_response_transport_value(
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     use wasm_bindgen::JsValue;
 
-    let transport = WorkerResponseTransport::from_response(response);
+    let transport = WorkerResponseTransport::from_response(response)
+        .map_err(|error| JsValue::from_str(&error))?;
     let message = js_sys::Object::new();
     js_sys::Reflect::set(
         &message,
@@ -6538,7 +7897,37 @@ pub(crate) fn worker_response_from_value(
             )
         })?;
 
-    let mut decoded_buffers = Vec::with_capacity(buffers.length() as usize);
+    let buffer_count = buffers.length() as usize;
+    if buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(SimulationError::InvalidConfig(format!(
+            "worker response contains {buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+        )));
+    }
+    let mut numeric_values = 0usize;
+    for index in 0..buffers.length() {
+        let view = buffers
+            .get(index)
+            .dyn_into::<js_sys::Float64Array>()
+            .map_err(|_| {
+                SimulationError::InvalidConfig(format!(
+                    "worker response transport buffer {index} is not a Float64Array"
+                ))
+            })?;
+        numeric_values = numeric_values
+            .checked_add(view.length() as usize)
+            .ok_or_else(|| {
+                SimulationError::InvalidConfig(
+                    "worker response numeric size overflows this platform".to_owned(),
+                )
+            })?;
+        if numeric_values > MAX_WORKER_F64_VALUES {
+            return Err(SimulationError::InvalidConfig(format!(
+                "worker response contains more than {MAX_WORKER_F64_VALUES} numerical values"
+            )));
+        }
+    }
+
+    let mut decoded_buffers = Vec::with_capacity(buffer_count);
     for index in 0..buffers.length() {
         let view = buffers
             .get(index)
@@ -6587,6 +7976,30 @@ fn sum_payload_bytes(bytes: impl IntoIterator<Item = usize>) -> usize {
 #[cfg(test)]
 fn f64_payload_bytes(len: usize) -> usize {
     len.saturating_mul(std::mem::size_of::<f64>())
+}
+
+#[cfg(test)]
+fn pss_operating_point_payload_bytes(
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+) -> usize {
+    let analysis = operating_point.analysis();
+    let values = analysis
+        .result
+        .time
+        .len()
+        .saturating_add(
+            analysis
+                .result
+                .waveforms
+                .iter()
+                .map(|waveform| waveform.values.len())
+                .sum::<usize>(),
+        )
+        .saturating_add(analysis.monodromy.iter().map(Vec::len).sum::<usize>())
+        .saturating_add(analysis.result.floquet_multipliers.len().saturating_mul(2))
+        .saturating_add(analysis.floquet_multipliers.len().saturating_mul(2))
+        .saturating_add(operating_point.shooting_state().len());
+    f64_payload_bytes(values)
 }
 
 #[cfg(test)]
@@ -6660,6 +8073,79 @@ fn worker_waveforms(waveforms: HashMap<String, WaveformData>) -> Vec<WorkerWavef
     let mut waveforms: Vec<_> = waveforms.into_values().map(WorkerWaveform::from).collect();
     waveforms.sort_by(|left, right| left.name.cmp(&right.name));
     waveforms
+}
+
+fn validate_pss_display_contract(
+    time: &[f64],
+    waveforms: &HashMap<String, WaveformData>,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+) -> Result<(), SimulationError> {
+    let result = &operating_point.analysis().result;
+    if time != result.time.as_slice() {
+        return Err(SimulationError::InvalidConfig(
+            "PSS display time axis does not match its retained numerical orbit".to_owned(),
+        ));
+    }
+    let expected_count = result
+        .node_names
+        .iter()
+        .filter(|name| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
+        .count();
+    if waveforms.len() != expected_count {
+        return Err(SimulationError::InvalidConfig(format!(
+            "PSS display contains {} waveforms, but its retained orbit requires {expected_count}",
+            waveforms.len()
+        )));
+    }
+    for (name, periodic) in result.node_names.iter().zip(&result.waveforms) {
+        if name == "0" || name.eq_ignore_ascii_case("gnd") {
+            continue;
+        }
+        let display_name = format!("V({name})");
+        let display = waveforms.get(&display_name).ok_or_else(|| {
+            SimulationError::InvalidConfig(format!(
+                "PSS display is missing retained-orbit waveform '{display_name}'"
+            ))
+        })?;
+        if display.name != display_name
+            || display.x_values.as_slice() != result.time.as_slice()
+            || display.y_values.as_slice() != periodic.values.as_slice()
+            || display.x_unit != "s"
+            || display.y_unit != "V"
+            || display.is_complex
+            || display.y_imag.is_some()
+        {
+            return Err(SimulationError::InvalidConfig(format!(
+                "PSS display waveform '{display_name}' does not exactly match its retained numerical orbit"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn simulation_result_from_worker_pss(
+    measurements: Vec<WorkerMeasurement>,
+    operating_point: rspice_core::engine::PssOperatingPoint,
+) -> SimulationResult {
+    let result = &operating_point.analysis().result;
+    let time = result.time.clone();
+    let mut waveforms = HashMap::with_capacity(result.waveforms.len());
+    for (name, periodic) in result.node_names.iter().zip(&result.waveforms) {
+        if name == "0" || name.eq_ignore_ascii_case("gnd") {
+            continue;
+        }
+        let display_name = format!("V({name})");
+        waveforms.insert(
+            display_name.clone(),
+            WaveformData::new_time_domain(display_name, time.clone(), periodic.values.clone()),
+        );
+    }
+    SimulationResult::Transient {
+        time,
+        waveforms,
+        measurements: measure_results(measurements),
+        periodic_state: Some(std::sync::Arc::new(operating_point)),
+    }
 }
 
 fn waveform_map(waveforms: Vec<WorkerWaveform>) -> HashMap<String, WaveformData> {

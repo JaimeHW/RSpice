@@ -6,7 +6,10 @@
 //! resolver the runner uses; the squiggle (underline), gutter pip, and
 //! inspector all read that single vector.
 
+use std::path::{Path, PathBuf};
+
 use egui::Ui;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 
 use crate::common::AppState;
 use crate::ui::theme::{self, FontWeight};
@@ -29,6 +32,21 @@ const CODE_TOP_PADDING: i8 = 8;
 const CODE_BOTTOM_PADDING: i8 = 36;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
+const SYNTHETIC_EDITOR_SOURCE: &str = "__rspice_netlist_editor__.cir";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IncludeAccess {
+    NativeFilesystem,
+    AuthenticatedBundleOnly,
+}
+
+const fn platform_include_access() -> IncludeAccess {
+    if cfg!(target_arch = "wasm32") {
+        IncludeAccess::AuthenticatedBundleOnly
+    } else {
+        IncludeAccess::NativeFilesystem
+    }
+}
 
 fn code_editor_frame() -> egui::Frame {
     egui::Frame::new().inner_margin(egui::Margin {
@@ -446,11 +464,46 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
         } else {
             Ok(buffer.clone())
         };
+    let source_path = match state.ui.netlist.active_document {
+        super::ActiveNetlistDocument::OwnedSource => state.workspace.netlist_source_path.as_deref(),
+        super::ActiveNetlistDocument::Generated => state.schematic.current_file.as_deref(),
+        super::ActiveNetlistDocument::GeneratedDiff => None,
+    };
+    let materialized_external_line = materialized
+        .as_ref()
+        .ok()
+        .and_then(|source| first_external_dependency_line(source));
+    let sealed_sources = if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly
+        && materialized_external_line.is_some()
+    {
+        match state.model_library_manager.seal_execution_sources() {
+            Ok(sources) => Some(sources),
+            Err(error) => {
+                let netlist = &mut state.ui.netlist;
+                netlist.diagnostics = vec![
+                    Diagnostic::error(format!(
+                        "Authenticated browser source bundle is invalid: {error}"
+                    ))
+                    .with_line(materialized_external_line),
+                ];
+                netlist.diag_revision = Some(revision);
+                return;
+            }
+        }
+    } else {
+        None
+    };
     let (diagnostics, symbols) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()))
     } else {
         match materialized {
-            Ok(source) => parse_buffer(&source),
+            Ok(source) => parse_buffer_with_context(
+                &source,
+                source_path,
+                platform_include_access(),
+                sealed_sources.as_ref(),
+                &NoAbort,
+            ),
             Err(error) => (vec![Diagnostic::error(error)], None),
         }
     };
@@ -462,32 +515,154 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     netlist.diag_revision = Some(revision);
 }
 
-/// Parse the buffer: diagnostics out of the error path, completion
-/// symbols out of the success path (a broken parse keeps the previous
-/// symbols). Includes are *not* resolved here — `.include`/`.lib` lines
-/// are inert in this pass, which keeps keystroke linting free of file
-/// IO; errors inside included files still surface at run time.
+/// Parse an in-memory source that owns no external dependency path.
+///
+/// Tests and dependency-free callers retain this convenience entry point;
+/// the live editor uses [`parse_buffer_with_context`] so include resolution
+/// receives the exact active-document origin used by execution.
+#[cfg(test)]
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
-    match rspice_core::Netlist::parse(buffer) {
+    parse_buffer_with_context(buffer, None, platform_include_access(), None, &NoAbort)
+}
+
+fn parse_buffer_with_context(
+    buffer: &str,
+    source_path: Option<&Path>,
+    include_access: IncludeAccess,
+    sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
+    abort: &dyn AbortSignal,
+) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
+    let external_line = first_external_dependency_line(buffer);
+    if source_path.is_none()
+        && let Some(line) = external_line
+    {
+        return (
+            vec![Diagnostic::error(
+                "Relative .include/.inc/.lib sources require an imported deck origin before they can be resolved and sealed.",
+            )
+            .with_line(Some(line))],
+            None,
+        );
+    }
+
+    let parse_source = match editor_parse_source(source_path) {
+        Ok(path) => path,
+        Err(error) => return (vec![Diagnostic::error(error)], None),
+    };
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: rspice_core::ResourceLimits::default(),
+        ..Default::default()
+    };
+    let parsed = match include_access {
+        IncludeAccess::NativeFilesystem => {
+            rspice_core::Netlist::parse_with_path_and_options_and_abort(
+                buffer,
+                &parse_source,
+                options,
+                abort,
+            )
+        }
+        IncludeAccess::AuthenticatedBundleOnly => {
+            let Some(sealed_sources) = sealed_sources else {
+                return (
+                    vec![Diagnostic::error(
+                        "External .include/.inc/.lib sources require an authenticated imported source bundle in this browser session.",
+                    )
+                    .with_line(external_line)],
+                    None,
+                );
+            };
+            let bundle = match sealed_sources.bundle_for_root(&parse_source, buffer) {
+                Ok(bundle) => bundle,
+                Err(error) => {
+                    return (
+                        vec![Diagnostic::error(error).with_line(external_line)],
+                        None,
+                    );
+                }
+            };
+            rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+                buffer,
+                &parse_source,
+                bundle,
+                options,
+                abort,
+            )
+        }
+    };
+    match parsed {
         Ok(netlist) => {
-            let mut diagnostics = parser_diagnostics(&netlist);
+            let mut diagnostics = parser_diagnostics(&netlist, Some(&parse_source));
             if let Err(error) = rspice_core::netlist::validate_output_symbols(&netlist) {
-                diagnostics.extend(parse_error_diagnostics(error));
+                diagnostics.extend(parse_error_diagnostics_at(error, Some(&parse_source)));
             }
             diagnostics.extend(unknown_reference_diagnostics(buffer));
             (diagnostics, Some(harvest_symbols(&netlist)))
         }
-        Err(error) => (parse_error_diagnostics(error), None),
+        Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => {
+            (parse_error_diagnostics_at(error, Some(&parse_source)), None)
+        }
+        Err(rspice_core::netlist::ParseWithAbortError::Aborted) => (
+            vec![Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                source_path: source_path.map(Path::to_path_buf),
+                source_line: None,
+                span: None,
+                line: None,
+                column: None,
+                message: "Live netlist diagnostics were cancelled before completion.".to_owned(),
+                fix: None,
+            }],
+            None,
+        ),
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn editor_parse_source(source_path: Option<&Path>) -> Result<PathBuf, String> {
+    let Some(path) = source_path else {
+        return Ok(PathBuf::from(SYNTHETIC_EDITOR_SOURCE));
+    };
+    if path.is_absolute() {
+        return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+    }
+    let current = std::env::current_dir()
+        .map_err(|error| format!("Could not resolve the netlist source origin: {error}"))?;
+    let absolute = current.join(path);
+    Ok(absolute.canonicalize().unwrap_or(absolute))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn editor_parse_source(source_path: Option<&Path>) -> Result<PathBuf, String> {
+    Ok(source_path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(SYNTHETIC_EDITOR_SOURCE)))
+}
+
+fn first_external_dependency_line(buffer: &str) -> Option<usize> {
+    buffer.lines().enumerate().find_map(|(line, raw)| {
+        let include = rspice_core::netlist::parse_include_directive(raw).is_some();
+        let external_lib = rspice_core::netlist::parse_lib_directive(raw)
+            .is_some_and(|(_, section)| section.is_some());
+        (include || external_lib).then_some(line)
+    })
 }
 
 /// Convert a typed parse failure into editor diagnostics. Aggregate semantic
 /// failures remain one row per authored card so distinct source origins are
 /// localized without flooding the strip; ordered and repeated occurrences are
 /// retained inside that card's message.
+#[cfg(test)]
 fn parse_error_diagnostics(error: rspice_core::netlist::ParseError) -> Vec<Diagnostic> {
+    parse_error_diagnostics_at(error, None)
+}
+
+fn parse_error_diagnostics_at(
+    error: rspice_core::netlist::ParseError,
+    editor_source_path: Option<&Path>,
+) -> Vec<Diagnostic> {
     let rspice_core::netlist::ParseError::OutputSymbolValidation(validation) = error else {
-        return vec![parse_error_diagnostic(error)];
+        return vec![parse_error_diagnostic_at(error, editor_source_path)];
     };
 
     let mut groups = Vec::<(
@@ -513,26 +688,35 @@ fn parse_error_diagnostics(error: rspice_core::netlist::ParseError) -> Vec<Diagn
     groups
         .into_iter()
         .map(|(directive, origin, entries)| {
-            let line = origin.line.checked_sub(1);
             Diagnostic::error(format!(
                 "Undefined output symbols in {directive} ({origin}): {}",
                 entries.join(", ")
             ))
-            .with_line(line)
+            .with_source_location(&origin, editor_source_path)
         })
         .collect()
 }
 
+#[cfg(test)]
 fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic {
+    parse_error_diagnostic_at(error, None)
+}
+
+fn parse_error_diagnostic_at(
+    error: rspice_core::netlist::ParseError,
+    editor_source_path: Option<&Path>,
+) -> Diagnostic {
     use rspice_core::netlist::ParseError;
 
     match error {
         ParseError::Syntax { line, message } => {
             // Parser lines are 1-based; `line == 0` means "unlocated".
-            Diagnostic::error(message).with_line(line.checked_sub(1))
+            let (message, origin) = mapped_syntax_origin(message, line, editor_source_path);
+            Diagnostic::error(message).with_source_location(&origin, editor_source_path)
         }
         ParseError::MissingSubcircuitEnds(error) => {
-            Diagnostic::error(error.to_string()).with_line(error.opened_at.line.checked_sub(1))
+            Diagnostic::error(error.to_string())
+                .with_source_location(&error.opened_at, editor_source_path)
         }
         ParseError::DuplicateSubcircuitPortBinding(error) => Diagnostic::error(format!(
             "{}\nSubcircuit: {} (canonical {}) · instance: {} · formal {} · positions {} and {} · effective nodes {} and {}",
@@ -566,7 +750,7 @@ fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic
             error.scope_name.as_deref().unwrap_or("top level"),
             error.reference_position,
         ))
-        .with_line(error.origin.line.checked_sub(1)),
+        .with_source_location(&error.origin, editor_source_path),
         ParseError::OutputSymbolValidation(_) => {
             unreachable!("aggregate output-symbol errors are expanded before scalar mapping")
         }
@@ -578,13 +762,41 @@ fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic
             error.conflicting_kind.as_spice_directive(),
             error.conflicting,
         ))
-        .with_line(error.conflicting.line.checked_sub(1)),
+        .with_source_location(&error.conflicting, editor_source_path),
         ParseError::DeviceInitialCondition(error) => {
             let origin = device_initial_condition_diagnostic_origin(&error);
-            Diagnostic::error(error.to_string()).with_line(origin.line.checked_sub(1))
+            Diagnostic::error(error.to_string()).with_source_location(origin, editor_source_path)
         }
         other => Diagnostic::error(other.to_string()),
     }
+}
+
+fn mapped_syntax_origin(
+    message: String,
+    line: usize,
+    editor_source_path: Option<&Path>,
+) -> (String, rspice_core::netlist::NetlistSourceLocation) {
+    if line > 0 {
+        let marker = format!(":{line}: ");
+        // Source-mapped core errors use `<path>:<line>: <detail>`. Search from
+        // the right so Windows drive prefixes (`C:` and `\\?\C:`) and any
+        // earlier colon-bearing path component remain part of the path.
+        if let Some(marker_start) = message.rfind(&marker)
+            && marker_start > 0
+        {
+            let source = PathBuf::from(&message[..marker_start]);
+            let detail = message[marker_start + marker.len()..].to_owned();
+            return (
+                detail,
+                rspice_core::netlist::NetlistSourceLocation::in_file(source, line),
+            );
+        }
+    }
+    let origin = match editor_source_path {
+        Some(path) => rspice_core::netlist::NetlistSourceLocation::in_file(path, line),
+        None => rspice_core::netlist::NetlistSourceLocation::in_memory(line),
+    };
+    (message, origin)
 }
 
 fn device_initial_condition_diagnostic_origin(
@@ -635,6 +847,266 @@ fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntr
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    struct IncludeFixtureDir(PathBuf);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl IncludeFixtureDir {
+        fn new(label: &str) -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+
+            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "rspice-editor-include-{label}-{}-{id}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create include fixture directory");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl Drop for IncludeFixtureDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn parse_native_fixture(
+        source: &str,
+        root: &Path,
+    ) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
+        parse_buffer_with_context(
+            source,
+            Some(root),
+            IncludeAccess::NativeFilesystem,
+            None,
+            &NoAbort,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lint_resolves_nested_includes_from_each_owning_source() {
+        let fixture = IncludeFixtureDir::new("nested");
+        let root = fixture.path().join("root.cir");
+        std::fs::write(
+            fixture.path().join("child.inc"),
+            ".include \"nested/grand.inc\"\n",
+        )
+        .expect("write child include");
+        std::fs::create_dir_all(fixture.path().join("nested")).expect("create nested directory");
+        std::fs::write(
+            fixture.path().join("nested/grand.inc"),
+            ".subckt CELL a b\nRIN a b 1k\n.ends CELL\n",
+        )
+        .expect("write grandchild include");
+        let source = "nested include lint\n.include \"child.inc\"\nX1 out 0 CELL\n.end\n";
+
+        let (diagnostics, symbols) = parse_native_fixture(source, &root);
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let symbols = symbols.expect("clean dependency closure harvests symbols");
+        assert!(symbols.iter().any(|symbol| symbol.name == "CELL"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lint_honors_external_lib_section_selection() {
+        let fixture = IncludeFixtureDir::new("lib-section");
+        let root = fixture.path().join("root.cir");
+        std::fs::write(
+            fixture.path().join("models.lib"),
+            ".lib TT\n.model DTT D(Is=1e-14)\n.endl TT\n\
+             .lib FF\n.enddata\n.endl FF\n",
+        )
+        .expect("write sectioned library");
+        let source = "selected library lint\n.lib \"models.lib\" TT\nD1 out 0 DTT\n.end\n";
+
+        let (diagnostics, symbols) = parse_native_fixture(source, &root);
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        assert!(
+            symbols
+                .expect("selected section parses")
+                .iter()
+                .any(|symbol| symbol.name.eq_ignore_ascii_case("DTT"))
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lint_reports_missing_include_at_root_directive() {
+        let fixture = IncludeFixtureDir::new("missing");
+        let root = fixture.path().join("root.cir");
+        let source = "missing include lint\n.include \"missing.inc\"\n.end\n";
+
+        let (diagnostics, symbols) = parse_native_fixture(source, &root);
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].line, Some(1));
+        assert_eq!(diagnostics[0].source_line, Some(1));
+        assert_eq!(diagnostics[0].source_path.as_deref(), Some(root.as_path()));
+        assert!(diagnostics[0].message.contains("Include file not found"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lint_reports_include_cycle_at_root_dependency_edge() {
+        let fixture = IncludeFixtureDir::new("cycle");
+        let root = fixture.path().join("root.cir");
+        std::fs::write(fixture.path().join("a.inc"), ".include \"b.inc\"\n")
+            .expect("write first cycle member");
+        std::fs::write(fixture.path().join("b.inc"), ".include \"a.inc\"\n")
+            .expect("write second cycle member");
+        let source = "cyclic include lint\n.include \"a.inc\"\n.end\n";
+
+        let (diagnostics, symbols) = parse_native_fixture(source, &root);
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].line, Some(1));
+        assert_eq!(diagnostics[0].source_path.as_deref(), Some(root.as_path()));
+        assert!(
+            diagnostics[0]
+                .message
+                .to_ascii_lowercase()
+                .contains("circular include")
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lint_keeps_included_syntax_error_on_included_source() {
+        let fixture = IncludeFixtureDir::new("included-syntax");
+        let root = fixture.path().join("root.cir");
+        let child = fixture.path().join("child.inc");
+        std::fs::write(&child, "R1 out 0 1k FIRST SECOND\n")
+            .expect("write invalid included source");
+        let source = "included syntax lint\n.include \"child.inc\"\n.end\n";
+
+        let (diagnostics, symbols) = parse_native_fixture(source, &root);
+        let canonical_child = child.canonicalize().expect("canonicalize included source");
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].source_path.as_deref(),
+            Some(canonical_child.as_path())
+        );
+        assert_eq!(diagnostics[0].source_line, Some(0));
+        assert_eq!(
+            diagnostics[0].line, None,
+            "an included-source line must not paint the root editor gutter"
+        );
+        assert!(diagnostics[0].message.contains("Unexpected trailing token"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lint_keeps_included_warning_off_the_root_gutter() {
+        let fixture = IncludeFixtureDir::new("included-warning");
+        let root = fixture.path().join("root.cir");
+        let child = fixture.path().join("child.inc");
+        std::fs::write(&child, "Rchild out 0\n").expect("write warning-producing include");
+        let source = "included warning lint\n.include \"child.inc\"\n.end\n";
+
+        let (diagnostics, symbols) = parse_native_fixture(source, &root);
+        let canonical_child = child.canonicalize().expect("canonicalize included source");
+
+        assert!(symbols.is_some());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        assert_eq!(
+            diagnostics[0].source_path.as_deref(),
+            Some(canonical_child.as_path())
+        );
+        assert_eq!(diagnostics[0].source_line, Some(0));
+        assert_eq!(
+            diagnostics[0].line, None,
+            "an included warning must not paint the root editor gutter"
+        );
+    }
+
+    #[test]
+    fn live_lint_fails_closed_when_browser_cannot_resolve_include() {
+        let source = "browser include lint\n.include \"models/device.lib\"\n.end\n";
+        let (diagnostics, symbols) = parse_buffer_with_context(
+            source,
+            Some(Path::new("project/root.cir")),
+            IncludeAccess::AuthenticatedBundleOnly,
+            None,
+            &NoAbort,
+        );
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].line, Some(1));
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("authenticated imported source bundle")
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lint_parses_authenticated_browser_model_bundle_without_filesystem_fallback() {
+        let fixture = IncludeFixtureDir::new("authenticated-browser");
+        let root = fixture.path().join("root.cir");
+        let model = fixture.path().join("device.lib");
+        std::fs::write(&model, ".lib TT\n.model DSEALED D(Is=1e-14)\n.endl TT\n")
+            .expect("write authenticated model library");
+        let mut manager = crate::state::ModelLibraryManager::new();
+        manager
+            .load_library_file(&model, Some("TT"))
+            .expect("import authenticated model library");
+        let sealed = manager
+            .seal_execution_sources()
+            .expect("seal authenticated model library");
+        let source = "authenticated browser lint\n.lib \"device.lib\" TT\nD1 out 0 DSEALED\n.end\n";
+
+        let (diagnostics, symbols) = parse_buffer_with_context(
+            source,
+            Some(&root),
+            IncludeAccess::AuthenticatedBundleOnly,
+            Some(&sealed),
+            &NoAbort,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        assert!(
+            symbols
+                .expect("authenticated source parses")
+                .iter()
+                .any(|symbol| symbol.name.eq_ignore_ascii_case("DSEALED"))
+        );
+    }
+
+    #[test]
+    fn live_lint_uses_abort_aware_parser_contract() {
+        let source = "cancelled lint\nR1 out 0 1k\n.end\n";
+        let (diagnostics, symbols) = parse_buffer_with_context(
+            source,
+            None,
+            IncludeAccess::NativeFilesystem,
+            None,
+            &rspice_core::abort_signal::ImmediateAbort,
+        );
+
+        assert!(symbols.is_none());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
+        assert!(diagnostics[0].message.contains("cancelled"));
+    }
+
     #[test]
     fn editor_frame_owns_the_canonical_gutter_and_code_insets() {
         let frame = code_editor_frame();
@@ -657,6 +1129,20 @@ mod tests {
         assert!(diagnostic.span.is_none());
         assert!(diagnostic.fix.is_none());
         assert!(!diagnostic.message.trim().is_empty());
+    }
+
+    #[test]
+    fn mapped_syntax_origin_accepts_windows_verbatim_drive_paths() {
+        let source = r"\\?\C:\projects\rspice\models\child.inc";
+        let (detail, origin) = mapped_syntax_origin(
+            format!("{source}:17: Unexpected trailing token"),
+            17,
+            Some(Path::new(r"C:\projects\rspice\root.cir")),
+        );
+
+        assert_eq!(detail, "Unexpected trailing token");
+        assert_eq!(origin.path.as_deref(), Some(Path::new(source)));
+        assert_eq!(origin.line, 17);
     }
 
     #[test]
@@ -769,7 +1255,12 @@ mod tests {
         );
 
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
-        assert_eq!(diagnostic.line, Some(11));
+        assert_eq!(diagnostic.line, None);
+        assert_eq!(diagnostic.source_line, Some(11));
+        assert_eq!(
+            diagnostic.source_path.as_deref(),
+            Some(Path::new("bug75.cir"))
+        );
         assert!(diagnostic.message.contains("Undefined inductor L2"));
         assert!(diagnostic.message.contains("Coupling: K3 (canonical K3)"));
         assert!(diagnostic.message.contains("scope: top level"));
@@ -832,7 +1323,12 @@ mod tests {
             ));
 
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
-        assert_eq!(diagnostic.line, Some(10));
+        assert_eq!(diagnostic.line, None);
+        assert_eq!(diagnostic.source_line, Some(10));
+        assert_eq!(
+            diagnostic.source_path.as_deref(),
+            Some(Path::new("included.cir"))
+        );
         assert!(diagnostic.message.contains(".IC at deck.cir:7"));
         assert!(diagnostic.message.contains(".NODESET at included.cir:11"));
     }
@@ -875,6 +1371,8 @@ mod tests {
         let source = "deck\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
         let diagnostic = Diagnostic {
             severity: DiagnosticSeverity::Error,
+            source_path: None,
+            source_line: Some(1),
             span: Some(18..22),
             line: Some(1),
             column: Some(11),

@@ -754,6 +754,13 @@ pub struct ParseDiagnostic {
     /// 1-based input line number. `0` is reserved for diagnostics that cannot be
     /// tied to one source line.
     pub line: usize,
+    /// Exact physical source location when the parser has source-map context.
+    ///
+    /// Callers that construct diagnostics for an in-memory deck may leave this
+    /// unset and continue to use [`Self::line`]. File-backed parsing populates
+    /// it for root and included sources so downstream tools do not project an
+    /// included warning onto the root deck.
+    pub origin: Option<NetlistSourceLocation>,
     /// Stable machine-readable diagnostic code.
     pub code: String,
     /// Human-readable diagnostic message.
@@ -767,6 +774,22 @@ impl ParseDiagnostic {
     pub fn warning(line: usize, code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             line,
+            origin: None,
+            code: code.into(),
+            message: message.into(),
+            severity: DiagnosticSeverity::Warning,
+        }
+    }
+
+    /// Create a warning tied to an exact physical source location.
+    pub fn warning_at(
+        origin: NetlistSourceLocation,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            line: origin.line,
+            origin: Some(origin),
             code: code.into(),
             message: message.into(),
             severity: DiagnosticSeverity::Warning,
@@ -966,6 +989,39 @@ impl Netlist {
         )
     }
 
+    /// Parse a netlist using only an authenticated in-memory source bundle for
+    /// every `.include`, `.inc`, and external `.lib` lookup.
+    ///
+    /// This is the browser-safe counterpart to
+    /// [`Self::parse_with_path_and_options_and_abort`]. The supplied bundle
+    /// must contain the root path and an authenticated edge for every external
+    /// source directive; filesystem fallback is never attempted.
+    pub fn parse_with_path_and_sealed_sources_and_options_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        sources: SealedSourceBundle,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let include_processor = IncludeProcessor::new_sealed(file_path, sources.clone())
+            .with_resource_limits(options.resource_limits);
+        let mut initcond_resource_limits = options.resource_limits;
+        initcond_resource_limits.max_dependency_source_bytes = initcond_resource_limits
+            .max_dependency_source_bytes
+            .min(MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES);
+        let initcond_source_provider = IncludeProcessor::new_sealed(file_path, sources)
+            .with_resource_limits(initcond_resource_limits);
+        Self::parse_with_source_providers_and_abort(
+            input,
+            file_path,
+            options,
+            abort,
+            include_processor,
+            initcond_source_provider,
+            false,
+        )
+    }
+
     /// Parse a netlist from source text with include resolution and an explicit
     /// execution directory.
     ///
@@ -1013,28 +1069,8 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
-        let mut include_processor =
-            IncludeProcessor::new_with_execution_dir(file_path, execution_dir)
-                .with_resource_limits(options.resource_limits);
-        let expanded =
-            include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
-        let (sanitized, mut diagnostics) =
-            Self::sanitize_expanded_source_with_abort(expanded, abort)?;
-        let mut netlist =
-            parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
-        diagnostics.extend(netlist.diagnostics);
-        netlist.diagnostics = diagnostics;
-        Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
-        Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
-        Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
-        Self::apply_spef_includes_with_abort(
-            &mut netlist,
-            file_path,
-            options.resource_limits,
-            abort,
-        )?;
-        netlist.source_path = Some(file_path.to_path_buf());
+        let include_processor = IncludeProcessor::new_with_execution_dir(file_path, execution_dir)
+            .with_resource_limits(options.resource_limits);
         let default_execution_dir = if execution_dir.is_none() {
             Some(std::env::current_dir().map_err(ParseError::Io)?)
         } else {
@@ -1050,6 +1086,53 @@ impl Netlist {
         let initcond_source_provider =
             IncludeProcessor::new_with_execution_dir(file_path, Some(initcond_execution_dir))
                 .with_resource_limits(initcond_resource_limits);
+        Self::parse_with_source_providers_and_abort(
+            input,
+            file_path,
+            options,
+            abort,
+            include_processor,
+            initcond_source_provider,
+            true,
+        )
+    }
+
+    fn parse_with_source_providers_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+        mut include_processor: IncludeProcessor,
+        initcond_source_provider: IncludeProcessor,
+        allow_filesystem_spef: bool,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
+        let expanded =
+            include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
+        let (sanitized, mut diagnostics) =
+            Self::sanitize_expanded_source_with_abort(expanded, abort)?;
+        let mut netlist =
+            parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
+        diagnostics.extend(netlist.diagnostics);
+        netlist.diagnostics = diagnostics;
+        Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
+        Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
+        Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
+        if !allow_filesystem_spef && !netlist.spef_includes.is_empty() {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: "Authenticated sealed-source parsing cannot resolve .spef_include from the filesystem"
+                    .to_owned(),
+            }
+            .into());
+        }
+        Self::apply_spef_includes_with_abort(
+            &mut netlist,
+            file_path,
+            options.resource_limits,
+            abort,
+        )?;
+        netlist.source_path = Some(file_path.to_path_buf());
         netlist
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
@@ -1564,8 +1647,8 @@ impl Netlist {
                     if head.eq_ignore_ascii_case(".control") {
                         in_control = true;
                         opened_at = Some(origin.clone());
-                        diagnostics.push(ParseDiagnostic::warning(
-                            origin.line,
+                        diagnostics.push(ParseDiagnostic::warning_at(
+                            origin.clone(),
                             "control-block-ignored",
                             ".control scripting ignored; simple analysis/output commands and supported settings are promoted into the parsed deck",
                         ));
@@ -7606,6 +7689,33 @@ mod tests {
             Some(&child),
             6,
             MissingSubcircuitEndsBoundary::EndOfSource,
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn included_control_warning_retains_child_source_provenance() {
+        let dir = cancellation_fixture_path("control-warning-origin");
+        std::fs::create_dir_all(&dir).expect("create control warning fixture");
+        let deck = dir.join("deck.cir");
+        let child = dir.join("child.inc");
+        std::fs::write(&deck, "control warning\n.include child.inc\n.end\n")
+            .expect("write control warning owner");
+        std::fs::write(&child, ".control\nop\n.endc\nR1 out 0 1k\n")
+            .expect("write included control block");
+
+        let netlist = Netlist::parse_file(&deck).expect("included control block is sanitized");
+        let canonical_child = child.canonicalize().expect("canonical child");
+        let warning = netlist
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "control-block-ignored")
+            .expect("sanitizer warning is retained");
+
+        assert_eq!(warning.line, 1);
+        assert_eq!(
+            warning.origin,
+            Some(NetlistSourceLocation::in_file(&canonical_child, 1))
         );
         let _ = std::fs::remove_dir_all(dir);
     }

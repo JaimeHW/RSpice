@@ -3,6 +3,7 @@ use super::*;
 impl SimulationController {
     pub(super) fn build_manifest_preview_spec(
         &self,
+        state: &AppState,
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<Option<AnalysisSpec>, String> {
         use crate::simulation::plan::AnalysisDraft;
@@ -11,6 +12,26 @@ impl SimulationController {
             return Err(error);
         }
         let spec = match draft {
+            AnalysisDraft::Noise(draft) => {
+                let mut config = draft.to_config()?;
+                config.temperature_kelvin =
+                    state.sim_setup.reference_pvt.temperature_celsius + 273.15;
+                config.validate().map_err(|errors| errors.join("; "))?;
+                AnalysisSpec::Noise {
+                    output_node: config.output_node,
+                    reference_node: config.reference_node,
+                    input_source: config.input_source,
+                    start_freq: config.start_freq,
+                    stop_freq: config.stop_freq,
+                    points_per_decade: config.num_points,
+                    sweep: draft.sweep,
+                    explicit_frequencies: config.explicit_frequencies,
+                    data_table_name: None,
+                    contribution_detail: config.contribution_detail,
+                    integration_mode: config.integration_mode,
+                    temperature: config.temperature_kelvin,
+                }
+            }
             AnalysisDraft::Qpss(draft) => {
                 let frequencies = parse_csv_si(&draft.tones, "QPSS tones")?;
                 let harmonics = parse_csv_usize(&draft.harmonics, "QPSS harmonics")?;
@@ -172,7 +193,55 @@ impl SimulationController {
         idx: usize,
     ) -> Result<AnalysisSpec, String> {
         match idx {
-            0 => Ok(AnalysisSpec::DcOp),
+            0 => {
+                let mut config = state.sim_setup.op.to_config()?;
+                config.selected_devices = state
+                    .schematic
+                    .components
+                    .iter()
+                    .filter(|component| state.schematic.selection.has_component(component.id))
+                    .map(|component| component.name.clone())
+                    .collect();
+                config.selected_devices.sort();
+                config.selected_devices.dedup();
+                if config.initial_guess
+                    == crate::simulation::dialog::OpInitialGuess::PreviousConverged
+                {
+                    config.previous_state = state
+                        .simulation
+                        .newest_retained_op_state(state.workspace.project.revision());
+                }
+                if matches!(
+                    config.device_detail,
+                    crate::simulation::dialog::OpDeviceDetail::SelectedAndViolations
+                        | crate::simulation::dialog::OpDeviceDetail::ViolationsOnly
+                ) {
+                    if let Some((source_digest, devices)) = state
+                        .simulation
+                        .active_soa_violation_context(state.workspace.project.revision())
+                    {
+                        config.violation_devices = devices;
+                        config.violation_source_content_digest = Some(source_digest);
+                    }
+                }
+                config.validate_for_execution()?;
+                Ok(AnalysisSpec::DcOp {
+                    temperature_mode: config.temperature_mode,
+                    temperature_celsius: config.temperature_celsius,
+                    initial_guess: config.initial_guess,
+                    node_initialization: config.node_initialization,
+                    homotopy: config.homotopy,
+                    annotation: config.annotation,
+                    device_detail: config.device_detail,
+                    save_device_op: config.save_device_op,
+                    accuracy: config.accuracy,
+                    selected_devices: config.selected_devices,
+                    previous_state: config.previous_state,
+                    violation_devices: config.violation_devices,
+                    violation_source_content_digest: config.violation_source_content_digest,
+                    run_point: config.run_point,
+                })
+            }
             1 => Ok(AnalysisSpec::Transient {
                 stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
                     .map_err(|e| format!("invalid stop time: {}", e))?,
@@ -237,18 +306,15 @@ impl SimulationController {
                     step2,
                 })
             }
-            4 => Ok(AnalysisSpec::Noise {
-                output_node: state.sim_setup.noise.output.trim().to_string(),
-                start_freq: parse_spice_value_checked(&state.sim_setup.noise.fstart)
-                    .map_err(|e| format!("invalid start frequency: {}", e))?,
-                stop_freq: parse_spice_value_checked(&state.sim_setup.noise.fstop)
-                    .map_err(|e| format!("invalid stop frequency: {}", e))?,
-                points_per_decade: Self::parse_positive_points(
-                    &state.sim_setup.ac.points,
-                    "ac_points",
-                )?,
-                temperature: 300.0,
-            }),
+            4 => match self.build_manifest_preview_spec(
+                state,
+                &state
+                    .sim_setup
+                    .legacy_analysis_draft(crate::simulation::plan::AnalysisKind::Noise),
+            )? {
+                Some(spec @ AnalysisSpec::Noise { .. }) => Ok(spec),
+                _ => Err("noise draft did not produce an exact noise spec".to_owned()),
+            },
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
             7 => self.build_monte_carlo_spec(state),
@@ -276,11 +342,42 @@ impl SimulationController {
 
     pub(super) fn analysis_spec_to_config(
         &self,
-        state: &AppState,
+        _state: &AppState,
         spec: &AnalysisSpec,
     ) -> Result<AnalysisConfig, String> {
         match spec {
-            AnalysisSpec::DcOp => Ok(AnalysisConfig::DcOp),
+            AnalysisSpec::LegacyDcOp => Ok(AnalysisConfig::dc_op()),
+            AnalysisSpec::DcOp {
+                temperature_mode,
+                temperature_celsius,
+                initial_guess,
+                node_initialization,
+                homotopy,
+                annotation,
+                device_detail,
+                save_device_op,
+                accuracy,
+                selected_devices,
+                previous_state,
+                violation_devices,
+                violation_source_content_digest,
+                run_point,
+            } => Ok(AnalysisConfig::DcOp(crate::simulation::dialog::OpConfig {
+                temperature_mode: *temperature_mode,
+                temperature_celsius: *temperature_celsius,
+                initial_guess: *initial_guess,
+                node_initialization: *node_initialization,
+                homotopy: *homotopy,
+                annotation: *annotation,
+                device_detail: *device_detail,
+                save_device_op: *save_device_op,
+                accuracy: *accuracy,
+                selected_devices: selected_devices.clone(),
+                previous_state: previous_state.clone(),
+                violation_devices: violation_devices.clone(),
+                violation_source_content_digest: *violation_source_content_digest,
+                run_point: *run_point,
+            })),
             AnalysisSpec::DcSweep {
                 source_name,
                 start,
@@ -326,18 +423,41 @@ impl SimulationController {
             })),
             AnalysisSpec::Noise {
                 output_node,
+                reference_node,
+                input_source,
                 start_freq,
                 stop_freq,
                 points_per_decade,
-                ..
+                sweep,
+                explicit_frequencies,
+                data_table_name,
+                contribution_detail,
+                integration_mode,
+                temperature,
             } => Ok(AnalysisConfig::Noise(NoiseAnalysisConfig {
                 output_node: output_node.clone(),
-                reference_node: state.sim_setup.noise.reference.trim().to_string(),
-                input_source: state.sim_setup.noise.input.trim().to_string(),
-                sweep_type: Self::map_ac_sweep(Self::map_frequency_sweep(state.sim_setup.ac.sweep)),
+                reference_node: reference_node.clone(),
+                input_source: input_source.clone(),
+                sweep_type: match sweep {
+                    NoiseSweepType::Decade | NoiseSweepType::ExplicitFrequencyList => {
+                        AcSweepType::Decade
+                    }
+                    NoiseSweepType::Octave => AcSweepType::Octave,
+                    NoiseSweepType::Linear => AcSweepType::Linear,
+                    NoiseSweepType::Unsupported(index) => {
+                        return Err(format!(
+                            "noise sweep mode {index} is outside the supported schema"
+                        ));
+                    }
+                },
                 num_points: *points_per_decade,
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
+                explicit_frequencies: explicit_frequencies.clone(),
+                data_table_name: data_table_name.clone(),
+                contribution_detail: *contribution_detail,
+                integration_mode: *integration_mode,
+                temperature_kelvin: *temperature,
             })),
             AnalysisSpec::PoleZero {
                 input_node,
@@ -427,19 +547,20 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PSS settings: {}", e))?;
         Ok(AnalysisSpec::Pss {
-            fundamental_freq: pss_cfg.fund_freq,
-            num_harmonics: pss_cfg.num_harmonics as usize,
-            tolerance: pss_cfg.stab_tol,
-            max_iterations: pss_cfg.max_iter as usize,
             method: match pss_cfg.method {
                 crate::simulation::dialog::PssSolverMethod::Shooting => PssMethod::Shooting,
                 crate::simulation::dialog::PssSolverMethod::HarmonicBalance => {
                     PssMethod::HarmonicBalance
                 }
             },
+            fundamental_freq: pss_cfg.fund_freq,
+            tone_sources: pss_cfg.tone_sources,
+            tstab_periods: pss_cfg.tstab_periods,
+            points_per_period: pss_cfg.points_per_period,
+            tolerance: pss_cfg.tolerance,
             oscillator_mode: pss_cfg.osc_mode,
             oscillator_node: pss_cfg.osc_mode.then(|| pss_cfg.osc_node.trim().to_owned()),
-            save_harmonics: pss_cfg.save_harmonics,
+            num_harmonics: pss_cfg.num_harmonics as usize,
         })
     }
 
@@ -918,6 +1039,48 @@ mod manifest_tests {
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     #[test]
+    fn noise_manifest_freezes_every_selected_field_without_singleton_fallback() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.reference_pvt.temperature_celsius = 125.0;
+        state.sim_setup.noise.output = "wrong_singleton".to_owned();
+        state.sim_setup.ac.points = "999".to_owned();
+        let mut draft = crate::simulation::plan::NoiseDraft::default();
+        draft.output = "V(out,ref)".to_owned();
+        draft.input = "VIN_EXACT".to_owned();
+        draft.sweep = NoiseSweepType::ExplicitFrequencyList;
+        draft.explicit_frequencies = "3, 7, 11".to_owned();
+        draft.contribution_detail =
+            crate::simulation::config::NoiseContributionDetail::AllContributors;
+        draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::OutputNoiseOnly;
+
+        let spec = controller
+            .build_manifest_preview_spec(&state, &AnalysisDraft::Noise(draft))
+            .expect("exact noise draft parses")
+            .expect("noise draft has an exact spec");
+        assert!(matches!(
+            spec,
+            AnalysisSpec::Noise {
+                output_node,
+                reference_node,
+                input_source,
+                sweep: NoiseSweepType::ExplicitFrequencyList,
+                explicit_frequencies: Some(frequencies),
+                contribution_detail:
+                    crate::simulation::config::NoiseContributionDetail::AllContributors,
+                integration_mode:
+                    crate::simulation::config::NoiseIntegrationMode::OutputNoiseOnly,
+                temperature,
+                ..
+            } if output_node == "out"
+                && reference_node == "ref"
+                && input_source == "VIN_EXACT"
+                && frequencies == vec![3.0, 7.0, 11.0]
+                && (temperature - 398.15).abs() < 1.0e-12
+        ));
+    }
+
+    #[test]
     fn every_new_manifest_draft_builds_its_exact_typed_spec() {
         let controller = SimulationController::new();
         for kind in [
@@ -933,7 +1096,7 @@ mod manifest_tests {
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = controller
-                .build_manifest_preview_spec(&draft)
+                .build_manifest_preview_spec(&AppState::default(), &draft)
                 .expect("default draft parses")
                 .expect("manifest draft has a typed spec");
             assert!(matches!(
@@ -961,25 +1124,28 @@ mod manifest_tests {
         let mut state = AppState::default();
         state.sim_setup.pss.ensure_initialized();
         state.sim_setup.pss.fund_freq = "2.5Meg".to_owned();
+        state.sim_setup.pss.tone_sources = "VIN_LO, VIN_MOD".to_owned();
+        state.sim_setup.pss.tstab_periods = "37".to_owned();
+        state.sim_setup.pss.points_per_period = "1024".to_owned();
+        state.sim_setup.pss.tolerance = "2e-9".to_owned();
         state.sim_setup.pss.num_harmonics = "17".to_owned();
-        state.sim_setup.pss.max_iter = "83".to_owned();
-        state.sim_setup.pss.method_idx = 1;
-        state.sim_setup.pss.osc_mode = false;
-        state.sim_setup.pss.osc_node.clear();
-        state.sim_setup.pss.save_harmonics = false;
+        state.sim_setup.pss.method_idx = 0;
+        state.sim_setup.pss.osc_mode = true;
+        state.sim_setup.pss.osc_node = "osc_out".to_owned();
 
         let spec = controller.build_pss_spec(&state).expect("PSS spec builds");
         assert_eq!(
             spec,
             AnalysisSpec::Pss {
+                method: PssMethod::Shooting,
                 fundamental_freq: 2.5e6,
+                tone_sources: vec!["VIN_LO".to_owned(), "VIN_MOD".to_owned()],
+                tstab_periods: 37,
+                points_per_period: 1024,
+                tolerance: 2.0e-9,
+                oscillator_mode: true,
+                oscillator_node: Some("osc_out".to_owned()),
                 num_harmonics: 17,
-                tolerance: 1.0e-3,
-                max_iterations: 83,
-                method: PssMethod::HarmonicBalance,
-                oscillator_mode: false,
-                oscillator_node: None,
-                save_harmonics: false,
             }
         );
     }

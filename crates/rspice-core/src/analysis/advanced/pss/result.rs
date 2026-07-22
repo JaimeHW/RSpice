@@ -11,7 +11,8 @@ use std::f64::consts::PI;
 /// Contains the converged periodic solution, harmonic content, and
 /// convergence diagnostics. This serves as the periodic operating point
 /// for subsequent analyses like PAC and PNoise.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct PssResult {
     /// Converged fundamental period (seconds)
     pub period: Value,
@@ -136,7 +137,8 @@ impl PssResult {
 ///
 /// Stores one complete period of the waveform and provides
 /// interpolation and harmonic analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeriodicWaveform {
     /// Voltage values at each time point
     pub values: Vec<Value>,

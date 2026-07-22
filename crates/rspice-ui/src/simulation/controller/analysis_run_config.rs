@@ -31,7 +31,7 @@ impl SimulationController {
         Ok(PacRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
             pss_num_harmonics: pss_cfg.num_harmonics as usize,
-            pss_tolerance: pss_cfg.stab_tol,
+            pss_tolerance: pss_cfg.tolerance,
             start_freq: pac_cfg.start_freq,
             stop_freq: pac_cfg.stop_freq,
             points_per_unit: pac_cfg.num_points as usize,
@@ -93,7 +93,7 @@ impl SimulationController {
         Ok(PnoiseRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
             pss_num_harmonics: pss_cfg.num_harmonics as usize,
-            pss_tolerance: pss_cfg.stab_tol,
+            pss_tolerance: pss_cfg.tolerance,
             start_freq: pnoise_cfg.start_freq,
             stop_freq: pnoise_cfg.stop_freq,
             points_per_unit: pnoise_cfg.num_points as usize,
@@ -140,7 +140,7 @@ impl SimulationController {
         Ok(PxfRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
             pss_num_harmonics: pss_cfg.num_harmonics as usize,
-            pss_tolerance: pss_cfg.stab_tol,
+            pss_tolerance: pss_cfg.tolerance,
             start_freq: pxf_cfg.start_freq,
             stop_freq: pxf_cfg.stop_freq,
             points_per_unit: pxf_cfg.num_points as usize,
@@ -176,7 +176,7 @@ impl SimulationController {
         Ok(PstbRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
             pss_num_harmonics: pss_cfg.num_harmonics as usize,
-            pss_tolerance: pss_cfg.stab_tol,
+            pss_tolerance: pss_cfg.tolerance,
             probe_instance: pstb_cfg.probe,
             max_harmonics: pstb_cfg.max_harmonics as usize,
             num_multipliers: pstb_cfg.num_multipliers as usize,

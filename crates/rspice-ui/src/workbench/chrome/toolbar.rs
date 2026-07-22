@@ -962,46 +962,59 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
                 ui.set_min_width(190.0);
                 ui.spacing_mut().item_spacing.y = 0.0;
                 use crate::simulation::dialog::corner::ProcessCorner;
-                for process in [
-                    ProcessCorner::FF,
-                    ProcessCorner::FS,
-                    ProcessCorner::TT,
-                    ProcessCorner::SF,
-                    ProcessCorner::SS,
-                ] {
-                    for temperature in [-40.0, 27.0, 125.0] {
-                        let selected = reference.process == process
-                            && (reference.temperature_celsius - temperature).abs() < f64::EPSILON;
-                        let label = format!(
-                            "{} · {}",
-                            process.short_name(),
-                            pvt_temperature_label(temperature, quantity_policy)
-                        );
-                        let option_height = if height >= 44.0 { 44.0 } else { 29.0 };
-                        if ui
-                            .add_sized(
-                                [190.0, option_height],
-                                egui::Button::selectable(selected, &label),
-                            )
-                            .clicked()
-                        {
-                            match commit_reference_pvt(app, process, temperature) {
-                                Ok(true) => app.state.push_user_message(
-                                    crate::common::app::ConsoleMessage::info(format!(
-                                        "Reference PVT changed to {label}"
-                                    )),
-                                ),
-                                Ok(false) => {}
-                                Err(error) => app.state.push_user_message(
-                                    crate::common::app::ConsoleMessage::warning(format!(
-                                        "Reference PVT was not changed: {error}"
-                                    )),
-                                ),
+                let option_height = if height >= 44.0 { 44.0 } else { 29.0 };
+                egui::ScrollArea::vertical()
+                    .id_salt("workbench.reference_pvt.options")
+                    .max_height(pvt_menu_height_for_viewport(
+                        ui.ctx().content_rect().height(),
+                        option_height,
+                    ))
+                    .auto_shrink([false, true])
+                    .scroll_bar_visibility(
+                        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                    )
+                    .show(ui, |ui| {
+                        for process in [
+                            ProcessCorner::FF,
+                            ProcessCorner::FS,
+                            ProcessCorner::TT,
+                            ProcessCorner::SF,
+                            ProcessCorner::SS,
+                        ] {
+                            for temperature in [-40.0, 27.0, 125.0] {
+                                let selected = reference.process == process
+                                    && (reference.temperature_celsius - temperature).abs()
+                                        < f64::EPSILON;
+                                let label = format!(
+                                    "{} · {}",
+                                    process.short_name(),
+                                    pvt_temperature_label(temperature, quantity_policy)
+                                );
+                                if ui
+                                    .add_sized(
+                                        [ui.available_width(), option_height],
+                                        egui::Button::selectable(selected, &label),
+                                    )
+                                    .clicked()
+                                {
+                                    match commit_reference_pvt(app, process, temperature) {
+                                        Ok(true) => app.state.push_user_message(
+                                            crate::common::app::ConsoleMessage::info(format!(
+                                                "Reference PVT changed to {label}"
+                                            )),
+                                        ),
+                                        Ok(false) => {}
+                                        Err(error) => app.state.push_user_message(
+                                            crate::common::app::ConsoleMessage::warning(format!(
+                                                "Reference PVT was not changed: {error}"
+                                            )),
+                                        ),
+                                    }
+                                    ui.close();
+                                }
                             }
-                            ui.close();
                         }
-                    }
-                }
+                    });
             })
         })
         .inner;
@@ -1047,6 +1060,10 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
         t.color.text_faint,
     );
     theme::paint_focus_ring_outset(ui, &response, response.rect);
+}
+
+fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
+    (viewport_height - 72.0).clamp(row_height * 3.0, 484.0)
 }
 
 fn commit_reference_pvt(
@@ -1347,6 +1364,13 @@ mod tests {
     fn compact_toolbar_projects_the_mockup_button_limit_for_every_workspace() {
         let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
         assert_eq!(compact.toolbar_tool_limit, Some(2));
+    }
+
+    #[test]
+    fn pvt_menu_height_is_bounded_for_short_and_touch_viewports() {
+        assert_eq!(pvt_menu_height_for_viewport(900.0, 29.0), 484.0);
+        assert_eq!(pvt_menu_height_for_viewport(600.0, 44.0), 484.0);
+        assert_eq!(pvt_menu_height_for_viewport(140.0, 44.0), 132.0);
     }
 
     #[test]
