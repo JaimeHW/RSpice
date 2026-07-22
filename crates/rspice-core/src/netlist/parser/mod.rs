@@ -537,6 +537,7 @@ fn parse_netlist_impl(
                 &mut continuation_line,
                 &mut continuation_origin,
                 &mut state,
+                active_sources.len() > 1,
                 abort,
             )?;
             apply_deferred_source_boundaries(
@@ -657,6 +658,7 @@ fn parse_netlist_impl(
             &mut continuation_line,
             &mut continuation_origin,
             &mut state,
+            active_sources.len() > 1,
             abort,
         )?;
     }
@@ -2255,6 +2257,7 @@ fn process_source_events_at(
                     continuation_line,
                     continuation_origin,
                     state,
+                    active_sources.len() > 1,
                     abort,
                 )?;
                 apply_deferred_source_boundaries(
@@ -2349,6 +2352,7 @@ fn flush_pending_logical_line(
     continuation_line: &mut Option<usize>,
     continuation_origin: &mut Option<NetlistSourceLocation>,
     state: &mut ParseState,
+    source_is_included: bool,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     if continuation.is_empty() {
@@ -2368,7 +2372,9 @@ fn flush_pending_logical_line(
     }
     let first_new_diagnostic = state.diagnostics.len();
     process_line_gated(continuation, logical_line, &logical_origin, state)
-        .map_err(|error| source_map_logical_line_error(error, logical_line, &logical_origin))
+        .map_err(|error| {
+            source_map_logical_line_error(error, logical_line, &logical_origin, source_is_included)
+        })
         .map_err(ParseWithAbortError::from)?;
     for diagnostic in &mut state.diagnostics[first_new_diagnostic..] {
         if diagnostic.origin.is_none() {
@@ -2388,12 +2394,13 @@ fn source_map_logical_line_error(
     error: ParseError,
     expanded_line: usize,
     origin: &NetlistSourceLocation,
+    source_is_included: bool,
 ) -> ParseError {
     let (line, message) = match error {
         ParseError::Syntax { line, message } => (line, message),
         other => return other,
     };
-    if line != expanded_line || origin.path.is_none() {
+    if !source_is_included || line != expanded_line || origin.path.is_none() {
         return ParseError::Syntax { line, message };
     }
     let prefix = format!("{origin}: ");
