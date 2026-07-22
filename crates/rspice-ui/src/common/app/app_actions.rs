@@ -824,9 +824,11 @@ impl RSpiceApp {
 
     fn try_project_design_undo(&mut self) -> bool {
         match self.state.undo_project_design() {
-            Ok(Some(description)) => self
-                .state
-                .push_user_message(ConsoleMessage::info(format!("Undo: {description}"))),
+            Ok(Some(description)) => {
+                self.invalidate_simulation_preflight();
+                self.state
+                    .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
+            }
             Ok(None) => return false,
             Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
         }
@@ -835,9 +837,11 @@ impl RSpiceApp {
 
     fn try_project_design_redo(&mut self) -> bool {
         match self.state.redo_project_design() {
-            Ok(Some(description)) => self
-                .state
-                .push_user_message(ConsoleMessage::info(format!("Redo: {description}"))),
+            Ok(Some(description)) => {
+                self.invalidate_simulation_preflight();
+                self.state
+                    .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
+            }
             Ok(None) => return false,
             Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
         }

@@ -4743,7 +4743,10 @@ mod tests {
         let error = load_project_text(&digest_without_source.to_string(), None)
             .expect_err("digest without source path must fail")
             .to_string();
-        assert!(error.contains("source_closure cannot exist without an external root_path"));
+        assert!(
+            error.contains("source_authority built_in cannot own a root path or source closure"),
+            "{error}"
+        );
     }
 
     #[test]

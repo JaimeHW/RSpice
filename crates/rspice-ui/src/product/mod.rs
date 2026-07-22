@@ -22,9 +22,10 @@ pub use command::{
 };
 pub use identity::{
     AnalysisInstanceId, AutomationPipelineId, ContentDigest, DatasetId, DesignId, DesignVariableId,
-    DigestError, JobId, ModelBindingId, ObjectRef, ObjectRevision, ProjectId, ReleaseCandidateId,
-    ResultDocumentId, RevisionError, RunId, RunSetId, SavedOutputId, SimulationPlanId, TestbenchId,
-    UuidIdError, UuidIdParseError, VerificationEvidenceId, VerificationPlanId,
+    DigestError, JobId, ModelBindingId, ModelSourceId, ObjectRef, ObjectRevision, ProjectId,
+    ReleaseCandidateId, ResultDocumentId, RevisionError, RunId, RunSetId, SavedOutputId,
+    SimulationPlanId, TestbenchId, UuidIdError, UuidIdParseError, VerificationEvidenceId,
+    VerificationPlanId,
 };
 pub use lifecycle::{
     DatasetBinding, DatasetManifest, DatasetProvenance, JobEvent, JobState, LifecycleError,

@@ -103,6 +103,7 @@ define_uuid_id!(VerificationEvidenceId);
 define_uuid_id!(ReleaseCandidateId);
 define_uuid_id!(AutomationPipelineId);
 define_uuid_id!(ModelBindingId);
+define_uuid_id!(ModelSourceId);
 
 /// A type-erased reference used by receipts and cross-domain links. Domain
 /// records retain their strongly typed IDs; erasure occurs only at boundaries

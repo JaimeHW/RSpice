@@ -3,6 +3,58 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::{DeviceModel, ModelType, ProcessCorner};
+use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
+
+/// Ownership and execution policy for a model library's source material.
+///
+/// External libraries are re-authenticated from the live filesystem for every
+/// native run. Project-owned sources are immutable revision records and
+/// execute from their retained, digest-checked bytes on every platform. Built-in
+/// catalogs have no source deck and therefore contribute no executable model
+/// cards through the source resolver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelSourceAuthority {
+    #[default]
+    BuiltIn,
+    External,
+    ProjectOwned {
+        source_id: ModelSourceId,
+        revision: ObjectRevision,
+        digest: ContentDigest,
+    },
+}
+
+impl ModelSourceAuthority {
+    #[must_use]
+    pub const fn is_project_owned(self) -> bool {
+        matches!(self, Self::ProjectOwned { .. })
+    }
+
+    #[must_use]
+    pub const fn has_execution_source(self) -> bool {
+        !matches!(self, Self::BuiltIn)
+    }
+}
+
+/// Host-local absolute identity used only inside the authenticated in-memory
+/// source resolver. Project ownership is carried by `ModelSourceId`; this path
+/// is regenerated on restore so cross-platform projects never depend on the
+/// path syntax of the machine that saved them.
+pub(crate) fn project_owned_source_path(source_id: ModelSourceId) -> PathBuf {
+    #[cfg(windows)]
+    {
+        PathBuf::from(format!(
+            r"C:\__rspice_project__\model-sources\{source_id}\definition.model"
+        ))
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from(format!(
+            "/__rspice_project__/model-sources/{source_id}/definition.model"
+        ))
+    }
+}
 
 /// One canonical member of an explicitly accepted external model-source
 /// closure. Paths are absolute, symlink-resolved identities captured by the
@@ -14,10 +66,11 @@ pub struct ModelSourcePin {
     pub digest: crate::product::ContentDigest,
 }
 
-/// Authenticated bytes retained for one pinned source. Desktop execution
-/// still revalidates the live file, while browser execution uses these bytes
-/// because host filesystem paths are not available in WASM. Keeping the bytes
-/// in the project also makes recovery checkpoints self-contained.
+/// Authenticated bytes retained for one pinned source. Native execution
+/// revalidates external libraries against the live filesystem, while
+/// project-owned execution and browser execution use these retained bytes.
+/// Keeping the bytes in the project also makes recovery checkpoints
+/// self-contained.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelSourceContent {
@@ -110,7 +163,7 @@ pub(crate) fn first_unreachable_source<'a>(
 }
 
 /// A PDK model library
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ModelLibrary {
     /// Library name (e.g., "tsmc180_1p8v")
     pub name: String,
@@ -118,8 +171,14 @@ pub struct ModelLibrary {
     pub pdk_name: String,
     /// Technology node (e.g., "180nm", "65nm")
     pub technology_node: String,
-    /// Root path on disk
+    /// Root execution identity. This is a live filesystem path only for an
+    /// external library; project-owned sources use a regenerated virtual path.
     pub root_path: Option<PathBuf>,
+    /// Authority that decides whether execution reads the live path or the
+    /// retained project bytes. Older direct serializations default to built-in;
+    /// project-file migrations classify legacy external roots explicitly.
+    #[serde(default)]
+    pub source_authority: ModelSourceAuthority,
     /// Canonical, deterministic root-plus-transitive-include closure accepted
     /// by the last successful load or refresh. An empty closure is valid only
     /// for an in-memory library or a legacy external binding that has not yet
@@ -206,6 +265,15 @@ impl ModelLibrary {
     /// Get model count
     pub fn model_count(&self) -> usize {
         self.models.len()
+    }
+
+    /// Stable source revision for an editable, project-owned definition.
+    #[must_use]
+    pub const fn project_source_revision(&self) -> Option<ObjectRevision> {
+        match self.source_authority {
+            ModelSourceAuthority::ProjectOwned { revision, .. } => Some(revision),
+            ModelSourceAuthority::BuiltIn | ModelSourceAuthority::External => None,
+        }
     }
 
     /// Get corner count

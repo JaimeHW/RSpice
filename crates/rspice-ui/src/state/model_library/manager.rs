@@ -6,10 +6,21 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
 use super::{
-    DeviceModel, ModelLevel, ModelLibrary, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
-    ModelType, ProcessCorner, first_unreachable_source,
+    DeviceModel, ModelLevel, ModelLibrary, ModelSourceAuthority, ModelSourceContent,
+    ModelSourceEdge, ModelSourcePin, ModelType, ProcessCorner, ProjectModelDefinition,
+    first_unreachable_source,
 };
+use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
+
+/// Published result of one atomic project-model definition transaction.
+#[derive(Debug, Clone)]
+pub struct ProjectModelCommit {
+    pub library_name: String,
+    pub model_name: String,
+    pub before: Option<ModelLibrary>,
+    pub after: ModelLibrary,
+}
 
 /// One immutable, authenticated model-source snapshot for a simulation run.
 /// The exact bytes are intentionally transient and are never serialized into
@@ -271,7 +282,7 @@ fn root_external_source_paths(source: &str) -> Vec<String> {
     let mut paths = Vec::new();
     let mut inline_library_depth = 0usize;
     for line in source.lines() {
-        let directive = line.trim().split_whitespace().next().unwrap_or_default();
+        let directive = line.split_whitespace().next().unwrap_or_default();
         if directive.eq_ignore_ascii_case(".endl") {
             inline_library_depth = inline_library_depth.saturating_sub(1);
             continue;
@@ -608,6 +619,7 @@ impl ModelLibraryManager {
             .cloned()
             .unwrap_or_else(|| ModelLibrary::new(&lib_name));
         library.root_path = Some(path.clone());
+        library.source_authority = ModelSourceAuthority::External;
         library.source_closure = source_closure;
         library.source_contents = source_contents;
         library.source_edges = source_edges;
@@ -716,6 +728,11 @@ impl ModelLibraryManager {
 
         let mut library = ModelLibrary::new(&lib_name);
         library.root_path = Some(root.clone());
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id: crate::product::ModelSourceId::new(),
+            revision: crate::product::ObjectRevision::INITIAL,
+            digest,
+        };
         library.source_closure = vec![ModelSourcePin {
             path: root.clone(),
             digest,
@@ -779,6 +796,223 @@ impl ModelLibraryManager {
         Ok(lib_name)
     }
 
+    /// Create a new single-card model whose exact source is owned by the
+    /// project. The candidate is rendered, parsed, and checked completely
+    /// before the manager is mutated.
+    pub fn create_project_model(
+        &mut self,
+        library_name: &str,
+        definition: &ProjectModelDefinition,
+    ) -> Result<ProjectModelCommit, String> {
+        validate_project_library_name(library_name)?;
+        if let Some(existing) = self
+            .libraries
+            .keys()
+            .find(|existing| existing.eq_ignore_ascii_case(library_name))
+        {
+            return Err(format!(
+                "Model library '{library_name}' conflicts with existing library '{existing}'"
+            ));
+        }
+
+        let source_id = ModelSourceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let root = super::project_owned_source_path(source_id);
+        let after = Self::build_project_model_library(
+            library_name,
+            None,
+            source_id,
+            revision,
+            root,
+            definition,
+        )?;
+        let model_name = definition.name.clone();
+        self.libraries
+            .insert(library_name.to_owned(), after.clone());
+        Ok(ProjectModelCommit {
+            library_name: library_name.to_owned(),
+            model_name,
+            before: None,
+            after,
+        })
+    }
+
+    /// Replace one editable project model using optimistic source-revision
+    /// guards. External, built-in, multi-card, and stale sources fail closed.
+    pub fn replace_project_model(
+        &mut self,
+        library_name: &str,
+        expected_source_id: ModelSourceId,
+        expected_revision: ObjectRevision,
+        definition: &ProjectModelDefinition,
+    ) -> Result<ProjectModelCommit, String> {
+        let before = self
+            .libraries
+            .get(library_name)
+            .cloned()
+            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            ..
+        } = before.source_authority
+        else {
+            return Err(format!(
+                "Model library '{library_name}' is not project-owned; create an editable project copy before changing it"
+            ));
+        };
+        if source_id != expected_source_id || revision != expected_revision {
+            return Err(format!(
+                "Model library '{library_name}' changed after this candidate was opened; reload or compare before saving"
+            ));
+        }
+        if before.models.len() != 1
+            || before.source_closure.len() != 1
+            || before.source_contents.len() != 1
+            || !before.source_edges.is_empty()
+            || !before.corners.is_empty()
+        {
+            return Err(format!(
+                "Model library '{library_name}' is not an editable single-card definition"
+            ));
+        }
+        let next_revision = revision
+            .next()
+            .map_err(|error| format!("Cannot revise model library '{library_name}': {error}"))?;
+        let root = before.root_path.clone().ok_or_else(|| {
+            format!("Project-owned model library '{library_name}' has no source identity")
+        })?;
+        let after = Self::build_project_model_library(
+            library_name,
+            Some(&before),
+            source_id,
+            next_revision,
+            root,
+            definition,
+        )?;
+        if before.source_contents[0].bytes == after.source_contents[0].bytes {
+            return Err("Model candidate has no source changes to save".to_owned());
+        }
+        let model_name = definition.name.clone();
+        self.libraries
+            .insert(library_name.to_owned(), after.clone());
+        Ok(ProjectModelCommit {
+            library_name: library_name.to_owned(),
+            model_name,
+            before: Some(before),
+            after,
+        })
+    }
+
+    /// Create a project-owned single-card copy of one selected external or
+    /// built-in model without changing its source library.
+    pub fn copy_model_to_project(
+        &mut self,
+        source_library: &str,
+        model_name: &str,
+        target_library: &str,
+    ) -> Result<ProjectModelCommit, String> {
+        let definition = {
+            let library = self
+                .libraries
+                .get(source_library)
+                .ok_or_else(|| format!("Model library '{source_library}' does not exist"))?;
+            let model = library.models.get(model_name).ok_or_else(|| {
+                format!("Model '{model_name}' does not exist in library '{source_library}'")
+            })?;
+            ProjectModelDefinition::from_device_model(model)
+        };
+        self.create_project_model(target_library, &definition)
+    }
+
+    fn build_project_model_library(
+        library_name: &str,
+        previous: Option<&ModelLibrary>,
+        source_id: ModelSourceId,
+        revision: ObjectRevision,
+        root: PathBuf,
+        definition: &ProjectModelDefinition,
+    ) -> Result<ModelLibrary, String> {
+        let source = definition.canonical_source()?;
+        let bytes = source.into_bytes();
+        let digest = ContentDigest::from_bytes(Sha256::digest(&bytes).into());
+        let mut parser =
+            rspice_core::library::LibParser::new(root.parent().unwrap_or_else(|| Path::new("/")));
+        let parsed = parser.parse_string(
+            rspice_core::netlist::decode_source_bytes(&bytes)
+                .map_err(|error| format!("Project model source cannot be decoded: {error}"))?
+                .as_str(),
+        );
+        if !parsed.is_ok() {
+            return Err(format!(
+                "Project model source is invalid: {}",
+                parsed
+                    .errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
+        if parsed.top_level_models.len() != 1
+            || parsed.model_count() != 1
+            || parsed.subcircuit_count() != 0
+            || !parsed.sections.is_empty()
+        {
+            return Err(
+                "Project model source must contain exactly one top-level .model card and no sections or subcircuits"
+                    .to_owned(),
+            );
+        }
+        let parsed_model = &parsed.top_level_models[0];
+        if parsed_model.name != definition.name {
+            return Err(format!(
+                "Parsed model identity '{}' does not match candidate '{}'",
+                parsed_model.name, definition.name
+            ));
+        }
+        verify_project_model_round_trip(definition, parsed_model)?;
+
+        let mut device_model = Self::convert_parsed_model(parsed_model, &root);
+        device_model.spice_type = Some(definition.spice_type.to_ascii_uppercase());
+        device_model.description = definition.description.clone();
+        device_model.source_line = Some(
+            definition
+                .description
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count()
+                + 1,
+        );
+
+        let mut library = ModelLibrary::new(library_name);
+        if let Some(previous) = previous {
+            library.pdk_name = previous.pdk_name.clone();
+            library.technology_node = previous.technology_node.clone();
+            library.expanded = previous.expanded;
+        }
+        library.root_path = Some(root.clone());
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            digest,
+        };
+        library.source_closure = vec![ModelSourcePin {
+            path: root.clone(),
+            digest,
+        }];
+        library.source_contents = vec![ModelSourceContent { path: root, bytes }];
+        library.source_edges.clear();
+        library.models.clear();
+        library
+            .models
+            .insert(device_model.name.clone(), device_model);
+        library.corners.clear();
+        library.selected_corner = None;
+        library.version = revision.get().to_string();
+        Ok(library)
+    }
+
     /// Compute the canonical SHA-256 identity used to pin an external model
     /// source. Callers compare this value with the digest stored by the last
     /// explicit load/refresh; computing it never accepts new content.
@@ -821,23 +1055,53 @@ impl ModelLibraryManager {
     /// over those same bytes, and only the authenticated UTF-8 content is
     /// published to the in-memory resolver.
     pub fn seal_execution_sources(&self) -> Result<SealedModelExecutionSources, String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.seal_execution_sources_with_reader(|path| {
+                std::fs::read(path).map_err(|error| error.to_string())
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.seal_execution_sources_with_reader(|path| {
+                Err(format!(
+                    "browser execution cannot authenticate external model path '{}'",
+                    path.display()
+                ))
+            })
+        }
+    }
+
+    fn seal_execution_sources_with_reader<F>(
+        &self,
+        mut read_external: F,
+    ) -> Result<SealedModelExecutionSources, String>
+    where
+        F: FnMut(&Path) -> Result<Vec<u8>, String>,
+    {
         let mut libraries: Vec<&ModelLibrary> = self
             .libraries
             .values()
-            .filter(|library| library.root_path.is_some())
+            .filter(|library| library.source_authority.has_execution_source())
             .collect();
         libraries.sort_by(|left, right| left.name.cmp(&right.name));
 
+        // The final flag selects retained project bytes (`true`) or a live,
+        // re-authenticated external read (`false`). A path can never mix the
+        // two authorities across libraries.
         let mut expected_sources =
-            BTreeMap::<PathBuf, (crate::product::ContentDigest, Vec<String>)>::new();
+            BTreeMap::<PathBuf, (crate::product::ContentDigest, Vec<String>, bool)>::new();
         let mut retained_sources = BTreeMap::<PathBuf, Vec<u8>>::new();
         let mut expected_edges = BTreeMap::<(PathBuf, String), PathBuf>::new();
         let mut sealed_libraries = Vec::with_capacity(libraries.len());
         for library in libraries {
-            let root_path = library
-                .root_path
-                .as_ref()
-                .expect("external model libraries have a source path");
+            let root_path = library.root_path.as_ref().ok_or_else(|| {
+                format!(
+                    "Model library '{}' declares source authority but has no root identity",
+                    library.name
+                )
+            })?;
+            let project_owned = library.source_authority.is_project_owned();
             if library.source_closure.is_empty() {
                 return Err(format!(
                     "Model library '{}' is not content-pinned; refresh or re-import '{}' before simulation",
@@ -865,7 +1129,7 @@ impl ModelLibraryManager {
 
             for source in &library.source_closure {
                 #[cfg(not(target_arch = "wasm32"))]
-                if is_foreign_platform_absolute_path(&source.path) {
+                if !project_owned && is_foreign_platform_absolute_path(&source.path) {
                     return Err(format!(
                         "Model library '{}' retains foreign-platform dependency '{}', which is unavailable on this host; re-import or repair the binding before simulation",
                         library.name,
@@ -881,12 +1145,18 @@ impl ModelLibraryManager {
                 }
                 match expected_sources.entry(source.path.clone()) {
                     std::collections::btree_map::Entry::Vacant(entry) => {
-                        entry.insert((source.digest, vec![library.name.clone()]));
+                        entry.insert((source.digest, vec![library.name.clone()], project_owned));
                     }
                     std::collections::btree_map::Entry::Occupied(mut entry) => {
                         if entry.get().0 != source.digest {
                             return Err(format!(
                                 "Model libraries disagree on the accepted SHA-256 for shared dependency '{}'",
+                                source.path.display()
+                            ));
+                        }
+                        if entry.get().2 != project_owned {
+                            return Err(format!(
+                                "Model libraries disagree on source authority for shared dependency '{}'",
                                 source.path.display()
                             ));
                         }
@@ -991,6 +1261,23 @@ impl ModelLibraryManager {
                     }
                 }
             }
+            if project_owned {
+                let ModelSourceAuthority::ProjectOwned { digest, .. } = library.source_authority
+                else {
+                    unreachable!("project-owned authority was checked above")
+                };
+                if library.source_closure.len() != 1
+                    || library.source_contents.len() != 1
+                    || library.source_closure[0].path != *root_path
+                    || library.source_contents[0].path != *root_path
+                    || library.source_closure[0].digest != digest
+                {
+                    return Err(format!(
+                        "Project-owned model library '{}' must retain exactly one root source whose digest matches its revision authority",
+                        library.name
+                    ));
+                }
+            }
 
             let mut sections = library
                 .corners
@@ -1018,66 +1305,48 @@ impl ModelLibraryManager {
             }
         }
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let authenticated_sources = {
-            let mut authenticated_sources = Vec::with_capacity(expected_sources.len());
-            for (path, (expected_digest, owners)) in expected_sources {
-                let bytes = std::fs::read(&path).map_err(|error| {
+        let mut authenticated_sources = Vec::with_capacity(expected_sources.len());
+        for (path, (expected_digest, owners, project_owned)) in expected_sources {
+            let bytes = if project_owned {
+                retained_sources.remove(&path).ok_or_else(|| {
+                    format!(
+                        "Project-owned model dependency '{}' (used by {}) has no retained source bytes",
+                        path.display(),
+                        owners.join(", ")
+                    )
+                })?
+            } else {
+                read_external(&path).map_err(|error| {
                     format!(
                         "Model library dependency is unavailable at '{}' (used by {}): {error}",
                         path.display(),
                         owners.join(", ")
                     )
-                })?;
-                let actual_digest =
-                    crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
-                if actual_digest != expected_digest {
-                    return Err(format!(
+                })?
+            };
+            let actual_digest =
+                crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
+            if actual_digest != expected_digest {
+                return Err(if project_owned {
+                    format!(
+                        "Project-owned model dependency changed at '{}'; the retained bytes no longer match the accepted SHA-256 identity",
+                        path.display()
+                    )
+                } else {
+                    format!(
                         "Model library dependency changed at '{}'; refresh or re-import the library to explicitly accept the new source closure before simulation",
                         path.display()
-                    ));
-                }
-                let content = rspice_core::netlist::decode_source_bytes(&bytes).map_err(|error| {
-                    format!(
-                        "Pinned model dependency '{}' cannot be decoded with the supported source encoding policy: {error}",
-                        path.display(),
                     )
-                })?;
-                authenticated_sources.push((path, content));
+                });
             }
-            authenticated_sources
-        };
-
-        #[cfg(target_arch = "wasm32")]
-        let authenticated_sources = {
-            let mut authenticated_sources = Vec::with_capacity(expected_sources.len());
-            for (path, (expected_digest, owners)) in expected_sources {
-                let bytes = retained_sources.remove(&path).ok_or_else(|| {
-                    format!(
-                        "Model library dependency '{}' (used by {}) has no retained browser source bytes; re-import the library",
-                        path.display(),
-                        owners.join(", ")
-                    )
-                })?;
-                let actual_digest =
-                    crate::product::ContentDigest::from_bytes(Sha256::digest(&bytes).into());
-                if actual_digest != expected_digest {
-                    return Err(format!(
-                        "Retained browser model dependency '{}' no longer matches its accepted digest",
-                        path.display()
-                    ));
-                }
-                let content =
-                    rspice_core::netlist::decode_source_bytes(&bytes).map_err(|error| {
-                        format!(
-                            "Pinned browser model dependency '{}' cannot be decoded: {error}",
-                            path.display()
-                        )
-                    })?;
-                authenticated_sources.push((path, content));
-            }
-            authenticated_sources
-        };
+            let content = rspice_core::netlist::decode_source_bytes(&bytes).map_err(|error| {
+                format!(
+                    "Pinned model dependency '{}' cannot be decoded with the supported source encoding policy: {error}",
+                    path.display(),
+                )
+            })?;
+            authenticated_sources.push((path, content));
+        }
 
         let edges = expected_edges
             .into_iter()
@@ -1176,7 +1445,10 @@ impl ModelLibraryManager {
                 let device_model = DeviceModel {
                     name: model.name.clone(),
                     model_type: Self::convert_core_model_type(model.model_type),
+                    spice_type: Some(Self::core_model_type_token(model.model_type).to_owned()),
                     level: ModelLevel::Unknown,
+                    spice_level: None,
+                    model_version: None,
                     description: model.description.clone().unwrap_or_default(),
                     l_min: model.lmin,
                     l_max: model.lmax,
@@ -1186,6 +1458,8 @@ impl ModelLibraryManager {
                     vth0: None,
                     file_path: None,
                     parameters: HashMap::new(),
+                    string_parameters: HashMap::new(),
+                    source_line: None,
                 };
                 library
                     .models
@@ -1204,7 +1478,10 @@ impl ModelLibraryManager {
         DeviceModel {
             name: model.name.clone(),
             model_type,
-            level: ModelLevel::Unknown,
+            spice_type: Some(Self::core_model_type_token(model.model_type).to_owned()),
+            level: Self::convert_model_level(model.level),
+            spice_level: model.level,
+            model_version: model.version,
             description: model.description.clone().unwrap_or_default(),
             l_min: model.lmin,
             l_max: model.lmax,
@@ -1214,6 +1491,34 @@ impl ModelLibraryManager {
             vth0: None,
             file_path: Some(file_path.to_path_buf()),
             parameters: model.parameters.clone(),
+            string_parameters: model.string_params.clone(),
+            source_line: model.source_line,
+        }
+    }
+
+    fn convert_model_level(level: Option<u32>) -> ModelLevel {
+        match level {
+            Some(1) => ModelLevel::SpiceLevel1,
+            Some(3) => ModelLevel::SpiceLevel3,
+            Some(8 | 49) => ModelLevel::Bsim3v3,
+            Some(14 | 54) => ModelLevel::Bsim4,
+            _ => ModelLevel::Unknown,
+        }
+    }
+
+    fn core_model_type_token(model_type: rspice_core::library::ModelType) -> &'static str {
+        use rspice_core::library::ModelType as CoreType;
+        match model_type {
+            CoreType::Nmos => "NMOS",
+            CoreType::Pmos => "PMOS",
+            CoreType::NpnBjt => "NPN",
+            CoreType::PnpBjt => "PNP",
+            CoreType::Diode => "D",
+            CoreType::Resistor => "R",
+            CoreType::Capacitor => "C",
+            CoreType::Njfet => "NJF",
+            CoreType::Pjfet => "PJF",
+            CoreType::Other => "OTHER",
         }
     }
 
@@ -1232,6 +1537,67 @@ impl ModelLibraryManager {
             CoreType::Other => ModelType::Other,
         }
     }
+}
+
+fn validate_project_library_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.trim() != name || name.len() > 128 {
+        return Err(
+            "Project model library name must contain 1 to 128 characters without outer whitespace"
+                .to_owned(),
+        );
+    }
+    if name
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '/' | '\\'))
+    {
+        return Err(format!(
+            "Project model library name '{name}' contains an invalid path or control character"
+        ));
+    }
+    Ok(())
+}
+
+fn verify_project_model_round_trip(
+    definition: &ProjectModelDefinition,
+    parsed: &rspice_core::library::ParsedModel,
+) -> Result<(), String> {
+    let expected_numeric = definition
+        .numeric_parameters
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), *value))
+        .collect::<HashMap<_, _>>();
+    if parsed.parameters.len() != expected_numeric.len()
+        || expected_numeric.iter().any(|(name, value)| {
+            parsed
+                .parameters
+                .get(name)
+                .is_none_or(|parsed| parsed.to_bits() != value.to_bits())
+        })
+    {
+        return Err(
+            "Project model numeric parameters did not survive canonical source parsing exactly"
+                .to_owned(),
+        );
+    }
+    let expected_strings = definition
+        .string_parameters
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.as_str()))
+        .collect::<HashMap<_, _>>();
+    if parsed.string_params.len() != expected_strings.len()
+        || expected_strings.iter().any(|(name, value)| {
+            parsed
+                .string_params
+                .get(name)
+                .is_none_or(|parsed| parsed != value)
+        })
+    {
+        return Err(
+            "Project model string parameters did not survive canonical source parsing exactly"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1767,6 +2133,159 @@ mod tests {
         assert!(cards.contains("utf16_n"), "{cards}");
 
         fs::remove_dir_all(directory).expect("remove encoding fixture directory");
+    }
+
+    fn project_definition(vth0: f64, tag: &str) -> ProjectModelDefinition {
+        ProjectModelDefinition {
+            name: "owned_nch".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Project-owned regression model".to_owned(),
+            numeric_parameters: BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("vth0".to_owned(), vth0),
+            ]),
+            string_parameters: BTreeMap::from([("revision_tag".to_owned(), tag.to_owned())]),
+        }
+    }
+
+    #[test]
+    fn project_model_create_and_replace_publish_exact_retained_execution_bytes() {
+        let mut manager = ModelLibraryManager::new();
+        let created = manager
+            .create_project_model("owned_models", &project_definition(0.48, "r1"))
+            .expect("create project model");
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            digest: first_digest,
+        } = created.after.source_authority
+        else {
+            panic!("created model must be project-owned")
+        };
+        assert_eq!(revision, ObjectRevision::INITIAL);
+        assert_eq!(
+            created.after.models["owned_nch"].string_parameters["revision_tag"],
+            "r1"
+        );
+
+        let sealed = manager
+            .seal_execution_sources_with_reader(|path| {
+                panic!(
+                    "project-owned desktop sealing must not read {}",
+                    path.display()
+                )
+            })
+            .expect("retained project bytes seal");
+        assert_eq!(sealed.sources.len(), 1);
+        assert!(sealed.sources[0].1.contains("VTH0=0.48"));
+        assert!(sealed.sources[0].1.contains("REVISION_TAG=r1"));
+
+        let replaced = manager
+            .replace_project_model(
+                "owned_models",
+                source_id,
+                revision,
+                &project_definition(0.51, "r2"),
+            )
+            .expect("replace project model");
+        let ModelSourceAuthority::ProjectOwned {
+            revision: second_revision,
+            digest: second_digest,
+            ..
+        } = replaced.after.source_authority
+        else {
+            panic!("replacement must remain project-owned")
+        };
+        assert_eq!(second_revision.get(), 2);
+        assert_ne!(first_digest, second_digest);
+        assert_eq!(replaced.after.models["owned_nch"].parameters["vth0"], 0.51);
+        assert_eq!(
+            replaced.after.models["owned_nch"].string_parameters["revision_tag"],
+            "r2"
+        );
+    }
+
+    #[test]
+    fn project_model_replacement_is_guarded_and_atomic() {
+        let mut manager = ModelLibraryManager::new();
+        let created = manager
+            .create_project_model("owned_models", &project_definition(0.48, "r1"))
+            .expect("create project model");
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            ..
+        } = created.after.source_authority
+        else {
+            panic!("created model must be project-owned")
+        };
+        let original = created.after.source_contents[0].bytes.clone();
+
+        let stale = manager
+            .replace_project_model(
+                "owned_models",
+                ModelSourceId::new(),
+                revision,
+                &project_definition(0.52, "r2"),
+            )
+            .expect_err("stale identity must fail");
+        assert!(stale.contains("changed after this candidate was opened"));
+        assert_eq!(
+            manager.get_library("owned_models").unwrap().source_contents[0].bytes,
+            original
+        );
+
+        let no_op = manager
+            .replace_project_model(
+                "owned_models",
+                source_id,
+                revision,
+                &project_definition(0.48, "r1"),
+            )
+            .expect_err("unchanged source must not create a revision");
+        assert!(no_op.contains("no source changes"));
+
+        let mut invalid = project_definition(f64::NAN, "r2");
+        invalid
+            .string_parameters
+            .insert("VTH0".to_owned(), "duplicate".to_owned());
+        let invalid_error = manager
+            .replace_project_model("owned_models", source_id, revision, &invalid)
+            .expect_err("invalid candidate must fail before publication");
+        assert!(
+            invalid_error.contains("more than once") || invalid_error.contains("finite"),
+            "{invalid_error}"
+        );
+        assert_eq!(
+            manager.get_library("owned_models").unwrap().source_contents[0].bytes,
+            original
+        );
+    }
+
+    #[test]
+    fn project_model_tamper_fails_before_any_external_read() {
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .create_project_model("owned_models", &project_definition(0.48, "r1"))
+            .expect("create project model");
+        manager
+            .get_library_mut("owned_models")
+            .unwrap()
+            .source_contents[0]
+            .bytes
+            .push(b' ');
+        let error = manager
+            .seal_execution_sources_with_reader(|path| {
+                panic!(
+                    "tampered project source must fail before reading {}",
+                    path.display()
+                )
+            })
+            .expect_err("tampered retained bytes must fail");
+        assert!(
+            error.contains("do not match the accepted digest"),
+            "{error}"
+        );
     }
 
     #[cfg(unix)]

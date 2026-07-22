@@ -16,18 +16,19 @@ use crate::product::ProjectId;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
-    DeviceModel, ModelLibrary, ModelLibraryManager, ModelSourceContent, ModelSourceEdge,
-    ModelSourcePin, ProcessCorner as LibraryProcessCorner, first_unreachable_source,
-    is_portable_absolute_path,
+    DeviceModel, ModelLibrary, ModelLibraryManager, ModelSourceAuthority, ModelSourceContent,
+    ModelSourceEdge, ModelSourcePin, ProcessCorner as LibraryProcessCorner,
+    first_unreachable_source, is_portable_absolute_path,
 };
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 6;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 7;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
 const SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 3;
 const STABLE_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 4;
 const PLAN_CATALOG_SCHEMA_VERSION: u32 = 5;
+const RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION: u32 = 6;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -124,6 +125,8 @@ pub struct ProjectModelLibrary {
     pub pdk_name: String,
     pub technology_node: String,
     pub root_path: Option<PathBuf>,
+    #[serde(default)]
+    pub source_authority: ModelSourceAuthority,
     /// Canonical root-plus-transitive-include source identities accepted by
     /// the last explicit load or refresh. Legacy external bindings may have
     /// an empty closure; they remain restorable but cannot participate in a
@@ -232,6 +235,21 @@ impl ProjectExecutionContext {
                 for library in &mut self.model_libraries {
                     library.source_contents.clear();
                 }
+                self.schema_version = RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION => {
+                // Schema 6 retained exact bytes for browser execution but did
+                // not distinguish their ownership. Never infer edit authority
+                // from byte availability: a legacy path remains external, and
+                // a source-less catalog remains built-in.
+                for library in &mut self.model_libraries {
+                    library.source_authority = if library.root_path.is_some() {
+                        ModelSourceAuthority::External
+                    } else {
+                        ModelSourceAuthority::BuiltIn
+                    };
+                }
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -310,6 +328,7 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             pdk_name: library.pdk_name.clone(),
             technology_node: library.technology_node.clone(),
             root_path: library.root_path.clone(),
+            source_authority: library.source_authority,
             source_closure: library.source_closure.clone(),
             source_contents: library.source_contents.clone(),
             source_edges: library.source_edges.clone(),
@@ -322,12 +341,31 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
 }
 
 impl ProjectModelLibrary {
-    fn into_model_library(self) -> ModelLibrary {
+    fn into_model_library(mut self) -> ModelLibrary {
+        if let ModelSourceAuthority::ProjectOwned { source_id, .. } = self.source_authority {
+            let host_root = crate::state::model_library::project_owned_source_path(source_id);
+            self.root_path = Some(host_root.clone());
+            for source in &mut self.source_closure {
+                source.path = host_root.clone();
+            }
+            for content in &mut self.source_contents {
+                content.path = host_root.clone();
+            }
+            for model in self.models.values_mut() {
+                model.file_path = Some(host_root.clone());
+            }
+            for corner in self.corners.values_mut() {
+                if corner.file_path.is_some() {
+                    corner.file_path = Some(host_root.clone());
+                }
+            }
+        }
         ModelLibrary {
             name: self.name,
             pdk_name: self.pdk_name,
             technology_node: self.technology_node,
             root_path: self.root_path,
+            source_authority: self.source_authority,
             source_closure: self.source_closure,
             source_contents: self.source_contents,
             source_edges: self.source_edges,
@@ -522,6 +560,44 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
             && path.as_os_str().is_empty()
         {
             return Err(format!("{context}.root_path must not be empty"));
+        }
+        match library.source_authority {
+            ModelSourceAuthority::BuiltIn => {
+                if library.root_path.is_some()
+                    || !library.source_closure.is_empty()
+                    || !library.source_contents.is_empty()
+                    || !library.source_edges.is_empty()
+                {
+                    return Err(format!(
+                        "{context}.source_authority built_in cannot own a root path or source closure"
+                    ));
+                }
+            }
+            ModelSourceAuthority::External => {
+                if library.root_path.is_none() {
+                    return Err(format!(
+                        "{context}.source_authority external requires a root_path"
+                    ));
+                }
+            }
+            ModelSourceAuthority::ProjectOwned { digest, .. } => {
+                let Some(root_path) = library.root_path.as_ref() else {
+                    return Err(format!(
+                        "{context}.source_authority project_owned requires a root identity"
+                    ));
+                };
+                if library.source_closure.len() != 1
+                    || library.source_contents.len() != 1
+                    || !library.source_edges.is_empty()
+                    || library.source_closure[0].path != *root_path
+                    || library.source_contents[0].path != *root_path
+                    || library.source_closure[0].digest != digest
+                {
+                    return Err(format!(
+                        "{context}.source_authority project_owned requires one exact retained root source with the authority digest and no dependency edges"
+                    ));
+                }
+            }
         }
         if library.root_path.is_none() && !library.source_closure.is_empty() {
             return Err(format!(
@@ -732,6 +808,23 @@ fn validate_model_numbers(
     model_key: &str,
     model: &DeviceModel,
 ) -> Result<(), String> {
+    if let Some(spice_type) = &model.spice_type
+        && (spice_type.trim().is_empty() || spice_type.chars().any(char::is_control))
+    {
+        return Err(format!(
+            "{context}.models['{model_key}'].spice_type must be a non-empty source token"
+        ));
+    }
+    if model.model_version.is_some_and(|value| !value.is_finite()) {
+        return Err(format!(
+            "{context}.models['{model_key}'].model_version must be finite"
+        ));
+    }
+    if model.source_line == Some(0) {
+        return Err(format!(
+            "{context}.models['{model_key}'].source_line must be one-based"
+        ));
+    }
     let optional_values = [
         ("l_min", model.l_min),
         ("l_max", model.l_max),
@@ -772,6 +865,25 @@ fn validate_model_numbers(
             "{context}.models['{model_key}'].parameters['{parameter}'] must be finite, got {value}"
         ));
     }
+    let mut parameter_names = HashSet::new();
+    for parameter in model.parameters.keys() {
+        if parameter.trim().is_empty() || !parameter_names.insert(parameter.to_ascii_lowercase()) {
+            return Err(format!(
+                "{context}.models['{model_key}'] contains an empty or case-duplicate parameter name '{parameter}'"
+            ));
+        }
+    }
+    for (parameter, value) in &model.string_parameters {
+        if parameter.trim().is_empty()
+            || !parameter_names.insert(parameter.to_ascii_lowercase())
+            || value.is_empty()
+            || value.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "{context}.models['{model_key}'].string_parameters['{parameter}'] is empty, duplicates another parameter, or contains control characters"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -779,6 +891,9 @@ fn validate_model_numbers(
 fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
     let mut warnings = Vec::new();
     for library in libraries {
+        if library.source_authority != ModelSourceAuthority::External {
+            continue;
+        }
         let Some(path) = library.root_path.as_deref() else {
             continue;
         };
@@ -859,6 +974,7 @@ fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
 fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
     libraries
         .iter()
+        .filter(|library| library.source_authority == ModelSourceAuthority::External)
         .filter_map(|library| {
             library.root_path.as_ref().map(|path| {
                 format!(
@@ -1044,6 +1160,87 @@ mod tests {
             crate::common::app::SimulationPlanLineage::root()
         );
         restored.validate().expect("promoted context validates");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn schema_six_classifies_legacy_sources_without_inventing_edit_authority() {
+        let (directory, path) = model_fixture();
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .load_library_file(&path, Some("TT"))
+            .expect("load external source");
+        manager.add_library(ModelLibrary::new("built-in-catalog"));
+        let context =
+            context_from_state(&SimSetupState::new(), &manager).expect("context validates");
+        let mut value = serde_json::to_value(context).expect("context serializes");
+        value["schema_version"] = serde_json::json!(RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION);
+        for library in value["model_libraries"]
+            .as_array_mut()
+            .expect("libraries array")
+        {
+            library
+                .as_object_mut()
+                .expect("library object")
+                .remove("source_authority");
+        }
+
+        let mut restored: ProjectExecutionContext =
+            serde_json::from_value(value).expect("schema six remains readable");
+        restored
+            .migrate_to_current(project_id())
+            .expect("schema six migrates");
+        restored.validate().expect("migrated context validates");
+        assert!(restored.model_libraries.iter().any(|library| {
+            library.name == "foundry" && library.source_authority == ModelSourceAuthority::External
+        }));
+        assert!(restored.model_libraries.iter().any(|library| {
+            library.name == "built-in-catalog"
+                && library.source_authority == ModelSourceAuthority::BuiltIn
+        }));
+
+        std::fs::remove_dir_all(directory).expect("remove model fixture");
+    }
+
+    #[test]
+    fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
+        let definition = crate::state::model_library::ProjectModelDefinition {
+            name: "owned_nch".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Persisted project model".to_owned(),
+            numeric_parameters: std::collections::BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("kp".to_owned(), 0.001),
+            ]),
+            string_parameters: std::collections::BTreeMap::from([(
+                "revision_tag".to_owned(),
+                "r1".to_owned(),
+            )]),
+        };
+        let mut manager = ModelLibraryManager::new();
+        let committed = manager
+            .create_project_model("owned-models", &definition)
+            .expect("create project model");
+        let expected_bytes = committed.after.source_contents[0].bytes.clone();
+        let expected_authority = committed.after.source_authority;
+        let context =
+            context_from_state(&SimSetupState::new(), &manager).expect("context validates");
+        let json = serde_json::to_string(&context).expect("context serializes");
+        let restored: ProjectExecutionContext =
+            serde_json::from_str(&json).expect("context deserializes");
+        let (_, restored_manager, warnings) = restored
+            .into_state(project_id())
+            .expect("project-owned model restores");
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let library = restored_manager
+            .get_library("owned-models")
+            .expect("library restored");
+        assert_eq!(library.source_authority, expected_authority);
+        assert_eq!(library.source_contents[0].bytes, expected_bytes);
+        restored_manager
+            .seal_execution_sources()
+            .expect("desktop execution consumes retained project bytes");
     }
 
     #[test]
@@ -1432,6 +1629,7 @@ mod tests {
                 pdk_name: String::new(),
                 technology_node: String::new(),
                 root_path: Some(root.clone()),
+                source_authority: ModelSourceAuthority::External,
                 source_closure: vec![ModelSourcePin {
                     path: root.clone(),
                     digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
@@ -1506,6 +1704,7 @@ mod tests {
                 pdk_name: String::new(),
                 technology_node: String::new(),
                 root_path: Some(root),
+                source_authority: ModelSourceAuthority::External,
                 source_closure,
                 source_contents: Vec::new(),
                 source_edges,

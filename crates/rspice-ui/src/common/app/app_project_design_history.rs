@@ -9,9 +9,12 @@
 use std::collections::BTreeMap;
 
 use crate::product::ObjectRevision;
+#[cfg(test)]
+use crate::state::model_library::ProjectModelDefinition;
+use crate::state::model_library::{ModelLibrary, ModelSourceAuthority, ProjectModelCommit};
 use crate::state::{
-    Cell, CellViewRef, ComponentType, DesignManagementCatalog, LibraryManager, OpenCellView,
-    SchematicSnapshot, SchematicState,
+    Cell, CellViewRef, ComponentType, DesignManagementCatalog, LibraryManager, ModelLibraryManager,
+    OpenCellView, SchematicSnapshot, SchematicState,
 };
 
 use super::AppState;
@@ -29,6 +32,7 @@ enum ProjectDesignRecord {
     HierarchyExtraction(Box<HierarchyExtractionRecord>),
     DesignManagement(Box<DesignManagementRecord>),
     SymbolDefinition(Box<SymbolDefinitionRecord>),
+    ModelDefinition(Box<ModelDefinitionRecord>),
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +92,20 @@ struct SymbolDefinitionFixtureRecord {
     after: Option<SchematicState>,
 }
 
+/// One guarded project-owned model-source publication. Only the affected
+/// model library is retained; manager filters, selection, and unrelated
+/// libraries are presentation or independent domain state.
+#[derive(Debug, Clone)]
+struct ModelDefinitionRecord {
+    description: String,
+    library: String,
+    model: String,
+    before: Option<ModelLibrary>,
+    after: Option<ModelLibrary>,
+    undo_guard_revision: ObjectRevision,
+    redo_guard_revision: Option<ObjectRevision>,
+}
+
 /// Optional real schematic-buffer delta published together with a symbol
 /// definition. Create Symbol uses this for its generated simulation fixture;
 /// import and parameter-form edits pass `None`.
@@ -106,6 +124,75 @@ pub(crate) struct SymbolDefinitionHistoryEntry {
     pub(crate) after: Option<Cell>,
     pub(crate) committed_revision: ObjectRevision,
     fixture: Option<SymbolDefinitionFixtureRecord>,
+}
+
+/// Publish an already validated model-manager candidate at the project
+/// revision boundary and add one guarded global undo step.
+pub(crate) fn publish_model_definition_candidate(
+    state: &mut AppState,
+    candidate: ModelLibraryManager,
+    commit: ProjectModelCommit,
+    description: impl Into<String>,
+) -> Result<ObjectRevision, String> {
+    if !state.project_lifecycle.project_open {
+        return Err("Model definitions require an open project.".to_owned());
+    }
+    if state.workbench.safe_mode.project_read_only() {
+        return Err("Model definitions cannot change while the project is read-only.".to_owned());
+    }
+    let observed = state
+        .model_library_manager
+        .get_library(&commit.library_name);
+    if !model_library_semantics_match(observed, commit.before.as_ref()) {
+        return Err(format!(
+            "Model library '{}' changed before the candidate could be published.",
+            commit.library_name
+        ));
+    }
+    let candidate_library = candidate.get_library(&commit.library_name).ok_or_else(|| {
+        format!(
+            "Candidate model library '{}' is unavailable.",
+            commit.library_name
+        )
+    })?;
+    if !model_library_semantics_match(Some(candidate_library), Some(&commit.after)) {
+        return Err("Candidate model manager does not contain the validated commit.".to_owned());
+    }
+    if !matches!(
+        commit.after.source_authority,
+        ModelSourceAuthority::ProjectOwned { .. }
+    ) {
+        return Err("Only project-owned model definitions can be published.".to_owned());
+    }
+    if model_library_semantics_match(commit.before.as_ref(), Some(&commit.after)) {
+        return Err("The model definition has no changes to publish.".to_owned());
+    }
+
+    let expected_revision = state
+        .workspace
+        .project
+        .next_revision()
+        .map_err(|error| error.to_string())?;
+    let committed_revision = state
+        .workspace
+        .project
+        .advance_revision()
+        .map_err(|error| error.to_string())?;
+    debug_assert_eq!(committed_revision, expected_revision);
+    state.model_library_manager = candidate;
+    state.workspace.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.ui.netlist.current_generation_input_digest = None;
+    state.record_model_definition_transaction(ModelDefinitionRecord {
+        description: description.into(),
+        library: commit.library_name,
+        model: commit.model_name,
+        before: commit.before,
+        after: Some(commit.after),
+        undo_guard_revision: committed_revision,
+        redo_guard_revision: None,
+    });
+    Ok(committed_revision)
 }
 
 /// Atomically publish a fully validated candidate library manager and record
@@ -255,6 +342,17 @@ pub(crate) struct HierarchyExtractionHistoryEntry {
 }
 
 impl AppState {
+    /// Atomically publish a fully validated project-owned model candidate and
+    /// record the change in the project-wide undo/redo history.
+    pub fn publish_project_model_candidate(
+        &mut self,
+        candidate: ModelLibraryManager,
+        commit: ProjectModelCommit,
+        description: impl Into<String>,
+    ) -> Result<ObjectRevision, String> {
+        publish_model_definition_candidate(self, candidate, commit, description)
+    }
+
     /// Preflight the component-name changes represented by the candidate's
     /// effective annotation journal. Every scoped object must still exist and
     /// retain either the journal's old or already-applied reference; a
@@ -459,6 +557,19 @@ impl AppState {
         self.project_design_history.redo.clear();
     }
 
+    fn record_model_definition_transaction(&mut self, record: ModelDefinitionRecord) {
+        if model_library_semantics_match(record.before.as_ref(), record.after.as_ref()) {
+            return;
+        }
+        self.project_design_history
+            .undo
+            .push(ProjectDesignRecord::ModelDefinition(Box::new(record)));
+        if self.project_design_history.undo.len() > MAX_PROJECT_DESIGN_STEPS {
+            self.project_design_history.undo.remove(0);
+        }
+        self.project_design_history.redo.clear();
+    }
+
     pub(crate) fn can_undo_project_design(&self) -> bool {
         self.project_design_history
             .undo
@@ -539,6 +650,7 @@ impl ProjectDesignRecord {
             Self::HierarchyExtraction(record) => record.after_design_matches(state),
             Self::DesignManagement(record) => record.after_design_matches(state),
             Self::SymbolDefinition(record) => record.after_design_matches(state),
+            Self::ModelDefinition(record) => record.after_design_matches(state),
         }
     }
 
@@ -547,6 +659,7 @@ impl ProjectDesignRecord {
             Self::HierarchyExtraction(record) => record.before_design_matches(state),
             Self::DesignManagement(record) => record.before_design_matches(state),
             Self::SymbolDefinition(record) => record.before_design_matches(state),
+            Self::ModelDefinition(record) => record.before_design_matches(state),
         }
     }
 
@@ -555,6 +668,7 @@ impl ProjectDesignRecord {
             Self::HierarchyExtraction(record) => record.validate_mutation(state, operation),
             Self::DesignManagement(record) => record.validate_mutation(state, operation),
             Self::SymbolDefinition(record) => record.validate_mutation(state, operation),
+            Self::ModelDefinition(record) => record.validate_mutation(state, operation),
         }
     }
 
@@ -569,6 +683,7 @@ impl ProjectDesignRecord {
                 active.library.eq_ignore_ascii_case(&record.library)
                     && active.cell.eq_ignore_ascii_case(&record.cell)
             }
+            Self::ModelDefinition(_) => false,
         }
     }
 
@@ -577,6 +692,7 @@ impl ProjectDesignRecord {
             Self::HierarchyExtraction(record) => &record.description,
             Self::DesignManagement(record) => &record.description,
             Self::SymbolDefinition(record) => &record.description,
+            Self::ModelDefinition(record) => &record.description,
         }
     }
 
@@ -585,6 +701,7 @@ impl ProjectDesignRecord {
             Self::HierarchyExtraction(record) => record.apply_before(state),
             Self::DesignManagement(record) => record.apply_before(state),
             Self::SymbolDefinition(record) => record.apply_before(state),
+            Self::ModelDefinition(record) => record.apply_before(state),
         }
     }
 
@@ -593,8 +710,163 @@ impl ProjectDesignRecord {
             Self::HierarchyExtraction(record) => record.apply_after(state),
             Self::DesignManagement(record) => record.apply_after(state),
             Self::SymbolDefinition(record) => record.apply_after(state),
+            Self::ModelDefinition(record) => record.apply_after(state),
         }
     }
+}
+
+impl ModelDefinitionRecord {
+    fn after_design_matches(&self, state: &AppState) -> bool {
+        model_library_semantics_match(
+            state.model_library_manager.get_library(&self.library),
+            self.after.as_ref(),
+        ) && state.workspace.project.revision() == self.undo_guard_revision
+    }
+
+    fn before_design_matches(&self, state: &AppState) -> bool {
+        model_library_semantics_match(
+            state.model_library_manager.get_library(&self.library),
+            self.before.as_ref(),
+        ) && self
+            .redo_guard_revision
+            .is_some_and(|revision| state.workspace.project.revision() == revision)
+    }
+
+    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+        if !state.project_lifecycle.project_open {
+            return Err(format!(
+                "Model definition cannot be {operation} without an open project."
+            ));
+        }
+        if state.workbench.safe_mode.project_read_only() {
+            return Err(format!(
+                "Model definition cannot be {operation} while the project is read-only."
+            ));
+        }
+        if let Some(library) = state.model_library_manager.get_library(&self.library)
+            && !matches!(
+                library.source_authority,
+                ModelSourceAuthority::ProjectOwned { .. }
+            )
+        {
+            return Err(format!(
+                "Model definition cannot be {operation} because library '{}' is no longer project-owned.",
+                self.library
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
+        if !self.after_design_matches(state) {
+            return Err(format!(
+                "Model '{}' cannot be undone because its source or project revision changed.",
+                self.model
+            ));
+        }
+        self.validate_mutation(state, "undone")?;
+        self.redo_guard_revision = Some(replace_model_library(
+            state,
+            &self.library,
+            self.before.as_ref(),
+        )?);
+        Ok(())
+    }
+
+    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
+        if !self.before_design_matches(state) {
+            return Err(format!(
+                "Model '{}' cannot be redone because its source or project revision changed.",
+                self.model
+            ));
+        }
+        self.validate_mutation(state, "redone")?;
+        self.undo_guard_revision =
+            replace_model_library(state, &self.library, self.after.as_ref())?;
+        Ok(())
+    }
+}
+
+fn model_library_semantics_match(
+    observed: Option<&ModelLibrary>,
+    expected: Option<&ModelLibrary>,
+) -> bool {
+    match (observed, expected) {
+        (None, None) => true,
+        (Some(observed), Some(expected)) => {
+            observed.name == expected.name
+                && observed.pdk_name == expected.pdk_name
+                && observed.technology_node == expected.technology_node
+                && observed.root_path == expected.root_path
+                && observed.source_authority == expected.source_authority
+                && observed.source_closure == expected.source_closure
+                && observed.source_contents == expected.source_contents
+                && observed.source_edges == expected.source_edges
+                && observed.models == expected.models
+                && observed.corners == expected.corners
+                && observed.selected_corner == expected.selected_corner
+                && observed.version == expected.version
+        }
+        _ => false,
+    }
+}
+
+fn replace_model_library(
+    state: &mut AppState,
+    library_name: &str,
+    replacement: Option<&ModelLibrary>,
+) -> Result<ObjectRevision, String> {
+    let revision = state
+        .workspace
+        .project
+        .next_revision()
+        .map_err(|error| error.to_string())?;
+    match replacement {
+        Some(replacement) => {
+            let mut replacement = replacement.clone();
+            if let Some(current) = state.model_library_manager.get_library(library_name) {
+                replacement.expanded = current.expanded;
+            }
+            state.model_library_manager.add_library(replacement);
+            if state.model_library_manager.selected_library.as_deref() == Some(library_name)
+                && state
+                    .workbench
+                    .selected_model
+                    .as_ref()
+                    .is_some_and(|model| {
+                        state
+                            .model_library_manager
+                            .get_library(library_name)
+                            .is_none_or(|library| !library.models.contains_key(model))
+                    })
+            {
+                state.workbench.selected_model = None;
+            }
+        }
+        None => {
+            if state
+                .model_library_manager
+                .remove_library(library_name)
+                .is_none()
+            {
+                return Err(format!("Model library '{library_name}' no longer exists."));
+            }
+            if state.model_library_manager.selected_library.as_deref() == Some(library_name) {
+                state.model_library_manager.selected_library = None;
+                state.workbench.selected_model = None;
+            }
+        }
+    }
+    state
+        .workspace
+        .project
+        .advance_revision()
+        .map_err(|error| error.to_string())?;
+    debug_assert_eq!(state.workspace.project.revision(), revision);
+    state.workspace.project_metadata_dirty = true;
+    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+    state.ui.netlist.current_generation_input_digest = None;
+    Ok(revision)
 }
 
 impl SymbolDefinitionRecord {
@@ -1805,6 +2077,122 @@ mod tests {
                 .get_library(&library_name)
                 .and_then(|library| library.get_cell("imported_symbol"))
                 .is_some()
+        );
+    }
+
+    fn owned_model_definition(vth0: f64) -> ProjectModelDefinition {
+        ProjectModelDefinition {
+            name: "history_nch".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "History integration model".to_owned(),
+            numeric_parameters: std::collections::BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("vth0".to_owned(), vth0),
+            ]),
+            string_parameters: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = true;
+        state.model_library_manager.filter_text = "nch".to_owned();
+        let initial_revision = state.workspace.project.revision();
+        let initial_epoch = state.design_execution_epoch;
+        let mut candidate = state.model_library_manager.clone();
+        let commit = candidate
+            .create_project_model("history-models", &owned_model_definition(0.48))
+            .expect("candidate model validates");
+
+        let committed_revision = state
+            .publish_project_model_candidate(candidate, commit, "create project model history_nch")
+            .expect("candidate publishes");
+        assert!(committed_revision > initial_revision);
+        assert!(state.workspace.project_metadata_dirty);
+        assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(1));
+        assert_eq!(state.model_library_manager.filter_text, "nch");
+        assert!(
+            state
+                .model_library_manager
+                .get_library("history-models")
+                .is_some()
+        );
+        assert!(state.can_undo_project_design());
+
+        assert_eq!(
+            state.undo_project_design().expect("undo"),
+            Some("create project model history_nch".to_owned())
+        );
+        assert!(
+            state
+                .model_library_manager
+                .get_library("history-models")
+                .is_none()
+        );
+        assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(2));
+        let undo_revision = state.workspace.project.revision();
+        assert!(undo_revision > committed_revision);
+        assert!(state.can_redo_project_design());
+
+        assert_eq!(
+            state.redo_project_design().expect("redo"),
+            Some("create project model history_nch".to_owned())
+        );
+        assert!(
+            state
+                .model_library_manager
+                .get_library("history-models")
+                .is_some()
+        );
+        assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(3));
+        assert!(state.workspace.project.revision() > undo_revision);
+        assert_eq!(state.model_library_manager.filter_text, "nch");
+    }
+
+    #[test]
+    fn project_model_publication_rejects_closed_or_read_only_projects_without_mutation() {
+        let mut state = AppState::default();
+        state.project_lifecycle.project_open = false;
+        let mut candidate = state.model_library_manager.clone();
+        let commit = candidate
+            .create_project_model("history-models", &owned_model_definition(0.48))
+            .expect("candidate model validates");
+        let revision = state.workspace.project.revision();
+        let error = state
+            .publish_project_model_candidate(
+                candidate.clone(),
+                commit.clone(),
+                "create project model",
+            )
+            .expect_err("closed project must reject publication");
+        assert!(error.contains("open project"));
+        assert_eq!(state.workspace.project.revision(), revision);
+        assert!(
+            state
+                .model_library_manager
+                .get_library("history-models")
+                .is_none()
+        );
+
+        state.project_lifecycle.project_open = true;
+        state.workbench.safe_mode.activate(
+            LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..LocalSafeModeOptions::default()
+            },
+            "retained session".to_owned(),
+        );
+        let error = state
+            .publish_project_model_candidate(candidate, commit, "create project model")
+            .expect_err("read-only project must reject publication");
+        assert!(error.contains("read-only"));
+        assert_eq!(state.workspace.project.revision(), revision);
+        assert!(
+            state
+                .model_library_manager
+                .get_library("history-models")
+                .is_none()
         );
     }
 

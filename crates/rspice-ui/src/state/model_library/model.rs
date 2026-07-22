@@ -5,14 +5,23 @@ use std::path::PathBuf;
 use super::{ModelLevel, ModelType};
 
 /// A single device model definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeviceModel {
     /// Model name (e.g., "nmos_3p3_svt")
     pub name: String,
     /// Model type
     pub model_type: ModelType,
+    /// Canonical SPICE type token retained from the parsed source.
+    #[serde(default)]
+    pub spice_type: Option<String>,
     /// Model level
     pub level: ModelLevel,
+    /// Exact numeric SPICE level, when declared.
+    #[serde(default)]
+    pub spice_level: Option<u32>,
+    /// Exact numeric model version, when declared.
+    #[serde(default)]
+    pub model_version: Option<f64>,
     /// Description
     pub description: String,
     /// Minimum channel length (for MOS)
@@ -31,6 +40,12 @@ pub struct DeviceModel {
     pub file_path: Option<PathBuf>,
     /// Model parameters (key-value)
     pub parameters: HashMap<String, f64>,
+    /// Non-numeric model parameters retained without lossy coercion.
+    #[serde(default)]
+    pub string_parameters: HashMap<String, String>,
+    /// One-based source line for inspection and diagnostics, when known.
+    #[serde(default)]
+    pub source_line: Option<usize>,
 }
 
 impl Default for DeviceModel {
@@ -38,7 +53,10 @@ impl Default for DeviceModel {
         Self {
             name: String::new(),
             model_type: ModelType::Nmos,
+            spice_type: None,
             level: ModelLevel::Unknown,
+            spice_level: None,
+            model_version: None,
             description: String::new(),
             l_min: None,
             l_max: None,
@@ -48,6 +66,8 @@ impl Default for DeviceModel {
             vth0: None,
             file_path: None,
             parameters: HashMap::new(),
+            string_parameters: HashMap::new(),
+            source_line: None,
         }
     }
 }
