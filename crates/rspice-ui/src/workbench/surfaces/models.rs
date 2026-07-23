@@ -1,7 +1,7 @@
 //! Model catalog, symbol contracts, PDK sections, authenticated includes, and
 //! the source-owned model qualification and release gate.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use egui::{Align, Align2, Color32, Key, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -28,6 +28,7 @@ use super::super::design_system::{
 };
 use super::super::model_editor::{self, ModelEditorSection};
 use super::super::state::{ModelsPage, Workspace};
+use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const TABLE_HEAD_H: f32 = 27.0;
 const TABLE_CARD_HEAD_H: f32 = 37.0;
@@ -41,6 +42,8 @@ const MODEL_WIDE_SUMMARY_H: f32 = 150.0;
 const MODEL_STACKED_SUMMARY_H: f32 = 300.0;
 const MODEL_TITLE_MIN_CONTENT_H: f32 = 48.0;
 const QUALIFICATION_MIN_CONTENT_H: f32 = 680.0;
+const QUALIFICATION_STACKED_MIN_CONTENT_H: f32 = 1000.0;
+const QUALIFICATION_GATE_COPY: &str = "Dispositions, reruns, replacement, and retirement remain source-owned here. Release promotion cannot override missing or failing vector outcomes.";
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
@@ -748,6 +751,57 @@ impl QualificationGate {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum QualificationDomain {
+    Dc,
+    Ac,
+    Transient,
+    Noise,
+}
+
+impl QualificationDomain {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Dc => "DC operating curves",
+            Self::Ac => "AC / charge",
+            Self::Transient => "Transient",
+            Self::Noise => "Noise",
+        }
+    }
+
+    const fn from_analysis(analysis: &QualificationAnalysis) -> Self {
+        match analysis {
+            QualificationAnalysis::DcOperatingPoint | QualificationAnalysis::DcSweep { .. } => {
+                Self::Dc
+            }
+            QualificationAnalysis::AcSweep { .. } => Self::Ac,
+            QualificationAnalysis::Transient { .. } => Self::Transient,
+            QualificationAnalysis::Noise { .. } => Self::Noise,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct QualificationDomainAccumulator {
+    vectors: usize,
+    references: usize,
+    quantities: BTreeSet<String>,
+    tolerance_contracts: BTreeMap<(u64, u64), String>,
+    evidenced_vectors: usize,
+    passing_vectors: usize,
+    open_dispositions: usize,
+}
+
+#[derive(Debug, Clone)]
+struct QualificationDomainSummary {
+    domain: QualificationDomain,
+    vectors: usize,
+    reference_coverage: String,
+    tolerance: String,
+    disposition: String,
+    tone: QualificationGate,
+}
+
 #[derive(Debug, Clone)]
 struct QualificationModelSummary {
     key: String,
@@ -774,18 +828,21 @@ struct QualificationModelSummary {
     releases: usize,
     comparison_available: bool,
     gate: QualificationGate,
+    domains: Vec<QualificationDomainSummary>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QualificationPageAction {
     ReviewVectors,
+    ReviewReleaseBinding,
     RunSuite,
     CompareRelease,
 }
 
 fn qualification(ui: &mut Ui, app: &mut RSpiceApp) {
     let available = ui.available_size();
-    if available.y >= QUALIFICATION_MIN_CONTENT_H {
+    let required_height = qualification_required_content_height(available.x);
+    if available.y >= required_height {
         qualification_content(ui, app);
         return;
     }
@@ -803,11 +860,22 @@ fn qualification(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(&mut child, |ui| {
             let content_width = ui.available_width().max(1.0);
             ui.allocate_ui_with_layout(
-                egui::vec2(content_width, QUALIFICATION_MIN_CONTENT_H),
+                egui::vec2(
+                    content_width,
+                    qualification_required_content_height(content_width),
+                ),
                 Layout::top_down(Align::Min),
                 |ui| qualification_content(ui, app),
             );
         });
+}
+
+fn qualification_required_content_height(width: f32) -> f32 {
+    if width <= MODEL_SUMMARY_BREAKPOINT {
+        QUALIFICATION_STACKED_MIN_CONTENT_H
+    } else {
+        QUALIFICATION_MIN_CONTENT_H
+    }
 }
 
 fn qualification_content(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -836,7 +904,7 @@ fn qualification_content(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         "Model qualification · source-owned release gate",
         "Model qualification",
-        "Versioned vectors, qualified oracles, runtime parity, tolerances, and governed dispositions. Release closure consumes only retained source-owned evidence.",
+        "Versioned vectors, retained golden references, runtime parity, tolerances, and governed dispositions. Release closure consumes only source-owned evidence.",
         true,
         430.0,
         |ui| {
@@ -934,9 +1002,9 @@ fn qualification_content(ui: &mut Ui, app: &mut RSpiceApp) {
             },
         ),
         Kpi::new(
-            "Oracle coverage",
+            "Reference coverage",
             format!("{evidence_vectors} / {total_vectors}"),
-            "exact retained vector evidence",
+            "exact retained golden-reference evidence",
             if total_vectors > 0 && evidence_vectors == total_vectors {
                 t.color.ok
             } else {
@@ -976,70 +1044,32 @@ fn qualification_content(ui: &mut Ui, app: &mut RSpiceApp) {
     ];
     kpi_strip(ui, &metrics);
 
-    let rows = summaries
-        .iter()
-        .map(|summary| {
-            let selected = app.state.workbench.selected_model.as_deref()
-                == Some(summary.model.as_str())
-                && app.state.model_library_manager.selected_library.as_deref()
-                    == Some(summary.library.as_str());
-            DataRow {
-                key: summary.key.clone(),
-                selected,
-                cells: vec![
-                    DataCell::mono(&summary.model),
-                    DataCell::mono(summary.dc_vectors.to_string()),
-                    DataCell::mono(summary.ac_vectors.to_string()),
-                    DataCell::mono(summary.transient_vectors.to_string()),
-                    DataCell::mono(summary.noise_vectors.to_string()),
-                    DataCell::mono(if summary.temperature_points == 0 {
-                        "not declared".to_owned()
-                    } else {
-                        format!("{} points", summary.temperature_points)
-                    }),
-                    DataCell::mono(format!("{} refs", summary.references)),
-                    DataCell::mono_colored(summary.gate.label(), summary.gate.color(&t)),
-                ],
-            }
-        })
-        .collect::<Vec<_>>();
-    let columns = [
-        ("Model family", 0.23),
-        ("DC", 0.08),
-        ("AC / charge", 0.13),
-        ("Transient", 0.12),
-        ("Noise", 0.09),
-        ("Temperature", 0.15),
-        ("Oracle", 0.10),
-        ("Gate", 0.10),
-    ];
     let detail_height = if ui.available_width() <= MODEL_SUMMARY_BREAKPOINT {
-        360.0
+        460.0 + qualification_gate_footer_height(ui, ui.available_width())
     } else {
-        250.0
+        330.0
     };
     let table_height = (ui.available_height() - detail_height)
         .clamp(135.0, 320.0)
         .min(ui.available_height().max(1.0));
-    if let Some(event) = data_table(
+    if let Some(event) = qualification_suite_table(
         ui,
-        "models.qualification",
-        760.0,
-        &columns,
-        &rows,
+        app,
+        &summaries,
         egui::vec2(ui.available_width(), table_height),
-        "No loaded model records are available for qualification.",
     ) {
         let (library, model) = split_model_key(&event.key);
         app.state.model_library_manager.select_library(library);
         app.state.workbench.selected_model = Some(model.to_owned());
+        if event.review {
+            execute_qualification_action(app, QualificationPageAction::ReviewVectors);
+        }
     }
 
-    qualification_detail(
-        ui,
-        selected_qualification_summary(app, &summaries),
-        detail_height,
-    );
+    let selected_detail = selected_qualification_summary(app, &summaries);
+    if let Some(action) = qualification_detail(ui, app, selected_detail, detail_height) {
+        execute_qualification_action(app, action);
+    }
 }
 
 fn qualification_summaries(app: &RSpiceApp) -> Vec<QualificationModelSummary> {
@@ -1060,6 +1090,16 @@ fn qualification_model_summary(
     model: &DeviceModel,
 ) -> QualificationModelSummary {
     let key = model_key(&library.name, &model.name);
+    let open_draft = app
+        .state
+        .workbench
+        .model_editor
+        .draft
+        .as_ref()
+        .filter(|draft| {
+            draft.library_name.eq_ignore_ascii_case(&library.name)
+                && draft.model_name.eq_ignore_ascii_case(&model.name)
+        });
     let resolved = model_editor::resolve_project_model_for_editor(
         &app.state.model_library_manager,
         &library.name,
@@ -1067,23 +1107,43 @@ fn qualification_model_summary(
     );
     let (source_revision, source_error, state, source) = match resolved {
         Ok(resolved) => {
+            let qualification = open_draft.map_or_else(
+                || resolved.qualification.clone(),
+                |draft| draft.qualification.clone(),
+            );
+            let source_id = open_draft.map_or_else(
+                || resolved.source_id.clone(),
+                |draft| draft.source_id.clone(),
+            );
+            let source_digest =
+                open_draft.map_or(resolved.model_digest, |draft| draft.base_source_digest);
+            let source_revision =
+                open_draft.map_or(resolved.model_revision, |draft| draft.base_source_revision);
             let source = ModelSourceEvidenceBinding::try_new_project_bound(
                 &model.name,
-                resolved.source_id,
-                resolved.model_digest,
-                resolved.model_revision,
+                source_id,
+                source_digest,
+                source_revision,
             );
             match source {
                 Ok(source) => (
-                    format!("{}@{}", model.name, resolved.model_revision.get()),
+                    if open_draft.is_some_and(|draft| draft.qualification_is_dirty()) {
+                        format!(
+                            "{}@{} · working qualification",
+                            model.name,
+                            source_revision.get()
+                        )
+                    } else {
+                        format!("{}@{}", model.name, source_revision.get())
+                    },
                     None,
-                    resolved.qualification,
+                    qualification,
                     Some(source),
                 ),
                 Err(error) => (
                     "invalid source identity".to_owned(),
                     Some(error.to_string()),
-                    resolved.qualification,
+                    qualification,
                     None,
                 ),
             }
@@ -1143,11 +1203,59 @@ fn summarize_qualification_state(
     let mut worst_relative_error: Option<f64> = None;
     let mut evidence_members = Vec::<(String, u64, crate::product::ContentDigest)>::new();
     let mut all_suites_have_passing_evidence = !exact_suites.is_empty();
+    let mut domain_accumulators =
+        BTreeMap::<QualificationDomain, QualificationDomainAccumulator>::new();
 
     for suite in &exact_suites {
         vectors += suite.vectors.len();
+        let evidence = source.and_then(|source| {
+            state.evidence.iter().find(|evidence| {
+                evidence.source == *source
+                    && evidence.suite_id.eq_ignore_ascii_case(&suite.id)
+                    && evidence.suite_revision == suite.revision
+            })
+        });
         for vector in &suite.vectors {
             references += vector.references.len();
+            let domain = QualificationDomain::from_analysis(&vector.analysis);
+            let accumulator = domain_accumulators.entry(domain).or_default();
+            accumulator.vectors += 1;
+            accumulator.references += vector.references.len();
+            for reference in &vector.references {
+                accumulator.quantities.insert(reference.quantity.clone());
+                let absolute = reference.absolute_tolerance.get();
+                let relative = reference.relative_tolerance.get();
+                accumulator
+                    .tolerance_contracts
+                    .entry(qualification_tolerance_key(absolute, relative))
+                    .or_insert_with(|| qualification_tolerance_label(absolute, relative));
+            }
+            if let Some(outcome) = evidence.and_then(|evidence| {
+                evidence
+                    .vector_outcomes
+                    .iter()
+                    .find(|outcome| outcome.vector_id.eq_ignore_ascii_case(&vector.id))
+            }) {
+                accumulator.evidenced_vectors += 1;
+                accumulator.passing_vectors += usize::from(outcome.passed);
+            }
+            accumulator.open_dispositions += source.map_or(0, |source| {
+                state
+                    .vector_dispositions
+                    .iter()
+                    .filter(|disposition| {
+                        disposition.is_open()
+                            && disposition.vector.source == *source
+                            && disposition.vector.suite_id.eq_ignore_ascii_case(&suite.id)
+                            && disposition.vector.suite_revision == suite.revision
+                            && disposition
+                                .vector
+                                .vector_id
+                                .eq_ignore_ascii_case(&vector.id)
+                    })
+                    .count()
+            });
+
             match &vector.analysis {
                 QualificationAnalysis::DcOperatingPoint | QualificationAnalysis::DcSweep { .. } => {
                     dc_vectors += 1;
@@ -1163,13 +1271,6 @@ fn summarize_qualification_state(
             }
         }
 
-        let evidence = source.and_then(|source| {
-            state.evidence.iter().find(|evidence| {
-                evidence.source == *source
-                    && evidence.suite_id.eq_ignore_ascii_case(&suite.id)
-                    && evidence.suite_revision == suite.revision
-            })
-        });
         if let Some(evidence) = evidence {
             evidenced_vectors += evidence.vector_outcomes.len();
             passing_vectors += evidence
@@ -1246,6 +1347,7 @@ fn summarize_qualification_state(
         QualificationGate::Review
     };
     let evidence_digest = qualification_evidence_contract_digest(&mut evidence_members);
+    let domains = qualification_domain_summaries(domain_accumulators);
 
     QualificationModelSummary {
         key,
@@ -1272,6 +1374,93 @@ fn summarize_qualification_state(
         releases: state.releases.len(),
         comparison_available: !state.candidates.is_empty() && !state.releases.is_empty(),
         gate,
+        domains,
+    }
+}
+
+fn qualification_domain_summaries(
+    accumulators: BTreeMap<QualificationDomain, QualificationDomainAccumulator>,
+) -> Vec<QualificationDomainSummary> {
+    accumulators
+        .into_iter()
+        .map(|(domain, accumulated)| {
+            let reference_coverage = if accumulated.references == 0 {
+                "No retained references".to_owned()
+            } else {
+                let quantity_label = if accumulated.quantities.len() == 1 {
+                    "quantity"
+                } else {
+                    "quantities"
+                };
+                format!(
+                    "{} refs · {} {quantity_label}",
+                    accumulated.references,
+                    accumulated.quantities.len()
+                )
+            };
+            let tolerance = match accumulated.tolerance_contracts.len() {
+                0 => "not declared".to_owned(),
+                1 => accumulated
+                    .tolerance_contracts
+                    .values()
+                    .next()
+                    .cloned()
+                    .expect("one retained tolerance contract"),
+                count => format!("{count} declared contracts · varies"),
+            };
+            let (disposition, tone) = if accumulated.open_dispositions > 0 {
+                (
+                    format!("{} open", accumulated.open_dispositions),
+                    QualificationGate::Review,
+                )
+            } else if accumulated.evidenced_vectors < accumulated.vectors {
+                (
+                    format!(
+                        "{} without evidence",
+                        accumulated.vectors - accumulated.evidenced_vectors
+                    ),
+                    QualificationGate::Unqualified,
+                )
+            } else if accumulated.passing_vectors == accumulated.vectors {
+                ("accepted".to_owned(), QualificationGate::Qualified)
+            } else {
+                (
+                    format!(
+                        "{} review",
+                        accumulated.vectors - accumulated.passing_vectors
+                    ),
+                    QualificationGate::Review,
+                )
+            };
+            QualificationDomainSummary {
+                domain,
+                vectors: accumulated.vectors,
+                reference_coverage,
+                tolerance,
+                disposition,
+                tone,
+            }
+        })
+        .collect()
+}
+
+fn qualification_tolerance_key(absolute: f64, relative: f64) -> (u64, u64) {
+    let canonical_bits = |value: f64| {
+        if value == 0.0 {
+            0.0_f64.to_bits()
+        } else {
+            value.to_bits()
+        }
+    };
+    (canonical_bits(absolute), canonical_bits(relative))
+}
+
+fn qualification_tolerance_label(absolute: f64, relative: f64) -> String {
+    match (absolute > 0.0, relative > 0.0) {
+        (false, false) => "exact".to_owned(),
+        (true, false) => format!("{absolute:.3e} absolute"),
+        (false, true) => format!("{:.4}% relative", relative * 100.0),
+        (true, true) => format!("{absolute:.3e} abs · {:.4}% rel", relative * 100.0),
     }
 }
 
@@ -1327,78 +1516,477 @@ fn selected_qualification_summary<'a>(
     })
 }
 
-fn qualification_detail(ui: &mut Ui, selected: Option<&QualificationModelSummary>, height: f32) {
-    let Some(selected) = selected else {
-        let t = Tokens::get(ui.ctx());
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            "Select a model family to inspect its source-owned qualification contract.",
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-        return;
+#[derive(Debug, Clone)]
+struct QualificationSuiteTableEvent {
+    key: String,
+    review: bool,
+}
+
+fn qualification_suite_table(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    summaries: &[QualificationModelSummary],
+    size: Vec2,
+) -> Option<QualificationSuiteTableEvent> {
+    let t = Tokens::get(ui.ctx());
+    let aggregate_gate = if summaries.is_empty() {
+        QualificationGate::Unqualified
+    } else if summaries
+        .iter()
+        .any(|summary| summary.gate == QualificationGate::Blocked)
+    {
+        QualificationGate::Blocked
+    } else if summaries
+        .iter()
+        .any(|summary| summary.gate != QualificationGate::Qualified)
+    {
+        QualificationGate::Review
+    } else {
+        QualificationGate::Qualified
     };
-    let left = [
-        ("Model revision", selected.source_revision.clone()),
-        ("Suites", selected.suites.to_string()),
-        (
-            "Vectors",
-            format!(
-                "{} / {} passing",
-                selected.passing_vectors, selected.vectors
-            ),
-        ),
-        (
-            "Desktop",
-            format!(
-                "{} / {} vectors passing",
-                selected.desktop_passing, selected.vectors
-            ),
-        ),
-        (
-            "WebAssembly",
-            format!(
-                "{} / {} vectors passing",
-                selected.wasm_passing, selected.vectors
-            ),
-        ),
+    let columns = [
+        ("Model family", 0.17),
+        ("DC", 0.07),
+        ("AC / charge", 0.12),
+        ("Transient", 0.10),
+        ("Noise", 0.08),
+        ("Temperature", 0.14),
+        ("References", 0.12),
+        ("Gate", 0.10),
+        ("", 0.10),
     ];
-    let right = [
-        ("Gate", selected.gate.label().to_owned()),
-        (
-            "Source authority",
-            selected
-                .source_error
-                .clone()
-                .unwrap_or_else(|| "exact project-owned revision".to_owned()),
-        ),
-        (
-            "Runtime parity",
-            format!("{} / {} suites", selected.parity_suites, selected.suites),
-        ),
-        (
-            "Evidence digest",
-            selected
-                .evidence_digest
-                .clone()
-                .unwrap_or_else(|| "not retained".to_owned()),
-        ),
-        ("Open dispositions", selected.open_dispositions.to_string()),
-        ("Approved releases", selected.releases.to_string()),
-    ];
-    let title = format!("{} · selected qualification", selected.model);
-    summary_cards(
+    let mut event = None;
+    table_card(
         ui,
-        ui.available_width() <= MODEL_SUMMARY_BREAKPOINT,
-        height,
-        false,
-        SummaryCardSpec::new(&title, &left),
-        SummaryCardSpec::new("Qualification contract", &right),
+        "Qualification suites",
+        Some((aggregate_gate.label(), aggregate_gate.color(&t))),
+        size,
+        |ui, table_size| {
+            let table_size = table_size.max(Vec2::splat(1.0));
+            let (viewport, _) = ui.allocate_exact_size(table_size, Sense::hover());
+            ui.painter().rect_filled(viewport, 0.0, t.color.bg_panel);
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(viewport)
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            child.spacing_mut().item_spacing = Vec2::ZERO;
+            let table_width = viewport.width().max(760.0);
+            ScrollArea::both()
+                .id_salt("models.qualification.suites")
+                .auto_shrink([false, false])
+                .show(&mut child, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                    ui.set_min_width(table_width);
+                    let (head, _) = ui
+                        .allocate_exact_size(egui::vec2(table_width, TABLE_HEAD_H), Sense::hover());
+                    ui.painter().rect_filled(head, 0.0, t.color.bg_panel_2);
+                    ui.painter().hline(
+                        head.x_range(),
+                        head.bottom(),
+                        Stroke::new(1.0, t.color.border),
+                    );
+                    paint_table_cells(ui, head, &columns, None, true);
+
+                    for summary in summaries {
+                        let selected = app.state.workbench.selected_model.as_deref()
+                            == Some(summary.model.as_str())
+                            && app.state.model_library_manager.selected_library.as_deref()
+                                == Some(summary.library.as_str());
+                        let cells = [
+                            DataCell::mono(&summary.model),
+                            DataCell::mono(summary.dc_vectors.to_string()),
+                            DataCell::mono(summary.ac_vectors.to_string()),
+                            DataCell::mono(summary.transient_vectors.to_string()),
+                            DataCell::mono(summary.noise_vectors.to_string()),
+                            DataCell::mono(if summary.temperature_points == 0 {
+                                "not declared".to_owned()
+                            } else {
+                                format!("{} points", summary.temperature_points)
+                            }),
+                            DataCell::mono(format!("{} refs", summary.references)),
+                            DataCell::mono_colored(summary.gate.label(), summary.gate.color(&t)),
+                        ];
+                        let row_height = t.metrics.row_h.max(30.0);
+                        let (row, _) = ui.allocate_exact_size(
+                            egui::vec2(table_width, row_height),
+                            Sense::hover(),
+                        );
+                        let response = ui.interact(
+                            row,
+                            ui.id()
+                                .with(("models.qualification.suite", summary.key.as_str())),
+                            Sense::click(),
+                        );
+                        if selected {
+                            ui.painter().rect_filled(row, 0.0, t.color.accent_dim);
+                            ui.painter().rect_filled(
+                                Rect::from_min_max(
+                                    row.min,
+                                    egui::pos2(row.left() + 2.0, row.bottom()),
+                                ),
+                                0.0,
+                                t.color.accent,
+                            );
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(row, 0.0, t.color.bg_hover);
+                        }
+                        ui.painter().hline(
+                            row.x_range(),
+                            row.bottom(),
+                            Stroke::new(1.0, t.color.border.gamma_multiply(0.75)),
+                        );
+                        paint_table_cells(ui, row, &columns, Some(&cells), false);
+
+                        let action_left = row.left()
+                            + row.width()
+                                * columns[..columns.len() - 1]
+                                    .iter()
+                                    .map(|(_, fraction)| *fraction)
+                                    .sum::<f32>();
+                        let action_rect = Rect::from_min_max(
+                            egui::pos2(action_left + 4.0, row.top() + 3.0),
+                            egui::pos2(row.right() - 4.0, row.bottom() - 3.0),
+                        );
+                        let mut action_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(action_rect).layout(
+                                Layout::centered_and_justified(egui::Direction::LeftToRight),
+                            ));
+                        let blocker = qualification_action_block_reason(
+                            app,
+                            Some(summary),
+                            QualificationPageAction::ReviewVectors,
+                        );
+                        let action = Button::new(if summary.gate == QualificationGate::Qualified {
+                            "Inspect"
+                        } else {
+                            "Review"
+                        })
+                        .enabled(blocker.is_none())
+                        .show(&mut action_ui);
+                        let action_clicked = action.clicked();
+                        if let Some(reason) = blocker.as_deref() {
+                            action.on_disabled_hover_text(reason);
+                        }
+
+                        if action_clicked || response.double_clicked() {
+                            event = Some(QualificationSuiteTableEvent {
+                                key: summary.key.clone(),
+                                review: true,
+                            });
+                        } else if response.clicked() {
+                            event = Some(QualificationSuiteTableEvent {
+                                key: summary.key.clone(),
+                                review: false,
+                            });
+                        }
+                        theme::paint_focus_ring_outset(ui, &response, row);
+                    }
+
+                    if summaries.is_empty() {
+                        let empty_height =
+                            (viewport.height() - TABLE_HEAD_H).max(t.metrics.row_h.max(44.0));
+                        let (empty, _) = ui.allocate_exact_size(
+                            egui::vec2(table_width, empty_height),
+                            Sense::hover(),
+                        );
+                        ui.painter().text(
+                            empty.center(),
+                            Align2::CENTER_CENTER,
+                            "No loaded model records are available for qualification.",
+                            theme::sans(tokens::FS_0, FontWeight::Regular),
+                            t.color.text_dim,
+                        );
+                    }
+                });
+        },
     );
+    event
+}
+
+fn qualification_detail(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    selected: Option<&QualificationModelSummary>,
+    height: f32,
+) -> Option<QualificationPageAction> {
+    let width = ui.available_width().max(1.0);
+    let narrow = width <= MODEL_SUMMARY_BREAKPOINT;
+    let footer_height = qualification_gate_footer_height(ui, width);
+    let body_height = (height - footer_height).max(1.0);
+    let mut requested_action = None;
+
+    if narrow {
+        let domain_height = (body_height - 250.0).max(190.0).min(body_height);
+        qualification_domain_table(ui, selected, egui::vec2(width, domain_height));
+        let contract_height = (body_height - domain_height).max(1.0);
+        if qualification_contract_card(ui, app, selected, egui::vec2(width, contract_height)) {
+            requested_action = Some(QualificationPageAction::ReviewVectors);
+        }
+    } else {
+        let (body, _) = ui.allocate_exact_size(egui::vec2(width, body_height), Sense::hover());
+        let left_width = (body.width() * 0.61).floor();
+        let left_rect = Rect::from_min_max(
+            body.left_top(),
+            egui::pos2(body.left() + left_width, body.bottom()),
+        );
+        let right_rect = Rect::from_min_max(
+            egui::pos2(left_rect.right() + 1.0, body.top()),
+            body.right_bottom(),
+        );
+        let mut left_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(left_rect)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        left_ui.spacing_mut().item_spacing = Vec2::ZERO;
+        qualification_domain_table(&mut left_ui, selected, left_rect.size());
+
+        let mut right_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(right_rect)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        right_ui.spacing_mut().item_spacing = Vec2::ZERO;
+        if qualification_contract_card(&mut right_ui, app, selected, right_rect.size()) {
+            requested_action = Some(QualificationPageAction::ReviewVectors);
+        }
+    }
+
+    if qualification_gate_footer(ui, app, selected, egui::vec2(width, footer_height)) {
+        requested_action = Some(QualificationPageAction::ReviewReleaseBinding);
+    }
+    requested_action
+}
+
+fn qualification_gate_footer_height(ui: &Ui, width: f32) -> f32 {
+    if width > MODEL_SUMMARY_BREAKPOINT {
+        return 58.0;
+    }
+    let t = Tokens::get(ui.ctx());
+    let body = ui.painter().layout(
+        QUALIFICATION_GATE_COPY.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        (width - 22.0).max(1.0),
+    );
+    (7.0 + 18.0 + body.size().y + 8.0 + 30.0 + 8.0).max(96.0)
+}
+
+fn qualification_domain_table(
+    ui: &mut Ui,
+    selected: Option<&QualificationModelSummary>,
+    size: Vec2,
+) {
+    let t = Tokens::get(ui.ctx());
+    let rows = selected
+        .into_iter()
+        .flat_map(|selected| selected.domains.iter())
+        .map(|domain| DataRow {
+            key: domain.domain.label().to_owned(),
+            selected: false,
+            cells: vec![
+                DataCell::plain(domain.domain.label()),
+                DataCell::mono(domain.vectors.to_string()),
+                DataCell::plain(&domain.reference_coverage),
+                DataCell::mono(&domain.tolerance),
+                DataCell::mono_colored(&domain.disposition, domain.tone.color(&t)),
+            ],
+        })
+        .collect::<Vec<_>>();
+    let columns = [
+        ("Domain", 0.22),
+        ("Vectors", 0.13),
+        ("References", 0.20),
+        ("Tolerance", 0.25),
+        ("Disposition", 0.20),
+    ];
+    let title = selected.map_or("Selected qualification", |selected| selected.model.as_str());
+    table_card(
+        ui,
+        title,
+        selected.map(|selected| (selected.gate.label(), selected.gate.color(&t))),
+        size,
+        |ui, table_size| {
+            let _ = data_table(
+                ui,
+                "models.qualification.domains",
+                470.0,
+                &columns,
+                &rows,
+                table_size,
+                "No executable qualification domains are retained for the selected source revision.",
+            );
+        },
+    );
+}
+
+fn qualification_contract_card(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    selected: Option<&QualificationModelSummary>,
+    size: Vec2,
+) -> bool {
+    let (viewport, _) = ui.allocate_exact_size(size.max(Vec2::splat(1.0)), Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(viewport)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    child.spacing_mut().item_spacing = Vec2::ZERO;
+    let review_blocker =
+        qualification_action_block_reason(app, selected, QualificationPageAction::ReviewVectors);
+    let mut clicked = false;
+    ScrollArea::vertical()
+        .id_salt("models.qualification.contract")
+        .auto_shrink([false, false])
+        .show(&mut child, |ui| {
+            ui.set_min_width(viewport.width());
+            let rows = [
+                (
+                    "Model revision",
+                    selected.map_or("not selected".to_owned(), |selected| {
+                        selected.source_revision.clone()
+                    }),
+                ),
+                (
+                    "Source authority",
+                    selected.map_or("select a model family".to_owned(), |selected| {
+                        selected
+                            .source_error
+                            .clone()
+                            .unwrap_or_else(|| "exact project-owned revision".to_owned())
+                    }),
+                ),
+                (
+                    "Runtime parity",
+                    selected.map_or("not evaluated".to_owned(), |selected| {
+                        format!(
+                            "desktop {}/{} · WASM {}/{}",
+                            selected.desktop_passing,
+                            selected.vectors,
+                            selected.wasm_passing,
+                            selected.vectors
+                        )
+                    }),
+                ),
+                (
+                    "Evidence set",
+                    selected.map_or("not retained".to_owned(), |selected| {
+                        selected
+                            .evidence_digest
+                            .clone()
+                            .unwrap_or_else(|| "not retained".to_owned())
+                    }),
+                ),
+                (
+                    "Approved releases",
+                    selected.map_or("0".to_owned(), |selected| selected.releases.to_string()),
+                ),
+            ];
+            property_card(ui, "Qualification contract", |ui| {
+                for (label, value) in &rows {
+                    property_row(ui, label, value);
+                }
+                let review = Button::new(selected.map_or("Review qualification", |selected| {
+                    if selected.open_dispositions > 0 {
+                        "Review dispositions"
+                    } else if selected.vectors == 0 {
+                        "Configure suite"
+                    } else {
+                        "Inspect vectors"
+                    }
+                }))
+                .enabled(review_blocker.is_none())
+                .show(ui);
+                if let Some(reason) = review_blocker.as_deref() {
+                    review.on_disabled_hover_text(reason);
+                } else if review.clicked() {
+                    clicked = true;
+                }
+            });
+        });
+    clicked
+}
+
+fn qualification_gate_footer(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    selected: Option<&QualificationModelSummary>,
+    size: Vec2,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(size.max(Vec2::splat(1.0)), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    let stacked = rect.width() <= MODEL_SUMMARY_BREAKPOINT;
+    let button_width = 150.0_f32.min((rect.width() - 22.0).max(1.0));
+    let button_rect = if stacked {
+        Rect::from_min_max(
+            egui::pos2(rect.right() - button_width - 8.0, rect.bottom() - 38.0),
+            egui::pos2(rect.right() - 8.0, rect.bottom() - 8.0),
+        )
+    } else {
+        Rect::from_center_size(
+            egui::pos2(rect.right() - button_width * 0.5 - 8.0, rect.center().y),
+            egui::vec2(button_width, 30.0),
+        )
+    };
+    let copy_rect = if stacked {
+        Rect::from_min_max(
+            egui::pos2(rect.left() + 11.0, rect.top() + 7.0),
+            egui::pos2(rect.right() - 11.0, button_rect.top() - 8.0),
+        )
+    } else {
+        Rect::from_min_max(
+            egui::pos2(rect.left() + 11.0, rect.top() + 7.0),
+            egui::pos2(button_rect.left() - 10.0, rect.bottom() - 7.0),
+        )
+    };
+    let heading_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let body_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    ui.painter().text(
+        copy_rect.left_top(),
+        Align2::LEFT_TOP,
+        "Gate ownership",
+        heading_font,
+        t.color.text,
+    );
+    let body = ui.painter().layout(
+        QUALIFICATION_GATE_COPY.to_owned(),
+        body_font,
+        t.color.text_dim,
+        copy_rect.width(),
+    );
+    ui.painter().galley(
+        egui::pos2(copy_rect.left(), copy_rect.top() + 18.0),
+        body,
+        t.color.text_dim,
+    );
+
+    let blocker = qualification_action_block_reason(
+        app,
+        selected,
+        QualificationPageAction::ReviewReleaseBinding,
+    );
+    let mut button_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(button_rect)
+            .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
+    );
+    let response = Button::new("Review release binding")
+        .enabled(blocker.is_none())
+        .show(&mut button_ui);
+    if let Some(reason) = blocker.as_deref() {
+        response.on_disabled_hover_text(reason);
+        false
+    } else {
+        response.clicked()
+    }
 }
 
 fn qualification_action_block_reason(
@@ -1450,7 +2038,9 @@ fn qualification_action_block_reason(
         }
     }
     match action {
-        QualificationPageAction::ReviewVectors => None,
+        QualificationPageAction::ReviewVectors | QualificationPageAction::ReviewReleaseBinding => {
+            None
+        }
         QualificationPageAction::RunSuite if app.state.workbench.safe_mode.project_read_only() => {
             Some("Qualification cannot run while the project is read-only".to_owned())
         }
@@ -1490,10 +2080,23 @@ fn execute_qualification_action(app: &mut RSpiceApp, action: QualificationPageAc
         )));
         return;
     }
+    if let Err(error) = app.state.workbench.navigate(
+        SurfaceRoute::surface(SurfaceId::ModelEditor),
+        RouteTransitionSource::User,
+    ) {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "Qualification editor cannot be shown: {error}"
+        )));
+        return;
+    }
 
     match action {
         QualificationPageAction::ReviewVectors => {
             app.state.workbench.model_editor.active_section = ModelEditorSection::Tests;
+            app.state.workbench.model_editor.qualification_plan_open = true;
+        }
+        QualificationPageAction::ReviewReleaseBinding => {
+            app.state.workbench.model_editor.active_section = ModelEditorSection::Release;
         }
         QualificationPageAction::RunSuite => {
             app.state.workbench.model_editor.active_section = ModelEditorSection::Tests;
@@ -1771,6 +2374,64 @@ struct DataRow {
 struct TableEvent {
     key: String,
     activate: bool,
+}
+
+fn table_card(
+    ui: &mut Ui,
+    title: &str,
+    status: Option<(&str, Color32)>,
+    desired_size: Vec2,
+    body: impl FnOnce(&mut Ui, Vec2),
+) {
+    let t = Tokens::get(ui.ctx());
+    let desired_size = desired_size.max(Vec2::splat(1.0));
+    let (viewport, response) = ui.allocate_exact_size(desired_size, Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(viewport)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    child.spacing_mut().item_spacing = Vec2::ZERO;
+    let (head, _) = child.allocate_exact_size(
+        egui::vec2(viewport.width(), TABLE_CARD_HEAD_H),
+        Sense::hover(),
+    );
+    child.painter().rect_filled(head, 0.0, t.color.bg_panel);
+    child.painter().hline(
+        head.x_range(),
+        head.top(),
+        Stroke::new(1.0, t.color.border_strong),
+    );
+    child.painter().hline(
+        head.x_range(),
+        head.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    child.painter().text(
+        egui::pos2(head.left() + 11.0, head.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+    if let Some((status, color)) = status {
+        child.painter().text(
+            egui::pos2(head.right() - 11.0, head.center().y),
+            Align2::RIGHT_CENTER,
+            status,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            color,
+        );
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    body(
+        &mut child,
+        egui::vec2(
+            viewport.width(),
+            (viewport.height() - TABLE_CARD_HEAD_H).max(1.0),
+        ),
+    );
 }
 
 fn data_table(
@@ -3012,6 +3673,14 @@ mod tests {
             "model-qualification"
         );
         assert!(QUALIFICATION_MIN_CONTENT_H > 600.0);
+        assert_eq!(
+            qualification_required_content_height(MODEL_SUMMARY_BREAKPOINT),
+            QUALIFICATION_STACKED_MIN_CONTENT_H
+        );
+        assert_eq!(
+            qualification_required_content_height(MODEL_SUMMARY_BREAKPOINT + 1.0),
+            QUALIFICATION_MIN_CONTENT_H
+        );
     }
 
     #[test]
@@ -3034,6 +3703,104 @@ mod tests {
             qualification_evidence_contract_digest(&mut reverse).expect("aggregate digest");
         assert_eq!(forward_label, reverse_label);
         assert!(forward_label.starts_with("2 suites · "));
+    }
+
+    #[test]
+    fn qualification_domain_projection_never_invents_oracle_provenance() {
+        let mut quantities = BTreeSet::new();
+        quantities.insert("v(out)".to_owned());
+        let domains = qualification_domain_summaries(BTreeMap::from([(
+            QualificationDomain::Ac,
+            QualificationDomainAccumulator {
+                vectors: 2,
+                references: 2,
+                quantities,
+                tolerance_contracts: BTreeMap::from([(
+                    qualification_tolerance_key(1.0e-6, 0.005),
+                    qualification_tolerance_label(1.0e-6, 0.005),
+                )]),
+                evidenced_vectors: 1,
+                passing_vectors: 1,
+                open_dispositions: 0,
+            },
+        )]));
+
+        assert_eq!(domains.len(), 1);
+        assert_eq!(domains[0].domain, QualificationDomain::Ac);
+        assert_eq!(domains[0].reference_coverage, "2 refs · 1 quantity");
+        assert_eq!(domains[0].disposition, "1 without evidence");
+        assert_eq!(domains[0].tone, QualificationGate::Unqualified);
+        assert!(
+            !domains[0]
+                .reference_coverage
+                .to_ascii_lowercase()
+                .contains("vendor")
+        );
+        assert!(
+            !domains[0]
+                .reference_coverage
+                .to_ascii_lowercase()
+                .contains("oracle")
+        );
+    }
+
+    #[test]
+    fn qualification_domain_projection_preserves_distinct_tolerance_contracts() {
+        let domains = qualification_domain_summaries(BTreeMap::from([(
+            QualificationDomain::Dc,
+            QualificationDomainAccumulator {
+                vectors: 2,
+                references: 2,
+                quantities: BTreeSet::from(["v(out)".to_owned()]),
+                tolerance_contracts: BTreeMap::from([
+                    (
+                        qualification_tolerance_key(1.0001e-6, 0.0),
+                        qualification_tolerance_label(1.0001e-6, 0.0),
+                    ),
+                    (
+                        qualification_tolerance_key(1.0002e-6, 0.0),
+                        qualification_tolerance_label(1.0002e-6, 0.0),
+                    ),
+                ]),
+                evidenced_vectors: 0,
+                passing_vectors: 0,
+                open_dispositions: 0,
+            },
+        )]));
+
+        assert_eq!(
+            qualification_tolerance_label(1.0001e-6, 0.0),
+            qualification_tolerance_label(1.0002e-6, 0.0)
+        );
+        assert_eq!(domains[0].tolerance, "2 declared contracts · varies");
+    }
+
+    #[test]
+    fn qualification_footer_reserves_wrapped_copy_before_stacking_its_action() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut heights = None;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    heights = Some((
+                        qualification_gate_footer_height(ui, 460.0),
+                        qualification_gate_footer_height(ui, 900.0),
+                    ));
+                });
+            },
+        );
+        let (stacked, wide) = heights.expect("footer heights measured");
+        assert!(stacked > wide);
+        assert_eq!(wide, 58.0);
+        assert!(stacked >= 96.0);
     }
 
     #[test]
@@ -3085,6 +3852,56 @@ mod tests {
                 &app,
                 Some(&summary),
                 QualificationPageAction::ReviewVectors
+            ),
+            None
+        );
+        execute_qualification_action(&mut app, QualificationPageAction::ReviewVectors);
+        assert_eq!(
+            app.state.workbench.model_editor.active_section,
+            ModelEditorSection::Tests
+        );
+        assert!(app.state.workbench.model_editor.qualification_plan_open);
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            SurfaceId::ModelEditor
+        );
+
+        let editor = &mut app.state.workbench.model_editor;
+        editor.begin_qualification_suite();
+        let authoring = &mut editor.qualification_authoring;
+        authoring.suite_id = "dc-op".to_owned();
+        authoring.suite_name = "DC operating point".to_owned();
+        authoring.vector_id = "nominal".to_owned();
+        authoring.vector_name = "Nominal bias".to_owned();
+        authoring.executable_input =
+            "V1 out 0 1\nR1 out 0 1k\nMbind 0 0 0 0 nch_owned\n.op\n.end\n".to_owned();
+        authoring.quantity = "v(out)".to_owned();
+        authoring.probe_target = "out".to_owned();
+        authoring.expected = "1".to_owned();
+        authoring.absolute_tolerance = "1e-9".to_owned();
+        authoring.relative_tolerance = "1e-9".to_owned();
+        assert!(
+            editor.commit_qualification_suite(),
+            "{:?}",
+            editor.qualification_authoring.error
+        );
+
+        let working_summary = qualification_summaries(&app)
+            .into_iter()
+            .find(|summary| summary.model == "nch_owned")
+            .expect("working qualification summary");
+        assert_eq!(working_summary.suites, 1);
+        assert_eq!(working_summary.vectors, 1);
+        assert!(
+            working_summary
+                .source_revision
+                .ends_with("· working qualification")
+        );
+        assert_eq!(
+            qualification_action_block_reason(
+                &app,
+                Some(&working_summary),
+                QualificationPageAction::RunSuite
             ),
             None
         );
