@@ -51734,8 +51734,20 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     ) => {}
                 ElementKind::Jfet { .. }
                     if Self::netlist_device_is_native_classic_jfet(netlist, &element.name) => {}
-                ElementKind::Xspice { model, .. }
-                    if Self::netlist_xspice_model_is_native_transient_tff(netlist, model) => {}
+                ElementKind::Xspice {
+                    model,
+                    pspice_u_timing,
+                    ..
+                } if Self::netlist_xspice_model_is_native_transient_tff(netlist, model) => {}
+                ElementKind::Xspice {
+                    model,
+                    pspice_u_timing,
+                    ..
+                } if Self::netlist_xspice_model_is_native_transient_dig_gate(
+                    netlist,
+                    model,
+                    pspice_u_timing.as_ref(),
+                ) => {}
                 ElementKind::XyceMemristor { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_xyce_memristor(netlist, element) => {}
@@ -56108,6 +56120,32 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 model.model_type.eq_ignore_ascii_case("d_tff")
                     || model.model_type.eq_ignore_ascii_case("xyce_d_tff")
             })
+    }
+
+    fn netlist_xspice_model_is_native_transient_dig_gate(
+        netlist: &Netlist,
+        model_name: &str,
+        timing: Option<&crate::netlist::PspiceUTiming>,
+    ) -> bool {
+        if !matches!(
+            model_name.to_ascii_lowercase().as_str(),
+            "d_and"
+                | "d_buffer"
+                | "d_inverter"
+                | "d_nand"
+                | "d_nor"
+                | "d_or"
+                | "d_xnor"
+                | "d_xor"
+        ) {
+            return false;
+        }
+        let Some(timing) = timing else {
+            return false;
+        };
+        timing.power_pins.is_some()
+            && Self::find_unique_model_in(&netlist.models, &timing.timing_model)
+                .is_some_and(|model| model.model_type.eq_ignore_ascii_case("DIG"))
     }
 
     fn netlist_device_is_native_relational_legacy_diode(
