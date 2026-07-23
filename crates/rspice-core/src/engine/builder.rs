@@ -1573,6 +1573,46 @@ fn xspice_auto_bridge_vcc(netlist: &Netlist) -> crate::Value {
         .unwrap_or(3.3)
 }
 
+/// Resolve the analog-interface parameters carried by a PSpice/Xyce `DIG`
+/// model referenced by a lowered U-device.  The digital XSPICE primitives use
+/// their own model parameters, while Xyce's U-device frontend additionally
+/// needs the DIG card to drive the external analog output network.  Keep this
+/// translation at the builder boundary so authored model cards remain the
+/// single source of truth and ordinary XSPICE instances are unaffected.
+fn pspice_u_dig_model_params(
+    netlist: &Netlist,
+    model: &str,
+    timing: Option<&crate::netlist::PspiceUTiming>,
+) -> Vec<(String, crate::Value)> {
+    if !model.eq_ignore_ascii_case("xyce_d_tff") {
+        return Vec::new();
+    }
+
+    timing
+        .and_then(|timing| find_model_def(netlist, &timing.timing_model))
+        .filter(|model_def| model_def.model_type.eq_ignore_ascii_case("DIG"))
+        .map(|model_def| model_def.params.clone())
+        .unwrap_or_default()
+}
+
+fn merge_pspice_u_numeric_params(
+    base: &[(String, crate::Value)],
+    overrides: &[(String, crate::Value)],
+) -> Vec<(String, crate::Value)> {
+    let mut merged = base.to_vec();
+    for (name, value) in overrides {
+        if let Some(existing) = merged
+            .iter_mut()
+            .find(|(existing_name, _)| existing_name.eq_ignore_ascii_case(name))
+        {
+            existing.1 = *value;
+        } else {
+            merged.push((name.clone(), *value));
+        }
+    }
+    merged
+}
+
 fn xspice_auto_bridge_scoped_metadata(
     circuit: &CircuitData,
     hints: &[XspiceAutoBridgeNodeHint],
@@ -6804,7 +6844,7 @@ impl Engine {
                 // XSPICE code model instances
                 ElementKind::Xspice {
                     model,
-                    pspice_u_timing: _,
+                    pspice_u_timing,
                     ports,
                     params,
                     expr_params,
@@ -6877,11 +6917,15 @@ impl Engine {
                         }
                     }
 
+                    let dig_model_params =
+                        pspice_u_dig_model_params(netlist, model, pspice_u_timing.as_ref());
+                    let xspice_instance_params =
+                        merge_pspice_u_numeric_params(&dig_model_params, params);
                     let resolved_model = resolve_xspice_model_instance(
                         netlist,
                         &circuit.xspice_registry,
                         model,
-                        params,
+                        &xspice_instance_params,
                         expr_params,
                         string_params,
                         string_expr_params,
