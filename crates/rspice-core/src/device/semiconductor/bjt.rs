@@ -590,6 +590,9 @@ pub struct Bjt {
     pub rbx: Value,
     /// Intrinsic base resistance (RBI)
     pub rbi: Value,
+    /// Base current at which the intrinsic legacy GP base resistance is
+    /// reduced to one half (IRB/JRB/IOB).
+    pub irb: Value,
     /// Extrinsic collector resistance (RCX)
     pub rcx: Value,
     /// Intrinsic collector resistance (RCI)
@@ -819,6 +822,8 @@ pub struct Bjt {
     rbx_nominal: Value,
     /// Nominal intrinsic base resistance before temperature scaling.
     rbi_nominal: Value,
+    /// Nominal legacy GP base-current half-resistance current.
+    irb_nominal: Value,
     /// Nominal extrinsic collector resistance before temperature scaling.
     rcx_nominal: Value,
     /// Nominal intrinsic collector resistance before temperature scaling.
@@ -1048,6 +1053,7 @@ impl Bjt {
             re: 0.1,            // Emitter resistance
             rbx: 10.0,          // Preserve legacy constant RB via RBX
             rbi: 0.0,
+            irb: 0.0,
             rcx: 1.0, // Preserve legacy constant RC via RCX
             rci: 0.0,
             rs: 0.0,
@@ -1161,6 +1167,7 @@ impl Bjt {
             re_nominal: 0.1,
             rbx_nominal: 10.0,
             rbi_nominal: 0.0,
+            irb_nominal: 0.0,
             rcx_nominal: 1.0,
             rci_nominal: 0.0,
             vo_nominal: 0.0,

@@ -95,27 +95,92 @@ impl Bjt {
 
         let rb = self.rbi.max(1e-12);
         let vrbi = vbx - vbi;
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            // Xyce's legacy GP load evaluates the bias-dependent base
+            // resistance conductance at the current operating point, then
+            // holds that conductance fixed in the Newton Jacobian
+            // (N_DEV_BJT.C: diBrdvCp/diBrdvEp are zero).  Do not feed dQB/dV
+            // (or dIB/dV when IRB is present) back into this branch; the
+            // compact-model junction derivatives already carry the complete
+            // GP charge dependence.
+            let conductance = self.legacy_gp_base_resistance_conductance(linearized, rb);
+            branch.current = conductance * vrbi;
+            branch.d_internal[IDX_VBX] = conductance;
+            branch.d_internal[IDX_VBI] = -conductance;
+            return branch;
+        }
+
+        // VBIC has no legacy IRB path; its conductance remains qb/rbi and
+        // retains the existing qB derivatives in its Jacobian.
         let qb = linearized.qb.max(1e-12);
         let scale = vrbi / rb;
-
+        let dqb_dvbi = linearized.dqb_dvbe + linearized.dqb_dvbc;
+        let dqb_dvci = -linearized.dqb_dvbc;
+        let dqb_dvei = -linearized.dqb_dvbe;
         branch.current = scale * qb;
         branch.d_internal[IDX_VBX] = qb / rb;
-        branch.d_internal[IDX_VBI] = -qb / rb;
-        // Xyce's legacy GP load evaluates the bias-dependent base
-        // resistance conductance at the current operating point, then holds
-        // that conductance fixed in the Newton Jacobian (N_DEV_BJT.C:
-        // diBrdvCp/diBrdvEp are zero).  Do not feed dQB/dV back into the
-        // legacy base-resistance branch; the compact-model junction
-        // derivatives already carry the complete GP charge dependence.
-        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
-            let dqb_dvbi = linearized.dqb_dvbe + linearized.dqb_dvbc;
-            let dqb_dvci = -linearized.dqb_dvbc;
-            let dqb_dvei = -linearized.dqb_dvbe;
-            branch.d_internal[IDX_VBI] += scale * dqb_dvbi;
-            branch.d_internal[IDX_VCI] = scale * dqb_dvci;
-            branch.d_internal[IDX_VEI] = scale * dqb_dvei;
-        }
+        branch.d_internal[IDX_VBI] = -qb / rb + scale * dqb_dvbi;
+        branch.d_internal[IDX_VCI] = scale * dqb_dvci;
+        branch.d_internal[IDX_VEI] = scale * dqb_dvei;
         branch
+    }
+
+    /// Return the legacy Gummel-Poon intrinsic base-resistance conductance.
+    ///
+    /// Xyce's `N_DEV_BJT.C` computes the conductance from the operating-point
+    /// base charge when IRB/JRB/IOB is absent.  When one of those aliases is
+    /// given, it uses the analytic high-current base-spreading law from the
+    /// original SPICE BJT model:
+    ///
+    /// `R(I_B) = 3 R_BPI (tan(z)-z)/(z tan(z)^2)`
+    ///
+    /// with `z = (-1 + sqrt(1 + 14.59025 I_B/I_RB)) /
+    /// (2.4317 sqrt(I_B/I_RB))`.  Xyce freezes this operating-point
+    /// conductance in the Newton Jacobian, so only the voltage-difference
+    /// derivatives are returned by `irbi_branch`.
+    #[inline]
+    fn legacy_gp_base_resistance_conductance(
+        &self,
+        linearized: BjtLinearization,
+        rb: Value,
+    ) -> Value {
+        let qb = linearized.qb.max(1e-12);
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon
+            || !self.irb.is_finite()
+            || self.irb <= 0.0
+        {
+            return qb / rb;
+        }
+
+        // `linearized.ib` is signed in terminal orientation.  Xyce evaluates
+        // its IRB argument using the model-oriented base current, which is
+        // positive for a forward-biased NPN or PNP device.
+        let model_base_current = self.polarity() * linearized.ib;
+        let xjr_b = self.irb;
+        let arg1 = if model_base_current.is_finite() && xjr_b.is_finite() {
+            (model_base_current / xjr_b).max(1e-9)
+        } else {
+            1e-9
+        };
+        let sqrt_arg = (1.0 + 14.59025 * arg1).max(1e-18).sqrt();
+        let sqrt_arg1 = arg1.sqrt().max(1e-18);
+        let z = (-1.0 + sqrt_arg) / (2.4317 * sqrt_arg1);
+        let tan_z = z.tan();
+        let denominator = z * tan_z * tan_z;
+        let resistance = if z.is_finite()
+            && tan_z.is_finite()
+            && denominator.is_finite()
+            && denominator.abs() > 1e-18
+        {
+            rb * 3.0 * (tan_z - z) / denominator
+        } else {
+            rb
+        };
+        if resistance.is_finite() && resistance > 1e-12 {
+            1.0 / resistance
+        } else {
+            1.0 / rb
+        }
     }
 
     pub(in crate::device::semiconductor::bjt) fn ibep_branch(
@@ -501,5 +566,44 @@ mod tests {
         );
         assert!(vbic_eval.irbi.d_internal[IDX_VCI].abs() > 0.0);
         assert!(vbic_eval.irbi.d_internal[IDX_VEI].abs() > 0.0);
+    }
+
+    #[test]
+    fn legacy_gp_irb_resistance_law_reduces_forward_conductance() {
+        let mut no_irb = Bjt::new_npn("no_irb".to_string(), 1, 2, 3);
+        no_irb.rbi = 96.0;
+        let linearized = BjtLinearization {
+            ib: 1.0e-2,
+            qb: 1.0,
+            ..BjtLinearization::default()
+        };
+        let baseline = no_irb.legacy_gp_base_resistance_conductance(linearized, no_irb.rbi);
+
+        let mut with_irb = no_irb;
+        with_irb.irb = 1.0e-3;
+        let reduced = with_irb.legacy_gp_base_resistance_conductance(linearized, with_irb.rbi);
+
+        assert!(baseline.is_finite() && reduced.is_finite());
+        assert!(
+            reduced > baseline,
+            "IRB must reduce the effective resistance"
+        );
+    }
+
+    #[test]
+    fn legacy_gp_irb_uses_model_oriented_pnp_base_current() {
+        let mut pnp = Bjt::new_pnp("pnp".to_string(), 1, 2, 3);
+        pnp.rbi = 96.0;
+        pnp.irb = 1.0e-3;
+        let linearized = BjtLinearization {
+            // PNP terminal base current is negative; Xyce's IRB argument is
+            // model-oriented and therefore uses the polarity-adjusted value.
+            ib: -1.0e-2,
+            qb: 1.0,
+            ..BjtLinearization::default()
+        };
+
+        let conductance = pnp.legacy_gp_base_resistance_conductance(linearized, pnp.rbi);
+        assert!(conductance.is_finite() && conductance > 0.0);
     }
 }

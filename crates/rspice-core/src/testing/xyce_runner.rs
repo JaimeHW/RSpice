@@ -51329,6 +51329,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_npn(netlist, element)
             });
+        let has_qualified_irb_bjt = purpose.validates_absolute_device_contract()
+            && elements.iter().any(|element| {
+                Self::netlist_device_is_single_native_transient_level1_npn_irb(netlist, element)
+            });
         let has_qualified_vbic = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_vbic_level11_single_bjt(netlist);
         let has_qualified_level1_mos = purpose.validates_absolute_device_contract()
@@ -51364,6 +51368,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let has_qualified_bsim3_capacitor = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_bsim3_capacitor(netlist);
         if (has_qualified_bjt
+            || has_qualified_irb_bjt
             || has_qualified_vbic
             || has_qualified_level1_mos
             || has_qualified_ekv26
@@ -51537,6 +51542,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if purpose.validates_absolute_device_contract() && has_qualified_vbic => {}
                 ElementKind::Bjt { .. }
                     if purpose.validates_absolute_device_contract()
+                        && has_qualified_irb_bjt
+                        && Self::netlist_device_is_single_native_transient_level1_npn_irb(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Bjt { .. }
+                    if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_transient_level1_npn(
                             netlist, element,
                         ) => {}
@@ -51613,7 +51624,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, and classic MOSFET models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and extended Level-1 NPN IRB/RBM, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, and classic MOSFET models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -57048,6 +57059,227 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && model.params[0].1 > 0.0
     }
 
+    /// Qualify the native legacy GP transient IRB/RBM path without admitting
+    /// arbitrary BJT cards.  The envelope is intentionally structural: one
+    /// bare NPN device, numeric-only supported GP model parameters, and only
+    /// plain R/C passives plus independent sources around it.  Instance AREA,
+    /// multiplicity, deferred bindings, parameter scopes, subcircuits, and
+    /// model aliases remain outside this contract.
+    fn netlist_device_is_single_native_transient_level1_npn_irb(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        if !netlist.subcircuits.is_empty()
+            || netlist.models.len() != 1
+            || !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_parameter_expressions().is_empty()
+            || !netlist.params.all_global_expressions().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return false;
+        }
+
+        let topology_is_qualified = match element.nodes.as_slice() {
+            [_, _, _] => true,
+            [_, _, _, substrate] => Self::node_name_is_ground(substrate),
+            _ => false,
+        };
+        let bjt_elements = netlist
+            .elements
+            .iter()
+            .filter(|candidate| matches!(candidate.kind, ElementKind::Bjt { .. }))
+            .collect::<Vec<_>>();
+        if bjt_elements.len() != 1
+            || !std::ptr::eq(bjt_elements[0], element)
+            || !topology_is_qualified
+        {
+            return false;
+        }
+        let ElementKind::Bjt {
+            model,
+            bjt_type: crate::netlist::BjtType::Npn,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return false;
+        };
+        if !instance_params.is_empty() || !deferred_params.is_empty() {
+            return false;
+        }
+        let Some(model_def) = Self::find_model(&netlist.models, model) else {
+            return false;
+        };
+        if !Self::model_is_native_transient_level1_npn_irb(model_def) {
+            return false;
+        }
+
+        // Do not silently qualify a surrounding nonlinear or parameterized
+        // element merely because the BJT itself matches the model envelope.
+        netlist.elements.iter().all(|candidate| {
+            if std::ptr::eq(candidate, element) {
+                return true;
+            }
+            match &candidate.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    value.is_finite()
+                        && *value >= 0.0
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                }
+                ElementKind::Capacitor {
+                    value,
+                    value_expr: None,
+                    initial_voltage: None,
+                    model: None,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    value.is_finite()
+                        && *value >= 0.0
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                }
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Self::native_transient_independent_source_spec(spec)
+                }
+                _ => false,
+            }
+        })
+    }
+
+    fn native_transient_independent_source_spec(spec: &crate::netlist::SourceSpec) -> bool {
+        match spec {
+            crate::netlist::SourceSpec::Dc(value) => value.is_finite(),
+            crate::netlist::SourceSpec::Ac { magnitude, phase } => {
+                magnitude.is_finite() && phase.is_finite()
+            }
+            crate::netlist::SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+            } => dc_value.is_finite() && ac_magnitude.is_finite() && ac_phase.is_finite(),
+            crate::netlist::SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                phase,
+                ..
+            } => [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
+                .into_iter()
+                .all(Value::is_finite),
+            crate::netlist::SourceSpec::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            } => [*offset, *amplitude, *frequency, *delay, *damping, *phase]
+                .into_iter()
+                .all(Value::is_finite),
+            crate::netlist::SourceSpec::Pwl { points, delay, .. } => {
+                delay.is_finite()
+                    && points
+                        .iter()
+                        .all(|(time, value)| time.is_finite() && value.is_finite())
+            }
+            crate::netlist::SourceSpec::Pat {
+                vhi,
+                vlo,
+                delay,
+                rise,
+                fall,
+                sample,
+                ..
+            } => [*vhi, *vlo, *delay, *rise, *fall, *sample]
+                .into_iter()
+                .all(Value::is_finite),
+            crate::netlist::SourceSpec::DcTransient {
+                dc_value,
+                transient,
+            }
+            | crate::netlist::SourceSpec::DcAcTransient {
+                dc_value,
+                transient,
+                ..
+            } => dc_value.is_finite() && Self::native_transient_independent_source_spec(transient),
+            _ => false,
+        }
+    }
+
+    fn model_is_native_transient_level1_npn_irb(model: &crate::netlist::ModelDef) -> bool {
+        if !model.model_type.eq_ignore_ascii_case("NPN")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+        if Self::numeric_param_value(&model.params, "LEVEL")
+            .is_some_and(|level| !level.is_finite() || (level - 1.0).abs() > 1.0e-9)
+        {
+            return false;
+        }
+
+        let mut seen = BTreeSet::new();
+        for (name, value) in &model.params {
+            let normalized = name.to_ascii_uppercase();
+            if !seen.insert(normalized.clone())
+                || !Self::native_transient_level1_npn_irb_model_param(&normalized, *value)
+            {
+                return false;
+            }
+        }
+        let parameter = |name: &str| {
+            model
+                .params
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                .map(|(_, value)| *value)
+        };
+        let Some(rb) = parameter("RB") else {
+            return false;
+        };
+        let Some(rbm) = parameter("RBM") else {
+            return false;
+        };
+        let Some(irb) = parameter("IRB") else {
+            return false;
+        };
+        rb.is_finite() && rb > rbm && rbm > 0.0 && irb.is_finite() && irb > 0.0
+    }
+
+    fn native_transient_level1_npn_irb_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match name {
+            "LEVEL" => (value - 1.0).abs() <= 1.0e-9,
+            "BF" | "BR" | "IS" | "NF" | "NE" | "NR" | "NC" | "VAF" | "VAR" | "VJE" | "VJC"
+            | "VJS" | "EG" | "XTI" => value > 0.0,
+            "IKF" | "ISE" | "IKR" | "ISC" | "RB" | "IRB" | "RBM" | "RE" | "RC" | "CJS" | "CJE"
+            | "CJC" | "TF" | "TR" => value >= 0.0,
+            "MJS" | "MJE" | "MJC" | "FC" => (0.0..1.0).contains(&value),
+            "XTB" => true,
+            _ => false,
+        }
+    }
+
     fn netlist_element_is_native_transient_level1_npn(
         netlist: &Netlist,
         element: &crate::netlist::Element,
@@ -57519,11 +57751,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn model_is_native_static_ac_legacy_npn_bjt(model: &crate::netlist::ModelDef) -> bool {
-        // The native legacy AC companion uses the same Level-1 Gummel-Poon
-        // model equations and parameter envelope that is already validated by
-        // the native Level-1 transient contract. Keep the AC admission tied to
-        // that structural envelope instead of allowing arbitrary BJT cards.
-        Self::model_is_native_transient_level1_npn(model)
+        // The AC companion has a deliberately narrower, independently
+        // validated six-parameter envelope.  The transient Level-1 predicate
+        // admits additional GP parameters that are not covered by this AC
+        // oracle, so do not reuse it here.
+        model.model_type.eq_ignore_ascii_case("NPN")
+            && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model.params.len() == 6
+            && model.params.iter().all(|(name, value)| {
+                value.is_finite()
+                    && match name.to_ascii_uppercase().as_str() {
+                        "IS" | "BF" | "VAF" | "RB" | "CJC" | "TF" => *value >= 0.0,
+                        _ => false,
+                    }
+            })
+            && ["IS", "BF", "VAF", "RB", "CJC", "TF"].iter().all(|name| {
+                model
+                    .params
+                    .iter()
+                    .filter(|(param, _)| param.eq_ignore_ascii_case(name))
+                    .count()
+                    == 1
+            })
+            && Self::numeric_param_value(&model.params, "IS").is_some_and(|value| value > 0.0)
+            && Self::numeric_param_value(&model.params, "BF").is_some_and(|value| value > 0.0)
+            && Self::numeric_param_value(&model.params, "VAF").is_some_and(|value| value > 0.0)
     }
 
     fn model_is_native_legacy_diode(model: &crate::netlist::ModelDef) -> bool {
@@ -86200,6 +86457,86 @@ Q1 c b 0 QN
             XyceTestRunner::validate_native_relational_transient_contract(&unqualified_bjt)
                 .is_err(),
             "a relational family name must not bypass the qualified nonlinear-device policy"
+        );
+    }
+
+    #[test]
+    fn extended_level1_npn_irb_transient_admission_is_generic_and_oracle_backed() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let path = root.join("Netlists/RESET/reset.cir");
+        let source = fs::read_to_string(&path).expect("read RESET deck");
+        let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("RESET deck parses in Xyce mode");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .expect("RESET BJT exists");
+        assert!(
+            XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(
+                &netlist, element,
+            ),
+            "the extended Level-1 IRB/RBM envelope must admit RESET"
+        );
+
+        let renamed_source = source.replace("Q1 RESET VB 0", "QRENAMED RESET VB 0");
+        let renamed = XyceTestRunner::parse_xyce_netlist(&renamed_source, &path)
+            .expect("renamed RESET BJT parses");
+        let renamed_element = renamed
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .expect("renamed RESET BJT exists");
+        assert!(
+            XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(
+                &renamed,
+                renamed_element,
+            ),
+            "admission must not depend on an instance name fingerprint"
+        );
+
+        let changed_model_source = source.replace("RB = 25.16", "RB = 26.16");
+        let changed_model = XyceTestRunner::parse_xyce_netlist(&changed_model_source, &path)
+            .expect("numeric GP model mutation parses");
+        let changed_model_element = changed_model
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .expect("changed-model BJT exists");
+        assert!(
+            XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(
+                &changed_model,
+                changed_model_element,
+            ),
+            "admission must remain parameterized over supported finite GP values"
+        );
+
+        let area_source = source.replace("Q1 RESET VB 0 Q2N2222", "Q1 RESET VB 0 Q2N2222 AREA=2");
+        let area_netlist =
+            XyceTestRunner::parse_xyce_netlist(&area_source, &path).expect("AREA mutation parses");
+        let area_element = area_netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .expect("AREA BJT exists");
+        assert!(
+            !XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(
+                &area_netlist,
+                area_element,
+            ),
+            "AREA scaling must remain outside the validated IRB envelope"
+        );
+
+        let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+        assert!(result.passed, "RESET oracle failed: {result:?}");
+        assert!(!result.expected_unsupported, "RESET must execute natively");
+        assert!(
+            result.mismatches.is_empty(),
+            "unexpected mismatches: {result:?}"
         );
     }
 

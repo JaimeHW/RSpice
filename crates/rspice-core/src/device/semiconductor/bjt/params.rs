@@ -22,6 +22,7 @@ impl Bjt {
         self.rb = 0.0;
         self.rbx = 0.0;
         self.rbi = 0.0;
+        self.irb = 0.0;
         // RBP is a VBIC parasitic base path. Legacy Gummel-Poon cards do not
         // expose that branch; clear the constructor's VBIC default before
         // applying any legacy model parameters.
@@ -29,6 +30,7 @@ impl Bjt {
         self.rbp_nominal = 0.0;
         self.rbx_nominal = 0.0;
         self.rbi_nominal = 0.0;
+        self.irb_nominal = 0.0;
         self.rc = 0.0;
         self.rcx = 0.0;
         self.rci = 0.0;
@@ -125,6 +127,7 @@ impl Bjt {
         self.rc = 0.0;
         self.rbx = 0.0;
         self.rbi = 0.1;
+        self.irb = 0.0;
         self.rcx = 0.0;
         self.rci = 0.1;
         self.re = 0.0;
@@ -132,6 +135,7 @@ impl Bjt {
         self.rbp = 0.1;
         self.rbx_nominal = self.rbx;
         self.rbi_nominal = self.rbi;
+        self.irb_nominal = self.irb;
         self.rcx_nominal = self.rcx;
         self.rci_nominal = self.rci;
         self.re_nominal = self.re;
@@ -597,6 +601,9 @@ impl Bjt {
         self.re = re_temp.max(0.0);
         self.rbx = rbx_temp.max(0.0);
         self.rbi = rbi_temp.max(0.0);
+        // Xyce's legacy GP model has no temperature coefficient for IRB
+        // (JRB/IOB are aliases), so retain the nominal current threshold.
+        self.irb = self.irb_nominal.max(0.0);
         self.rcx = rcx_temp.max(0.0);
         self.rci = rci_temp.max(0.0);
         self.vje = vje_temp;
@@ -709,6 +716,12 @@ impl Bjt {
         let mut has_rth = false;
         let mut legacy_rb: Option<Value> = None;
         let mut legacy_rbm: Option<Value> = None;
+        let legacy_irb = params
+            .get("IRB")
+            .copied()
+            .or_else(|| params.get("JRB").copied())
+            .or_else(|| params.get("IOB").copied())
+            .filter(|v| v.is_finite() && *v >= 0.0);
         self.charge_model = if Self::uses_vbic_charge_model(params) {
             BjtChargeModel::Vbic
         } else {
@@ -717,6 +730,12 @@ impl Bjt {
         match self.charge_model {
             BjtChargeModel::LegacyGummelPoon => self.apply_legacy_spice_model_defaults(),
             BjtChargeModel::Vbic => self.apply_vbic_model_defaults(),
+        }
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && let Some(v) = legacy_irb
+        {
+            self.irb_nominal = v;
+            self.irb = v;
         }
 
         // DC parameters
@@ -1622,6 +1641,14 @@ mod tests {
         assert_eq!(bjt.rb, 50.0);
         assert_eq!(bjt.rbx, 10.0);
         assert_eq!(bjt.rbi, 40.0);
+    }
+
+    #[test]
+    fn legacy_irb_jrb_iob_aliases_select_base_current_threshold() {
+        for alias in ["IRB", "JRB", "IOB"] {
+            let bjt = model_with(&[(alias, 1.144e-3)]);
+            assert_eq!(bjt.irb, 1.144e-3, "{alias} must map to IRB");
+        }
     }
 
     #[test]
