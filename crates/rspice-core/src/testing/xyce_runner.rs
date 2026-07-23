@@ -51326,6 +51326,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_npn(netlist, element)
             });
+        let has_qualified_vbic = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_transient_vbic_level11_single_bjt(netlist);
         let has_qualified_level1_mos = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_mosfet(netlist, element)
@@ -51359,6 +51361,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let has_qualified_bsim3_capacitor = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_bsim3_capacitor(netlist);
         if (has_qualified_bjt
+            || has_qualified_vbic
             || has_qualified_level1_mos
             || has_qualified_ekv26
             || has_qualified_diode
@@ -51527,6 +51530,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         )?;
                     }
                 }
+                ElementKind::Bjt { .. }
+                    if purpose.validates_absolute_device_contract() && has_qualified_vbic => {}
                 ElementKind::Bjt { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_transient_level1_npn(
@@ -52637,6 +52642,33 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .iter()
                     .any(|level| (*value - *level).abs() <= 1.0e-9)
             })
+    }
+
+    fn model_is_native_transient_vbic_level11(model: &crate::netlist::ModelDef) -> bool {
+        if !model.model_type.eq_ignore_ascii_case("NPN")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || model.params.len() != 10
+        {
+            return false;
+        }
+
+        let mut names = BTreeSet::new();
+        model.params.iter().all(|(name, value)| {
+            let normalized = name.to_ascii_uppercase();
+            let valid = value.is_finite()
+                && match normalized.as_str() {
+                    "LEVEL" => (*value - 11.0).abs() <= 1.0e-9,
+                    "RCX" | "RCI" | "RBX" | "RBI" | "RE" | "RBP" | "RS" | "RTH" => *value > 0.0,
+                    "IBEN" => *value > 0.0,
+                    _ => false,
+                };
+            valid && names.insert(normalized)
+        }) && names.len() == 10
     }
 
     fn dc_probe_references_voltage_source_current(
@@ -56038,6 +56070,137 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 | ElementKind::GenericSwitch { initial_state, .. } => initial_state.is_none(),
                 _ => true,
             })
+    }
+
+    /// The native generated VBIC route is validated for one narrow absolute
+    /// transient envelope: a single four-terminal LEVEL=11 NPN with the
+    /// finite scalar card used by the Xyce BUG_1602 reference, driven by one
+    /// PWL and three DC voltage sources and returning its fourth terminal to
+    /// ground through one numeric resistor.  Other VBIC levels, parameter
+    /// forms, hierarchies, and mixed-device transient networks remain
+    /// fail-closed until each has an independent waveform oracle.
+    fn netlist_is_native_transient_vbic_level11_single_bjt(netlist: &Netlist) -> bool {
+        if netlist.options.gmin.is_some()
+            || !netlist.subcircuits.is_empty()
+            || netlist.models.len() != 1
+            || !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }])
+            || !Self::native_transient_uses_standard_startup(netlist)
+            || !netlist.params.numeric_parameters().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.diagnostics.is_empty()
+        {
+            return false;
+        }
+
+        let bjts = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .collect::<Vec<_>>();
+        if bjts.len() != 1 {
+            return false;
+        }
+        let bjt = bjts[0];
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &bjt.kind
+        else {
+            return false;
+        };
+        if bjt.nodes.len() != 4
+            || !bjt.nodes[2].eq_ignore_ascii_case("0")
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+            || !Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_transient_vbic_level11)
+        {
+            return false;
+        }
+
+        let mut dc_sources = 0usize;
+        let mut pwl_sources = 0usize;
+        let mut resistors = 0usize;
+        let mut bulk_resistor_to_ground = false;
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::Bjt { .. } => {}
+                ElementKind::VoltageSource(source) => {
+                    if element.nodes.len() != 2 {
+                        return false;
+                    }
+                    match source {
+                        crate::netlist::SourceSpec::Dc(value) if value.is_finite() => {
+                            dc_sources += 1;
+                        }
+                        crate::netlist::SourceSpec::Pwl {
+                            points,
+                            delay,
+                            repeat_from,
+                        } if Self::native_transient_vbic_pwl_is_valid(
+                            points,
+                            *delay,
+                            *repeat_from,
+                        ) =>
+                        {
+                            pwl_sources += 1;
+                        }
+                        _ => return false,
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    if element.nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || model.is_some()
+                        || !instance_params.is_empty()
+                        || !deferred_params.is_empty()
+                    {
+                        return false;
+                    }
+                    resistors += 1;
+                    bulk_resistor_to_ground = (element.nodes[0]
+                        .eq_ignore_ascii_case(&bjt.nodes[3])
+                        && element.nodes[1].eq_ignore_ascii_case("0"))
+                        || (element.nodes[1].eq_ignore_ascii_case(&bjt.nodes[3])
+                            && element.nodes[0].eq_ignore_ascii_case("0"));
+                }
+                _ => return false,
+            }
+        }
+
+        dc_sources == 3 && pwl_sources == 1 && resistors == 1 && bulk_resistor_to_ground
+    }
+
+    fn native_transient_vbic_pwl_is_valid(
+        points: &[(Value, Value)],
+        delay: Value,
+        repeat_from: Option<Value>,
+    ) -> bool {
+        delay.is_finite()
+            && delay >= 0.0
+            && repeat_from.is_none()
+            && points.len() >= 2
+            && points
+                .iter()
+                .all(|(time, value)| time.is_finite() && value.is_finite())
+            && points.windows(2).all(|window| window[1].0 > window[0].0)
     }
 
     fn find_unique_model_in<'a>(
@@ -85507,6 +85670,45 @@ Q1 c b 0 s QN
         assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
             &vector
         ));
+    }
+
+    #[test]
+    fn absolute_vbic_level11_transient_contract_is_explicit_and_bounded() {
+        let source = "\
+validated native VBIC level-11 transient subset
+vbe bx 0 PWL (0 0.0 1 1)
+vcb cx bx 0
+vib bx b 0
+vic cx c 0
+rxth dt 0 1e12
+q1 c b 0 dt vbicmodel
+.model vbicmodel npn level=11
++ RCX=10 RCI=10 RBX=1 RBI=10 RE=1 RBP=10 RS=10
++ IBEN=1.0e-13 RTH=100
+.tran 1u 1s
+.print tran v(b)
+.end
+";
+        let netlist = Netlist::parse(source).expect("VBIC Level-11 fixture parses");
+        assert!(
+            XyceTestRunner::netlist_is_native_transient_vbic_level11_single_bjt(&netlist),
+            "the checked-in native VBIC Level-11 envelope must be recognized"
+        );
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("exact VBIC Level-11 fixture is eligible");
+
+        for mutation in [
+            source.replacen("level=11", "level=12", 1),
+            source.replacen("RTH=100", "RTH=100 C10=1", 1),
+            source.replacen("rxth dt 0 1e12", "rxth dt 0 {RTH}", 1),
+            source.replacen(".tran 1u 1s", ".tran 1u 1s UIC", 1),
+        ] {
+            let mutated = Netlist::parse(&mutation).expect("VBIC negative fixture parses");
+            assert!(
+                !XyceTestRunner::netlist_is_native_transient_vbic_level11_single_bjt(&mutated),
+                "mutated VBIC source must remain outside the absolute envelope"
+            );
+        }
     }
 
     #[test]
