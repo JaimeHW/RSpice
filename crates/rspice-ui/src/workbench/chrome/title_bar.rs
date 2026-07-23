@@ -1513,6 +1513,7 @@ fn models_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
     );
     command_item(ui, app, Command::ModelEditor);
+    command_item(ui, app, Command::ModelCorrelation);
     menu_separator(ui);
     command_item_as(
         ui,

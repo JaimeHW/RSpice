@@ -2,6 +2,8 @@
 
 mod automation;
 mod design;
+mod model_correlation;
+mod model_correlation_controller;
 mod model_editor;
 mod models;
 mod netlist;
@@ -29,6 +31,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelEditor {
         model_editor::show(ui, app);
+        return;
+    }
+    if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelCorrelation {
+        model_correlation::show(ui, app);
         return;
     }
     match app.state.workbench.workspace {

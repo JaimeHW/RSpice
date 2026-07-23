@@ -1,8 +1,62 @@
 use std::collections::HashSet;
 
-use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+use crate::product::{
+    AnalysisInstanceId, ContentDigest, ModelSourceId, ObjectRevision, SimulationPlanId,
+};
 
 use super::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType};
+
+/// Exact project-owned model definition admitted to one prepared run.
+///
+/// Historical receipts legitimately carry no identities and therefore cannot
+/// authorize model-correlation evidence for an exact model revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedModelSourceIdentity {
+    source_id: ModelSourceId,
+    model_name: String,
+    revision: ObjectRevision,
+    content_digest: ContentDigest,
+}
+
+impl PreparedModelSourceIdentity {
+    pub(crate) fn new(
+        source_id: ModelSourceId,
+        model_name: impl Into<String>,
+        revision: ObjectRevision,
+        content_digest: ContentDigest,
+    ) -> Result<Self, String> {
+        let model_name = model_name.into();
+        if model_name.trim().is_empty() {
+            return Err("prepared model-source identity requires a model name".to_owned());
+        }
+        Ok(Self {
+            source_id,
+            model_name,
+            revision,
+            content_digest,
+        })
+    }
+
+    #[must_use]
+    pub const fn source_id(&self) -> ModelSourceId {
+        self.source_id
+    }
+
+    #[must_use]
+    pub fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> ObjectRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn content_digest(&self) -> ContentDigest {
+        self.content_digest
+    }
+}
 
 /// Typed source-check authority captured by immutable run preparation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,11 +207,13 @@ pub struct PreparedRunReceipt {
     prepared_snapshot_digest: ContentDigest,
     source_content_digest: ContentDigest,
     source_check_receipt: PreparedSourceCheckReceipt,
+    project_model_sources: Vec<PreparedModelSourceIdentity>,
     tasks: Vec<PreparedRunTaskReceipt>,
 }
 
 impl PreparedRunReceipt {
     #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     pub(crate) fn new(
         source_domain: AnalysisResultSourceDomain,
         simulation_plan_id: Option<SimulationPlanId>,
@@ -165,6 +221,29 @@ impl PreparedRunReceipt {
         prepared_snapshot_digest: ContentDigest,
         source_content_digest: ContentDigest,
         source_check_receipt: PreparedSourceCheckReceipt,
+        tasks: Vec<PreparedRunTaskReceipt>,
+    ) -> Result<Self, String> {
+        Self::new_with_project_model_sources(
+            source_domain,
+            simulation_plan_id,
+            project_revision,
+            prepared_snapshot_digest,
+            source_content_digest,
+            source_check_receipt,
+            Vec::new(),
+            tasks,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_project_model_sources(
+        source_domain: AnalysisResultSourceDomain,
+        simulation_plan_id: Option<SimulationPlanId>,
+        project_revision: ObjectRevision,
+        prepared_snapshot_digest: ContentDigest,
+        source_content_digest: ContentDigest,
+        source_check_receipt: PreparedSourceCheckReceipt,
+        mut project_model_sources: Vec<PreparedModelSourceIdentity>,
         tasks: Vec<PreparedRunTaskReceipt>,
     ) -> Result<Self, String> {
         match (source_domain, simulation_plan_id, source_check_receipt) {
@@ -204,6 +283,40 @@ impl PreparedRunReceipt {
                     .to_owned(),
             );
         }
+        project_model_sources.sort_by(|left, right| {
+            left.source_id
+                .as_uuid()
+                .cmp(&right.source_id.as_uuid())
+                .then_with(|| {
+                    left.model_name
+                        .to_ascii_lowercase()
+                        .cmp(&right.model_name.to_ascii_lowercase())
+                })
+                .then_with(|| left.revision.cmp(&right.revision))
+                .then_with(|| left.content_digest.cmp(&right.content_digest))
+        });
+        if project_model_sources
+            .windows(2)
+            .any(|pair| pair[0] == pair[1])
+        {
+            return Err(
+                "prepared-run receipt repeats an exact project model-source identity".to_owned(),
+            );
+        }
+        let mut semantic_model_keys = HashSet::with_capacity(project_model_sources.len());
+        for model in &project_model_sources {
+            let key = (
+                model.source_id,
+                model.model_name.to_ascii_lowercase(),
+                model.revision,
+            );
+            if !semantic_model_keys.insert(key) {
+                return Err(format!(
+                    "prepared-run receipt carries conflicting content for project model '{}'",
+                    model.model_name
+                ));
+            }
+        }
 
         let mut prior_tasks = HashSet::with_capacity(tasks.len());
         for task in &tasks {
@@ -231,6 +344,7 @@ impl PreparedRunReceipt {
             prepared_snapshot_digest,
             source_content_digest,
             source_check_receipt,
+            project_model_sources,
             tasks,
         })
     }
@@ -263,6 +377,11 @@ impl PreparedRunReceipt {
     #[must_use]
     pub const fn source_check_receipt(&self) -> PreparedSourceCheckReceipt {
         self.source_check_receipt
+    }
+
+    #[must_use]
+    pub fn project_model_sources(&self) -> &[PreparedModelSourceIdentity] {
+        &self.project_model_sources
     }
 
     #[must_use]
@@ -346,6 +465,41 @@ mod tests {
             tasks,
         )
         .expect("valid plan receipt")
+    }
+
+    #[test]
+    fn prepared_receipt_retains_typed_project_model_identity() {
+        let source_id = ModelSourceId::new();
+        let identity = PreparedModelSourceIdentity::new(
+            source_id,
+            "precision_nmos",
+            ObjectRevision::INITIAL,
+            digest(0x44),
+        )
+        .expect("valid project model identity");
+        let receipt = PreparedRunReceipt::new_with_project_model_sources(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            digest(0x31),
+            digest(0x32),
+            PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
+            vec![identity],
+            vec![task(
+                AnalysisInstanceId::new(),
+                ObjectRevision::INITIAL,
+                Vec::new(),
+                0,
+                0x45,
+            )],
+        )
+        .expect("model-bound prepared receipt");
+
+        let retained = &receipt.project_model_sources()[0];
+        assert_eq!(retained.source_id(), source_id);
+        assert_eq!(retained.model_name(), "precision_nmos");
+        assert_eq!(retained.revision(), ObjectRevision::INITIAL);
+        assert_eq!(retained.content_digest(), digest(0x44));
     }
 
     fn result(

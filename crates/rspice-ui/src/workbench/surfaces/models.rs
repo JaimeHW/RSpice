@@ -14,8 +14,8 @@ use crate::common::app::{
     open_symbol_parameter_form_dialog,
 };
 use crate::state::model_library::{
-    DeviceModel, ModelLibrary, ModelQualificationState, ModelSourceEvidenceBinding,
-    QualificationAnalysis, QualificationPlatform,
+    DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
+    ModelSourceEvidenceBinding, QualificationAnalysis, QualificationPlatform,
 };
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType};
 use crate::ui::theme::{self, FontWeight};
@@ -827,6 +827,8 @@ struct QualificationModelSummary {
     open_dispositions: usize,
     releases: usize,
     comparison_available: bool,
+    correlation_status: String,
+    correlation_evidence_digest: Option<String>,
     gate: QualificationGate,
     domains: Vec<QualificationDomainSummary>,
 }
@@ -837,6 +839,7 @@ enum QualificationPageAction {
     ReviewReleaseBinding,
     RunSuite,
     CompareRelease,
+    OpenCorrelation,
 }
 
 fn qualification(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -943,6 +946,13 @@ fn qualification_content(ui: &mut Ui, app: &mut RSpiceApp) {
             if compare_clicked {
                 requested_action = Some(QualificationPageAction::CompareRelease);
             }
+
+            ui.menu_button("More", |ui| {
+                if ui.button("Measurement correlation").clicked() {
+                    requested_action = Some(QualificationPageAction::OpenCorrelation);
+                    ui.close();
+                }
+            });
         },
     );
 
@@ -1111,10 +1121,7 @@ fn qualification_model_summary(
                 || resolved.qualification.clone(),
                 |draft| draft.qualification.clone(),
             );
-            let source_id = open_draft.map_or_else(
-                || resolved.source_id.clone(),
-                |draft| draft.source_id.clone(),
-            );
+            let source_id = open_draft.map_or_else(|| resolved.source_id, |draft| draft.source_id);
             let source_digest =
                 open_draft.map_or(resolved.model_digest, |draft| draft.base_source_digest);
             let source_revision =
@@ -1160,7 +1167,7 @@ fn qualification_model_summary(
         ),
     };
 
-    summarize_qualification_state(
+    let mut summary = summarize_qualification_state(
         key,
         &library.name,
         model,
@@ -1168,7 +1175,13 @@ fn qualification_model_summary(
         source_error,
         &state,
         source.as_ref(),
-    )
+    );
+    apply_correlation_qualification_contract(
+        &mut summary,
+        library.model_correlation.get(&model.name),
+        source.as_ref(),
+    );
+    summary
 }
 
 fn summarize_qualification_state(
@@ -1373,8 +1386,81 @@ fn summarize_qualification_state(
         open_dispositions,
         releases: state.releases.len(),
         comparison_available: !state.candidates.is_empty() && !state.releases.is_empty(),
+        correlation_status: "not configured".to_owned(),
+        correlation_evidence_digest: None,
         gate,
         domains,
+    }
+}
+
+fn apply_correlation_qualification_contract(
+    summary: &mut QualificationModelSummary,
+    correlation: Option<&ModelCorrelationState>,
+    source: Option<&ModelSourceEvidenceBinding>,
+) {
+    let Some(correlation) = correlation.filter(|state| !state.suites.is_empty()) else {
+        return;
+    };
+    if let Err(error) = correlation.validate_for_model(&summary.model) {
+        summary.correlation_status = format!("invalid retained state: {error}");
+        summary.gate = QualificationGate::Blocked;
+        return;
+    }
+    let Some(source) = source else {
+        summary.correlation_status = "source identity unavailable".to_owned();
+        summary.gate = QualificationGate::Blocked;
+        return;
+    };
+    let suites = correlation
+        .suite_lineages()
+        .into_iter()
+        .filter(|suite| suite.source == *source)
+        .collect::<Vec<_>>();
+    if suites.is_empty() {
+        summary.correlation_status =
+            "configured evidence is stale for this model revision".to_owned();
+        if summary.gate != QualificationGate::Blocked {
+            summary.gate = QualificationGate::Review;
+        }
+        return;
+    }
+
+    let mut approved = 0usize;
+    let mut evidence_members = Vec::new();
+    for suite in &suites {
+        let evidence = correlation
+            .evidence
+            .iter()
+            .filter(|evidence| {
+                evidence.suite_id.eq_ignore_ascii_case(&suite.id)
+                    && evidence.suite_revision == suite.revision
+                    && evidence.source == *source
+                    && evidence.validate_current(suite).is_ok()
+            })
+            .max_by_key(|evidence| (evidence.reviewed_at_unix_ms, evidence.id.as_str()));
+        if let Some(evidence) = evidence.filter(|evidence| evidence.approved()) {
+            approved += 1;
+            if let Ok(digest) = evidence.content_digest() {
+                evidence_members.push((suite.id.clone(), suite.revision.get(), digest));
+            }
+        }
+    }
+    summary.correlation_evidence_digest =
+        qualification_evidence_contract_digest(&mut evidence_members);
+    summary.correlation_status = if approved == suites.len() {
+        format!(
+            "{} current suite{} approved",
+            approved,
+            if approved == 1 { "" } else { "s" }
+        )
+    } else {
+        format!(
+            "{approved}/{} current suite approvals retained",
+            suites.len()
+        )
+    };
+    if approved != suites.len() && summary.gate != QualificationGate::Blocked {
+        summary.gate = QualificationGate::Review;
     }
 }
 
@@ -1880,6 +1966,15 @@ fn qualification_contract_card(
                     }),
                 ),
                 (
+                    "Measurement correlation",
+                    selected.map_or("not configured".to_owned(), |selected| {
+                        selected.correlation_evidence_digest.as_ref().map_or_else(
+                            || selected.correlation_status.clone(),
+                            |digest| format!("{} · {digest}", selected.correlation_status),
+                        )
+                    }),
+                ),
+                (
                     "Approved releases",
                     selected.map_or("0".to_owned(), |selected| selected.releases.to_string()),
                 ),
@@ -2038,9 +2133,9 @@ fn qualification_action_block_reason(
         }
     }
     match action {
-        QualificationPageAction::ReviewVectors | QualificationPageAction::ReviewReleaseBinding => {
-            None
-        }
+        QualificationPageAction::ReviewVectors
+        | QualificationPageAction::ReviewReleaseBinding
+        | QualificationPageAction::OpenCorrelation => None,
         QualificationPageAction::RunSuite if app.state.workbench.safe_mode.project_read_only() => {
             Some("Qualification cannot run while the project is read-only".to_owned())
         }
@@ -2060,6 +2155,17 @@ fn execute_qualification_action(app: &mut RSpiceApp, action: QualificationPageAc
     let selected = selected_qualification_summary(app, &summaries);
     if let Some(reason) = qualification_action_block_reason(app, selected, action) {
         app.state.push_user_message(ConsoleMessage::warning(reason));
+        return;
+    }
+    if action == QualificationPageAction::OpenCorrelation {
+        if let Err(error) = app.state.workbench.navigate(
+            SurfaceRoute::surface(SurfaceId::ModelCorrelation),
+            RouteTransitionSource::User,
+        ) {
+            app.state.push_user_message(ConsoleMessage::warning(format!(
+                "Measurement correlation cannot be opened: {error}"
+            )));
+        }
         return;
     }
     let Some(library) = app.state.model_library_manager.selected_library.clone() else {
@@ -2121,6 +2227,7 @@ fn execute_qualification_action(app: &mut RSpiceApp, action: QualificationPageAc
                 )));
             }
         }
+        QualificationPageAction::OpenCorrelation => {}
     }
 }
 
@@ -3923,6 +4030,86 @@ mod tests {
         assert_eq!(summary.vectors, 0);
         assert_eq!(summary.passing_vectors, 0);
         assert!(summary.evidence_digest.is_none());
+    }
+
+    #[test]
+    fn configured_correlation_requires_current_approved_evidence_for_qualification() {
+        use crate::state::model_library::{
+            CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSuite,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        let definition = crate::state::model_library::ProjectModelDefinition {
+            name: "nch_correlated".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Correlation handoff fixture".to_owned(),
+            numeric_parameters: BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("vth0".to_owned(), 0.48),
+            ]),
+            string_parameters: BTreeMap::new(),
+        };
+        app.state
+            .model_library_manager
+            .create_project_model("owned-models", &definition)
+            .unwrap();
+        let resolved = model_editor::resolve_project_model_for_editor(
+            &app.state.model_library_manager,
+            "owned-models",
+            "nch_correlated",
+        )
+        .unwrap();
+        let source = ModelSourceEvidenceBinding::try_new_project_bound(
+            "nch_correlated",
+            resolved.source_id,
+            resolved.model_digest,
+            resolved.model_revision,
+        )
+        .unwrap();
+        let dataset = CorrelationDatasetRevision::try_from_csv(
+            "bench",
+            crate::product::ObjectRevision::INITIAL,
+            "Bench",
+            CorrelationDatasetClass::BenchMeasurement,
+            "lab",
+            "lot-1",
+            "fixture-1",
+            "calibration-1",
+            "bench.csv",
+            b"id,quantity,value,unit\np1,V(out),1,V\n".to_vec(),
+            None,
+        )
+        .unwrap();
+        let suite = CorrelationSuite::try_new(
+            "bench-correlation",
+            crate::product::ObjectRevision::INITIAL,
+            "Bench correlation",
+            "model-owner",
+            source.clone(),
+            vec![dataset],
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let correlation = ModelCorrelationState::try_new(vec![suite], Vec::new()).unwrap();
+        let library = app
+            .state
+            .model_library_manager
+            .get_library("owned-models")
+            .unwrap();
+        let model = library.models.get("nch_correlated").unwrap();
+        let mut summary = qualification_model_summary(&app, library, model);
+        summary.gate = QualificationGate::Qualified;
+
+        apply_correlation_qualification_contract(&mut summary, Some(&correlation), Some(&source));
+
+        assert_eq!(summary.gate, QualificationGate::Review);
+        assert_eq!(
+            summary.correlation_status,
+            "0/1 current suite approvals retained"
+        );
+        assert!(summary.correlation_evidence_digest.is_none());
     }
 
     #[test]

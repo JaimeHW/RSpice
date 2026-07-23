@@ -16,8 +16,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::io::project_execution::ProjectExecutionContext;
 use crate::product::{
-    AnalysisInstanceId, ContentDigest, DatasetId, JobId, ObjectRevision, ProjectId, RunId,
-    SimulationPlanId,
+    AnalysisInstanceId, ContentDigest, DatasetId, JobId, ModelSourceId, ObjectRevision, ProjectId,
+    RunId, SimulationPlanId,
 };
 use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
@@ -25,10 +25,10 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey, CellViewRef, DcOpResult,
     ExecutionTarget, LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue,
-    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, ProjectWorkspace,
-    SavedOutputMaterializationStatus, SavedOutputReceipt, SimulationRun, SimulationRunLifecycle,
-    SimulationRunProvenance, SimulationState, ViewType, WaveformData,
-    canonical_cell_view_owner_key,
+    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, ProjectWorkspace, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
+    SimulationState, ViewType, WaveformData, canonical_cell_view_owner_key,
 };
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -2216,6 +2216,37 @@ impl From<&PreparedRunTaskReceipt> for ProjectPreparedRunTaskReceipt {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ProjectPreparedModelSourceIdentity {
+    pub source_id: ModelSourceId,
+    pub model_name: String,
+    pub revision: ObjectRevision,
+    pub content_digest: ContentDigest,
+}
+
+impl ProjectPreparedModelSourceIdentity {
+    fn into_identity(self) -> Result<PreparedModelSourceIdentity, String> {
+        PreparedModelSourceIdentity::new(
+            self.source_id,
+            self.model_name,
+            self.revision,
+            self.content_digest,
+        )
+    }
+}
+
+impl From<&PreparedModelSourceIdentity> for ProjectPreparedModelSourceIdentity {
+    fn from(identity: &PreparedModelSourceIdentity) -> Self {
+        Self {
+            source_id: identity.source_id(),
+            model_name: identity.model_name().to_owned(),
+            revision: identity.revision(),
+            content_digest: identity.content_digest(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectPreparedRunReceipt {
     pub source_domain: AnalysisResultSourceDomain,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2224,23 +2255,31 @@ pub struct ProjectPreparedRunReceipt {
     pub prepared_snapshot_digest: ContentDigest,
     pub source_content_digest: ContentDigest,
     pub source_check_receipt: ProjectPreparedSourceCheckReceipt,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub project_model_sources: Vec<ProjectPreparedModelSourceIdentity>,
     pub tasks: Vec<ProjectPreparedRunTaskReceipt>,
 }
 
 impl ProjectPreparedRunReceipt {
     fn into_receipt(self) -> Result<PreparedRunReceipt, String> {
+        let project_model_sources = self
+            .project_model_sources
+            .into_iter()
+            .map(ProjectPreparedModelSourceIdentity::into_identity)
+            .collect::<Result<Vec<_>, _>>()?;
         let tasks = self
             .tasks
             .into_iter()
             .map(ProjectPreparedRunTaskReceipt::into_receipt)
             .collect::<Result<Vec<_>, _>>()?;
-        PreparedRunReceipt::new(
+        PreparedRunReceipt::new_with_project_model_sources(
             self.source_domain,
             self.simulation_plan_id,
             self.project_revision,
             self.prepared_snapshot_digest,
             self.source_content_digest,
             self.source_check_receipt.into(),
+            project_model_sources,
             tasks,
         )
     }
@@ -2259,6 +2298,11 @@ impl From<&PreparedRunReceipt> for ProjectPreparedRunReceipt {
             prepared_snapshot_digest: receipt.prepared_snapshot_digest(),
             source_content_digest: receipt.source_content_digest(),
             source_check_receipt: receipt.source_check_receipt().into(),
+            project_model_sources: receipt
+                .project_model_sources()
+                .iter()
+                .map(ProjectPreparedModelSourceIdentity::from)
+                .collect(),
             tasks: receipt
                 .tasks()
                 .iter()
@@ -4132,6 +4176,51 @@ mod tests {
         .expect("prepared run receipt");
         run.restore_provenance(SimulationRunProvenance::Prepared(receipt))
             .expect("prepared fixture seals explicitly");
+    }
+
+    #[test]
+    fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
+        let source_id = ModelSourceId::new();
+        let identity = PreparedModelSourceIdentity::new(
+            source_id,
+            "nch_receipt",
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x51; 32]),
+        )
+        .unwrap();
+        let task = PreparedRunTaskReceipt::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            2,
+            ContentDigest::from_bytes([0x52; 32]),
+        )
+        .unwrap();
+        let receipt = PreparedRunReceipt::new_with_project_model_sources(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x53; 32]),
+            ContentDigest::from_bytes([0x54; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x55; 32])),
+            vec![identity],
+            vec![task],
+        )
+        .unwrap();
+
+        let wire = ProjectPreparedRunReceipt::from(&receipt);
+        let encoded = serde_json::to_string(&wire).unwrap();
+        let decoded = serde_json::from_str::<ProjectPreparedRunReceipt>(&encoded).unwrap();
+        let restored = decoded.into_receipt().unwrap();
+
+        assert_eq!(restored.project_model_sources().len(), 1);
+        let restored_source = &restored.project_model_sources()[0];
+        assert_eq!(restored_source.source_id(), source_id);
+        assert_eq!(restored_source.model_name(), "nch_receipt");
+        assert_eq!(
+            restored_source.content_digest(),
+            ContentDigest::from_bytes([0x51; 32])
+        );
     }
 
     fn project_with_execution_context() -> ProjectFile {

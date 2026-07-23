@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
 use super::{
-    DeviceModel, FiniteF64, ModelDefinitionMetadata, ModelFileIdentity, ModelLevel, ModelLibrary,
-    ModelQualificationState, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
-    ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ModelType, ParameterDataType,
-    ParameterDefinition, ParameterSource, ParameterValue, ProcessCorner, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, first_unreachable_source,
+    DeviceModel, FiniteF64, ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity,
+    ModelLevel, ModelLibrary, ModelQualificationState, ModelSectionQualification,
+    ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
+    ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
+    ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
+    first_unreachable_source,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
@@ -467,6 +468,89 @@ impl ModelLibraryManager {
             .and_then(|name| self.libraries.get(name))
     }
 
+    /// Canonical identities of every project-owned model definition admitted
+    /// to the executable model closure.
+    ///
+    /// Prepared simulation receipts retain these typed identities so later
+    /// engineering evidence can prove that an exact model revision was present
+    /// in the immutable run snapshot instead of trusting a display name or a
+    /// user-entered digest.
+    pub(crate) fn project_model_definition_identities(
+        &self,
+    ) -> Result<Vec<(ModelSourceId, String, ObjectRevision, ContentDigest)>, String> {
+        let mut identities = Vec::new();
+        for library in self
+            .libraries
+            .values()
+            .filter(|library| library.source_authority.is_project_owned())
+        {
+            let ModelSourceAuthority::ProjectOwned {
+                source_id,
+                revision: library_revision,
+                ..
+            } = library.source_authority
+            else {
+                continue;
+            };
+            for (model_name, model) in &library.models {
+                let metadata = library
+                    .model_definition_metadata
+                    .get(model_name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "Project model '{}/{}' has no typed definition metadata",
+                            library.name, model_name
+                        )
+                    })?;
+                let definition = ProjectModelRevisionDefinition::new(
+                    ProjectModelDefinition::from_device_model(model),
+                    metadata,
+                );
+                let canonical = definition.canonical_source().map_err(|error| {
+                    format!(
+                        "Project model '{}/{}' cannot be authenticated for execution: {error}",
+                        library.name, model_name
+                    )
+                })?;
+                let definition_identity =
+                    definition.project_source_identity().map_err(|error| {
+                        format!(
+                            "Project model '{}/{}' has invalid source identity: {error}",
+                            library.name, model_name
+                        )
+                    })?;
+                let revision = definition_identity
+                    .as_ref()
+                    .map_or(library_revision, |identity| identity.revision);
+                let digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
+                if let Some(identity) = definition_identity
+                    && (identity.source_id != source_id || identity.content_digest != digest)
+                {
+                    return Err(format!(
+                        "Project model '{}/{}' definition identity does not match its retained source",
+                        library.name, model_name
+                    ));
+                }
+                identities.push((source_id, model_name.clone(), revision, digest));
+            }
+        }
+        identities.sort_by(|left, right| {
+            left.0
+                .as_uuid()
+                .cmp(&right.0.as_uuid())
+                .then_with(|| {
+                    left.1
+                        .to_ascii_lowercase()
+                        .cmp(&right.1.to_ascii_lowercase())
+                })
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.3.cmp(&right.3))
+        });
+        identities.dedup();
+        Ok(identities)
+    }
+
     /// Search for models by name
     pub fn search_models(&self, pattern: &str) -> Vec<(&ModelLibrary, &DeviceModel)> {
         let pattern_lower = pattern.to_lowercase();
@@ -631,6 +715,7 @@ impl ModelLibraryManager {
         library.models.clear();
         library.model_definition_metadata.clear();
         library.model_qualification.clear();
+        library.model_correlation.clear();
         library.corners.clear();
         library.selected_corner = None;
 
@@ -1248,6 +1333,17 @@ impl ModelLibraryManager {
                     .to_owned(),
             );
         }
+        if bound.base.name != expected_model_name
+            && before
+                .model_correlation
+                .get(expected_model_name)
+                .is_some_and(|retained| *retained != ModelCorrelationState::default())
+        {
+            return Err(
+                "A model with correlation history cannot be renamed without an explicit evidence-lineage migration"
+                    .to_owned(),
+            );
+        }
 
         let mut parser = rspice_core::library::LibParser::new(
             source_path.parent().unwrap_or_else(|| Path::new("/")),
@@ -1303,6 +1399,9 @@ impl ModelLibraryManager {
             after
                 .model_qualification
                 .insert(bound.base.name.clone(), retained_qualification);
+        }
+        if bound.base.name != expected_model_name {
+            after.model_correlation.remove(expected_model_name);
         }
         after.version = next_library_revision.get().to_string();
         self.libraries
@@ -1434,6 +1533,213 @@ impl ModelLibraryManager {
             after
                 .model_qualification
                 .insert(model_name.to_owned(), qualification.clone());
+        }
+        self.libraries
+            .insert(library_name.to_owned(), after.clone());
+        Ok(ProjectModelCommit {
+            library_name: library_name.to_owned(),
+            model_name: model_name.to_owned(),
+            before: Some(before),
+            after,
+            affects_execution: false,
+        })
+    }
+
+    /// Replace only the measurement-correlation aggregate for an exact
+    /// project-owned model source. Source bytes and revisions remain
+    /// unchanged; historical suites may remain retained while every new suite
+    /// binds the exact source revision selected by its author.
+    pub fn replace_project_model_correlation(
+        &mut self,
+        library_name: &str,
+        expected_source_id: ModelSourceId,
+        expected_library_revision: ObjectRevision,
+        expected_model_revision: ObjectRevision,
+        expected_model_digest: ContentDigest,
+        model_name: &str,
+        correlation: &ModelCorrelationState,
+    ) -> Result<ProjectModelCommit, String> {
+        let before = self
+            .libraries
+            .get(library_name)
+            .cloned()
+            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            digest: root_digest,
+        } = before.source_authority
+        else {
+            return Err(format!(
+                "Model library '{library_name}' is not project-owned; create an editable project copy before changing it"
+            ));
+        };
+        if source_id != expected_source_id || revision != expected_library_revision {
+            return Err(format!(
+                "Model library '{library_name}' changed after correlation review began; reload the current source revision"
+            ));
+        }
+        validate_project_owned_retained_closure(&before, root_digest)?;
+        let model = before.models.get(model_name).ok_or_else(|| {
+            format!("Model library '{library_name}' does not contain model '{model_name}'")
+        })?;
+        let metadata = before
+            .model_definition_metadata
+            .get(model_name)
+            .ok_or_else(|| {
+                format!("Model '{model_name}' has no typed project-owned definition metadata")
+            })?;
+        let definition = ProjectModelRevisionDefinition::new(
+            ProjectModelDefinition::from_device_model(model),
+            metadata.clone(),
+        );
+        let canonical = definition
+            .canonical_source()
+            .map_err(|error| format!("Retained model revision is invalid: {error}"))?;
+        let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
+        let model_identity = definition
+            .project_source_identity()
+            .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
+        let model_revision = model_identity
+            .as_ref()
+            .map_or(revision, |identity| identity.revision);
+        if model_identity
+            .as_ref()
+            .is_some_and(|identity| identity.source_id != source_id)
+            || model_revision != expected_model_revision
+            || model_digest != expected_model_digest
+        {
+            return Err(format!(
+                "Model '{model_name}' changed after correlation review began; reload the current source revision"
+            ));
+        }
+        let source_path = model.file_path.as_ref().ok_or_else(|| {
+            format!("Model '{model_name}' has no retained source-file projection")
+        })?;
+        let source_bytes = before
+            .source_contents
+            .iter()
+            .find(|content| content.path == *source_path)
+            .map(|content| content.bytes.as_slice())
+            .ok_or_else(|| {
+                format!(
+                    "Model '{model_name}' points outside the retained source closure at '{}'",
+                    source_path.display()
+                )
+            })?;
+        let occurrences = exact_subslice_offsets(source_bytes, canonical.as_bytes()).len();
+        if occurrences != 1 {
+            return Err(format!(
+                "Model '{model_name}' canonical revision must occur exactly once in retained source '{}' (found {occurrences})",
+                source_path.display()
+            ));
+        }
+        correlation
+            .validate_for_model(model_name)
+            .map_err(|error| format!("Project model correlation state is invalid: {error}"))?;
+        let current_source = ModelSourceEvidenceBinding::try_new_project_bound(
+            model_name,
+            source_id,
+            model_digest,
+            model_revision,
+        )
+        .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
+        let retained = before
+            .model_correlation
+            .get(model_name)
+            .cloned()
+            .unwrap_or_default();
+        if retained == *correlation {
+            return Err("Model correlation has no semantic changes to save".to_owned());
+        }
+        for existing in &retained.suites {
+            let replacement = correlation
+                .suites
+                .iter()
+                .find(|candidate| {
+                    candidate.id.eq_ignore_ascii_case(&existing.id)
+                        && candidate.revision == existing.revision
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "Correlation suite '{}@{}' is immutable and cannot be removed",
+                        existing.id,
+                        existing.revision.get()
+                    )
+                })?;
+            if replacement != existing {
+                return Err(format!(
+                    "Correlation suite '{}@{}' is immutable and cannot be replaced",
+                    existing.id,
+                    existing.revision.get()
+                ));
+            }
+        }
+        for existing in &retained.evidence {
+            let replacement = correlation
+                .evidence
+                .iter()
+                .find(|candidate| candidate.id.eq_ignore_ascii_case(&existing.id))
+                .ok_or_else(|| {
+                    format!(
+                        "Correlation evidence '{}' is immutable and cannot be removed",
+                        existing.id
+                    )
+                })?;
+            if replacement != existing {
+                return Err(format!(
+                    "Correlation evidence '{}' is immutable and cannot be replaced",
+                    existing.id
+                ));
+            }
+        }
+        for suite in correlation.suites.iter().filter(|candidate| {
+            !retained.suites.iter().any(|existing| {
+                existing.id.eq_ignore_ascii_case(&candidate.id)
+                    && existing.revision == candidate.revision
+            })
+        }) {
+            if suite.source != current_source {
+                return Err(format!(
+                    "New correlation suite '{}@{}' must bind the exact current model source revision",
+                    suite.id,
+                    suite.revision.get()
+                ));
+            }
+            if retained
+                .suites
+                .iter()
+                .filter(|existing| existing.id.eq_ignore_ascii_case(&suite.id))
+                .any(|existing| existing.revision >= suite.revision)
+            {
+                return Err(format!(
+                    "New correlation suite revision '{}@{}' does not advance retained history",
+                    suite.id,
+                    suite.revision.get()
+                ));
+            }
+        }
+        for evidence in correlation.evidence.iter().filter(|candidate| {
+            !retained
+                .evidence
+                .iter()
+                .any(|existing| existing.id.eq_ignore_ascii_case(&candidate.id))
+        }) {
+            if evidence.source != current_source {
+                return Err(format!(
+                    "New correlation evidence '{}' must bind the exact current model source revision",
+                    evidence.id
+                ));
+            }
+        }
+
+        let mut after = before.clone();
+        if *correlation == ModelCorrelationState::default() {
+            after.model_correlation.remove(model_name);
+        } else {
+            after
+                .model_correlation
+                .insert(model_name.to_owned(), correlation.clone());
         }
         self.libraries
             .insert(library_name.to_owned(), after.clone());
@@ -1579,6 +1885,24 @@ impl ModelLibraryManager {
                 library
                     .model_qualification
                     .insert(definition.name.clone(), qualification.clone());
+            }
+        }
+        if let Some(previous) = previous
+            && let Some(previous_model_name) = previous_model_name.as_deref()
+            && let Some(correlation) = previous.model_correlation.get(previous_model_name)
+        {
+            if previous_model_name != definition.name
+                && *correlation != ModelCorrelationState::default()
+            {
+                return Err(
+                    "A model with correlation history cannot be renamed without an explicit evidence-lineage migration"
+                        .to_owned(),
+                );
+            }
+            if previous_model_name == definition.name {
+                library
+                    .model_correlation
+                    .insert(definition.name.clone(), correlation.clone());
             }
         }
         library.corners.clear();
@@ -1731,6 +2055,24 @@ impl ModelLibraryManager {
             library
                 .model_qualification
                 .insert(bound.base.name.clone(), retained_qualification);
+        }
+        if let Some(previous) = previous
+            && let Some(previous_model_name) = previous_model_name.as_deref()
+            && let Some(correlation) = previous.model_correlation.get(previous_model_name)
+        {
+            if previous_model_name != bound.base.name
+                && *correlation != ModelCorrelationState::default()
+            {
+                return Err(
+                    "A model with correlation history cannot be renamed without an explicit evidence-lineage migration"
+                        .to_owned(),
+                );
+            }
+            if previous_model_name == bound.base.name {
+                library
+                    .model_correlation
+                    .insert(bound.base.name.clone(), correlation.clone());
+            }
         }
 
         library.corners.clear();
@@ -2569,6 +2911,10 @@ fn verify_project_model_round_trip(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::model_library::{
+        CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSimulationProvenance,
+        CorrelationSuite,
+    };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -3112,6 +3458,215 @@ mod tests {
             ]),
             string_parameters: BTreeMap::from([("revision_tag".to_owned(), tag.to_owned())]),
         }
+    }
+
+    fn current_model_source(
+        library: &ModelLibrary,
+    ) -> (
+        ModelSourceId,
+        ObjectRevision,
+        ObjectRevision,
+        ContentDigest,
+        ModelSourceEvidenceBinding,
+    ) {
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision: library_revision,
+            ..
+        } = library.source_authority
+        else {
+            panic!("fixture model must be project-owned");
+        };
+        let model = &library.models["owned_nch"];
+        let metadata = library.model_definition_metadata["owned_nch"].clone();
+        let definition = ProjectModelRevisionDefinition::new(
+            ProjectModelDefinition::from_device_model(model),
+            metadata,
+        );
+        let canonical = definition.canonical_source().unwrap();
+        let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
+        let model_revision = definition
+            .project_source_identity()
+            .unwrap()
+            .expect("project source identity")
+            .revision;
+        let binding = ModelSourceEvidenceBinding::try_new_project_bound(
+            "owned_nch",
+            source_id,
+            model_digest,
+            model_revision,
+        )
+        .unwrap();
+        (
+            source_id,
+            library_revision,
+            model_revision,
+            model_digest,
+            binding,
+        )
+    }
+
+    fn correlation_suite(
+        source: ModelSourceEvidenceBinding,
+        revision: ObjectRevision,
+    ) -> CorrelationSuite {
+        let reference_bytes = b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec();
+        let simulation_bytes = b"id,quantity,value,unit\ns1,gain,1,V\n".to_vec();
+        let reference = CorrelationDatasetRevision::try_from_csv(
+            "reference",
+            ObjectRevision::INITIAL,
+            "Reference",
+            CorrelationDatasetClass::BenchMeasurement,
+            "test authority",
+            "lot-1",
+            "fixture-1",
+            "calibration-1",
+            "reference.csv",
+            reference_bytes,
+            None,
+        )
+        .unwrap();
+        let simulation_digest = ContentDigest::from_bytes(Sha256::digest(&simulation_bytes).into());
+        let simulation = CorrelationDatasetRevision::try_from_csv_with_provenance(
+            "simulation",
+            ObjectRevision::INITIAL,
+            "Simulation",
+            CorrelationDatasetClass::ModelSimulation,
+            "RSpice",
+            "owned_nch",
+            "retained-plan",
+            "numeric-contract",
+            "simulation.csv",
+            simulation_bytes,
+            Some(source.clone()),
+            Some(CorrelationSimulationProvenance {
+                run_id: "run-1".to_owned(),
+                run_dataset_id: "dataset-1".to_owned(),
+                analysis_id: 1,
+                analysis_result_digest: ContentDigest::from_bytes([0x40; 32]),
+                plan_id: "plan-1".to_owned(),
+                project_revision: ObjectRevision::INITIAL,
+                prepared_snapshot_digest: ContentDigest::from_bytes([0x41; 32]),
+                source_content_digest: ContentDigest::from_bytes([0x42; 32]),
+                task_config_digest: ContentDigest::from_bytes([0x43; 32]),
+                execution_target: "Local desktop engine".to_owned(),
+                export_digest: simulation_digest,
+                model_source: source.clone(),
+                executed_at_unix_ms: 1,
+            }),
+        )
+        .unwrap();
+        CorrelationSuite::try_new(
+            "owned-nch-correlation",
+            revision,
+            "Owned NCH correlation",
+            "model-owner",
+            source,
+            vec![reference, simulation],
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn project_model_correlation_commit_is_guarded_append_only_and_source_bound() {
+        let mut manager = ModelLibraryManager::new();
+        let created = manager
+            .create_project_model("owned_models", &project_definition(0.48, "r1"))
+            .expect("create project model");
+        let (source_id, library_revision, model_revision, model_digest, current_source) =
+            current_model_source(&created.after);
+        let first_suite = correlation_suite(current_source.clone(), ObjectRevision::INITIAL);
+        let first_state =
+            ModelCorrelationState::try_new(vec![first_suite.clone()], Vec::new()).unwrap();
+        manager
+            .replace_project_model_correlation(
+                "owned_models",
+                source_id,
+                library_revision,
+                model_revision,
+                model_digest,
+                "owned_nch",
+                &first_state,
+            )
+            .expect("first correlation revision commits without changing model bytes");
+
+        let second_revision = ObjectRevision::INITIAL.next().unwrap();
+        let second_suite = correlation_suite(current_source.clone(), second_revision);
+        let second_state = ModelCorrelationState::try_new(
+            vec![first_suite.clone(), second_suite.clone()],
+            Vec::new(),
+        )
+        .unwrap();
+        let appended = manager
+            .replace_project_model_correlation(
+                "owned_models",
+                source_id,
+                library_revision,
+                model_revision,
+                model_digest,
+                "owned_nch",
+                &second_state,
+            )
+            .expect("suite history appends atomically");
+        assert!(!appended.affects_execution);
+
+        let deleted_history =
+            ModelCorrelationState::try_new(vec![second_suite.clone()], Vec::new()).unwrap();
+        let error = manager
+            .replace_project_model_correlation(
+                "owned_models",
+                source_id,
+                library_revision,
+                model_revision,
+                model_digest,
+                "owned_nch",
+                &deleted_history,
+            )
+            .unwrap_err();
+        assert!(error.contains("immutable") && error.contains("cannot be removed"));
+
+        let stale_source = ModelSourceEvidenceBinding::try_new_project_bound(
+            "owned_nch",
+            source_id,
+            ContentDigest::from_bytes([0xee; 32]),
+            model_revision,
+        )
+        .unwrap();
+        let third_revision = second_revision.next().unwrap();
+        let stale_suite = correlation_suite(stale_source, third_revision);
+        let stale_state = ModelCorrelationState::try_new(
+            vec![first_suite, second_suite, stale_suite],
+            Vec::new(),
+        )
+        .unwrap();
+        let error = manager
+            .replace_project_model_correlation(
+                "owned_models",
+                source_id,
+                library_revision,
+                model_revision,
+                model_digest,
+                "owned_nch",
+                &stale_state,
+            )
+            .unwrap_err();
+        assert!(error.contains("exact current model source revision"));
+
+        let wrong_library_revision = library_revision.next().unwrap();
+        let error = manager
+            .replace_project_model_correlation(
+                "owned_models",
+                source_id,
+                wrong_library_revision,
+                model_revision,
+                model_digest,
+                "owned_nch",
+                &second_state,
+            )
+            .unwrap_err();
+        assert!(error.contains("changed after correlation review began"));
     }
 
     #[test]

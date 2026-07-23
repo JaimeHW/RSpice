@@ -348,6 +348,7 @@ impl SimulationController {
             &project_veriloga_runtimes,
         )?;
         validate_prepared_periodic_sources(&tasks, &netlist)?;
+        let project_model_sources = prepared_project_model_sources(state, &netlist)?;
 
         let source_digest =
             content_digest("rspice.generated-executable-source/v1", netlist.as_bytes());
@@ -394,6 +395,7 @@ impl SimulationController {
             executable_netlist: netlist,
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities,
+            project_model_sources,
             project_veriloga_runtimes,
             target: ExecutionTargetCapabilities::current(),
             receipt,
@@ -465,6 +467,7 @@ impl SimulationController {
         }
         let (expanded, canonical_origin, sealed_source_dependencies) =
             expand_manual_dependencies(&composed, origin, &state.model_library_manager)?;
+        let project_model_sources = prepared_project_model_sources(state, &expanded)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?;
         reject_deferred_external_sources_with_project_runtimes(
             &expanded,
@@ -520,6 +523,7 @@ impl SimulationController {
             executable_netlist: expanded,
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities,
+            project_model_sources,
             project_veriloga_runtimes,
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
@@ -1443,6 +1447,216 @@ fn append_corner_model_identities<'a>(
     }
 }
 
+fn prepared_project_model_sources(
+    state: &AppState,
+    executable_netlist: &str,
+) -> Result<Vec<crate::state::PreparedModelSourceIdentity>, PreparationError> {
+    let parsed = rspice_core::netlist::parse_netlist(executable_netlist).map_err(|error| {
+        PreparationError::new(
+            PreparationStage::ModelBindings,
+            format!("Executable source cannot authenticate project model use: {error}"),
+        )
+    })?;
+    let flattened =
+        rspice_core::netlist::flatten_netlist_with_models(&parsed).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!("Executable hierarchy cannot authenticate project model use: {error}"),
+            )
+        })?;
+    let referenced_names = flattened
+        .elements
+        .iter()
+        .filter_map(element_model_name)
+        .map(str::to_ascii_lowercase)
+        .collect::<HashSet<_>>();
+    let executable_models = parsed
+        .models
+        .iter()
+        .chain(flattened.scoped_models.iter())
+        .collect::<Vec<_>>();
+    let identities = state
+        .model_library_manager
+        .project_model_definition_identities()
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+        .into_iter()
+        .filter(|(_, model_name, _, _)| referenced_names.contains(&model_name.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
+    let canonical_models = canonical_project_model_definitions(state);
+    let mut name_counts = HashMap::<String, usize>::new();
+    for (_, model_name, _, _) in &identities {
+        *name_counts
+            .entry(model_name.to_ascii_lowercase())
+            .or_default() += 1;
+    }
+    identities
+        .into_iter()
+        // A repeated semantic name cannot be traced back to one exact project
+        // source from the executable SPICE instance. Omit every ambiguous
+        // candidate so simulation remains available while correlation
+        // evidence fails closed.
+        .filter(|(_, model_name, _, _)| {
+            name_counts.get(&model_name.to_ascii_lowercase()).copied() == Some(1)
+        })
+        .filter(|(source_id, model_name, _, _)| {
+            let mut executable_matches = executable_models
+                .iter()
+                .copied()
+                .filter(|model| model.name.eq_ignore_ascii_case(model_name));
+            let Some(executable_model) = executable_matches.next() else {
+                return false;
+            };
+            if executable_matches.next().is_some() {
+                return false;
+            }
+
+            let mut canonical_matches =
+                canonical_models
+                    .iter()
+                    .filter(|(candidate_source_id, candidate_name, _)| {
+                        candidate_source_id == source_id
+                            && candidate_name.eq_ignore_ascii_case(model_name)
+                    });
+            let Some((_, _, canonical_model)) = canonical_matches.next() else {
+                return false;
+            };
+            canonical_matches.next().is_none()
+                && model_definitions_match(canonical_model, executable_model)
+        })
+        .map(|(source_id, model_name, revision, content_digest)| {
+            crate::state::PreparedModelSourceIdentity::new(
+                source_id,
+                model_name,
+                revision,
+                content_digest,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+        })
+        .collect()
+}
+
+fn canonical_project_model_definitions(
+    state: &AppState,
+) -> Vec<(
+    crate::product::ModelSourceId,
+    String,
+    rspice_core::netlist::ModelDef,
+)> {
+    let mut models = Vec::new();
+    for library in state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| library.source_authority.is_project_owned())
+    {
+        let crate::state::model_library::ModelSourceAuthority::ProjectOwned { source_id, .. } =
+            library.source_authority
+        else {
+            continue;
+        };
+        for (model_name, model) in &library.models {
+            let Some(metadata) = library.model_definition_metadata.get(model_name) else {
+                continue;
+            };
+            let definition = crate::state::model_library::ProjectModelRevisionDefinition::new(
+                crate::state::model_library::ProjectModelDefinition::from_device_model(model),
+                metadata.clone(),
+            );
+            let Ok(source) = definition.qualification_model_source(None) else {
+                continue;
+            };
+            let deck = format!("Authenticated project model\n{source}.end\n");
+            let Ok(parsed) = rspice_core::netlist::parse_netlist(&deck) else {
+                continue;
+            };
+            let mut matching = parsed
+                .models
+                .into_iter()
+                .filter(|candidate| candidate.name.eq_ignore_ascii_case(model_name));
+            let Some(canonical_model) = matching.next() else {
+                continue;
+            };
+            if matching.next().is_none() {
+                models.push((source_id, model_name.clone(), canonical_model));
+            }
+        }
+    }
+    models
+}
+
+fn model_definitions_match(
+    canonical: &rspice_core::netlist::ModelDef,
+    executable: &rspice_core::netlist::ModelDef,
+) -> bool {
+    canonical.name.eq_ignore_ascii_case(&executable.name)
+        && canonical
+            .model_type
+            .eq_ignore_ascii_case(&executable.model_type)
+        && named_model_fields_match(&canonical.params, &executable.params)
+        && named_model_fields_match(&canonical.expr_params, &executable.expr_params)
+        && named_model_fields_match(&canonical.string_params, &executable.string_params)
+        && named_model_fields_match(
+            &canonical.string_vector_params,
+            &executable.string_vector_params,
+        )
+        && named_model_fields_match(
+            &canonical.real_vector_params,
+            &executable.real_vector_params,
+        )
+        && named_model_fields_match(
+            &canonical.real_vector_expr_params,
+            &executable.real_vector_expr_params,
+        )
+        && named_model_fields_match(
+            &canonical.integer_vector_params,
+            &executable.integer_vector_params,
+        )
+}
+
+fn named_model_fields_match<T: PartialEq>(
+    canonical: &[(String, T)],
+    executable: &[(String, T)],
+) -> bool {
+    fn normalized<T>(fields: &[(String, T)]) -> Option<HashMap<String, &T>> {
+        let mut normalized = HashMap::with_capacity(fields.len());
+        for (name, value) in fields {
+            if normalized
+                .insert(name.to_ascii_lowercase(), value)
+                .is_some()
+            {
+                return None;
+            }
+        }
+        Some(normalized)
+    }
+
+    normalized(canonical)
+        .zip(normalized(executable))
+        .is_some_and(|(canonical, executable)| canonical == executable)
+}
+
+fn element_model_name(element: &rspice_core::netlist::Element) -> Option<&str> {
+    use rspice_core::netlist::ElementKind as Kind;
+    match &element.kind {
+        Kind::Resistor { model, .. }
+        | Kind::Capacitor { model, .. }
+        | Kind::Inductor { model, .. }
+        | Kind::TransmissionLine { model, .. } => model.as_deref(),
+        Kind::JilesAthertonInductor { model, .. }
+        | Kind::Diode { model, .. }
+        | Kind::Bjt { model, .. }
+        | Kind::Mosfet { model, .. }
+        | Kind::Jfet { model, .. }
+        | Kind::Mesfet { model, .. }
+        | Kind::XyceMemristor { model, .. }
+        | Kind::VSwitch { model, .. }
+        | Kind::ISwitch { model, .. }
+        | Kind::GenericSwitch { model, .. }
+        | Kind::Xspice { model, .. } => Some(model),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1451,6 +1665,102 @@ mod tests {
 
     use crate::services::drc::DrcResult;
     static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn prepared_model_receipts_authenticate_exact_executable_model_definition() {
+        let mut state = AppState::default();
+        state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        let definition = prepared_model_receipt_definition();
+        state
+            .model_library_manager
+            .create_project_model("models-a", &definition)
+            .unwrap();
+        let source = definition.canonical_source().unwrap();
+        let used = prepared_project_model_sources(
+            &state,
+            &format!("receipt fixture\n{source}M1 d g 0 0 nch_receipt\n.op\n.end\n"),
+        )
+        .unwrap();
+        assert_eq!(used.len(), 1);
+        assert_eq!(used[0].model_name(), "nch_receipt");
+    }
+
+    #[test]
+    fn prepared_model_receipts_reject_modified_same_name_manual_card() {
+        let mut state = AppState::default();
+        state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        let definition = prepared_model_receipt_definition();
+        state
+            .model_library_manager
+            .create_project_model("models-a", &definition)
+            .unwrap();
+
+        let modified = prepared_project_model_sources(
+            &state,
+            "receipt fixture\n.model nch_receipt NMOS (level=1 vth0=0.51)\nM1 d g 0 0 nch_receipt\n.op\n.end\n",
+        )
+        .unwrap();
+        assert!(
+            modified.is_empty(),
+            "a same-name card with different executable parameters must not inherit project provenance"
+        );
+    }
+
+    #[test]
+    fn prepared_model_receipts_ignore_exact_but_unused_model() {
+        let mut state = AppState::default();
+        state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        let definition = prepared_model_receipt_definition();
+        state
+            .model_library_manager
+            .create_project_model("models-a", &definition)
+            .unwrap();
+        let source = definition.canonical_source().unwrap();
+        let unused = prepared_project_model_sources(
+            &state,
+            &format!("receipt fixture\n{source}V1 out 0 1\nR1 out 0 1k\n.op\n.end\n"),
+        )
+        .unwrap();
+        assert!(unused.is_empty());
+    }
+
+    #[test]
+    fn prepared_model_receipts_reject_duplicate_project_model_name() {
+        let mut state = AppState::default();
+        state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        let definition = prepared_model_receipt_definition();
+        state
+            .model_library_manager
+            .create_project_model("models-a", &definition)
+            .unwrap();
+        state
+            .model_library_manager
+            .create_project_model("models-b", &definition)
+            .unwrap();
+        let source = definition.canonical_source().unwrap();
+        let ambiguous = prepared_project_model_sources(
+            &state,
+            &format!("receipt fixture\n{source}M1 d g 0 0 nch_receipt\n.op\n.end\n"),
+        )
+        .unwrap();
+        assert!(
+            ambiguous.is_empty(),
+            "an executable model name shared by multiple project sources cannot authenticate either source"
+        );
+    }
+
+    fn prepared_model_receipt_definition() -> crate::state::model_library::ProjectModelDefinition {
+        crate::state::model_library::ProjectModelDefinition {
+            name: "nch_receipt".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Prepared receipt fixture".to_owned(),
+            numeric_parameters: std::collections::BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("vth0".to_owned(), 0.48),
+            ]),
+            string_parameters: std::collections::BTreeMap::new(),
+        }
+    }
 
     fn fixture_dir(label: &str) -> PathBuf {
         let nonce = FIXTURE_NONCE.fetch_add(1, Ordering::Relaxed);

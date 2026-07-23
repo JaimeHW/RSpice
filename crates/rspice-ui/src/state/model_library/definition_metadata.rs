@@ -1393,7 +1393,7 @@ fn collect_expression_parameters(
                 collect_expression_parameters(argument, parameters);
             }
         }
-        Expr::Number(_) | Expr::ComplexNumber(_) => {}
+        Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) => {}
     }
 }
 

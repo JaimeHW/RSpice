@@ -1610,6 +1610,11 @@ pub struct WorkbenchState {
     /// in the project model-library domain.
     #[serde(skip)]
     pub model_editor: super::model_editor::ModelEditorState,
+    /// Runtime-only selection and transactional drafts for measurement
+    /// correlation. Committed suites and evidence remain in the project-owned
+    /// model-library domain.
+    #[serde(skip)]
+    pub model_correlation: super::model_correlation::ModelCorrelationWorkspaceState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -1705,6 +1710,7 @@ impl Default for WorkbenchState {
             visualization_studio: super::visualization_studio::VisualizationStudioState::default(),
             report_authoring: ReportAuthoringState::default(),
             model_editor: super::model_editor::ModelEditorState::default(),
+            model_correlation: super::model_correlation::ModelCorrelationWorkspaceState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             capability_matrix: CapabilityMatrixState::default(),
@@ -1720,6 +1726,7 @@ impl WorkbenchState {
         self.project_launcher_open
             || self.preflight.open
             || self.notification_center_open
+            || self.model_correlation.dialog_open()
             || self.simulation_workflow.is_some()
             || self.verification.regression_baseline_picker_open
             || self.verification.tuning_review_open
