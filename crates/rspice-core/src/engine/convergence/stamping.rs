@@ -109,7 +109,7 @@ impl Engine {
         circuit.update_bjt_static_linearizations(solution);
         circuit.update_b3soi_static_linearizations(solution);
         circuit.update_jfet_static_linearizations(solution);
-        circuit.stamp_generic_switches(matrix, rhs, time);
+        circuit.stamp_generic_switches_with_solution(matrix, rhs, solution, time);
         circuit
             .try_stamp_static_probe_nonlinear(matrix, rhs, solution)
             .map_err(SimulationError::Circuit)?;
@@ -136,7 +136,7 @@ impl Engine {
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
-        circuit.stamp_generic_switches(matrix, rhs, time);
+        circuit.stamp_generic_switches_with_solution(matrix, rhs, solution, time);
         circuit
             .try_stamp_nonlinear(matrix, rhs, solution)
             .map_err(SimulationError::Circuit)?;

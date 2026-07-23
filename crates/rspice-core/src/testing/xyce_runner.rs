@@ -52141,21 +52141,26 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 expression, element_name
             )
         })?;
-        let ast = parse_expression_strict(&prepared).map_err(|err| {
+        let _ast = parse_expression_strict(&prepared).map_err(|err| {
             format!(
                 "native static .PRINT TRAN comparison does not yet support generic switch CONTROL expression '{}' on element '{}': {err}",
                 expression, element_name
             )
         })?;
-        if Self::expression_depends_on_solution_quantity(&ast) {
+        if Self::expression_contains_sdt(&_ast) {
             return Err(format!(
-                "native static .PRINT TRAN comparison does not yet support generic switch CONTROL expression '{}' on element '{}' because it references circuit nodes or branch currents",
+                "native static .PRINT TRAN comparison does not support stateful SDT in generic switch CONTROL expression '{}' on element '{}'",
                 expression, element_name
             ));
         }
+        // Generic SWITCH controls are linearized against the live Newton
+        // solution just like behavioral sources. Keep V(...)/I(...) controls
+        // in the native transient contract; only parser/build failures are
+        // rejected here.
         Ok(())
     }
 
+    #[cfg(test)]
     fn expression_depends_on_solution_quantity(expression: &Expr) -> bool {
         match expression {
             Expr::NodeVoltage(_) | Expr::BranchCurrent(_) => true,

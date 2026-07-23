@@ -921,9 +921,23 @@ impl CircuitData {
         rhs: &mut [Value],
         time: Value,
     ) {
+        self.stamp_generic_switches_with_solution(matrix, rhs, &[], time);
+    }
+
+    /// Stamp generic switches using the current Newton solution so CONTROL
+    /// expressions containing V(...) or I(...) receive their Jacobian
+    /// coupling. The zero-solution compatibility wrapper above remains useful
+    /// for the purely time-dependent linear path.
+    pub fn stamp_generic_switches_with_solution(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+    ) {
         let mut stamper = StaticMatrixStamper { matrix, rhs };
         for switch in &mut self.generic_switches {
-            switch.stamp_time_dependent(time, &mut stamper);
+            switch.stamp_time_dependent_with_solution(time, solution, &mut stamper);
         }
     }
 

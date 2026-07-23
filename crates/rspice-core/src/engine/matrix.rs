@@ -498,6 +498,18 @@ impl Engine {
             if n > 0 {
                 triplets.push((n - 1, n - 1, 0.0));
             }
+
+            // Solution-dependent CONTROL expressions contribute Jacobian
+            // columns on the switch's two terminal rows. Reserve every bound
+            // node/branch column before the sparse matrix is materialized.
+            for column in sw.bound_solution_indices() {
+                if p > 0 {
+                    triplets.push((p - 1, column, 0.0));
+                }
+                if n > 0 {
+                    triplets.push((n - 1, column, 0.0));
+                }
+            }
         }
 
         // Inductor stamps (branch variable like voltage source)

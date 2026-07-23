@@ -1111,8 +1111,19 @@ pub struct GenericSwitch {
     pub node_neg: NodeId,
 
     /// Compiled scalar control expression
+    ast: Expr,
     pub program: CompiledExpr,
     vm: Vm,
+    /// Compiled-expression references mapped to circuit solution indices.
+    /// Node indices are zero-based matrix indices; ground is represented by
+    /// `None` because its voltage is always zero. Branch indices are likewise
+    /// zero-based matrix indices.
+    node_bindings: Vec<Option<usize>>,
+    branch_bindings: Vec<Option<usize>>,
+    node_values: Vec<Value>,
+    branch_values: Vec<Value>,
+    node_partials: Vec<Value>,
+    branch_partials: Vec<Value>,
     time_breakpoints: Vec<Value>,
     temperature: Value,
     gmin: Value,
@@ -1167,8 +1178,15 @@ impl GenericSwitch {
             name,
             node_pos,
             node_neg,
+            ast,
             program,
             vm: Vm::new(),
+            node_bindings: Vec::new(),
+            branch_bindings: Vec::new(),
+            node_values: Vec::new(),
+            branch_values: Vec::new(),
+            node_partials: Vec::new(),
+            branch_partials: Vec::new(),
             time_breakpoints,
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
@@ -1192,6 +1210,63 @@ impl GenericSwitch {
     /// Return true when the expression needs solution-vector Jacobian support.
     pub fn has_solution_references(&self) -> bool {
         !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
+    }
+
+    /// Resolve expression references against the final circuit topology.
+    ///
+    /// Binding is deliberately performed after flattening and ground-reference
+    /// normalization, matching behavioral-source expression semantics. A
+    /// missing reference is a build error rather than an implicit zero.
+    pub fn bind_references<FN, FB>(
+        &mut self,
+        resolve_node: FN,
+        resolve_branch: FB,
+    ) -> Result<(), String>
+    where
+        FN: Fn(&str) -> Option<usize>,
+        FB: Fn(&str) -> Option<usize>,
+    {
+        self.node_bindings = vec![None; self.program.node_map.len()];
+        for (name, &local_idx) in &self.program.node_map {
+            let resolved = if crate::compat::ground::is_spice_ground_name(name) {
+                Some(0usize)
+            } else {
+                resolve_node(name)
+            }
+            .ok_or_else(|| {
+                format!(
+                    "Generic switch '{}' references unknown node '{}'",
+                    self.name, name
+                )
+            })?;
+            self.node_bindings[local_idx] = resolved.checked_sub(1);
+        }
+
+        self.branch_bindings = vec![None; self.program.branch_map.len()];
+        for (name, &local_idx) in &self.program.branch_map {
+            let resolved = resolve_branch(name).ok_or_else(|| {
+                format!(
+                    "Generic switch '{}' references unknown branch source '{}'",
+                    self.name, name
+                )
+            })?;
+            self.branch_bindings[local_idx] = Some(resolved);
+        }
+
+        self.node_values.resize(self.node_bindings.len(), 0.0);
+        self.branch_values.resize(self.branch_bindings.len(), 0.0);
+        self.node_partials.resize(self.node_bindings.len(), 0.0);
+        self.branch_partials.resize(self.branch_bindings.len(), 0.0);
+        Ok(())
+    }
+
+    /// Return the zero-based solution columns which the control expression can
+    /// couple into the Newton matrix.
+    pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.node_bindings
+            .iter()
+            .chain(self.branch_bindings.iter())
+            .filter_map(|binding| *binding)
     }
 
     /// Time instants where the control expression can change discontinuously.
@@ -1532,16 +1607,134 @@ impl GenericSwitch {
             .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect);
         let value = vm.execute(&self.program, &ctx);
-        if value.is_finite() { value } else { self.off }
+        if value.is_finite() {
+            value
+        } else {
+            self.off
+        }
+    }
+
+    fn refresh_expression_inputs(&mut self, solution: &[Value]) {
+        for (idx, binding) in self.node_bindings.iter().enumerate() {
+            self.node_values[idx] = binding
+                .and_then(|global_idx| solution.get(global_idx).copied())
+                .unwrap_or(0.0);
+        }
+        for (idx, binding) in self.branch_bindings.iter().enumerate() {
+            self.branch_values[idx] = binding
+                .and_then(|global_idx| solution.get(global_idx).copied())
+                .unwrap_or(0.0);
+        }
     }
 
     fn evaluate_control(&mut self, time: Value) -> Value {
-        let ctx = Context::transient(&[], &[], time)
+        let ctx = Context::transient(&self.node_values, &self.branch_values, time)
             .with_temperature(self.temperature)
             .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect);
         let value = self.vm.execute(&self.program, &ctx);
-        if value.is_finite() { value } else { self.off }
+        if value.is_finite() {
+            value
+        } else {
+            self.off
+        }
+    }
+
+    #[inline]
+    fn derivative_step(base: Value) -> Value {
+        1.0e-9 + 1.0e-6 * base.abs().max(1.0)
+    }
+
+    /// Evaluate CONTROL and cache its Jacobian with respect to all bound
+    /// solution quantities. The shared behavioral-expression differentiator
+    /// handles smooth algebra/functions analytically and this device uses a
+    /// bounded central-difference fallback for discontinuous/unsupported
+    /// functions, preserving a finite, fail-closed Newton companion.
+    fn linearize_control(&mut self, time: Value) -> Value {
+        let f0 = self.evaluate_control(time);
+        if !f0.is_finite() {
+            self.node_partials.fill(0.0);
+            self.branch_partials.fill(0.0);
+            return self.off;
+        }
+
+        for idx in 0..self.node_values.len() {
+            let analytic = super::behavioral::compiled_expression_node_partial(
+                &self.ast,
+                &self.program,
+                &self.node_values,
+                &self.branch_values,
+                time,
+                0.0,
+                self.temperature,
+                self.gmin,
+                self.expression_dialect,
+                idx,
+            );
+            self.node_partials[idx] = analytic.unwrap_or_else(|| {
+                let base = self.node_values[idx];
+                let h = Self::derivative_step(base);
+                self.node_values[idx] = base + h;
+                let fp = self.evaluate_control(time);
+                self.node_values[idx] = base - h;
+                let fm = self.evaluate_control(time);
+                self.node_values[idx] = base;
+                let derivative = if fp.is_finite() && fm.is_finite() {
+                    (fp - fm) / (2.0 * h)
+                } else if fp.is_finite() {
+                    (fp - f0) / h
+                } else if fm.is_finite() {
+                    (f0 - fm) / h
+                } else {
+                    0.0
+                };
+                if derivative.is_finite() {
+                    derivative
+                } else {
+                    0.0
+                }
+            });
+        }
+
+        for idx in 0..self.branch_values.len() {
+            let analytic = super::behavioral::compiled_expression_branch_partial(
+                &self.ast,
+                &self.program,
+                &self.node_values,
+                &self.branch_values,
+                time,
+                0.0,
+                self.temperature,
+                self.gmin,
+                self.expression_dialect,
+                idx,
+            );
+            self.branch_partials[idx] = analytic.unwrap_or_else(|| {
+                let base = self.branch_values[idx];
+                let h = Self::derivative_step(base);
+                self.branch_values[idx] = base + h;
+                let fp = self.evaluate_control(time);
+                self.branch_values[idx] = base - h;
+                let fm = self.evaluate_control(time);
+                self.branch_values[idx] = base;
+                let derivative = if fp.is_finite() && fm.is_finite() {
+                    (fp - fm) / (2.0 * h)
+                } else if fp.is_finite() {
+                    (fp - f0) / h
+                } else if fm.is_finite() {
+                    (f0 - fm) / h
+                } else {
+                    0.0
+                };
+                if derivative.is_finite() {
+                    derivative
+                } else {
+                    0.0
+                }
+            });
+        }
+
+        f0
     }
 
     #[inline]
@@ -1555,28 +1748,44 @@ impl GenericSwitch {
         }
     }
 
-    fn interpolated_conductance(&self, normalized_state: Value) -> Value {
+    /// Return conductance and derivative with respect to the normalized
+    /// control state. The endpoint derivative is exactly zero because Xyce's
+    /// normalized law clamps fully-off/fully-on controls.
+    fn interpolated_conductance_with_derivative(&self, normalized_state: Value) -> (Value, Value) {
         let state = normalized_state.clamp(0.0, 1.0);
         if state >= 1.0 {
-            return 1.0 / self.ron;
+            return (1.0 / self.ron, 0.0);
         }
         if state <= 0.0 {
-            return 1.0 / self.roff;
+            return (1.0 / self.roff, 0.0);
         }
 
         let lm = (self.ron * self.roff).sqrt().ln();
         let lr = (self.ron / self.roff).ln();
         let x = 2.0 * state - 1.0;
-        (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp()
+        let conductance = (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp();
+        let dconductance_dstate = 1.5 * conductance * lr * (x * x - 1.0);
+        (conductance, dconductance_dstate)
     }
 
+    #[cfg(test)]
     fn conductance_for_control(&mut self, control: Value) -> Value {
+        self.conductance_sensitivity_for_control(control).0
+    }
+
+    /// Evaluate the Xyce conductance law and its derivative with respect to
+    /// the scalar CONTROL value. `trial_state` is updated exactly once for the
+    /// evaluated control, so Newton retries retain the same accepted-history
+    /// semantics as the legacy time-only path.
+    fn conductance_sensitivity_for_control(&mut self, control: Value) -> (Value, Value) {
         let d_inv = 1.0 / Self::safe_delta(self.on - self.off);
         let base_state = (control - self.off) * d_inv;
 
         if !self.hysteresis_enabled {
             self.trial_state = base_state;
-            return self.interpolated_conductance(base_state);
+            let (conductance, derivative) =
+                self.interpolated_conductance_with_derivative(base_state);
+            return (conductance, derivative * d_inv);
         }
 
         let previous_state = self.last_state;
@@ -1587,14 +1796,14 @@ impl GenericSwitch {
             // Xyce writes the hysteretic normalization unconditionally in the
             // ON branch, including when the unhysterized control crossed 1.
             self.trial_state = hys_on_state;
-            return 1.0 / self.ron;
+            return (1.0 / self.ron, 0.0);
         }
 
         if base_state <= 0.0 || (previous_state <= 0.0 && hys_off_state <= 0.0) {
             // Xyce likewise writes the hysteretic normalization
             // unconditionally in the OFF branch.
             self.trial_state = hys_off_state;
-            return 1.0 / self.roff;
+            return (1.0 / self.roff, 0.0);
         }
 
         let interpolation_state = if previous_state <= 0.0 {
@@ -1608,7 +1817,16 @@ impl GenericSwitch {
         // vector in the interpolation branch, even when the conductance uses
         // a hysteresis-adjusted state for this accepted point.
         self.trial_state = base_state;
-        self.interpolated_conductance(interpolation_state)
+        let (conductance, derivative) =
+            self.interpolated_conductance_with_derivative(interpolation_state);
+        let interpolation_scale = if previous_state <= 0.0 {
+            1.0 / Self::safe_delta(self.onh - self.off)
+        } else if previous_state >= 1.0 {
+            1.0 / Self::safe_delta(self.on - self.offh)
+        } else {
+            d_inv
+        };
+        (conductance, derivative * interpolation_scale)
     }
 
     /// Advance Xyce's three-level store-vector history after an accepted
@@ -1650,10 +1868,80 @@ impl GenericSwitch {
 
     /// Stamp the switch conductance for a given analysis time.
     pub fn stamp_time_dependent(&mut self, time: Value, matrix: &mut impl MatrixStamper) {
+        self.refresh_expression_inputs(&[]);
         let control = self.evaluate_control(time);
-        let g = self.conductance_for_control(control);
+        let (g, _) = self.conductance_sensitivity_for_control(control);
         self.current_conductance = g;
         self.stamp_conductance(g, matrix);
+    }
+
+    /// Stamp the switch using the current Newton solution. Solution-dependent
+    /// CONTROL expressions are linearized into the same nodal/branch columns
+    /// as behavioral sources; time-only controls naturally reduce to the
+    /// legacy conductance stamp.
+    pub fn stamp_time_dependent_with_solution(
+        &mut self,
+        time: Value,
+        solution: &[Value],
+        matrix: &mut impl MatrixStamper,
+    ) {
+        self.refresh_expression_inputs(solution);
+        let control = self.linearize_control(time);
+        let (g, dg_dcontrol) = self.conductance_sensitivity_for_control(control);
+        self.current_conductance = g;
+
+        let vp = self
+            .node_pos
+            .checked_sub(1)
+            .and_then(|index| solution.get(index).copied())
+            .unwrap_or(0.0);
+        let vn = self
+            .node_neg
+            .checked_sub(1)
+            .and_then(|index| solution.get(index).copied())
+            .unwrap_or(0.0);
+        let vmain = vp - vn;
+        let control_scale = vmain * dg_dcontrol;
+
+        self.stamp_conductance(g, matrix);
+
+        let mut control_jacobian =
+            Vec::with_capacity(self.node_bindings.len() + self.branch_bindings.len());
+        for (idx, binding) in self.node_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                let dc_dx = self.node_partials[idx];
+                if dc_dx != 0.0 {
+                    control_jacobian.push((*global_idx + 1, control_scale * dc_dx));
+                }
+            }
+        }
+        for (idx, binding) in self.branch_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                let dc_dx = self.branch_partials[idx];
+                if dc_dx != 0.0 {
+                    control_jacobian.push((*global_idx + 1, control_scale * dc_dx));
+                }
+            }
+        }
+
+        let mut ieq = g * vmain;
+        if self.node_pos > 0 {
+            ieq -= g * vp;
+        }
+        if self.node_neg > 0 {
+            ieq -= -g * vn;
+        }
+        for &(column, derivative) in &control_jacobian {
+            let value = column
+                .checked_sub(1)
+                .and_then(|index| solution.get(index).copied())
+                .unwrap_or(0.0);
+            ieq -= derivative * value;
+            matrix.stamp(self.node_pos, column, derivative);
+            matrix.stamp(self.node_neg, column, -derivative);
+        }
+        matrix.stamp_rhs(self.node_pos, -ieq);
+        matrix.stamp_rhs(self.node_neg, ieq);
     }
 
     /// Stamp the current frozen conductance, used by small-signal analyses

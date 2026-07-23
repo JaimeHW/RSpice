@@ -117,7 +117,7 @@ impl Engine {
             // native device topologies such as BSIM4 RGATEMOD=3.
             Self::stamp_matrix_conditioning_diagonal(circuit, matrix, size, gmin_floor);
             circuit.stamp_dc_direct(matrix, &mut rhs);
-            circuit.stamp_generic_switches(matrix, &mut rhs, 0.0);
+            circuit.stamp_generic_switches_with_solution(matrix, &mut rhs, &solution, 0.0);
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
                 circuit.set_xyce_memristor_operating_point_mode(true);
@@ -198,7 +198,7 @@ impl Engine {
                 .voltage_sources
                 .update_transient_rhs(&mut rhs, time, |br_ordinal| num_nodes + br_ordinal);
             circuit.current_sources.update_transient_rhs(&mut rhs, time);
-            circuit.stamp_generic_switches(matrix, &mut rhs, time);
+            circuit.stamp_generic_switches_with_solution(matrix, &mut rhs, &solution, time);
 
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);

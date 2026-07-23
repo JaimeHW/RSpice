@@ -6255,6 +6255,50 @@ impl Engine {
                             element.name, model
                         ))
                     })?;
+                    // Xyce canonicalizes the legacy four-node `S` spelling
+                    // with a `.MODEL ... SWITCH` card into an expression-
+                    // controlled switch whose CONTROL is the voltage across
+                    // the two optional control nodes. Preserve that semantic
+                    // distinction from a true VSWITCH card rather than
+                    // silently accepting the model with the wrong thresholds.
+                    if model_def.model_type.eq_ignore_ascii_case("SWITCH") {
+                        let params_map = resolve_supported_model_params_upper_map(
+                            netlist,
+                            model_def,
+                            "Generic switch",
+                            &element.name,
+                            model,
+                            GENERIC_SWITCH_MODEL_PARAMS,
+                            self.config.temperature,
+                        )?;
+                        let implicit_control = format!("V({})-V({})", control_pos, control_neg);
+                        let mut sw = crate::device::GenericSwitch::new(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            &implicit_control,
+                        )
+                        .map_err(SimulationError::Circuit)?
+                        .with_params(&params_map);
+                        if sw.program.sdt_count != 0 {
+                            return Err(SimulationError::Circuit(format!(
+                                "Generic switch '{}' CONTROL does not support stateful SDT expressions",
+                                element.name
+                            )));
+                        }
+                        sw.set_expression_context(
+                            crate::analysis::temperature::kelvin_to_celsius(
+                                self.config.temperature,
+                            ),
+                            self.config.convergence_config.junction_gmin_target,
+                            netlist.params.expression_dialect(),
+                        );
+                        if let Some(state) = initial_state {
+                            sw = sw.with_initial_state(map_switch_state(*state));
+                        }
+                        circuit.generic_switches.push(sw);
+                        continue;
+                    }
                     ensure_model_type(
                         "Voltage-controlled switch",
                         &element.name,
@@ -6387,17 +6431,38 @@ impl Engine {
                         &element.name,
                         model,
                         model_def,
-                        &["SW", "SWITCH"],
+                        &["SW", "SWITCH", "VSWITCH", "VSW"],
                     )?;
+                    let model_is_vswitch = model_def.model_type.eq_ignore_ascii_case("VSWITCH")
+                        || model_def.model_type.eq_ignore_ascii_case("VSW");
                     let params_map = resolve_supported_model_params_upper_map(
                         netlist,
                         model_def,
                         "Generic switch",
                         &element.name,
                         model,
-                        GENERIC_SWITCH_MODEL_PARAMS,
+                        if model_is_vswitch {
+                            VSWITCH_MODEL_PARAMS
+                        } else {
+                            GENERIC_SWITCH_MODEL_PARAMS
+                        },
                         self.config.temperature,
                     )?;
+                    let mut params_map = params_map;
+                    if model_is_vswitch {
+                        if let Some(&value) = params_map.get("VON") {
+                            params_map.entry("ON".to_string()).or_insert(value);
+                        }
+                        if let Some(&value) = params_map.get("VOFF") {
+                            params_map.entry("OFF".to_string()).or_insert(value);
+                        }
+                        if let Some(&value) = params_map.get("VHON") {
+                            params_map.entry("ONH".to_string()).or_insert(value);
+                        }
+                        if let Some(&value) = params_map.get("VHOFF") {
+                            params_map.entry("OFFH".to_string()).or_insert(value);
+                        }
+                    }
 
                     let mut sw = crate::device::GenericSwitch::new(
                         element.name.clone(),
@@ -6407,17 +6472,17 @@ impl Engine {
                     )
                     .map_err(SimulationError::Circuit)?
                     .with_params(&params_map);
+                    if sw.program.sdt_count != 0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Generic switch '{}' CONTROL does not support stateful SDT expressions",
+                            element.name
+                        )));
+                    }
                     sw.set_expression_context(
                         crate::analysis::temperature::kelvin_to_celsius(self.config.temperature),
                         self.config.convergence_config.junction_gmin_target,
                         netlist.params.expression_dialect(),
                     );
-                    if sw.has_solution_references() {
-                        return Err(SimulationError::Circuit(format!(
-                            "Generic switch '{}' CONTROL expression references circuit nodes or branch currents; native SWITCH CONTROL currently requires expressions independent of solution unknowns",
-                            element.name
-                        )));
-                    }
                     if let Some(state) = initial_state {
                         sw = sw.with_initial_state(map_switch_state(*state));
                     }

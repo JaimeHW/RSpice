@@ -309,7 +309,7 @@ impl Engine {
         let generic_switch_snapshot = ctx
             .xyce_one_step_order2
             .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
-        circuit.stamp_generic_switches(matrix, rhs, time);
+        circuit.stamp_generic_switches_with_solution(matrix, rhs, solution, time);
         if let Some((before_values, before_rhs)) = generic_switch_snapshot {
             for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
                 *value = before + 0.5 * (*value - before);
@@ -430,7 +430,7 @@ impl Engine {
             circuit
                 .current_sources
                 .update_transient_rhs(probe_rhs, time);
-            circuit.stamp_generic_switches(probe, probe_rhs, time);
+            circuit.stamp_generic_switches_with_solution(probe, probe_rhs, solution, time);
             if circuit.has_nonlinear_devices() {
                 circuit
                     .try_stamp_static_probe_nonlinear(probe, probe_rhs, solution)

@@ -180,7 +180,37 @@ impl CircuitData {
                         .map(|ordinal| num_nodes + ordinal - 1)
                 },
             )
-            .map_err(CircuitError::InvalidComponent)
+            .map_err(CircuitError::InvalidComponent)?;
+
+        let node_lookup = self.node_map.clone();
+        let branch_lookup = self.branch_names.clone();
+        let num_nodes = self.num_nodes;
+        for switch in &mut self.generic_switches {
+            switch
+                .bind_references(
+                    |name: &str| {
+                        node_lookup
+                            .get(name)
+                            .copied()
+                            .or_else(|| node_lookup.get(&name.to_lowercase()).copied())
+                            .or_else(|| node_lookup.get(&name.to_uppercase()).copied())
+                            .or_else(|| {
+                                node_lookup.iter().find_map(|(candidate, &id)| {
+                                    candidate.eq_ignore_ascii_case(name).then_some(id)
+                                })
+                            })
+                    },
+                    |name: &str| {
+                        branch_lookup
+                            .get(name)
+                            .or_else(|| branch_lookup.get(&name.to_uppercase()))
+                            .copied()
+                            .map(|ordinal| num_nodes + ordinal - 1)
+                    },
+                )
+                .map_err(CircuitError::InvalidComponent)?;
+        }
+        Ok(())
     }
 
     /// Check whether the circuit explicitly referenced the SPICE ground node.
