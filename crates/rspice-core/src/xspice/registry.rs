@@ -128,7 +128,15 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "tline",
     "triangle",
     "xfer",
+    "xyce_d_and",
+    "xyce_d_buffer",
+    "xyce_d_inverter",
+    "xyce_d_nand",
+    "xyce_d_nor",
+    "xyce_d_or",
     "xyce_d_tff",
+    "xyce_d_xnor",
+    "xyce_d_xor",
     "zener",
 ];
 
@@ -293,7 +301,15 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::AdcBridge));
         self.register(Arc::new(super::models::DacBridge));
         self.register(Arc::new(super::models::BidiBridge));
+        self.register(Arc::new(super::models::XyceDGate::and()));
+        self.register(Arc::new(super::models::XyceDGate::buffer()));
+        self.register(Arc::new(super::models::XyceDGate::inverter()));
+        self.register(Arc::new(super::models::XyceDGate::nand()));
+        self.register(Arc::new(super::models::XyceDGate::nor()));
+        self.register(Arc::new(super::models::XyceDGate::or()));
         self.register(Arc::new(super::models::XyceDTff));
+        self.register(Arc::new(super::models::XyceDGate::xnor()));
+        self.register(Arc::new(super::models::XyceDGate::xor()));
 
         // Real-valued event models
         self.register(Arc::new(super::models::DigitalToReal));
