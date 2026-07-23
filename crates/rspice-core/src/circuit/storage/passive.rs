@@ -337,6 +337,7 @@ impl Capacitors {
         self.internal.push(false);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.capacitances.push(capacitance);
+        self.value_expressions.push(None);
         self.v_prev.push(ic); // Initialize v_prev to IC
         self.v_prev_prev.push(ic); // Initialize v_prev_prev to IC as well
         self.v_prev_prev_prev.push(ic);
