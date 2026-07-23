@@ -52350,6 +52350,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Ok(());
         }
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
+            if Self::semiconductor_instance_parameter_probe_is_supported(
+                netlist,
+                &element_name,
+                &parameter,
+            ) {
+                return Ok(());
+            }
             match parameter.as_str() {
                 "acmag" | "acphase"
                     if Self::source_is_independent_source(netlist, &element_name) =>
@@ -53125,6 +53132,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Ok(());
         }
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
+            if Self::semiconductor_instance_parameter_probe_is_supported(
+                netlist,
+                &element_name,
+                &parameter,
+            ) {
+                return Ok(());
+            }
             match parameter.as_str() {
                 "dcv0" if Self::source_is_independent_source(netlist, &element_name) => {
                     return Ok(());
@@ -55167,6 +55181,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         element_name: &str,
         parameter: &str,
     ) -> Result<f64, String> {
+        if let Some(value) = Self::evaluate_semiconductor_instance_parameter_probe(
+            netlist,
+            dc,
+            sweep_point,
+            element_name,
+            parameter,
+        ) {
+            return value;
+        }
+
         match parameter {
             "dcv0" => {
                 if element_name.eq_ignore_ascii_case(&dc.source) {
@@ -58837,6 +58861,187 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
             Self::elements_have_recorded_branch_current(&flattened.elements, source)
         })
+    }
+
+    fn semiconductor_instance_parameter_probe_is_supported(
+        netlist: &Netlist,
+        element_name: &str,
+        parameter: &str,
+    ) -> bool {
+        let Some(element) = Self::find_semiconductor_device_element(netlist, element_name) else {
+            return false;
+        };
+        if parameter.eq_ignore_ascii_case("TEMP") {
+            return true;
+        }
+        let Some((model_name, instance_params)) =
+            Self::semiconductor_model_and_instance_params(&element)
+        else {
+            return false;
+        };
+        Self::instance_param(instance_params, &[parameter]).is_some()
+            || Self::semiconductor_model_parameter_is_supported(netlist, model_name, parameter)
+    }
+
+    fn evaluate_semiconductor_instance_parameter_probe(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        element_name: &str,
+        parameter: &str,
+    ) -> Option<Result<Value, String>> {
+        let element = Self::find_semiconductor_device_element(netlist, element_name)?;
+        if parameter.eq_ignore_ascii_case("TEMP") {
+            let (_, instance_params) = Self::semiconductor_model_and_instance_params(&element)?;
+            return Some(Ok(Self::instance_param(instance_params, &["TEMP"])
+                .unwrap_or_else(|| {
+                    Self::active_temperature_c(netlist, Some(dc), Some(sweep_point))
+                })));
+        }
+
+        let (model_name, instance_params) =
+            Self::semiconductor_model_and_instance_params(&element)?;
+        if let Some(value) = Self::instance_param(instance_params, &[parameter]) {
+            return Some(Ok(value));
+        }
+        Self::evaluate_semiconductor_model_parameter_probe(
+            netlist,
+            dc,
+            sweep_point,
+            model_name,
+            parameter,
+        )
+    }
+
+    fn semiconductor_model_parameter_is_supported(
+        netlist: &Netlist,
+        model_name: &str,
+        parameter: &str,
+    ) -> bool {
+        Self::find_semiconductor_model(netlist, model_name).is_some_and(|model| {
+            model
+                .params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(parameter))
+                || model
+                    .expr_params
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(parameter))
+        })
+    }
+
+    fn evaluate_semiconductor_model_parameter_probe(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        model_name: &str,
+        parameter: &str,
+    ) -> Option<Result<Value, String>> {
+        let model = Self::find_semiconductor_model(netlist, model_name)?;
+        if let Some((_, value)) = model
+            .params
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+        {
+            return Some(Ok(*value));
+        }
+        model
+            .expr_params
+            .iter()
+            .rev()
+            .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+            .map(|(_, expression)| {
+                let context = Self::print_eval_context(netlist, Some(dc), Some(sweep_point));
+                crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                    format!(
+                        "failed to evaluate semiconductor model parameter probe '{}:{}': {err}",
+                        model_name, parameter
+                    )
+                })
+            })
+    }
+
+    fn find_semiconductor_model(
+        netlist: &Netlist,
+        model_name: &str,
+    ) -> Option<crate::netlist::ModelDef> {
+        Self::find_model(&netlist.models, model_name)
+            .cloned()
+            .or_else(|| {
+                crate::netlist::flatten_netlist_with_models(netlist)
+                    .ok()?
+                    .scoped_models
+                    .into_iter()
+                    .find(|model| model.name.eq_ignore_ascii_case(model_name))
+            })
+    }
+
+    fn find_semiconductor_device_element(
+        netlist: &Netlist,
+        element_name: &str,
+    ) -> Option<crate::netlist::Element> {
+        let is_semiconductor = |element: &crate::netlist::Element| {
+            matches!(
+                element.kind,
+                ElementKind::Diode { .. }
+                    | ElementKind::Bjt { .. }
+                    | ElementKind::Mosfet { .. }
+                    | ElementKind::Jfet { .. }
+                    | ElementKind::Mesfet { .. }
+            )
+        };
+        netlist
+            .elements
+            .iter()
+            .find(|element| {
+                is_semiconductor(element)
+                    && Self::device_instance_names_match(&element.name, element_name)
+            })
+            .cloned()
+            .or_else(|| {
+                crate::netlist::flatten_netlist_with_models(netlist)
+                    .ok()?
+                    .elements
+                    .into_iter()
+                    .find(|element| {
+                        is_semiconductor(element)
+                            && Self::device_instance_names_match(&element.name, element_name)
+                    })
+            })
+    }
+
+    fn semiconductor_model_and_instance_params(
+        element: &crate::netlist::Element,
+    ) -> Option<(&str, &[(String, Value)])> {
+        match &element.kind {
+            ElementKind::Diode {
+                model,
+                instance_params,
+                ..
+            }
+            | ElementKind::Bjt {
+                model,
+                instance_params,
+                ..
+            }
+            | ElementKind::Mosfet {
+                model,
+                instance_params,
+                ..
+            }
+            | ElementKind::Jfet {
+                model,
+                instance_params,
+                ..
+            }
+            | ElementKind::Mesfet {
+                model,
+                instance_params,
+                ..
+            } => Some((model.as_str(), instance_params.as_slice())),
+            _ => None,
+        }
     }
 
     fn netlist_has_diode_instance(netlist: &Netlist, source: &str) -> bool {
@@ -86821,7 +87026,10 @@ Q1 c b 0 QN
             "the canonical one-device BSIMSOI LEVEL=10/SOIMOD=1 AC envelope admits gain-stagesoi"
         );
         let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
-        assert!(result.passed, "BSIMSOI gain-stage oracle failed: {result:?}");
+        assert!(
+            result.passed,
+            "BSIMSOI gain-stage oracle failed: {result:?}"
+        );
         assert!(
             !result.expected_unsupported,
             "BSIMSOI gain-stagesoi must execute"
