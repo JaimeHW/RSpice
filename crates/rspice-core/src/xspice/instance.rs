@@ -1959,8 +1959,10 @@ impl XspiceInstance {
     pub fn transient_voltage_lte_excluded_nodes(&self) -> Vec<usize> {
         let mut nodes = Vec::new();
         for (port_idx, port) in self.ports.iter().enumerate() {
-            if port.direction != super::PortDirection::Out
-                || !port.default_type.is_analog()
+            if !matches!(
+                port.direction,
+                super::PortDirection::Out | super::PortDirection::InOut
+            ) || !port.default_type.is_analog()
                 || !self
                     .model
                     .excludes_output_from_transient_voltage_lte(&port.name)

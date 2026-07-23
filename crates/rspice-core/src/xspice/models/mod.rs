@@ -75,6 +75,7 @@
 //! - **d_srlatch** - SR latch
 //! - **d_state** - State machine
 //! - **d_ram** - Random access memory
+//! - **xyce_d_tff** - Xyce DIG-compatible finite-output T flip-flop
 //!
 //! # Real Event Models
 //!
@@ -92,6 +93,9 @@ mod analog;
 
 // A/D and D/A bridges
 mod bridges;
+
+// Xyce-compatible analog digital output devices
+mod digital_output;
 
 // Lookup-table analog sources
 mod lookup;
@@ -137,6 +141,8 @@ pub use analog::{
 };
 
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
+
+pub use digital_output::XyceDTff;
 
 pub use digital::{
     DFlipFlop, DLatch, DigitalAnd, DigitalBuffer, DigitalCosim, DigitalFrequencyDivider,

@@ -128,6 +128,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "tline",
     "triangle",
     "xfer",
+    "xyce_d_tff",
     "zener",
 ];
 
@@ -292,6 +293,7 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::AdcBridge));
         self.register(Arc::new(super::models::DacBridge));
         self.register(Arc::new(super::models::BidiBridge));
+        self.register(Arc::new(super::models::XyceDTff));
 
         // Real-valued event models
         self.register(Arc::new(super::models::DigitalToReal));
