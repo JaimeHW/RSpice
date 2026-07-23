@@ -805,6 +805,32 @@ impl Engine {
             }
         }
 
+        #[inline]
+        fn push_current_control_row(
+            triplets: &mut Vec<(usize, usize, Value)>,
+            row_pos: usize,
+            row_neg: usize,
+            pos: usize,
+            neg: usize,
+        ) {
+            if row_pos > 0 {
+                if pos > 0 {
+                    triplets.push((row_pos - 1, pos - 1, 0.0));
+                }
+                if neg > 0 {
+                    triplets.push((row_pos - 1, neg - 1, 0.0));
+                }
+            }
+            if row_neg > 0 {
+                if pos > 0 {
+                    triplets.push((row_neg - 1, pos - 1, 0.0));
+                }
+                if neg > 0 {
+                    triplets.push((row_neg - 1, neg - 1, 0.0));
+                }
+            }
+        }
+
         fn push_current_output_control_topology(
             triplets: &mut Vec<(usize, usize, Value)>,
             circuit: &CircuitData,
@@ -818,6 +844,7 @@ impl Engine {
                 crate::xspice::PortConnection::Analog(node) => {
                     if *node > 0 {
                         push_current_control_column(triplets, pos, neg, *node - 1);
+                        push_current_control_row(triplets, *node, 0, pos, neg);
                     }
                 }
                 crate::xspice::PortConnection::Differential(ctrl_pos, ctrl_neg) => {
@@ -827,12 +854,14 @@ impl Engine {
                     if *ctrl_neg > 0 {
                         push_current_control_column(triplets, pos, neg, *ctrl_neg - 1);
                     }
+                    push_current_control_row(triplets, *ctrl_pos, *ctrl_neg, pos, neg);
                 }
                 crate::xspice::PortConnection::CurrentProbe { branch_ordinal, .. }
                 | crate::xspice::PortConnection::BranchCurrent { branch_ordinal }
                 | crate::xspice::PortConnection::Hybrid { branch_ordinal, .. } => {
                     let branch = circuit.get_branch_matrix_index(*branch_ordinal);
                     push_current_control_column(triplets, pos, neg, branch - 1);
+                    push_current_control_row(triplets, branch, 0, pos, neg);
                 }
                 crate::xspice::PortConnection::NamedBranchCurrent {
                     branch_ordinal: Some(branch_ordinal),
@@ -840,11 +869,13 @@ impl Engine {
                 } => {
                     let branch = circuit.get_branch_matrix_index(*branch_ordinal);
                     push_current_control_column(triplets, pos, neg, branch - 1);
+                    push_current_control_row(triplets, branch, 0, pos, neg);
                 }
                 crate::xspice::PortConnection::AnalogVector(nodes) => {
                     for &node in nodes {
                         if node > 0 {
                             push_current_control_column(triplets, pos, neg, node - 1);
+                            push_current_control_row(triplets, node, 0, pos, neg);
                         }
                     }
                 }
@@ -855,12 +886,14 @@ impl Engine {
                         {
                             let branch = circuit.get_branch_matrix_index(branch_ordinal);
                             push_current_control_column(triplets, pos, neg, branch - 1);
+                            push_current_control_row(triplets, branch, 0, pos, neg);
                             continue;
                         }
                         if let Some(node) = element.primary_node()
                             && node > 0
                         {
                             push_current_control_column(triplets, pos, neg, node - 1);
+                            push_current_control_row(triplets, node, 0, pos, neg);
                         }
                     }
                 }
