@@ -1236,6 +1236,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
     if let Some(pane) = studio.active_pane_mut() {
         app.state.ui.results.viewer = pane.viewer;
     }
+    normalize_fit_policy_for_renderer(&mut studio.autoscale, app.state.ui.results.viewer);
     let binding = studio
         .active_pane
         .and_then(|id| studio.panes.iter().find(|pane| pane.id == id))
@@ -2247,7 +2248,16 @@ fn axes_section(ui: &mut Ui, app: &mut RSpiceApp) {
                         }
                     },
                 );
-                if Button::new("Fit active view").show(ui).clicked() {
+                let fit_blocker = fit_block_reason(&app.state);
+                let fit = Button::new("Fit active view")
+                    .enabled(fit_blocker.is_none())
+                    .show(ui);
+                let fit = if let Some(reason) = fit_blocker {
+                    fit.on_disabled_hover_text(reason)
+                } else {
+                    fit
+                };
+                if fit.clicked() {
                     fit_active_view(app);
                 }
             });
@@ -2763,10 +2773,15 @@ fn viewer_toolbar(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
                                 app.state.workbench.visualization_studio.section =
                                     VisualizationSection::Axes;
                             });
-                            if ui
-                                .add_enabled(waveform_coordinates, egui::Button::new("Fit"))
-                                .clicked()
-                            {
+                            let fit_blocker = fit_block_reason(&app.state);
+                            let fit =
+                                ui.add_enabled(fit_blocker.is_none(), egui::Button::new("Fit"));
+                            let fit = if let Some(reason) = fit_blocker {
+                                fit.on_disabled_hover_text(reason)
+                            } else {
+                                fit
+                            };
+                            if fit.clicked() {
                                 fit_active_view(app);
                             }
                             if ui
@@ -4412,78 +4427,102 @@ fn add_cursor_at_midpoint(app: &mut RSpiceApp) {
 }
 
 fn fit_active_view(app: &mut RSpiceApp) {
+    if let Some(reason) = fit_block_reason(&app.state) {
+        app.state.push_user_message(ConsoleMessage::warning(reason));
+        return;
+    }
+
     let viewer = app.state.ui.results.viewer;
     let strip = app.state.simulation.active_analysis_idx.unwrap_or_default();
     match app.state.workbench.visualization_studio.autoscale {
         VisualizationAutoscale::RobustVisible => {
             app.state.ui.results.reset_plot_view(viewer, strip);
         }
-        VisualizationAutoscale::ExactExtrema if viewer == ResultViewer::Waves => {
-            let extrema = app.state.simulation.active_analysis().and_then(|analysis| {
-                let mut x_min = f64::INFINITY;
-                let mut x_max = f64::NEG_INFINITY;
-                let mut y_min = f64::INFINITY;
-                let mut y_max = f64::NEG_INFINITY;
-                for waveform in analysis
-                    .waveforms
-                    .iter()
-                    .filter(|waveform| waveform.visible)
-                {
-                    for &x in waveform.x.iter() {
-                        if x.is_finite() {
-                            x_min = x_min.min(x);
-                            x_max = x_max.max(x);
-                        }
-                    }
-                    for &y in waveform.y.iter() {
-                        if y.is_finite() {
-                            y_min = y_min.min(y);
-                            y_max = y_max.max(y);
-                        }
-                    }
-                }
-                (x_min.is_finite() && x_max.is_finite() && y_min.is_finite() && y_max.is_finite())
-                    .then_some((
-                        nondegenerate_range(x_min, x_max),
-                        nondegenerate_range(y_min, y_max),
-                    ))
-            });
-            if let Some((x, y)) = extrema {
-                let view = app.state.ui.results.plot_view_mut(viewer, strip);
-                view.x = Some(x);
-                view.y = Some(y);
-            } else {
-                app.state.push_user_message(ConsoleMessage::warning(
-                    "Exact-extrema fitting requires at least one visible finite waveform.",
-                ));
-                return;
-            }
-        }
         VisualizationAutoscale::ExactExtrema => {
-            app.state.push_user_message(ConsoleMessage::warning(
-                "Exact-extrema fitting is not implemented for the active renderer.",
-            ));
-            return;
+            let (x, y) = exact_extrema_fit(&app.state)
+                .expect("fit availability guarantees finite exact waveform extrema");
+            let view = app.state.ui.results.plot_view_mut(viewer, strip);
+            view.x = Some(x);
+            view.y = Some(y);
         }
         VisualizationAutoscale::SpecificationBounds => {
-            if viewer != ResultViewer::Waves {
-                app.state.push_user_message(ConsoleMessage::warning(
-                    "Specification-bound fitting is available only for the waveform renderer.",
-                ));
-                return;
-            }
-            let Some((x, y)) = specification_bound_fit(&app.state) else {
-                app.state.push_user_message(ConsoleMessage::warning(
-                    "Specification-bound fitting requires a visible waveform whose exact quantity name matches a configured project specification.",
-                ));
-                return;
-            };
+            let (x, y) = specification_bound_fit(&app.state)
+                .expect("fit availability guarantees exact specification bounds");
             let view = app.state.ui.results.plot_view_mut(viewer, strip);
             view.x = Some(x);
             view.y = Some(y);
         }
     }
     app.state.workbench.visualization_studio.zoom = 1.0;
+}
+
+fn normalize_fit_policy_for_renderer(
+    autoscale: &mut VisualizationAutoscale,
+    viewer: ResultViewer,
+) -> bool {
+    if viewer != ResultViewer::Waves && *autoscale == VisualizationAutoscale::ExactExtrema {
+        *autoscale = VisualizationAutoscale::RobustVisible;
+        true
+    } else {
+        false
+    }
+}
+
+fn fit_block_reason(state: &AppState) -> Option<&'static str> {
+    match state.workbench.visualization_studio.autoscale {
+        VisualizationAutoscale::RobustVisible => None,
+        VisualizationAutoscale::ExactExtrema if state.ui.results.viewer != ResultViewer::Waves => {
+            Some("Exact-extrema fitting is available only for the waveform renderer.")
+        }
+        VisualizationAutoscale::ExactExtrema if exact_extrema_fit(state).is_none() => Some(
+            "Exact-extrema fitting requires at least one visible waveform with finite samples.",
+        ),
+        VisualizationAutoscale::ExactExtrema => None,
+        VisualizationAutoscale::SpecificationBounds
+            if state.ui.results.viewer != ResultViewer::Waves =>
+        {
+            Some("Specification-bound fitting is available only for the waveform renderer.")
+        }
+        VisualizationAutoscale::SpecificationBounds if specification_bound_fit(state).is_none() => {
+            Some(
+                "Specification-bound fitting requires a visible waveform whose exact quantity name matches a configured project specification.",
+            )
+        }
+        VisualizationAutoscale::SpecificationBounds => None,
+    }
+}
+
+fn exact_extrema_fit(state: &AppState) -> Option<((f64, f64), (f64, f64))> {
+    if state.ui.results.viewer != ResultViewer::Waves {
+        return None;
+    }
+    let analysis = state.simulation.active_analysis()?;
+    let mut x_min = f64::INFINITY;
+    let mut x_max = f64::NEG_INFINITY;
+    let mut y_min = f64::INFINITY;
+    let mut y_max = f64::NEG_INFINITY;
+    for waveform in analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| waveform.visible)
+    {
+        for &x in waveform.x.iter() {
+            if x.is_finite() {
+                x_min = x_min.min(x);
+                x_max = x_max.max(x);
+            }
+        }
+        for &y in waveform.y.iter() {
+            if y.is_finite() {
+                y_min = y_min.min(y);
+                y_max = y_max.max(y);
+            }
+        }
+    }
+    (x_min.is_finite() && x_max.is_finite() && y_min.is_finite() && y_max.is_finite()).then_some((
+        nondegenerate_range(x_min, x_max),
+        nondegenerate_range(y_min, y_max),
+    ))
 }
 
 fn nondegenerate_range(minimum: f64, maximum: f64) -> (f64, f64) {
@@ -6886,6 +6925,67 @@ mod integrity_scan_tests {
         app.state.simulation.runs = vec![run];
         assert!(app.state.simulation.select_run(0));
         app
+    }
+
+    #[test]
+    fn restored_exact_extrema_policy_normalizes_for_non_wave_renderer() {
+        let mut app = app_with_exact_source();
+        app.state.ui.results.viewer = ResultViewer::Bode;
+        app.state.workbench.visualization_studio.autoscale = VisualizationAutoscale::ExactExtrema;
+
+        reconcile_document(&mut app);
+
+        assert_eq!(app.state.ui.results.viewer, ResultViewer::Bode);
+        assert_eq!(
+            app.state.workbench.visualization_studio.autoscale,
+            VisualizationAutoscale::RobustVisible
+        );
+        assert_eq!(fit_block_reason(&app.state), None);
+    }
+
+    #[test]
+    fn fit_contract_reports_exact_source_and_specification_blockers() {
+        let mut app = app_with_exact_source();
+        app.state.workbench.visualization_studio.autoscale = VisualizationAutoscale::ExactExtrema;
+        assert_eq!(fit_block_reason(&app.state), None);
+
+        for waveform in &mut app.state.simulation.runs[0].analyses[0].waveforms {
+            waveform.visible = false;
+        }
+        assert_eq!(
+            fit_block_reason(&app.state),
+            Some(
+                "Exact-extrema fitting requires at least one visible waveform with finite samples."
+            )
+        );
+
+        app.state.workbench.visualization_studio.autoscale =
+            VisualizationAutoscale::SpecificationBounds;
+        assert_eq!(
+            fit_block_reason(&app.state),
+            Some(
+                "Specification-bound fitting requires a visible waveform whose exact quantity name matches a configured project specification."
+            )
+        );
+
+        app.state.ui.results.viewer = ResultViewer::Smith;
+        assert_eq!(
+            fit_block_reason(&app.state),
+            Some("Specification-bound fitting is available only for the waveform renderer.")
+        );
+    }
+
+    #[test]
+    fn robust_fit_is_available_for_non_wave_renderers() {
+        let mut app = app_with_exact_source();
+        app.state.ui.results.viewer = ResultViewer::Bode;
+        app.state.workbench.visualization_studio.autoscale = VisualizationAutoscale::RobustVisible;
+        app.state.workbench.visualization_studio.zoom = 2.5;
+
+        assert_eq!(fit_block_reason(&app.state), None);
+        fit_active_view(&mut app);
+
+        assert_eq!(app.state.workbench.visualization_studio.zoom, 1.0);
     }
 
     #[test]

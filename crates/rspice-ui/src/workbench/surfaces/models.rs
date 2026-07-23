@@ -1,25 +1,32 @@
 //! Model catalog, symbol contracts, PDK sections, authenticated includes, and
-//! a truthful audit of the metadata currently retained for loaded models.
+//! the source-owned model qualification and release gate.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use egui::{Align, Align2, Color32, Key, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
+use sha2::{Digest as _, Sha256};
 
 use crate::common::RSpiceApp;
+use crate::common::app::ConsoleMessage;
 use crate::common::app::{
     open_create_model_bound_symbol_dialog, open_symbol_import_dialog,
     open_symbol_parameter_form_dialog,
 };
-use crate::state::model_library::{DeviceModel, ModelLibrary};
+use crate::state::model_library::{
+    DeviceModel, ModelLibrary, ModelQualificationState, ModelSourceEvidenceBinding,
+    QualificationAnalysis, QualificationPlatform,
+};
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 
+use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::{
     property_card, property_row, property_row_toned, workspace_title_row,
 };
+use super::super::model_editor::{self, ModelEditorSection};
 use super::super::state::{ModelsPage, Workspace};
 
 const TABLE_HEAD_H: f32 = 27.0;
@@ -33,6 +40,7 @@ const MODEL_TABLE_MIN_H: f32 = 180.0;
 const MODEL_WIDE_SUMMARY_H: f32 = 150.0;
 const MODEL_STACKED_SUMMARY_H: f32 = 300.0;
 const MODEL_TITLE_MIN_CONTENT_H: f32 = 48.0;
+const QUALIFICATION_MIN_CONTENT_H: f32 = 680.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
@@ -59,7 +67,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         ModelsPage::Symbols => symbols(&mut surface, app),
         ModelsPage::Corners => corners(&mut surface, app),
         ModelsPage::Include => include_graph(&mut surface, app),
-        ModelsPage::Qualification => metadata_audit(&mut surface, app),
+        ModelsPage::Qualification => qualification(&mut surface, app),
     }
     if let Some(page) = requested_page {
         app.state.workbench.models_page = page;
@@ -714,183 +722,253 @@ fn include_graph(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AuditTone {
-    Neutral,
-    Info,
-    Error,
+enum QualificationGate {
+    Qualified,
+    Review,
+    Unqualified,
+    Blocked,
 }
 
-impl AuditTone {
-    fn color(self, tokens: &Tokens) -> Color32 {
+impl QualificationGate {
+    const fn label(self) -> &'static str {
         match self {
-            Self::Neutral => tokens.color.text_dim,
-            Self::Info => tokens.color.info,
-            Self::Error => tokens.color.err,
+            Self::Qualified => "qualified",
+            Self::Review => "review",
+            Self::Unqualified => "unqualified",
+            Self::Blocked => "blocked",
         }
     }
+
+    fn color(self, tokens: &Tokens) -> Color32 {
+        match self {
+            Self::Qualified => tokens.color.ok,
+            Self::Review | Self::Unqualified => tokens.color.warn,
+            Self::Blocked => tokens.color.err,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct QualificationModelSummary {
+    key: String,
+    library: String,
+    model: String,
+    source_revision: String,
+    source_error: Option<String>,
+    suites: usize,
+    vectors: usize,
+    evidenced_vectors: usize,
+    passing_vectors: usize,
+    dc_vectors: usize,
+    ac_vectors: usize,
+    transient_vectors: usize,
+    noise_vectors: usize,
+    temperature_points: usize,
+    references: usize,
+    desktop_passing: usize,
+    wasm_passing: usize,
+    parity_suites: usize,
+    worst_relative_error: Option<f64>,
+    evidence_digest: Option<String>,
+    open_dispositions: usize,
+    releases: usize,
+    comparison_available: bool,
+    gate: QualificationGate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ModelMetadataAudit {
-    source: &'static str,
-    source_tone: AuditTone,
-    source_blocking: bool,
-    geometry: &'static str,
-    geometry_tone: AuditTone,
-    geometry_blocking: bool,
-    geometry_declared: bool,
-    description_missing: bool,
+enum QualificationPageAction {
+    ReviewVectors,
+    RunSuite,
+    CompareRelease,
 }
 
-fn audit_model_metadata(library: &ModelLibrary, model: &DeviceModel) -> ModelMetadataAudit {
-    let external = library.root_path.is_some() || model.file_path.is_some();
-    let source = model.file_path.as_deref().or(library.root_path.as_deref());
-    let source_pinned = library.root_path.is_some()
-        && source.is_some_and(|source| library.source_closure.iter().any(|pin| pin.path == source));
-    let (source_label, source_tone, source_blocking) = if !external {
-        ("in memory", AuditTone::Neutral, false)
-    } else if source.is_none() {
-        ("path missing", AuditTone::Error, true)
-    } else if library.source_closure.is_empty() {
-        ("unpinned", AuditTone::Error, true)
-    } else if source_pinned {
-        ("pinned", AuditTone::Info, false)
-    } else {
-        ("outside closure", AuditTone::Error, true)
-    };
-
-    let geometry_declared = model.l_min.is_some()
-        || model.l_max.is_some()
-        || model.w_min.is_some()
-        || model.w_max.is_some();
-    let geometry_invalid = model_geometry_invalid(model);
-    let (geometry, geometry_tone) = if geometry_invalid {
-        ("inconsistent", AuditTone::Error)
-    } else if geometry_declared {
-        ("recorded", AuditTone::Info)
-    } else {
-        ("not declared", AuditTone::Neutral)
-    };
-
-    ModelMetadataAudit {
-        source: source_label,
-        source_tone,
-        source_blocking,
-        geometry,
-        geometry_tone,
-        geometry_blocking: geometry_invalid,
-        geometry_declared,
-        description_missing: model.description.trim().is_empty(),
+fn qualification(ui: &mut Ui, app: &mut RSpiceApp) {
+    let available = ui.available_size();
+    if available.y >= QUALIFICATION_MIN_CONTENT_H {
+        qualification_content(ui, app);
+        return;
     }
+
+    let (viewport, _) = ui.allocate_exact_size(available.max(Vec2::splat(1.0)), Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(viewport)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    child.spacing_mut().item_spacing = Vec2::ZERO;
+    ScrollArea::vertical()
+        .id_salt("models.qualification.workspace")
+        .auto_shrink([false, false])
+        .show(&mut child, |ui| {
+            let content_width = ui.available_width().max(1.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(content_width, QUALIFICATION_MIN_CONTENT_H),
+                Layout::top_down(Align::Min),
+                |ui| qualification_content(ui, app),
+            );
+        });
 }
 
-fn metadata_audit(ui: &mut Ui, app: &mut RSpiceApp) {
-    surface_title(
+fn qualification_content(ui: &mut Ui, app: &mut RSpiceApp) {
+    let summaries = qualification_summaries(app);
+    let selected = selected_qualification_summary(app, &summaries).cloned();
+    let selected_vector_count = selected.as_ref().map_or(0, |summary| summary.vectors);
+    let review_label = format!("Review {selected_vector_count} vectors");
+    let run_blocker = qualification_action_block_reason(
+        app,
+        selected.as_ref(),
+        QualificationPageAction::RunSuite,
+    );
+    let review_blocker = qualification_action_block_reason(
+        app,
+        selected.as_ref(),
+        QualificationPageAction::ReviewVectors,
+    );
+    let compare_blocker = qualification_action_block_reason(
+        app,
+        selected.as_ref(),
+        QualificationPageAction::CompareRelease,
+    );
+    let mut requested_action = None;
+
+    surface_title_with_action_reserve(
         ui,
-        "Model metadata · catalog audit",
-        "Model metadata audit",
-        "Inspect retained source pins, geometry limits, descriptions, and parameter records. This audit does not qualify numerical behavior or runtime parity.",
-        false,
-        |_| {},
+        "Model qualification · source-owned release gate",
+        "Model qualification",
+        "Versioned vectors, qualified oracles, runtime parity, tolerances, and governed dispositions. Release closure consumes only retained source-owned evidence.",
+        true,
+        430.0,
+        |ui| {
+            let run_enabled = run_blocker.is_none();
+            let mut run_button = Button::new("Run suite").enabled(run_enabled);
+            if run_enabled {
+                run_button = run_button.accent();
+            }
+            let run = run_button.show(ui);
+            let run_clicked = run.clicked();
+            if let Some(reason) = run_blocker.as_deref() {
+                run.on_disabled_hover_text(reason);
+            }
+            if run_clicked {
+                requested_action = Some(QualificationPageAction::RunSuite);
+            }
+
+            let review = Button::new(&review_label)
+                .enabled(review_blocker.is_none())
+                .show(ui);
+            let review_clicked = review.clicked();
+            if let Some(reason) = review_blocker.as_deref() {
+                review.on_disabled_hover_text(reason);
+            }
+            if review_clicked {
+                requested_action = Some(QualificationPageAction::ReviewVectors);
+            }
+
+            let compare = Button::new("Compare approved model")
+                .enabled(compare_blocker.is_none())
+                .show(ui);
+            let compare_clicked = compare.clicked();
+            if let Some(reason) = compare_blocker.as_deref() {
+                compare.on_disabled_hover_text(reason);
+            }
+            if compare_clicked {
+                requested_action = Some(QualificationPageAction::CompareRelease);
+            }
+        },
     );
 
-    let t = Tokens::get(ui.ctx());
-    let mut total = 0usize;
-    let mut source_findings = 0usize;
-    let mut invalid_geometry = 0usize;
-    let mut undeclared_geometry = 0usize;
-    let mut undocumented = 0usize;
-    let mut rows = Vec::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
-        let mut models = library.models.values().collect::<Vec<_>>();
-        models.sort_by(|left, right| left.name.cmp(&right.name));
-        for model in models {
-            total += 1;
-            let audit = audit_model_metadata(library, model);
-            source_findings += usize::from(audit.source_blocking);
-            invalid_geometry += usize::from(audit.geometry_blocking);
-            undeclared_geometry += usize::from(!audit.geometry_declared);
-            undocumented += usize::from(audit.description_missing);
-            let blocking = audit.source_blocking || audit.geometry_blocking;
-            let selected = app.state.workbench.selected_model.as_deref() == Some(&model.name)
-                && app.state.model_library_manager.selected_library.as_deref()
-                    == Some(&library.name);
-            rows.push(DataRow {
-                key: model_key(&library.name, &model.name),
-                selected,
-                cells: vec![
-                    DataCell::mono(&model.name),
-                    DataCell::plain(&library.name),
-                    DataCell::mono_colored(audit.source, audit.source_tone.color(&t)),
-                    DataCell::mono_colored(audit.geometry, audit.geometry_tone.color(&t)),
-                    DataCell::mono_colored(
-                        if audit.description_missing {
-                            "missing"
-                        } else {
-                            "recorded"
-                        },
-                        if audit.description_missing {
-                            t.color.warn
-                        } else {
-                            t.color.info
-                        },
-                    ),
-                    DataCell::mono(model.parameters.len().to_string()),
-                    DataCell::mono_colored(
-                        if blocking {
-                            "review"
-                        } else if audit.description_missing {
-                            "advisory"
-                        } else {
-                            "metadata complete"
-                        },
-                        if blocking {
-                            t.color.err
-                        } else if audit.description_missing {
-                            t.color.warn
-                        } else {
-                            t.color.info
-                        },
-                    ),
-                ],
-            });
-        }
+    if let Some(action) = requested_action {
+        execute_qualification_action(app, action);
     }
 
-    let blocking = source_findings + invalid_geometry;
+    let t = Tokens::get(ui.ctx());
+    let total_vectors = summaries
+        .iter()
+        .map(|summary| summary.vectors)
+        .sum::<usize>();
+    let passing_vectors = summaries
+        .iter()
+        .map(|summary| summary.passing_vectors)
+        .sum::<usize>();
+    let evidence_vectors = summaries
+        .iter()
+        .filter(|summary| summary.source_error.is_none())
+        .map(|summary| summary.evidenced_vectors)
+        .sum::<usize>();
+    let qualified_models = summaries
+        .iter()
+        .filter(|summary| summary.gate == QualificationGate::Qualified)
+        .count();
+    let source_owned_models = summaries
+        .iter()
+        .filter(|summary| summary.source_error.is_none())
+        .count();
+    let parity_models = summaries
+        .iter()
+        .filter(|summary| {
+            summary.suites > 0
+                && summary.parity_suites == summary.suites
+                && summary.source_error.is_none()
+        })
+        .count();
+    let worst_relative_error = summaries
+        .iter()
+        .filter_map(|summary| summary.worst_relative_error)
+        .max_by(f64::total_cmp);
     let metrics = [
         Kpi::new(
-            "Models audited",
-            total.to_string(),
-            "complete loaded catalog",
-            t.color.text,
-        ),
-        Kpi::new(
-            "Source records",
-            (total.saturating_sub(source_findings)).to_string(),
-            format!("{source_findings} require review"),
-            if source_findings == 0 {
-                t.color.info
+            "Vectors passing",
+            format!("{passing_vectors} / {total_vectors}"),
+            format!(
+                "{} source dispositions pending",
+                summaries
+                    .iter()
+                    .map(|summary| summary.open_dispositions)
+                    .sum::<usize>()
+            ),
+            if total_vectors > 0 && passing_vectors == total_vectors {
+                t.color.ok
             } else {
-                t.color.err
+                t.color.warn
             },
         ),
         Kpi::new(
-            "Geometry metadata",
-            (total.saturating_sub(undeclared_geometry)).to_string(),
-            format!("{invalid_geometry} inconsistent · {undeclared_geometry} not declared"),
-            if invalid_geometry == 0 {
-                t.color.info
+            "Oracle coverage",
+            format!("{evidence_vectors} / {total_vectors}"),
+            "exact retained vector evidence",
+            if total_vectors > 0 && evidence_vectors == total_vectors {
+                t.color.ok
             } else {
-                t.color.err
+                t.color.warn
             },
         ),
         Kpi::new(
-            "Documentation",
-            (total.saturating_sub(undocumented)).to_string(),
-            format!("{undocumented} missing"),
-            if undocumented == 0 {
-                t.color.info
+            "Worst deviation",
+            worst_relative_error
+                .map(|value| format!("{:.4}%", value * 100.0))
+                .unwrap_or_else(|| "No evidence".to_owned()),
+            format!("{qualified_models} qualified models"),
+            if worst_relative_error.is_some() {
+                t.color.text
+            } else {
+                t.color.warn
+            },
+        ),
+        Kpi::new(
+            "Interpreter parity",
+            if source_owned_models == 0 {
+                "No source".to_owned()
+            } else {
+                format!("{parity_models} / {source_owned_models}")
+            },
+            if source_owned_models == 0 {
+                "no project-owned models"
+            } else {
+                "desktop · WebAssembly"
+            },
+            if source_owned_models > 0 && parity_models == source_owned_models {
+                t.color.ok
             } else {
                 t.color.warn
             },
@@ -898,38 +976,549 @@ fn metadata_audit(ui: &mut Ui, app: &mut RSpiceApp) {
     ];
     kpi_strip(ui, &metrics);
 
-    let footer_h = if ui.available_width() <= 560.0 {
-        66.0
-    } else {
-        44.0
-    };
-    let table_size = egui::vec2(
-        ui.available_width(),
-        (ui.available_height() - footer_h).max(120.0),
-    );
+    let rows = summaries
+        .iter()
+        .map(|summary| {
+            let selected = app.state.workbench.selected_model.as_deref()
+                == Some(summary.model.as_str())
+                && app.state.model_library_manager.selected_library.as_deref()
+                    == Some(summary.library.as_str());
+            DataRow {
+                key: summary.key.clone(),
+                selected,
+                cells: vec![
+                    DataCell::mono(&summary.model),
+                    DataCell::mono(summary.dc_vectors.to_string()),
+                    DataCell::mono(summary.ac_vectors.to_string()),
+                    DataCell::mono(summary.transient_vectors.to_string()),
+                    DataCell::mono(summary.noise_vectors.to_string()),
+                    DataCell::mono(if summary.temperature_points == 0 {
+                        "not declared".to_owned()
+                    } else {
+                        format!("{} points", summary.temperature_points)
+                    }),
+                    DataCell::mono(format!("{} refs", summary.references)),
+                    DataCell::mono_colored(summary.gate.label(), summary.gate.color(&t)),
+                ],
+            }
+        })
+        .collect::<Vec<_>>();
     let columns = [
-        ("Model", 0.18),
-        ("Library", 0.15),
-        ("Source record", 0.16),
-        ("Geometry metadata", 0.16),
-        ("Documentation", 0.15),
-        ("Parameters", 0.10),
-        ("Audit", 0.10),
+        ("Model family", 0.23),
+        ("DC", 0.08),
+        ("AC / charge", 0.13),
+        ("Transient", 0.12),
+        ("Noise", 0.09),
+        ("Temperature", 0.15),
+        ("Oracle", 0.10),
+        ("Gate", 0.10),
     ];
+    let detail_height = if ui.available_width() <= MODEL_SUMMARY_BREAKPOINT {
+        360.0
+    } else {
+        250.0
+    };
+    let table_height = (ui.available_height() - detail_height)
+        .clamp(135.0, 320.0)
+        .min(ui.available_height().max(1.0));
     if let Some(event) = data_table(
         ui,
-        "models.metadata-audit",
-        820.0,
+        "models.qualification",
+        760.0,
         &columns,
         &rows,
-        table_size,
-        "No loaded models are available for metadata audit.",
+        egui::vec2(ui.available_width(), table_height),
+        "No loaded model records are available for qualification.",
     ) {
         let (library, model) = split_model_key(&event.key);
         app.state.model_library_manager.select_library(library);
         app.state.workbench.selected_model = Some(model.to_owned());
     }
-    metadata_audit_footer(ui, blocking, undocumented);
+
+    qualification_detail(
+        ui,
+        selected_qualification_summary(app, &summaries),
+        detail_height,
+    );
+}
+
+fn qualification_summaries(app: &RSpiceApp) -> Vec<QualificationModelSummary> {
+    let mut summaries = Vec::new();
+    for library in app.state.model_library_manager.libraries_sorted() {
+        let mut models = library.models.values().collect::<Vec<_>>();
+        models.sort_by(|left, right| left.name.cmp(&right.name));
+        for model in models {
+            summaries.push(qualification_model_summary(app, library, model));
+        }
+    }
+    summaries
+}
+
+fn qualification_model_summary(
+    app: &RSpiceApp,
+    library: &ModelLibrary,
+    model: &DeviceModel,
+) -> QualificationModelSummary {
+    let key = model_key(&library.name, &model.name);
+    let resolved = model_editor::resolve_project_model_for_editor(
+        &app.state.model_library_manager,
+        &library.name,
+        &model.name,
+    );
+    let (source_revision, source_error, state, source) = match resolved {
+        Ok(resolved) => {
+            let source = ModelSourceEvidenceBinding::try_new_project_bound(
+                &model.name,
+                resolved.source_id,
+                resolved.model_digest,
+                resolved.model_revision,
+            );
+            match source {
+                Ok(source) => (
+                    format!("{}@{}", model.name, resolved.model_revision.get()),
+                    None,
+                    resolved.qualification,
+                    Some(source),
+                ),
+                Err(error) => (
+                    "invalid source identity".to_owned(),
+                    Some(error.to_string()),
+                    resolved.qualification,
+                    None,
+                ),
+            }
+        }
+        Err(error) => (
+            "not source-owned".to_owned(),
+            Some(error),
+            library
+                .model_qualification
+                .get(&model.name)
+                .cloned()
+                .unwrap_or_default(),
+            None,
+        ),
+    };
+
+    summarize_qualification_state(
+        key,
+        &library.name,
+        model,
+        source_revision,
+        source_error,
+        &state,
+        source.as_ref(),
+    )
+}
+
+fn summarize_qualification_state(
+    key: String,
+    library_name: &str,
+    model: &DeviceModel,
+    source_revision: String,
+    mut source_error: Option<String>,
+    state: &ModelQualificationState,
+    source: Option<&ModelSourceEvidenceBinding>,
+) -> QualificationModelSummary {
+    if source_error.is_none()
+        && let Err(error) = state.validate_for_model(&model.name)
+    {
+        source_error = Some(format!("Retained qualification state is invalid: {error}"));
+    }
+    let exact_suites = source
+        .and_then(|source| state.exact_suites_for_source(source).ok())
+        .unwrap_or_default();
+    let mut vectors = 0usize;
+    let mut evidenced_vectors = 0usize;
+    let mut passing_vectors = 0usize;
+    let mut dc_vectors = 0usize;
+    let mut ac_vectors = 0usize;
+    let mut transient_vectors = 0usize;
+    let mut noise_vectors = 0usize;
+    let mut temperatures = BTreeSet::<String>::new();
+    let mut references = 0usize;
+    let mut desktop_passing = 0usize;
+    let mut wasm_passing = 0usize;
+    let mut parity_suites = 0usize;
+    let mut worst_relative_error: Option<f64> = None;
+    let mut evidence_members = Vec::<(String, u64, crate::product::ContentDigest)>::new();
+    let mut all_suites_have_passing_evidence = !exact_suites.is_empty();
+
+    for suite in &exact_suites {
+        vectors += suite.vectors.len();
+        for vector in &suite.vectors {
+            references += vector.references.len();
+            match &vector.analysis {
+                QualificationAnalysis::DcOperatingPoint | QualificationAnalysis::DcSweep { .. } => {
+                    dc_vectors += 1;
+                }
+                QualificationAnalysis::AcSweep { .. } => ac_vectors += 1,
+                QualificationAnalysis::Transient { .. } => transient_vectors += 1,
+                QualificationAnalysis::Noise {
+                    temperature_kelvin, ..
+                } => {
+                    noise_vectors += 1;
+                    temperatures.insert(format!("{:.6}", temperature_kelvin.get()));
+                }
+            }
+        }
+
+        let evidence = source.and_then(|source| {
+            state.evidence.iter().find(|evidence| {
+                evidence.source == *source
+                    && evidence.suite_id.eq_ignore_ascii_case(&suite.id)
+                    && evidence.suite_revision == suite.revision
+            })
+        });
+        if let Some(evidence) = evidence {
+            evidenced_vectors += evidence.vector_outcomes.len();
+            passing_vectors += evidence
+                .vector_outcomes
+                .iter()
+                .filter(|outcome| outcome.passed)
+                .count();
+            all_suites_have_passing_evidence &= evidence.passed;
+            if let Ok(digest) = evidence.content_digest() {
+                evidence_members.push((suite.id.clone(), suite.revision.get(), digest));
+            }
+            for reference in evidence
+                .vector_outcomes
+                .iter()
+                .flat_map(|outcome| &outcome.platforms)
+                .flat_map(|platform| &platform.references)
+            {
+                worst_relative_error = Some(
+                    worst_relative_error.map_or(reference.relative_error.get(), |current| {
+                        current.max(reference.relative_error.get())
+                    }),
+                );
+            }
+        } else {
+            all_suites_have_passing_evidence = false;
+        }
+
+        let platform_run = |platform| {
+            source.and_then(|source| {
+                state.platform_runs.iter().find(|run| {
+                    run.platform == platform
+                        && run.source == *source
+                        && run.suite_id.eq_ignore_ascii_case(&suite.id)
+                        && run.suite_revision == suite.revision
+                })
+            })
+        };
+        let desktop = platform_run(QualificationPlatform::Desktop);
+        let wasm = platform_run(QualificationPlatform::WebAssembly);
+        desktop_passing += desktop.map_or(0, |run| {
+            run.vector_outcomes
+                .iter()
+                .filter(|outcome| outcome.outcome.passed)
+                .count()
+        });
+        wasm_passing += wasm.map_or(0, |run| {
+            run.vector_outcomes
+                .iter()
+                .filter(|outcome| outcome.outcome.passed)
+                .count()
+        });
+        parity_suites += usize::from(
+            desktop.is_some_and(|run| run.passed) && wasm.is_some_and(|run| run.passed),
+        );
+    }
+
+    let open_dispositions = source.map_or(0, |source| {
+        state
+            .vector_dispositions
+            .iter()
+            .filter(|disposition| disposition.is_open() && disposition.vector.source == *source)
+            .count()
+    });
+    let gate = if source_error.is_some() {
+        QualificationGate::Blocked
+    } else if exact_suites.is_empty() {
+        QualificationGate::Unqualified
+    } else if all_suites_have_passing_evidence
+        && parity_suites == exact_suites.len()
+        && open_dispositions == 0
+    {
+        QualificationGate::Qualified
+    } else {
+        QualificationGate::Review
+    };
+    let evidence_digest = qualification_evidence_contract_digest(&mut evidence_members);
+
+    QualificationModelSummary {
+        key,
+        library: library_name.to_owned(),
+        model: model.name.clone(),
+        source_revision,
+        source_error,
+        suites: exact_suites.len(),
+        vectors,
+        evidenced_vectors,
+        passing_vectors,
+        dc_vectors,
+        ac_vectors,
+        transient_vectors,
+        noise_vectors,
+        temperature_points: temperatures.len(),
+        references,
+        desktop_passing,
+        wasm_passing,
+        parity_suites,
+        worst_relative_error,
+        evidence_digest,
+        open_dispositions,
+        releases: state.releases.len(),
+        comparison_available: !state.candidates.is_empty() && !state.releases.is_empty(),
+        gate,
+    }
+}
+
+fn qualification_evidence_contract_digest(
+    members: &mut Vec<(String, u64, crate::product::ContentDigest)>,
+) -> Option<String> {
+    if members.is_empty() {
+        return None;
+    }
+    members.sort_by(|left, right| {
+        left.0
+            .to_ascii_lowercase()
+            .cmp(&right.0.to_ascii_lowercase())
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    if let [(suite, revision, digest)] = members.as_slice() {
+        return Some(format!(
+            "{suite}@{revision} · {}",
+            short_digest(&digest.to_string())
+        ));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"rspice:model-qualification-evidence-set:v1\0");
+    let member_count = members.len();
+    for (suite, revision, digest) in members.iter() {
+        hasher.update((suite.len() as u64).to_le_bytes());
+        hasher.update(suite.as_bytes());
+        hasher.update(revision.to_le_bytes());
+        hasher.update(digest.as_bytes());
+    }
+    let digest = crate::product::ContentDigest::from_bytes(hasher.finalize().into());
+    Some(format!(
+        "{} suites · {}",
+        member_count,
+        short_digest(&digest.to_string())
+    ))
+}
+
+fn selected_qualification_summary<'a>(
+    app: &RSpiceApp,
+    summaries: &'a [QualificationModelSummary],
+) -> Option<&'a QualificationModelSummary> {
+    let library = app
+        .state
+        .model_library_manager
+        .selected_library
+        .as_deref()?;
+    let model = app.state.workbench.selected_model.as_deref()?;
+    summaries.iter().find(|summary| {
+        summary.library.eq_ignore_ascii_case(library) && summary.model.eq_ignore_ascii_case(model)
+    })
+}
+
+fn qualification_detail(ui: &mut Ui, selected: Option<&QualificationModelSummary>, height: f32) {
+    let Some(selected) = selected else {
+        let t = Tokens::get(ui.ctx());
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "Select a model family to inspect its source-owned qualification contract.",
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+        return;
+    };
+    let left = [
+        ("Model revision", selected.source_revision.clone()),
+        ("Suites", selected.suites.to_string()),
+        (
+            "Vectors",
+            format!(
+                "{} / {} passing",
+                selected.passing_vectors, selected.vectors
+            ),
+        ),
+        (
+            "Desktop",
+            format!(
+                "{} / {} vectors passing",
+                selected.desktop_passing, selected.vectors
+            ),
+        ),
+        (
+            "WebAssembly",
+            format!(
+                "{} / {} vectors passing",
+                selected.wasm_passing, selected.vectors
+            ),
+        ),
+    ];
+    let right = [
+        ("Gate", selected.gate.label().to_owned()),
+        (
+            "Source authority",
+            selected
+                .source_error
+                .clone()
+                .unwrap_or_else(|| "exact project-owned revision".to_owned()),
+        ),
+        (
+            "Runtime parity",
+            format!("{} / {} suites", selected.parity_suites, selected.suites),
+        ),
+        (
+            "Evidence digest",
+            selected
+                .evidence_digest
+                .clone()
+                .unwrap_or_else(|| "not retained".to_owned()),
+        ),
+        ("Open dispositions", selected.open_dispositions.to_string()),
+        ("Approved releases", selected.releases.to_string()),
+    ];
+    let title = format!("{} · selected qualification", selected.model);
+    summary_cards(
+        ui,
+        ui.available_width() <= MODEL_SUMMARY_BREAKPOINT,
+        height,
+        false,
+        SummaryCardSpec::new(&title, &left),
+        SummaryCardSpec::new("Qualification contract", &right),
+    );
+}
+
+fn qualification_action_block_reason(
+    app: &RSpiceApp,
+    selected: Option<&QualificationModelSummary>,
+    action: QualificationPageAction,
+) -> Option<String> {
+    let Some(selected) = selected else {
+        return Some("Select a model family first".to_owned());
+    };
+    if !app.state.project_lifecycle.project_open {
+        return Some("Open a project before using model qualification".to_owned());
+    }
+    if selected.source_error.is_some() {
+        return Some("Select an exact project-owned model revision".to_owned());
+    }
+    if app
+        .state
+        .workbench
+        .model_editor
+        .qualification_execution
+        .is_some()
+    {
+        return Some(
+            "Finish or cancel the active model qualification run before changing workflows"
+                .to_owned(),
+        );
+    }
+    if let Some(draft) = app.state.workbench.model_editor.draft.as_ref() {
+        let same_model = draft.library_name.eq_ignore_ascii_case(&selected.library)
+            && draft.model_name.eq_ignore_ascii_case(&selected.model);
+        if draft.is_dirty() && !same_model {
+            return Some(format!(
+                "Save or discard unsaved model candidate '{}/{}' first",
+                draft.library_name, draft.model_name
+            ));
+        }
+        if same_model
+            && draft.definition_is_dirty()
+            && matches!(
+                action,
+                QualificationPageAction::RunSuite | QualificationPageAction::CompareRelease
+            )
+        {
+            return Some(
+                "Save the changed model definition before running or comparing qualification"
+                    .to_owned(),
+            );
+        }
+    }
+    match action {
+        QualificationPageAction::ReviewVectors => None,
+        QualificationPageAction::RunSuite if app.state.workbench.safe_mode.project_read_only() => {
+            Some("Qualification cannot run while the project is read-only".to_owned())
+        }
+        QualificationPageAction::RunSuite if selected.suites == 0 => {
+            Some("Author at least one executable qualification suite first".to_owned())
+        }
+        QualificationPageAction::RunSuite => None,
+        QualificationPageAction::CompareRelease if !selected.comparison_available => {
+            Some("The selected model has no immutable approved release to compare".to_owned())
+        }
+        QualificationPageAction::CompareRelease => None,
+    }
+}
+
+fn execute_qualification_action(app: &mut RSpiceApp, action: QualificationPageAction) {
+    let summaries = qualification_summaries(app);
+    let selected = selected_qualification_summary(app, &summaries);
+    if let Some(reason) = qualification_action_block_reason(app, selected, action) {
+        app.state.push_user_message(ConsoleMessage::warning(reason));
+        return;
+    }
+    let Some(library) = app.state.model_library_manager.selected_library.clone() else {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "Select a model family before opening qualification.",
+        ));
+        return;
+    };
+    let Some(model) = app.state.workbench.selected_model.clone() else {
+        app.state.push_user_message(ConsoleMessage::warning(
+            "Select a model family before opening qualification.",
+        ));
+        return;
+    };
+    if let Err(error) = model_editor::open_project_model(app, &library, &model) {
+        app.state.push_user_message(ConsoleMessage::warning(format!(
+            "Qualification cannot be opened: {error}"
+        )));
+        return;
+    }
+
+    match action {
+        QualificationPageAction::ReviewVectors => {
+            app.state.workbench.model_editor.active_section = ModelEditorSection::Tests;
+        }
+        QualificationPageAction::RunSuite => {
+            app.state.workbench.model_editor.active_section = ModelEditorSection::Tests;
+            model_editor::validate_open_candidate(app);
+            let command = Command::ModelRunQualificationTests;
+            if command.is_enabled(app) {
+                command.execute(app);
+            } else if let CommandAvailability::Disabled(reason) = command.availability(app) {
+                app.state.push_user_message(ConsoleMessage::warning(format!(
+                    "Qualification cannot run: {reason}."
+                )));
+            }
+        }
+        QualificationPageAction::CompareRelease => {
+            app.state.workbench.model_editor.active_section = ModelEditorSection::Release;
+            let command = Command::ModelCompareRelease;
+            if command.is_enabled(app) {
+                command.execute(app);
+            } else if let CommandAvailability::Disabled(reason) = command.availability(app) {
+                app.state.push_user_message(ConsoleMessage::warning(format!(
+                    "Approved-model comparison is unavailable: {reason}."
+                )));
+            }
+        }
+    }
 }
 
 fn surface_title(
@@ -940,7 +1529,21 @@ fn surface_title(
     has_actions: bool,
     actions: impl FnOnce(&mut Ui),
 ) {
-    let narrow = model_title_actions_stack(ui.available_width());
+    surface_title_with_action_reserve(ui, eyebrow, title, description, has_actions, 240.0, actions);
+}
+
+fn surface_title_with_action_reserve(
+    ui: &mut Ui,
+    eyebrow: &str,
+    title: &str,
+    description: &str,
+    has_actions: bool,
+    requested_action_reserve: f32,
+    actions: impl FnOnce(&mut Ui),
+) {
+    let surface_width = ui.available_width();
+    let narrow = model_title_actions_stack(surface_width)
+        || (has_actions && requested_action_reserve > 300.0 && surface_width < 720.0);
     workspace_title_row(ui, |ui| {
         if narrow {
             ui.vertical(|ui| {
@@ -953,7 +1556,7 @@ fn surface_title(
         } else {
             let width = ui.available_width().max(1.0);
             let action_reserve = if has_actions {
-                240.0_f32.min(width * 0.34)
+                requested_action_reserve.min(width * 0.5)
             } else {
                 0.0
             };
@@ -2008,77 +2611,6 @@ fn kpi_strip(ui: &mut Ui, items: &[Kpi; 4]) {
     }
 }
 
-fn metadata_audit_status(blocking: usize) -> &'static str {
-    if blocking == 0 {
-        "No blocking metadata inconsistencies found"
-    } else {
-        "Metadata inconsistencies require review"
-    }
-}
-
-fn metadata_audit_footer(ui: &mut Ui, blocking: usize, undocumented: usize) {
-    let t = Tokens::get(ui.ctx());
-    let narrow = ui.available_width() <= 560.0;
-    let height = if narrow { 66.0 } else { 44.0 };
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.top(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    let status = metadata_audit_status(blocking);
-    if narrow {
-        ui.painter().text(
-            egui::pos2(rect.left() + 10.0, rect.top() + 17.0),
-            Align2::LEFT_CENTER,
-            "Metadata audit",
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-        );
-        ui.painter().text(
-            egui::pos2(rect.left() + 10.0, rect.top() + 36.0),
-            Align2::LEFT_CENTER,
-            status,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            if blocking == 0 {
-                t.color.info
-            } else {
-                t.color.err
-            },
-        );
-        ui.painter().text(
-            egui::pos2(rect.left() + 10.0, rect.bottom() - 8.0),
-            Align2::LEFT_BOTTOM,
-            format!("{undocumented} advisories · metadata only · not qualified"),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-    } else {
-        ui.painter().text(
-            egui::pos2(rect.left() + 10.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            "Metadata audit",
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-        );
-        ui.painter().text(
-            egui::pos2(rect.left() + 116.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            format!(
-                "{status} · {undocumented} description advisories · no numerical/runtime qualification"
-            ),
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            if blocking == 0 {
-                t.color.info
-            } else {
-                t.color.err
-            },
-        );
-    }
-}
-
 fn symbol_model_family(app: &RSpiceApp, cell: &crate::state::Cell) -> String {
     if let Some(value) = metadata_value(
         [&cell.metadata],
@@ -2210,7 +2742,7 @@ mod tests {
                 "Symbols & CDF",
                 "Corners & sections",
                 "Include graph",
-                "Metadata audit",
+                "Qualification",
             ]
         );
     }
@@ -2473,62 +3005,107 @@ mod tests {
     }
 
     #[test]
-    fn external_model_without_source_closure_is_an_audit_finding() {
-        let path = PathBuf::from("models/vendor.lib");
-        let mut library = ModelLibrary::new("vendor");
-        library.root_path = Some(path.clone());
-        let mut model =
-            DeviceModel::new("vendor_nmos", crate::state::model_library::ModelType::Nmos);
-        model.file_path = Some(path);
-
-        let audit = audit_model_metadata(&library, &model);
-
-        assert_eq!(audit.source, "unpinned");
-        assert!(audit.source_blocking);
-        assert_eq!(audit.source_tone, AuditTone::Error);
-    }
-
-    #[test]
-    fn pinned_source_is_metadata_evidence_not_a_qualification_gate() {
-        let path = PathBuf::from("models/vendor.lib");
-        let mut library = ModelLibrary::new("vendor");
-        library.root_path = Some(path.clone());
-        library
-            .source_closure
-            .push(crate::state::model_library::ModelSourcePin {
-                path: path.clone(),
-                digest: crate::product::ContentDigest::from_bytes([0x2a; 32]),
-            });
-        let mut model =
-            DeviceModel::new("vendor_nmos", crate::state::model_library::ModelType::Nmos);
-        model.file_path = Some(path);
-
-        let audit = audit_model_metadata(&library, &model);
-
-        assert_eq!(audit.source, "pinned");
-        assert!(!audit.source_blocking);
-        assert_eq!(audit.source_tone, AuditTone::Info);
+    fn qualification_tab_uses_the_mockup_contract_label() {
+        assert_eq!(ModelsPage::Qualification.label(), "Qualification");
         assert_eq!(
-            metadata_audit_status(0),
-            "No blocking metadata inconsistencies found"
+            Command::ModelsPage(ModelsPage::Qualification).stable_id(),
+            "model-qualification"
         );
-        assert!(!metadata_audit_status(0).contains("qualified"));
-        assert!(!metadata_audit_status(0).contains("pass"));
+        assert!(QUALIFICATION_MIN_CONTENT_H > 600.0);
     }
 
     #[test]
-    fn in_memory_models_are_truthfully_distinct_from_pinned_sources() {
-        let library = ModelLibrary::new("scratch");
+    fn qualification_evidence_set_digest_is_order_independent_and_suite_qualified() {
+        let first = crate::product::ContentDigest::from_bytes([0x11; 32]);
+        let second = crate::product::ContentDigest::from_bytes([0x22; 32]);
+        let mut one = vec![("dc".to_owned(), 3, first)];
+        let one_label =
+            qualification_evidence_contract_digest(&mut one).expect("single digest label");
+        assert!(one_label.starts_with("dc@3 · "));
+
+        let mut forward = vec![
+            ("transient".to_owned(), 4, second),
+            ("dc".to_owned(), 3, first),
+        ];
+        let mut reverse = forward.iter().cloned().rev().collect::<Vec<_>>();
+        let forward_label =
+            qualification_evidence_contract_digest(&mut forward).expect("aggregate digest");
+        let reverse_label =
+            qualification_evidence_contract_digest(&mut reverse).expect("aggregate digest");
+        assert_eq!(forward_label, reverse_label);
+        assert!(forward_label.starts_with("2 suites · "));
+    }
+
+    #[test]
+    fn project_model_without_suites_is_truthfully_unqualified() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        let definition = crate::state::model_library::ProjectModelDefinition {
+            name: "nch_owned".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Project-owned qualification fixture".to_owned(),
+            numeric_parameters: std::collections::BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("vth0".to_owned(), 0.48),
+            ]),
+            string_parameters: std::collections::BTreeMap::new(),
+        };
+        app.state
+            .model_library_manager
+            .create_project_model("owned-models", &definition)
+            .expect("create project model");
+
+        let summary = qualification_summaries(&app)
+            .into_iter()
+            .find(|summary| summary.model == "nch_owned")
+            .expect("qualification summary");
+
+        assert!(summary.source_error.is_none());
+        assert_eq!(summary.gate, QualificationGate::Unqualified);
+        assert_eq!(summary.suites, 0);
+        assert_eq!(summary.vectors, 0);
+        assert_eq!(summary.passing_vectors, 0);
+        assert!(summary.evidence_digest.is_none());
+
+        app.state
+            .model_library_manager
+            .select_library(&summary.library);
+        app.state.workbench.selected_model = Some(summary.model.clone());
+        assert_eq!(
+            qualification_action_block_reason(
+                &app,
+                Some(&summary),
+                QualificationPageAction::RunSuite
+            )
+            .as_deref(),
+            Some("Author at least one executable qualification suite first")
+        );
+        assert_eq!(
+            qualification_action_block_reason(
+                &app,
+                Some(&summary),
+                QualificationPageAction::ReviewVectors
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn non_project_model_never_receives_synthetic_qualification_evidence() {
+        let app = RSpiceApp::test_instance();
+        let library = ModelLibrary::new("built-in");
         let model = DeviceModel::new(
-            "scratch_resistor",
+            "builtin_resistor",
             crate::state::model_library::ModelType::Resistor,
         );
 
-        let audit = audit_model_metadata(&library, &model);
+        let summary = qualification_model_summary(&app, &library, &model);
 
-        assert_eq!(audit.source, "in memory");
-        assert!(!audit.source_blocking);
-        assert_eq!(audit.source_tone, AuditTone::Neutral);
+        assert!(summary.source_error.is_some());
+        assert_eq!(summary.gate, QualificationGate::Blocked);
+        assert_eq!(summary.vectors, 0);
+        assert_eq!(summary.passing_vectors, 0);
+        assert!(summary.evidence_digest.is_none());
     }
 
     #[test]

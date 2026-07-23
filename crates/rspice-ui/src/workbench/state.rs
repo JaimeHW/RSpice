@@ -860,7 +860,7 @@ impl ModelsPage {
             Self::Symbols => "Symbols & CDF",
             Self::Corners => "Corners & sections",
             Self::Include => "Include graph",
-            Self::Qualification => "Metadata audit",
+            Self::Qualification => "Qualification",
         }
     }
 

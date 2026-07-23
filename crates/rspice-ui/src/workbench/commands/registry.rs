@@ -741,6 +741,10 @@ impl Command {
                 "an active simulation execution still owns result history"
             }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
+            Self::ResultViewer(viewer) => {
+                crate::workbench::result_document::viewer_unavailability_reason(&app.state, viewer)
+                    .unwrap_or("the active dataset is incompatible with this viewer")
+            }
             Self::VerificationPage(crate::workbench::state::VerificationPage::Drc) => {
                 "no retained layout, qualified rule deck, or immutable marker database is available"
             }

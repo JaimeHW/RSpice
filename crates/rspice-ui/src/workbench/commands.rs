@@ -316,6 +316,13 @@ impl Command {
     /// Unknown IDs are intentionally retained by profile persistence but are
     /// never guessed into a command owned by this build.
     pub fn from_stable_id(id: &str) -> Option<Self> {
+        // `model-metadata-audit` shipped as the portable identity for this
+        // tab before the mockup-defined Qualification workspace replaced the
+        // temporary audit. Preserve imported shortcut profiles explicitly;
+        // do not make general command resolution fuzzy.
+        if id == "model-metadata-audit" {
+            return Some(Self::ModelsPage(ModelsPage::Qualification));
+        }
         COMMAND_REGISTRY
             .iter()
             .copied()
@@ -616,7 +623,7 @@ impl Command {
                 spec("include-graph", "Include graph", "Models")
             }
             Self::ModelsPage(ModelsPage::Qualification) => {
-                spec("model-metadata-audit", "Metadata audit", "Models")
+                spec("model-qualification", "Model qualification", "Models")
             }
             Self::ModelBrowser => spec("model-browser", "Model browser…", "Models"),
             Self::ModelEditor => spec(
@@ -927,6 +934,14 @@ impl Command {
                 state.simulation.has_results()
                     && state.simulation.active_execution.is_none()
                     && !state.simulation.is_running
+            }
+            // "Open results workspace" is the generic route and remains
+            // useful before a dataset exists. Specialized viewers are only
+            // actionable when the active retained dataset satisfies the same
+            // compatibility contract used by the in-workspace viewer tabs.
+            Self::ResultViewer(crate::workbench::ResultViewer::Waves) => true,
+            Self::ResultViewer(viewer) => {
+                super::result_document::viewer_is_available(state, viewer)
             }
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
@@ -1615,8 +1630,21 @@ impl Command {
             Self::ToggleLinkedCursors => app.state.ui.results.toggle_linked_cursors(),
             Self::WaveformCalculator => app.state.dialogs.waveform_calculator_dialog = true,
             Self::ResultViewer(viewer) => {
-                app.state.ui.results.viewer = viewer;
-                activate_workspace(app, Workspace::Results);
+                if viewer == crate::workbench::ResultViewer::Waves
+                    || super::result_document::viewer_is_available(&app.state, viewer)
+                {
+                    app.state.ui.results.viewer = viewer;
+                    activate_workspace(app, Workspace::Results);
+                } else {
+                    let reason =
+                        super::result_document::viewer_unavailability_reason(&app.state, viewer)
+                            .unwrap_or("the active dataset is incompatible with this viewer");
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                            "{} cannot be opened: {reason}.",
+                            viewer.label()
+                        )));
+                }
             }
             Self::EditSpecifications => {
                 app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
@@ -2966,29 +2994,47 @@ mod tests {
     }
 
     #[test]
-    fn every_exposed_result_viewer_command_activates_its_real_viewer() {
-        for viewer in [
-            crate::workbench::ResultViewer::Waves,
-            crate::workbench::ResultViewer::Bode,
-            crate::workbench::ResultViewer::Fft,
-            crate::workbench::ResultViewer::Eye,
-            crate::workbench::ResultViewer::Hist,
-            crate::workbench::ResultViewer::Op,
-            crate::workbench::ResultViewer::NoiseContrib,
-            crate::workbench::ResultViewer::Contribution,
-            crate::workbench::ResultViewer::TransferFunction,
-            crate::workbench::ResultViewer::Specs,
-            crate::workbench::ResultViewer::Nyquist,
-            crate::workbench::ResultViewer::Smith,
-            crate::workbench::ResultViewer::PoleZero,
-        ] {
-            let mut app = RSpiceApp::test_instance();
+    fn generic_results_command_opens_the_workspace_without_a_dataset() {
+        let mut app = RSpiceApp::test_instance();
+        let command = Command::ResultViewer(crate::workbench::ResultViewer::Waves);
 
-            Command::ResultViewer(viewer).execute(&mut app);
+        assert!(command.is_enabled(&app));
+        assert_eq!(command.availability(&app), CommandAvailability::Available);
+        command.execute(&mut app);
 
-            assert_eq!(app.state.workbench.workspace, Workspace::Results);
-            assert_eq!(app.state.ui.results.viewer, viewer);
-        }
+        assert_eq!(app.state.workbench.workspace, Workspace::Results);
+        assert_eq!(
+            app.state.ui.results.viewer,
+            crate::workbench::ResultViewer::Waves
+        );
+    }
+
+    #[test]
+    fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Project;
+        let command = Command::ResultViewer(crate::workbench::ResultViewer::Bode);
+
+        assert!(!command.is_enabled(&app));
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled(
+                "Requires a usable AC magnitude response in the active dataset"
+            )
+        );
+        command.execute(&mut app);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Project);
+        assert_eq!(
+            app.state.ui.results.viewer,
+            crate::workbench::ResultViewer::Waves
+        );
+        assert!(
+            app.state
+                .log_buffer
+                .entries()
+                .any(|message| message.message.contains("cannot be opened"))
+        );
     }
 
     #[test]
@@ -3109,6 +3155,18 @@ mod tests {
                 "bindable command is missing a unique stable ID: {command:?}"
             );
         }
+    }
+
+    #[test]
+    fn legacy_model_metadata_audit_identity_migrates_to_qualification() {
+        assert_eq!(
+            Command::from_stable_id("model-metadata-audit"),
+            Some(Command::ModelsPage(ModelsPage::Qualification))
+        );
+        assert_eq!(
+            Command::ModelsPage(ModelsPage::Qualification).stable_id(),
+            "model-qualification"
+        );
     }
 
     #[test]
