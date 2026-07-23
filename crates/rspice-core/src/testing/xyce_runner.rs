@@ -53184,6 +53184,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if Self::netlist_has_recorded_branch_current(netlist, &element_name) {
                 return Ok(());
             }
+            if Self::netlist_has_diode_instance(netlist, &element_name) {
+                return Ok(());
+            }
             if Self::source_is_current_source(netlist, &element_name) {
                 return Ok(());
             }
@@ -58833,6 +58836,22 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
             Self::elements_have_recorded_branch_current(&flattened.elements, source)
+        })
+    }
+
+    fn netlist_has_diode_instance(netlist: &Netlist, source: &str) -> bool {
+        if netlist.elements.iter().any(|element| {
+            Self::device_instance_names_match(&element.name, source)
+                && matches!(element.kind, ElementKind::Diode { .. })
+        }) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            flattened.elements.iter().any(|element| {
+                Self::device_instance_names_match(&element.name, source)
+                    && matches!(element.kind, ElementKind::Diode { .. })
+            })
         })
     }
 

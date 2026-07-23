@@ -23,6 +23,7 @@ pub use newton::*;
 pub use sparse::*;
 
 use crate::Value;
+use std::collections::HashMap;
 use thiserror::Error;
 
 /// Solver errors
@@ -67,6 +68,10 @@ pub struct SimulationResult {
     /// these values preserve the actual per-point circuit configuration for
     /// parameter, temperature, and nested DC sweeps.
     pub dc_observables: Vec<(String, Value)>,
+    /// Case-insensitive lookup index for observables populated by the engine.
+    /// The ordered public vector remains the export view; this index prevents
+    /// large .PRINT DC requests from degrading to an O(columns^2) scan.
+    dc_observable_index: HashMap<String, Value>,
     /// Time points (for transient analysis)
     pub time_points: Vec<Value>,
     /// Voltage waveforms: waveforms[node_id][time_index]
@@ -83,13 +88,29 @@ impl SimulationResult {
             branch_currents: vec![0.0; num_branches],
             branch_names: vec![String::new(); num_branches],
             dc_observables: Vec::new(),
+            dc_observable_index: HashMap::new(),
             time_points: Vec::new(),
             voltage_waveforms: Vec::new(),
         }
     }
 
+    /// Append an engine-owned DC observable and update its lookup index.
+    pub(crate) fn push_dc_observable(&mut self, name: String, value: Value) {
+        self.dc_observable_index
+            .insert(name.to_ascii_lowercase(), value);
+        self.dc_observables.push((name, value));
+    }
+
     /// Look up a converged DC observable by its SPICE probe name.
     pub fn try_dc_observable_named(&self, name: &str) -> Option<Value> {
+        if self.dc_observable_index.len() == self.dc_observables.len()
+            && !self.dc_observable_index.is_empty()
+        {
+            return self
+                .dc_observable_index
+                .get(&name.to_ascii_lowercase())
+                .copied();
+        }
         self.dc_observables
             .iter()
             .find_map(|(candidate, value)| candidate.eq_ignore_ascii_case(name).then_some(*value))
@@ -256,5 +277,26 @@ impl From<&crate::engine::SimulationConfig> for Simulator {
 impl From<crate::engine::SimulationConfig> for Simulator {
     fn from(config: crate::engine::SimulationConfig) -> Self {
         Self::from(&config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SimulationResult;
+
+    #[test]
+    fn indexed_dc_observable_lookup_is_case_insensitive() {
+        let mut result = SimulationResult::new(0, 0);
+        result.push_dc_observable("I(R1)".to_string(), 2.5);
+
+        assert_eq!(result.try_dc_observable_named("i(r1)"), Some(2.5));
+    }
+
+    #[test]
+    fn direct_dc_observable_append_retains_linear_compatibility() {
+        let mut result = SimulationResult::new(0, 0);
+        result.dc_observables.push(("I(R2)".to_string(), -1.25));
+
+        assert_eq!(result.try_dc_observable_named("i(r2)"), Some(-1.25));
     }
 }

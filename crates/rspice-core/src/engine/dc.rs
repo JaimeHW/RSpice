@@ -242,16 +242,16 @@ impl Engine {
         // Its exported solution name is the canonical instance name followed
         // by `_BRANCH`, independently of whether the owning element also has
         // a conventional I(...) accessor.
-        for (name, current) in result.branch_names.iter().zip(&result.branch_currents) {
+        for index in 0..result.branch_names.len().min(result.branch_currents.len()) {
+            let name = &result.branch_names[index];
+            let current = result.branch_currents[index];
             if !name.is_empty() {
                 let internal_name = if name.to_ascii_uppercase().ends_with("_BRANCH") {
                     name.clone()
                 } else {
                     format!("{name}_BRANCH")
                 };
-                result
-                    .dc_observables
-                    .push((format!("N({internal_name})"), *current));
+                result.push_dc_observable(format!("N({internal_name})"), current);
             }
         }
 
@@ -268,9 +268,9 @@ impl Engine {
             let voltage = node_voltage(stamp.pp.row) - node_voltage(stamp.nn.row);
             let current = voltage * conductance;
             let power = voltage * current;
-            result.dc_observables.push((format!("I({name})"), current));
-            result.dc_observables.push((format!("P({name})"), power));
-            result.dc_observables.push((format!("W({name})"), power));
+            result.push_dc_observable(format!("I({name})"), current);
+            result.push_dc_observable(format!("P({name})"), power);
+            result.push_dc_observable(format!("W({name})"), power);
         }
 
         // Zero and near-zero resistors use an explicit MNA branch. Preserve
@@ -285,9 +285,21 @@ impl Engine {
             // and use the same one-based branch ordinal as every MNA branch.
             let current = solution[circuit.num_nodes() + branch_ordinal - 1];
             let power = voltage * current;
-            result.dc_observables.push((format!("I({name})"), current));
-            result.dc_observables.push((format!("P({name})"), power));
-            result.dc_observables.push((format!("W({name})"), power));
+            result.push_dc_observable(format!("I({name})"), current);
+            result.push_dc_observable(format!("P({name})"), power);
+            result.push_dc_observable(format!("W({name})"), power);
+        }
+
+        // Native diodes are nodal nonlinear devices, so they do not allocate
+        // an MNA branch unknown.  Their accepted lead current is nevertheless
+        // a first-class Xyce observable and must be evaluated from the same
+        // converged terminal voltage used by the device's constitutive law.
+        // Keep the positive-to-negative anode/cathode convention consistent
+        // with voltage-source and resistor I(...) observables.
+        for diode in &circuit.diodes.devices {
+            let voltage = node_voltage(diode.node_anode) - node_voltage(diode.node_cathode);
+            let current = diode.current(voltage);
+            result.push_dc_observable(format!("I({})", diode.name), current);
         }
 
         // A solution-dependent resistor is stamped as a behavioral current
@@ -302,15 +314,9 @@ impl Engine {
             let mut observable_source = source.clone();
             let current = observable_source.evaluate(solution, 0.0);
             let power = voltage * current;
-            result
-                .dc_observables
-                .push((format!("I({})", source.name), current));
-            result
-                .dc_observables
-                .push((format!("P({})", source.name), power));
-            result
-                .dc_observables
-                .push((format!("W({})", source.name), power));
+            result.push_dc_observable(format!("I({})", source.name), current);
+            result.push_dc_observable(format!("P({})", source.name), power);
+            result.push_dc_observable(format!("W({})", source.name), power);
         }
 
         // Native Xyce memristor lead current and resistance are device outputs rather
@@ -335,18 +341,13 @@ impl Engine {
             if let Some(resistance) = cache.resistance {
                 binding.resistance_store = resistance;
             }
-            result
-                .dc_observables
-                .push((format!("I({})", binding.name), cache.current));
-            result
-                .dc_observables
-                .push((format!("P({})", binding.name), power));
-            result
-                .dc_observables
-                .push((format!("W({})", binding.name), power));
-            result
-                .dc_observables
-                .push((format!("N({}:R)", binding.name), binding.resistance_store));
+            result.push_dc_observable(format!("I({})", binding.name), cache.current);
+            result.push_dc_observable(format!("P({})", binding.name), power);
+            result.push_dc_observable(format!("W({})", binding.name), power);
+            result.push_dc_observable(
+                format!("N({}:R)", binding.name),
+                binding.resistance_store,
+            );
         }
         Ok(())
     }
@@ -1745,6 +1746,14 @@ D1 1 0 DXX
         assert!(
             rel <= 5.0e-3,
             "expected diode source current near Shockley value {expected:.12e}, got {current:.12e} (rel={rel:.3e})"
+        );
+
+        let diode_current = result
+            .try_dc_observable_named("I(D1)")
+            .expect("native diode lead current is retained");
+        assert!(
+            diode_current.is_finite() && diode_current > 0.0,
+            "expected a finite forward diode lead current, got {diode_current}"
         );
     }
 
