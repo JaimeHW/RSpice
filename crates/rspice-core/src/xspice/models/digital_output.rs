@@ -894,12 +894,7 @@ impl XyceDGate {
         let dgnd = ctx.input("dgnd");
         let voltages: Vec<Value> = ctx
             .input_analog_vector_values("in")
-            .map(|values| {
-                values
-                    .iter()
-                    .map(|value| value.value - dgnd)
-                    .collect()
-            })
+            .map(|values| values.iter().map(|value| value.value - dgnd).collect())
             .unwrap_or_default();
         let mut states = Vec::with_capacity(width);
         let mut transition_times = Vec::with_capacity(width);
@@ -1200,6 +1195,482 @@ impl CodeModel for XyceDGate {
 
     fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
         output_port.eq_ignore_ascii_case("out")
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> crate::xspice::XspiceCheckpointSupport {
+        crate::xspice::XspiceCheckpointSupport::Serializable
+    }
+}
+
+/// Xyce-compatible finite-output three-input full adder.
+///
+/// The native Xyce ADD device has three analog logic inputs and two
+/// independently loaded analog outputs.  Its truth table is the canonical
+/// full-adder relation: `sum = A xor B xor Cin` and `carry = majority(A, B,
+/// Cin)`.  The two outputs share input history but retain independent delay
+/// and finite-output state so each terminal follows the DIG card exactly.
+#[derive(Debug, Default)]
+pub struct XyceDAdd;
+
+impl XyceDAdd {
+    const SUM_Q: usize = 0;
+    const SUM_TRANSITION_START: usize = 1;
+    const SUM_TRANSITION_FROM: usize = 2;
+    const SUM_PENDING_Q: usize = 3;
+    const SUM_PENDING_TIME: usize = 4;
+    const SUM_PREV_LOW_VOLTAGE: usize = 5;
+    const SUM_PREV_HIGH_VOLTAGE: usize = 6;
+    const CARRY_Q: usize = 7;
+    const CARRY_TRANSITION_START: usize = 8;
+    const CARRY_TRANSITION_FROM: usize = 9;
+    const CARRY_PENDING_Q: usize = 10;
+    const CARRY_PENDING_TIME: usize = 11;
+    const CARRY_PREV_LOW_VOLTAGE: usize = 12;
+    const CARRY_PREV_HIGH_VOLTAGE: usize = 13;
+    const INPUT_BASE: usize = 14;
+    const INPUT_STRIDE: usize = 3;
+
+    const INPUT_STATE: usize = 0;
+    const INPUT_VOLTAGE: usize = 1;
+    const INPUT_TRANSITION_TIME: usize = 2;
+
+    fn input_state_index(index: usize, field: usize) -> usize {
+        Self::INPUT_BASE + index * Self::INPUT_STRIDE + field
+    }
+
+    fn commit_state(ctx: &mut CmContext, index: usize, value: Value) {
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            ctx.set_state(index, value);
+        }
+    }
+
+    fn sample_inputs(
+        ctx: &mut CmContext,
+        params: DigParams,
+        width: usize,
+    ) -> (Vec<Option<bool>>, Value) {
+        let dgnd = ctx.input("dgnd");
+        let voltages: Vec<Value> = ctx
+            .input_analog_vector_values("in")
+            .map(|values| values.iter().map(|value| value.value - dgnd).collect())
+            .unwrap_or_default();
+        let mut states = Vec::with_capacity(width);
+        let mut last_transition_time: Value = 0.0;
+
+        for index in 0..width {
+            let state_index = Self::input_state_index(index, Self::INPUT_STATE);
+            let voltage_index = Self::input_state_index(index, Self::INPUT_VOLTAGE);
+            let transition_index = Self::input_state_index(index, Self::INPUT_TRANSITION_TIME);
+            let voltage = voltages.get(index).copied().unwrap_or(f64::NAN);
+            let previous_state = q_state(ctx.state_prev(state_index));
+            let previous_voltage = ctx.state_prev(voltage_index);
+            let mut state = XyceDTff::input_logic_state(voltage, previous_state, params);
+            let mut transition_time = ctx.state_prev(transition_index);
+
+            if ctx.is_dc() {
+                state = XyceDTff::input_logic_state(voltage, None, params);
+                transition_time = 0.0;
+            } else if previous_state.is_some() && previous_state != state {
+                transition_time = XyceDTff::input_transition_time(
+                    ctx,
+                    previous_voltage,
+                    voltage,
+                    state.unwrap_or(false),
+                    params,
+                );
+            }
+
+            if let Some(state) = state {
+                Self::commit_state(ctx, state_index, if state { Q_HIGH } else { Q_LOW });
+            }
+            if voltage.is_finite() {
+                Self::commit_state(ctx, voltage_index, voltage);
+            }
+            if transition_time.is_finite() {
+                Self::commit_state(ctx, transition_index, transition_time);
+            }
+
+            states.push(state);
+            if transition_time.is_finite() {
+                last_transition_time = last_transition_time.max(transition_time);
+            }
+        }
+
+        (states, last_transition_time)
+    }
+
+    fn update_output(
+        ctx: &mut CmContext,
+        desired: Option<bool>,
+        last_input_transition_time: Value,
+        params: DigParams,
+        q_state_index: usize,
+        transition_start_index: usize,
+        transition_from_index: usize,
+        pending_q_index: usize,
+        pending_time_index: usize,
+    ) -> (Option<bool>, Value, Option<bool>) {
+        let previous_q = q_state(ctx.state_prev(q_state_index));
+        let mut q = previous_q;
+        let mut transition_start = ctx.state_prev(transition_start_index);
+        let mut transition_from = q_state(ctx.state_prev(transition_from_index));
+        let mut pending_q = q_state(ctx.state_prev(pending_q_index));
+        let mut pending_time = ctx.state_prev(pending_time_index);
+
+        if transition_from.is_none() && q.is_some() {
+            transition_from = q;
+            transition_start = 0.0;
+        }
+
+        if !ctx.is_dc() && q.is_none() && desired.is_some() {
+            q = desired;
+            transition_from = q;
+            transition_start = 0.0;
+        }
+
+        if ctx.is_dc() {
+            q = desired;
+            transition_from = q;
+            transition_start = 0.0;
+            pending_q = None;
+            pending_time = f64::NAN;
+        } else {
+            if let Some(target) = pending_q
+                && pending_time.is_finite()
+                && pending_time <= ctx.time + 1.0e-18
+            {
+                transition_from = q;
+                q = Some(target);
+                transition_start = pending_time;
+            }
+
+            match desired {
+                Some(target) if Some(target) != q => {
+                    let event_time = last_input_transition_time + params.delay;
+                    if event_time <= ctx.time + 1.0e-18 {
+                        transition_from = q;
+                        q = Some(target);
+                        transition_start = event_time;
+                        pending_q = None;
+                        pending_time = f64::NAN;
+                    } else {
+                        pending_q = Some(target);
+                        pending_time = event_time;
+                        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+                            ctx.request_breakpoint(event_time);
+                        }
+                    }
+                }
+                Some(_) => {
+                    pending_q = None;
+                    pending_time = f64::NAN;
+                }
+                None => {
+                    pending_q = None;
+                    pending_time = f64::NAN;
+                }
+            }
+        }
+
+        Self::commit_state(
+            ctx,
+            q_state_index,
+            q.map_or(Q_UNKNOWN, |value| if value { Q_HIGH } else { Q_LOW }),
+        );
+        Self::commit_state(ctx, transition_start_index, transition_start);
+        Self::commit_state(
+            ctx,
+            transition_from_index,
+            transition_from.map_or(Q_UNKNOWN, |value| if value { Q_HIGH } else { Q_LOW }),
+        );
+        Self::commit_state(
+            ctx,
+            pending_q_index,
+            pending_q.map_or(Q_PENDING_NONE, |value| if value { Q_HIGH } else { Q_LOW }),
+        );
+        Self::commit_state(ctx, pending_time_index, pending_time);
+        (q, transition_start, transition_from)
+    }
+
+    fn stamp_input_load(
+        ctx: &mut CmContext,
+        index: usize,
+        voltage_state_index: usize,
+        params: DigParams,
+    ) {
+        if ctx.is_ac() {
+            return;
+        }
+        let input_pair = ctx.port_vector_node_pair("in", index).unwrap_or((0, 0));
+        let dgnd_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
+        stamp_between(ctx, input_pair, dgnd_pair, 1.0 / params.rload);
+
+        if !ctx.is_transient() || !ctx.timestep.is_finite() || ctx.timestep <= 0.0 {
+            return;
+        }
+
+        let current_voltage = ctx
+            .input_analog_vector_values("in")
+            .and_then(|values| values.get(index).copied())
+            .map(|value| value.value)
+            .unwrap_or(0.0);
+        let dgnd_voltage = ctx.input("dgnd");
+        let current_relative = current_voltage - dgnd_voltage;
+        let previous_relative = ctx.state_prev(voltage_state_index);
+        let initial_point = ctx.time == 0.0 && ctx.time_prev == 0.0;
+        let history = if !previous_relative.is_finite() || initial_point {
+            current_relative
+        } else {
+            previous_relative
+        };
+        let conductance = params.cload / ctx.timestep;
+        stamp_between(ctx, input_pair, dgnd_pair, conductance);
+        stamp_between_rhs(ctx, input_pair, dgnd_pair, -conductance * history);
+    }
+
+    fn ports() -> &'static [PortSpec] {
+        use std::sync::OnceLock;
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
+            let output = |name: &str, description: &str| PortSpec {
+                name: name.to_string(),
+                direction: PortDirection::InOut,
+                default_type: PortType::Conductance,
+                allowed_types: vec![PortType::Conductance, PortType::DifferentialConductance],
+                is_vector: false,
+                null_allowed: false,
+                vector_min_len: None,
+                vector_max_len: None,
+                description: description.to_string(),
+            };
+            vec![
+                PortSpec::input("dpwr", PortType::Voltage)
+                    .with_description("Positive digital power rail"),
+                PortSpec::input("dgnd", PortType::Voltage)
+                    .with_description("Digital ground/reference rail"),
+                PortSpec::vector_input("in", PortType::Voltage)
+                    .with_vector_min_len(3)
+                    .with_vector_max_len(3)
+                    .with_description("Three analog full-adder inputs referenced to DGND"),
+                output("sum", "Finite-impedance sum output"),
+                output("carry", "Finite-impedance carry output"),
+            ]
+        })
+    }
+
+    fn parameters() -> &'static [ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            let mut params = q_parameters().to_vec();
+            params.push(ParamSpec::real("ic_sum", f64::NAN));
+            params.push(ParamSpec::real("ic_carry", f64::NAN));
+            params
+        })
+    }
+
+    fn initial_state(value: Value) -> Value {
+        if (value - Q_HIGH).abs() <= 0.25 {
+            Q_HIGH
+        } else if value.abs() <= 0.25 {
+            Q_LOW
+        } else {
+            Q_UNKNOWN
+        }
+    }
+}
+
+impl CodeModel for XyceDAdd {
+    fn name(&self) -> &str {
+        "xyce_d_add"
+    }
+
+    fn description(&self) -> &str {
+        "Xyce DIG-compatible finite-output full adder"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        Self::ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        Self::parameters()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        dig_params(ctx)?;
+        if ctx.port_width("in") != 3 {
+            return Err(CmError::InvalidPortConnection(
+                "Xyce DIG ADD requires exactly three inputs".to_string(),
+            ));
+        }
+        ctx.allocate_states(Self::INPUT_BASE + 3 * Self::INPUT_STRIDE);
+        for (index, param) in [(Self::SUM_Q, "ic_sum"), (Self::CARRY_Q, "ic_carry")] {
+            ctx.set_initial_state(index, Self::initial_state(ctx.param(param)));
+        }
+        for index in [
+            Self::SUM_TRANSITION_START,
+            Self::SUM_TRANSITION_FROM,
+            Self::SUM_PENDING_TIME,
+            Self::CARRY_TRANSITION_START,
+            Self::CARRY_TRANSITION_FROM,
+            Self::CARRY_PENDING_TIME,
+        ] {
+            ctx.set_initial_state(
+                index,
+                if index == Self::SUM_TRANSITION_FROM || index == Self::CARRY_TRANSITION_FROM {
+                    f64::NAN
+                } else {
+                    0.0
+                },
+            );
+        }
+        ctx.set_initial_state(Self::SUM_PENDING_Q, Q_PENDING_NONE);
+        ctx.set_initial_state(Self::CARRY_PENDING_Q, Q_PENDING_NONE);
+        for index in [
+            Self::SUM_PREV_LOW_VOLTAGE,
+            Self::SUM_PREV_HIGH_VOLTAGE,
+            Self::CARRY_PREV_LOW_VOLTAGE,
+            Self::CARRY_PREV_HIGH_VOLTAGE,
+        ] {
+            ctx.set_initial_state(index, f64::NAN);
+        }
+        for index in 0..3 {
+            ctx.set_initial_state(Self::input_state_index(index, Self::INPUT_STATE), f64::NAN);
+            ctx.set_initial_state(
+                Self::input_state_index(index, Self::INPUT_VOLTAGE),
+                f64::NAN,
+            );
+            ctx.set_initial_state(
+                Self::input_state_index(index, Self::INPUT_TRANSITION_TIME),
+                0.0,
+            );
+        }
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let params = dig_params(ctx)?;
+        let (inputs, last_input_transition_time) = Self::sample_inputs(ctx, params, 3);
+        let desired = match inputs.as_slice() {
+            [Some(a), Some(b), Some(c)] => {
+                Some((a ^ b ^ c, (*a && *b) || (*a && *c) || (*b && *c)))
+            }
+            _ => None,
+        };
+        let (sum, sum_start, sum_from) = Self::update_output(
+            ctx,
+            desired.map(|value| value.0),
+            last_input_transition_time,
+            params,
+            Self::SUM_Q,
+            Self::SUM_TRANSITION_START,
+            Self::SUM_TRANSITION_FROM,
+            Self::SUM_PENDING_Q,
+            Self::SUM_PENDING_TIME,
+        );
+        let (carry, carry_start, carry_from) = Self::update_output(
+            ctx,
+            desired.map(|value| value.1),
+            last_input_transition_time,
+            params,
+            Self::CARRY_Q,
+            Self::CARRY_TRANSITION_START,
+            Self::CARRY_TRANSITION_FROM,
+            Self::CARRY_PENDING_Q,
+            Self::CARRY_PENDING_TIME,
+        );
+
+        for index in 0..3 {
+            Self::stamp_input_load(
+                ctx,
+                index,
+                Self::input_state_index(index, Self::INPUT_VOLTAGE),
+                params,
+            );
+        }
+        XyceDTff::stamp_output(
+            ctx,
+            "sum",
+            sum,
+            Self::SUM_PREV_LOW_VOLTAGE,
+            Self::SUM_PREV_HIGH_VOLTAGE,
+            params,
+            sum_start,
+            sum_from,
+        );
+        XyceDTff::stamp_output(
+            ctx,
+            "carry",
+            carry,
+            Self::CARRY_PREV_LOW_VOLTAGE,
+            Self::CARRY_PREV_HIGH_VOLTAGE,
+            params,
+            carry_start,
+            carry_from,
+        );
+
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            for (state, start) in [(sum, sum_start), (carry, carry_start)] {
+                if let Some(state) = state
+                    && let Some(end) = transition_time_for_state(state, start, params)
+                    && end > ctx.time + 1.0e-18
+                {
+                    ctx.request_breakpoint(end);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn output_input_ac_partials(
+        &self,
+        ctx: &CmContext,
+        output_port: &str,
+        frequency: Value,
+    ) -> Vec<(String, Complex64)> {
+        let (q_state_index, from_index, start_index) = if output_port.eq_ignore_ascii_case("sum") {
+            (
+                Self::SUM_Q,
+                Self::SUM_TRANSITION_FROM,
+                Self::SUM_TRANSITION_START,
+            )
+        } else if output_port.eq_ignore_ascii_case("carry") {
+            (
+                Self::CARRY_Q,
+                Self::CARRY_TRANSITION_FROM,
+                Self::CARRY_TRANSITION_START,
+            )
+        } else {
+            return Vec::new();
+        };
+        let Ok(params) = dig_params(ctx) else {
+            return Vec::new();
+        };
+        let state = q_state(ctx.state_prev(q_state_index));
+        let from = q_state(ctx.state_prev(from_index));
+        let resistance =
+            interpolated_resistances(state, from, ctx.state_prev(start_index), ctx.time, params);
+        let g_low = 1.0 / resistance.low;
+        let g_high = 1.0 / resistance.high;
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        if !omega.is_finite() {
+            return Vec::new();
+        }
+        let c_low = Complex64::new(0.0, omega * params.clo);
+        let c_high = Complex64::new(0.0, omega * params.chi);
+        vec![
+            (
+                output_port.to_string(),
+                Complex64::new(g_low + g_high, 0.0) + c_low + c_high,
+            ),
+            ("dgnd".to_string(), -Complex64::new(g_low, 0.0) - c_low),
+            ("dpwr".to_string(), -Complex64::new(g_high, 0.0) - c_high),
+        ]
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("sum") || output_port.eq_ignore_ascii_case("carry")
     }
 
     fn checkpoint_support(&self, _ctx: &CmContext) -> crate::xspice::XspiceCheckpointSupport {

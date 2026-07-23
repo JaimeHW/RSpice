@@ -129,6 +129,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "triangle",
     "xfer",
     "xyce_d_and",
+    "xyce_d_add",
     "xyce_d_buffer",
     "xyce_d_inverter",
     "xyce_d_nand",
@@ -301,6 +302,7 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::AdcBridge));
         self.register(Arc::new(super::models::DacBridge));
         self.register(Arc::new(super::models::BidiBridge));
+        self.register(Arc::new(super::models::XyceDAdd));
         self.register(Arc::new(super::models::XyceDGate::and()));
         self.register(Arc::new(super::models::XyceDGate::buffer()));
         self.register(Arc::new(super::models::XyceDGate::inverter()));
