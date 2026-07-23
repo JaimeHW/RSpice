@@ -169,6 +169,25 @@ impl Engine {
             .any(Option::is_some)
     }
 
+    /// The OneStep split keeps the static DAE history separate from each
+    /// device's dynamic charge history.  RSpice's magnetic companions and
+    /// hysteretic switches retain additional accepted state that is not yet
+    /// represented by that static-history snapshot.  Keep those topologies on
+    /// the canonical companion path until their complete DAE history mapping
+    /// is available; mixing the two contracts would silently alter the
+    /// physical transient equations.
+    #[inline]
+    fn xyce_one_step_requires_order_one_for_stateful_topology(
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        !circuit.inductors.names.is_empty()
+            || !circuit.coupled_inductor_pairs.is_empty()
+            || !circuit.multi_winding_transformers.is_empty()
+            || !circuit.vswitches.is_empty()
+            || !circuit.iswitches.is_empty()
+            || !circuit.generic_switches.is_empty()
+    }
+
     fn derived_transient_branch_currents(
         circuit: &crate::circuit::CircuitData,
         existing_branch_names: &[String],
@@ -2320,9 +2339,15 @@ impl Engine {
             );
             let current_method = current_integration_method(&trapgear);
             let locked_edge_order_reset = locked_edge_order && breakpoints.at_breakpoint(t);
-            let locked_reference_order_restart = locked_grid.as_ref().is_some_and(|grid| {
-                Self::locked_grid_requires_xyce_order_restart(grid, locked_cursor)
-            });
+            let xyce_one_step_stateful_topology =
+                Self::xyce_one_step_requires_order_one_for_ic_branch(&circuit)
+                    || Self::xyce_one_step_requires_order_one_for_stateful_topology(&circuit)
+                    || !circuit.tlines.is_empty()
+                    || !circuit.coupled_tlines.is_empty();
+            let locked_reference_order_restart = !xyce_one_step_stateful_topology
+                && locked_grid.as_ref().is_some_and(|grid| {
+                    Self::locked_grid_requires_xyce_order_restart(grid, locked_cursor)
+                });
             // Resume is a breakpoint-style integration restart. The checkpoint
             // supplies the accepted solution but deliberately omits nonlinear
             // charge histories and their timestep provenance, so the first real
@@ -2348,7 +2373,8 @@ impl Engine {
                 )
             };
             let xyce_one_step_order2 = self.config.spice_dialect == SpiceDialect::Xyce
-                && !Self::xyce_one_step_requires_order_one_for_ic_branch(&circuit)
+                && !xyce_one_step_stateful_topology
+                && circuit.couplings.is_empty()
                 && circuit.tlines.is_empty()
                 && circuit.coupled_tlines.is_empty()
                 && step_trap_order == 2
@@ -3724,7 +3750,9 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
-                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                    if self.config.spice_dialect == SpiceDialect::Xyce
+                        && !xyce_one_step_stateful_topology
+                    {
                         xyce_static_history = Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
@@ -4651,7 +4679,9 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
-                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                    if self.config.spice_dialect == SpiceDialect::Xyce
+                        && !xyce_one_step_stateful_topology
+                    {
                         xyce_static_history = Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
@@ -4914,7 +4944,9 @@ impl Engine {
             }
 
             solution.clone_from(&new_solution);
-            if self.config.spice_dialect == SpiceDialect::Xyce {
+            if self.config.spice_dialect == SpiceDialect::Xyce
+                && !xyce_one_step_stateful_topology
+            {
                 xyce_static_history = Some(self.capture_xyce_static_residual(
                     &mut circuit,
                     &mut matrix,
