@@ -332,12 +332,27 @@ pub struct TemperatureLawDefinition {
     pub description: String,
 }
 
+/// One deterministic evaluation of a temperature law. The requested and
+/// effective temperatures differ only when the declared clamp policy applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TemperatureLawEvaluation {
+    pub requested_temperature_c: FiniteF64,
+    pub effective_temperature_c: FiniteF64,
+    pub value: FiniteF64,
+    pub outside_declared_range: bool,
+}
+
 /// Complete metadata rendered by the Parameters, Sections, Statistics, and
 /// Temperature pages of the model editor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelDefinitionMetadata {
     pub schema_version: u16,
+    /// Stable identity of this model's canonical source fragment. The model
+    /// revision advances only when this model changes; it is deliberately
+    /// independent from the containing library closure revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_identity: Option<ModelFileIdentity>,
     pub parameters: Vec<ParameterDefinition>,
     pub sections: Vec<ModelSectionDefinition>,
     pub statistics: StatisticalDefinition,
@@ -348,6 +363,7 @@ impl Default for ModelDefinitionMetadata {
     fn default() -> Self {
         Self {
             schema_version: MODEL_DEFINITION_METADATA_SCHEMA_VERSION,
+            source_identity: None,
             parameters: Vec::new(),
             sections: Vec::new(),
             statistics: StatisticalDefinition::default(),
@@ -368,6 +384,9 @@ impl ModelDefinitionMetadata {
                 actual: self.schema_version,
                 supported: MODEL_DEFINITION_METADATA_SCHEMA_VERSION,
             });
+        }
+        if let Some(identity) = self.source_identity.as_ref() {
+            validate_model_file_identity("source_identity", identity)?;
         }
 
         let parameter_indices = self.validate_parameters()?;
@@ -405,6 +424,30 @@ impl ModelDefinitionMetadata {
         self.temperature_laws
             .iter()
             .find(|law| identifier_eq(&law.quantity, quantity))
+    }
+
+    /// Evaluate one declared law using the same typed parameter values that
+    /// are persisted with the definition. Equation variables are
+    /// case-insensitive: `T`/`TK` are absolute kelvin, `TEMP`/`TEMPER` are
+    /// degrees Celsius, and `TREF`/`TREF_C` are the declared reference values.
+    pub fn evaluate_temperature_law(
+        &self,
+        quantity: &str,
+        temperature_c: f64,
+    ) -> Result<TemperatureLawEvaluation, DefinitionMetadataError> {
+        self.validate()?;
+        let requested_temperature_c =
+            FiniteF64::new(temperature_c).map_err(|_| DefinitionMetadataError::Invalid {
+                path: "temperature".to_owned(),
+                message: "requested temperature must be finite".to_owned(),
+            })?;
+        let law =
+            self.temperature_law(quantity)
+                .ok_or_else(|| DefinitionMetadataError::Invalid {
+                    path: "temperature_laws".to_owned(),
+                    message: format!("temperature quantity '{quantity}' is not declared"),
+                })?;
+        evaluate_temperature_law(self, law, requested_temperature_c)
     }
 
     fn validate_parameters(&self) -> Result<BTreeMap<String, usize>, DefinitionMetadataError> {
@@ -521,25 +564,13 @@ impl ModelDefinitionMetadata {
             let mut file_ids = BTreeSet::new();
             for (file_index, file) in section.model_files.iter().enumerate() {
                 let file_path = format!("{path}.model_files[{file_index}]");
-                validate_opaque_identity(&format!("{file_path}.source_id"), &file.source_id)?;
+                validate_model_file_identity(&file_path, file)?;
                 if !file_ids.insert(file.source_id.clone()) {
                     return invalid(
                         &format!("{file_path}.source_id"),
                         "duplicate source identity within section",
                     );
                 }
-                if file.revision == 0 {
-                    return invalid(
-                        &format!("{file_path}.revision"),
-                        "revision must be greater than zero",
-                    );
-                }
-                validate_sha256(&format!("{file_path}.content_digest"), &file.content_digest)?;
-                validate_display_text(
-                    &format!("{file_path}.display_name"),
-                    &file.display_name,
-                    false,
-                )?;
             }
             validate_qualification(&format!("{path}.qualification"), &section.qualification)?;
         }
@@ -778,6 +809,41 @@ impl ModelDefinitionMetadata {
                 &law.representation,
                 law.valid_range,
             )?;
+            match &law.representation {
+                TemperatureLawRepresentation::Equation { expression } => {
+                    let expression_dependencies = temperature_expression_dependencies(expression)
+                        .map_err(|message| {
+                        DefinitionMetadataError::Invalid {
+                            path: format!("{path}.representation.expression"),
+                            message,
+                        }
+                    })?;
+                    if expression_dependencies != dependencies {
+                        return invalid(
+                            &format!("{path}.parameters"),
+                            format!(
+                                "declared dependencies {dependencies:?} do not exactly match equation references {expression_dependencies:?}"
+                            ),
+                        );
+                    }
+                    evaluate_temperature_equation(
+                        self,
+                        law,
+                        expression,
+                        law.reference_temperature_c,
+                    )?;
+                }
+                TemperatureLawRepresentation::LookupTable {
+                    interpolation,
+                    points,
+                } => {
+                    evaluate_temperature_table(
+                        *interpolation,
+                        points,
+                        law.reference_temperature_c,
+                    )?;
+                }
+            }
         }
         Ok(())
     }
@@ -856,6 +922,25 @@ fn validate_opaque_identity(path: &str, value: &str) -> Result<(), DefinitionMet
     Ok(())
 }
 
+fn validate_model_file_identity(
+    path: &str,
+    identity: &ModelFileIdentity,
+) -> Result<(), DefinitionMetadataError> {
+    validate_opaque_identity(&format!("{path}.source_id"), &identity.source_id)?;
+    if identity.revision == 0 {
+        return invalid(
+            &format!("{path}.revision"),
+            "revision must be greater than zero",
+        );
+    }
+    validate_sha256(&format!("{path}.content_digest"), &identity.content_digest)?;
+    validate_display_text(
+        &format!("{path}.display_name"),
+        &identity.display_name,
+        false,
+    )
+}
+
 fn validate_sha256(path: &str, value: &str) -> Result<(), DefinitionMetadataError> {
     if value.len() != 64
         || !value
@@ -901,11 +986,13 @@ fn validate_qualification(
         ModelSectionQualification::Failed { summary } => {
             validate_display_text(&format!("{path}.summary"), summary, false)
         }
-        ModelSectionQualification::Unqualified
-        | ModelSectionQualification::Pending
-        | ModelSectionQualification::Qualified {
+        ModelSectionQualification::Qualified {
             evidence_digest: None,
-        } => Ok(()),
+        } => invalid(
+            &format!("{path}.evidence_digest"),
+            "a qualified model section requires the exact retained evidence digest",
+        ),
+        ModelSectionQualification::Unqualified | ModelSectionQualification::Pending => Ok(()),
     }
 }
 
@@ -1188,6 +1275,174 @@ fn validate_temperature_representation(
     }
 }
 
+fn evaluate_temperature_law(
+    metadata: &ModelDefinitionMetadata,
+    law: &TemperatureLawDefinition,
+    requested_temperature_c: FiniteF64,
+) -> Result<TemperatureLawEvaluation, DefinitionMetadataError> {
+    let outside_declared_range = !law.valid_range.contains(requested_temperature_c);
+    let effective_temperature_c = if outside_declared_range {
+        match law.extrapolation {
+            TemperatureExtrapolationPolicy::BlockOutsideRange => {
+                return invalid(
+                    "temperature",
+                    format!(
+                        "{} °C is outside the declared range {}..{} °C for '{}'",
+                        requested_temperature_c,
+                        law.valid_range.minimum_c,
+                        law.valid_range.maximum_c,
+                        law.quantity
+                    ),
+                );
+            }
+            TemperatureExtrapolationPolicy::Warn => requested_temperature_c,
+            TemperatureExtrapolationPolicy::Clamp => {
+                FiniteF64::new(requested_temperature_c.get().clamp(
+                    law.valid_range.minimum_c.get(),
+                    law.valid_range.maximum_c.get(),
+                ))
+                .expect("clamping finite values produces a finite value")
+            }
+        }
+    } else {
+        requested_temperature_c
+    };
+
+    let value = match &law.representation {
+        TemperatureLawRepresentation::Equation { expression } => {
+            evaluate_temperature_equation(metadata, law, expression, effective_temperature_c)?
+        }
+        TemperatureLawRepresentation::LookupTable {
+            interpolation,
+            points,
+        } => evaluate_temperature_table(*interpolation, points, effective_temperature_c)?,
+    };
+    Ok(TemperatureLawEvaluation {
+        requested_temperature_c,
+        effective_temperature_c,
+        value,
+        outside_declared_range,
+    })
+}
+
+fn evaluate_temperature_equation(
+    metadata: &ModelDefinitionMetadata,
+    law: &TemperatureLawDefinition,
+    expression: &str,
+    temperature_c: FiniteF64,
+) -> Result<FiniteF64, DefinitionMetadataError> {
+    let mut context = rspice_core::netlist::expr::ParamContext::new();
+    for parameter in &metadata.parameters {
+        if let ParameterValue::Numeric(value) = parameter.value {
+            context.set(&parameter.name, value.get());
+        }
+    }
+    let temperature_k = temperature_c.get() + 273.15;
+    let reference_k = law.reference_temperature_c.get() + 273.15;
+    context.set("T", temperature_k);
+    context.set("TK", temperature_k);
+    context.set("TEMP", temperature_c.get());
+    context.set("TEMPER", temperature_c.get());
+    context.set("TREF", reference_k);
+    context.set("TREF_C", law.reference_temperature_c.get());
+    let value =
+        rspice_core::netlist::expr::eval_expression(expression, &context).map_err(|error| {
+            DefinitionMetadataError::Invalid {
+                path: format!(
+                    "temperature_laws[{}].representation.expression",
+                    law.quantity
+                ),
+                message: format!("temperature equation cannot be evaluated: {error}"),
+            }
+        })?;
+    FiniteF64::new(value).map_err(|_| DefinitionMetadataError::Invalid {
+        path: format!(
+            "temperature_laws[{}].representation.expression",
+            law.quantity
+        ),
+        message: "temperature equation produced a non-finite value".to_owned(),
+    })
+}
+
+fn temperature_expression_dependencies(expression: &str) -> Result<BTreeSet<String>, String> {
+    let parsed = rspice_core::netlist::expr::parse_expression(expression)
+        .map_err(|error| format!("temperature equation cannot be parsed: {error}"))?;
+    let mut dependencies = BTreeSet::new();
+    collect_expression_parameters(&parsed, &mut dependencies);
+    const RESERVED: [&str; 6] = ["t", "tk", "temp", "temper", "tref", "tref_c"];
+    dependencies.retain(|name| !RESERVED.contains(&name.as_str()));
+    Ok(dependencies)
+}
+
+fn collect_expression_parameters(
+    expression: &rspice_core::netlist::expr::Expr,
+    parameters: &mut BTreeSet<String>,
+) {
+    use rspice_core::netlist::expr::Expr;
+    match expression {
+        Expr::Param(name) => {
+            parameters.insert(canonical_identifier(name));
+        }
+        Expr::BinOp { left, right, .. } => {
+            collect_expression_parameters(left, parameters);
+            collect_expression_parameters(right, parameters);
+        }
+        Expr::UnaryOp { operand, .. } => collect_expression_parameters(operand, parameters),
+        Expr::FnCall { args, .. } => {
+            for argument in args {
+                collect_expression_parameters(argument, parameters);
+            }
+        }
+        Expr::Number(_) | Expr::ComplexNumber(_) => {}
+    }
+}
+
+fn evaluate_temperature_table(
+    interpolation: LookupInterpolation,
+    points: &[TemperaturePoint],
+    temperature_c: FiniteF64,
+) -> Result<FiniteF64, DefinitionMetadataError> {
+    let target = temperature_c.get();
+    let segment = if target <= points[0].temperature_c.get() {
+        (&points[0], &points[1])
+    } else if target >= points[points.len() - 1].temperature_c.get() {
+        (&points[points.len() - 2], &points[points.len() - 1])
+    } else {
+        points
+            .windows(2)
+            .find(|pair| {
+                pair[0].temperature_c.get() <= target && target <= pair[1].temperature_c.get()
+            })
+            .map(|pair| (&pair[0], &pair[1]))
+            .ok_or_else(|| DefinitionMetadataError::Invalid {
+                path: "temperature_laws[*].representation.points".to_owned(),
+                message: "temperature table has no interval for the requested value".to_owned(),
+            })?
+    };
+    let (left, right) = segment;
+    let fraction = (target - left.temperature_c.get())
+        / (right.temperature_c.get() - left.temperature_c.get());
+    let value = match interpolation {
+        LookupInterpolation::Linear => {
+            left.value.get() + fraction * (right.value.get() - left.value.get())
+        }
+        LookupInterpolation::LogLinear => (left.value.get().ln()
+            + fraction * (right.value.get().ln() - left.value.get().ln()))
+        .exp(),
+        LookupInterpolation::Step => {
+            if target >= right.temperature_c.get() {
+                right.value.get()
+            } else {
+                left.value.get()
+            }
+        }
+    };
+    FiniteF64::new(value).map_err(|_| DefinitionMetadataError::Invalid {
+        path: "temperature_laws[*].representation.points".to_owned(),
+        message: "temperature interpolation produced a non-finite value".to_owned(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1252,10 +1507,36 @@ mod tests {
             },
             description: "Model formulation selector".to_owned(),
         };
+        let tnom = ParameterDefinition {
+            name: "TNOM".to_owned(),
+            data_type: ParameterDataType::Numeric,
+            value: ParameterValue::Numeric(finite(300.15)),
+            unit: Some("K".to_owned()),
+            bounds: Some(FiniteBounds {
+                lower: Some(finite(1.0)),
+                upper: None,
+            }),
+            source: ParameterSource::Declared {
+                source: "base".to_owned(),
+            },
+            description: "Nominal absolute model temperature".to_owned(),
+        };
+        let ute = ParameterDefinition {
+            name: "UTE".to_owned(),
+            data_type: ParameterDataType::Numeric,
+            value: ParameterValue::Numeric(finite(-1.5)),
+            unit: None,
+            bounds: None,
+            source: ParameterSource::Declared {
+                source: "base".to_owned(),
+            },
+            description: "Mobility temperature exponent".to_owned(),
+        };
 
         ModelDefinitionMetadata {
             schema_version: MODEL_DEFINITION_METADATA_SCHEMA_VERSION,
-            parameters: vec![vth0, u0, mode],
+            source_identity: None,
+            parameters: vec![vth0, u0, mode, tnom, ute],
             sections: vec![
                 ModelSectionDefinition {
                     name: "BASE".to_owned(),
@@ -1331,7 +1612,7 @@ mod tests {
             temperature_laws: vec![
                 TemperatureLawDefinition {
                     quantity: "mobility".to_owned(),
-                    parameters: vec!["U0".to_owned()],
+                    parameters: vec!["U0".to_owned(), "TNOM".to_owned(), "UTE".to_owned()],
                     representation: TemperatureLawRepresentation::Equation {
                         expression: "U0*(T/Tnom)^UTE".to_owned(),
                     },
@@ -1404,6 +1685,46 @@ mod tests {
     }
 
     #[test]
+    fn temperature_equations_and_tables_evaluate_with_declared_range_policy() {
+        let metadata = valid_metadata();
+        let reference = metadata
+            .evaluate_temperature_law("mobility", 27.0)
+            .expect("equation evaluates at reference");
+        assert!((reference.value.get() - 0.0418).abs() < 1.0e-12);
+        assert!(!reference.outside_declared_range);
+
+        let table = metadata
+            .evaluate_temperature_law("threshold voltage", 101.0)
+            .expect("table interpolates");
+        let expected = 0.4821 + (101.0 - 27.0) / (175.0 - 27.0) * (0.39 - 0.4821);
+        assert!((table.value.get() - expected).abs() < 1.0e-12);
+
+        let error = metadata
+            .evaluate_temperature_law("mobility", 200.0)
+            .expect_err("block policy rejects extrapolation");
+        assert!(error.to_string().contains("outside the declared range"));
+
+        let mut clamped = metadata.clone();
+        clamped.temperature_laws[1].extrapolation = TemperatureExtrapolationPolicy::Clamp;
+        let result = clamped
+            .evaluate_temperature_law("threshold voltage", 250.0)
+            .expect("clamp policy evaluates at boundary");
+        assert!(result.outside_declared_range);
+        assert_eq!(result.effective_temperature_c, finite(175.0));
+        assert_eq!(result.value, finite(0.39));
+    }
+
+    #[test]
+    fn unevaluable_temperature_equations_are_not_valid_metadata() {
+        let mut metadata = valid_metadata();
+        metadata.temperature_laws[0].representation = TemperatureLawRepresentation::Equation {
+            expression: "U0 * missing_parameter".to_owned(),
+        };
+        let error = metadata.validate().expect_err("unbound equation must fail");
+        assert!(error.to_string().contains("do not exactly match"));
+    }
+
+    #[test]
     fn finite_value_rejects_nan_and_infinities() {
         assert!(FiniteF64::new(f64::NAN).is_err());
         assert!(FiniteF64::new(f64::INFINITY).is_err());
@@ -1422,7 +1743,7 @@ mod tests {
 
         let mut metadata = valid_metadata();
         metadata.parameters.push(numeric_parameter("vth0", 0.5));
-        assert_invalid(&metadata, "parameters[3].name");
+        assert_invalid(&metadata, "parameters[5].name");
     }
 
     #[test]

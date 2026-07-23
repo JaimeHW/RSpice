@@ -27,8 +27,8 @@ pub use definition_metadata::{
     ModelFileIdentity, ModelSectionDefinition, ModelSectionQualification, NonFiniteNumber,
     ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue, StatisticalDefinition,
     StatisticalDistribution, StatisticalHierarchyScope, StatisticalVariableDefinition,
-    TemperatureExtrapolationPolicy, TemperatureLawDefinition, TemperatureLawRepresentation,
-    TemperaturePoint, TemperatureRange,
+    TemperatureExtrapolationPolicy, TemperatureLawDefinition, TemperatureLawEvaluation,
+    TemperatureLawRepresentation, TemperaturePoint, TemperatureRange,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use library::is_foreign_platform_absolute_path;
@@ -46,13 +46,20 @@ pub use project_revision::{
 pub use qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,
-    LicenseDeclaration, LicenseScope, MODEL_QUALIFICATION_SCHEMA_VERSION, ModelPromotionRecord,
-    ModelQualificationState, ModelRelease, ModelReleaseCandidate, ModelReleaseIdentity,
-    ModelSourceEvidenceBinding, NonNegativeFinite, PlatformCompatibilityEvidence,
-    PlatformQualificationOutcome, PromotionApproval, PromotionApprovalRole, PromotionChecklist,
-    QualificationErrorCode, QualificationEvidence, QualificationPlatform, QualificationResult,
+    FiniteValue, LicenseDeclaration, LicenseScope, MODEL_QUALIFICATION_SCHEMA_VERSION,
+    ModelPromotionRecord, ModelQualificationState, ModelRelease, ModelReleaseCandidate,
+    ModelReleaseIdentity, ModelSourceEvidenceBinding, NonNegativeFinite,
+    PlatformCompatibilityEvidence, PlatformQualificationOutcome, PromotionApproval,
+    PromotionApprovalRole, PromotionChecklist, QualificationAnalysis, QualificationErrorCode,
+    QualificationEvidence, QualificationExecutionError, QualificationExecutionFailure,
+    QualificationExecutionProgress, QualificationExecutionService, QualificationExecutionSession,
+    QualificationExecutionStep, QualificationFailureStage, QualificationOutputDefinition,
+    QualificationPlatform, QualificationPlatformRun, QualificationPlatformVectorOutcome,
+    QualificationProbe, QualificationReference, QualificationResult, QualificationSample,
     QualificationSuite, QualificationValidationError, QualificationVector,
-    QualificationVectorOutcome, ReferenceErrorEvidence, ReferenceTolerance,
-    ReleaseCandidateIdentity, RequiredDocumentation,
+    QualificationVectorBinding, QualificationVectorDisposition,
+    QualificationVectorDispositionCause, QualificationVectorDispositionResolution,
+    QualificationVectorOutcome, QualificationVectorRequiredAction, ReferenceErrorEvidence,
+    ReferenceTolerance, ReleaseCandidateIdentity, RequiredDocumentation,
 };
 pub use types::{ModelLevel, ModelType};

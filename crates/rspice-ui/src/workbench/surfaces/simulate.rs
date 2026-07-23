@@ -8,6 +8,7 @@ use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, 
 
 use crate::common::RSpiceApp;
 use crate::product::{AnalysisInstanceId, ContentDigest};
+use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
     AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
     AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
@@ -79,6 +80,8 @@ struct SelectedAnalysis {
     issues: Vec<AnalysisPlanIssue>,
     contextual_dependency_error: Option<String>,
     repair_label: Option<String>,
+    configure_pss_label: Option<String>,
+    enabled: bool,
 }
 
 #[derive(Clone)]
@@ -197,6 +200,7 @@ enum AnalysisAction {
         target: AnalysisInstanceId,
     },
     RepairDependencies,
+    PrepareAutonomousPss,
     Validate,
     Remove,
     SetEnabled(bool),
@@ -2903,7 +2907,18 @@ fn lifecycle_toolbar(
                 {
                     *action = Some(AnalysisAction::Later(selected.position + 1));
                 }
-                if Button::new("Bind dependencies").show(ui).clicked() {
+                let can_bind_existing = selected
+                    .prerequisite_candidates
+                    .iter()
+                    .any(|(_, candidates)| !candidates.is_empty());
+                if Button::new("Bind existing")
+                    .enabled(can_bind_existing)
+                    .show(ui)
+                    .on_disabled_hover_text(
+                        "No compatible enabled prerequisite is already positioned earlier in the plan. Use the guided prerequisite action below to create or repair the required chain.",
+                    )
+                    .clicked()
+                {
                     *action = Some(AnalysisAction::BindDependencies);
                 }
                 if Button::new("Validate").icon(Icon::Check).show(ui).clicked() {
@@ -2959,6 +2974,13 @@ fn analysis_contract(
                     )
                 } else if let Some(error) = &selected.contextual_dependency_error {
                     (t.color.err, "Dependency graph blocked", error.clone())
+                } else if selected.repair_label.is_some() || selected.configure_pss_label.is_some() {
+                    (
+                        t.color.warn,
+                        "Prerequisites not prepared",
+                        "This disabled analysis does not block preflight, but its required prerequisite chain must be prepared before it can be enabled."
+                            .to_owned(),
+                    )
                 } else {
                     (
                         t.color.ok,
@@ -2984,6 +3006,19 @@ fn analysis_contract(
                         .clicked()
                     {
                         *action = Some(AnalysisAction::RepairDependencies);
+                    }
+                }
+                if let Some(configure_label) = selected.configure_pss_label.as_deref() {
+                    ui.add_space(7.0);
+                    if Button::new(configure_label)
+                        .icon(Icon::Add)
+                        .show(ui)
+                        .on_hover_text(
+                            "Select an existing prepared autonomous PSS when one is available; otherwise insert one disabled prerequisite with its inferable dependency chain, then open its complete configuration form.",
+                        )
+                        .clicked()
+                    {
+                        *action = Some(AnalysisAction::PrepareAutonomousPss);
                     }
                 }
             };
@@ -3090,7 +3125,13 @@ fn prerequisite_rows(ui: &mut Ui, selected: &SelectedAnalysis) -> Option<Analysi
             .iter()
             .find(|dependency| dependency.prerequisite() == *prerequisite);
         let target = bound.map_or_else(
-            || "unbound · preflight blocked".to_owned(),
+            || {
+                if selected.enabled {
+                    "unbound · preflight blocked".to_owned()
+                } else {
+                    "unbound · required when enabled".to_owned()
+                }
+            },
             |dependency| dependency.target().to_string(),
         );
         let label = format!("{} prerequisite", prerequisite.stable_id().to_uppercase());
@@ -4022,13 +4063,21 @@ fn selected_analysis(
             (*prerequisite, candidates)
         })
         .collect();
+    let disabled_prerequisite_label = (!instance.enabled())
+        .then(|| {
+            prerequisite_roles.first().map(|prerequisite| {
+                compatible_dependency_repair_label(plan, id, *prerequisite, &repair_context)
+            })
+        })
+        .flatten();
     let proposed_repair_label =
         dependency_repair_cta_with_context(plan, &issues, &dependency_closure, &repair_context)
             .or_else(|| {
                 contextual_dependency_error
                     .is_some()
                     .then(|| "Repair PSS prerequisite".to_owned())
-            });
+            })
+            .or(disabled_prerequisite_label);
     // The visible quick action must be executable for the selected root, not
     // merely for the first transitive issue used to describe it. Preview the
     // exact transactional repair against the same circuit context and omit an
@@ -4039,6 +4088,22 @@ fn selected_analysis(
             .repair_dependencies_with_context(id, &repair_context)
             .is_ok()
     });
+    let phase_noise_requires_user_pss = matches!(
+        instance.draft(),
+        AnalysisDraft::Pnoise(draft)
+            if draft
+                .to_config()
+                .is_ok_and(|config| config.noise_ref == NoiseReferenceType::Phase)
+    );
+    let prepared_pss = prepared_autonomous_pss_id(plan, id);
+    let configure_pss_label =
+        (phase_noise_requires_user_pss && repair_label.is_none()).then(|| {
+            if prepared_pss.is_some() {
+                "Configure existing autonomous PSS".to_owned()
+            } else {
+                "Add and configure autonomous PSS".to_owned()
+            }
+        });
     Ok(Some(SelectedAnalysis {
         id,
         kind: instance.kind(),
@@ -4052,7 +4117,24 @@ fn selected_analysis(
         issues,
         contextual_dependency_error,
         repair_label,
+        configure_pss_label,
+        enabled: instance.enabled(),
     }))
+}
+
+fn prepared_autonomous_pss_id(
+    plan: &crate::simulation::plan::SimulationPlan,
+    dependent: AnalysisInstanceId,
+) -> Option<AnalysisInstanceId> {
+    let dependent_index = plan
+        .instances()
+        .iter()
+        .position(|instance| instance.id() == dependent)?;
+    plan.instances()[..dependent_index]
+        .iter()
+        .rev()
+        .find(|candidate| matches!(candidate.draft(), AnalysisDraft::Pss(pss) if pss.osc_mode))
+        .map(|candidate| candidate.id())
 }
 
 fn contextual_dependency_error(
@@ -4262,6 +4344,48 @@ fn apply_analysis_action(app: &mut RSpiceApp, id: AnalysisInstanceId, action: An
                     );
                 }
                 Err(error) => record_failure(app, "Repair prerequisites", &error),
+            }
+        }
+        AnalysisAction::PrepareAutonomousPss => {
+            let existing = app
+                .state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .and_then(|plan| prepared_autonomous_pss_id(plan, id));
+            if let Some(pss_id) = existing {
+                app.state.workbench.active_analysis_instance = Some(pss_id);
+                app.state.workbench.analysis_lifecycle_status = format!(
+                    "Existing autonomous PSS prerequisite {pss_id} was selected for phase-noise analysis {id}. Complete its oscillator node and remaining controls, enable it, then run dependency repair to bind the exact prerequisite without creating a duplicate instance."
+                );
+                return;
+            }
+            let mut pss = PssDialogState::default();
+            pss.osc_mode = true;
+            pss.osc_node.clear();
+            pss.tone_sources.clear();
+            let repair_context = build_envelope_source_catalog(app).dependency_repair_context();
+            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+                Ok(plan) => plan
+                    .prepare_prerequisite_for_configuration(
+                        id,
+                        AnalysisKind::Pss,
+                        AnalysisDraft::Pss(pss),
+                        &repair_context,
+                    )
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok((pss_id, receipt)) => {
+                    refresh_analysis_projections(app);
+                    app.state.workbench.active_analysis_instance = Some(pss_id);
+                    app.state.workbench.analysis_lifecycle_status = format!(
+                        "Receipt #{} committed. Autonomous PSS prerequisite {pss_id} and its inferable dependency chain are prepared before phase-noise analysis {id}. Enter the exact oscillator node, review the remaining PSS controls, then enable it; dependency repair will reuse and bind it while preflight remains fail-closed until configuration is complete.",
+                        receipt.sequence(),
+                    );
+                }
+                Err(error) => record_failure(app, "Configure PSS prerequisite", &error),
             }
         }
         AnalysisAction::Validate => validate_analysis_instance(app, id),
@@ -5604,6 +5728,114 @@ mod tests {
         assert_eq!(
             selected.repair_label, None,
             "a quick action must be hidden when the selected root cannot be repaired"
+        );
+    }
+
+    #[test]
+    fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        plan.set_enabled(ac, false).expect("AC disables");
+        let mut app = RSpiceApp::test_instance();
+        app.state.sim_setup.analysis_plan = Some(plan);
+        app.state.workbench.active_analysis_instance = Some(ac);
+        let sources = build_envelope_source_catalog(&app);
+
+        let selected = selected_analysis(&app, &sources)
+            .expect("selection resolves")
+            .expect("AC remains selected");
+        assert!(!selected.enabled);
+        assert_eq!(
+            selected.repair_label.as_deref(),
+            Some("Add Operating point")
+        );
+
+        apply_analysis_action(&mut app, ac, AnalysisAction::RepairDependencies);
+        let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+        let dependency = plan.instance(ac).unwrap().dependencies()[0];
+        let op = plan.instance(dependency.target()).unwrap();
+        assert_eq!(op.kind(), AnalysisKind::OperatingPoint);
+        assert!(op.enabled());
+        assert!(
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .contains("Prerequisite repair completed atomically")
+        );
+    }
+
+    #[test]
+    fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
+        let mut plan = crate::simulation::plan::SimulationPlan::empty();
+        let (pnoise, _) = plan.insert(AnalysisKind::Pnoise).expect("PNOISE inserts");
+        plan.edit(pnoise, |draft| {
+            let AnalysisDraft::Pnoise(pnoise) = draft else {
+                panic!("expected PNOISE draft");
+            };
+            pnoise.noise_ref_idx = 2;
+        })
+        .expect("phase-noise selection commits");
+        let mut app = RSpiceApp::test_instance();
+        app.state.sim_setup.analysis_plan = Some(plan);
+        app.state.workbench.active_analysis_instance = Some(pnoise);
+        let sources = build_envelope_source_catalog(&app);
+
+        let selected = selected_analysis(&app, &sources)
+            .expect("selection resolves")
+            .expect("PNOISE remains selected");
+        assert_eq!(selected.repair_label, None);
+        assert_eq!(
+            selected.configure_pss_label.as_deref(),
+            Some("Add and configure autonomous PSS")
+        );
+
+        apply_analysis_action(&mut app, pnoise, AnalysisAction::PrepareAutonomousPss);
+        let prepared = app
+            .state
+            .workbench
+            .active_analysis_instance
+            .expect("prepared PSS becomes selected");
+        let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+        let prerequisite = plan.instance(prepared).expect("prepared PSS is retained");
+        assert_eq!(prerequisite.kind(), AnalysisKind::Pss);
+        assert!(!prerequisite.enabled());
+        let AnalysisDraft::Pss(pss) = prerequisite.draft() else {
+            panic!("prepared prerequisite is PSS");
+        };
+        assert!(pss.osc_mode);
+        assert!(pss.osc_node.is_empty());
+        assert!(plan.instance(pnoise).unwrap().dependencies().is_empty());
+        assert!(
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .contains("Enter the exact oscillator node")
+        );
+
+        app.state.workbench.active_analysis_instance = Some(pnoise);
+        let selected = selected_analysis(&app, &sources)
+            .expect("selection resolves after prerequisite preparation")
+            .expect("PNOISE becomes selected again");
+        assert_eq!(
+            selected.configure_pss_label.as_deref(),
+            Some("Configure existing autonomous PSS")
+        );
+        let before_count = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .instances()
+            .len();
+        apply_analysis_action(&mut app, pnoise, AnalysisAction::PrepareAutonomousPss);
+        let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+        assert_eq!(plan.instances().len(), before_count);
+        assert_eq!(app.state.workbench.active_analysis_instance, Some(prepared));
+        assert!(
+            app.state
+                .workbench
+                .analysis_lifecycle_status
+                .contains("without creating a duplicate instance")
         );
     }
 

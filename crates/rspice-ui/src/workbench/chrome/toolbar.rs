@@ -9,7 +9,8 @@ use crate::state::Tool;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::super::commands::Command;
+use super::super::RouteTransitionSource;
+use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
@@ -293,6 +294,10 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         report_authoring_tools(ui, app, layout);
         return;
     }
+    if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::ModelEditor {
+        model_editor_tools(ui, app, layout);
+        return;
+    }
     match workspace {
         Workspace::Project => project_tools(ui, app, layout),
         Workspace::Design => design_tools(ui, app, layout),
@@ -498,6 +503,61 @@ fn report_authoring_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layout
     // contract. Report authoring never advertises a non-executable artifact.
 }
 
+fn model_editor_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    if let Some(origin) = app.state.workbench.previous_route() {
+        let label = format!("Source: {}", origin.surface_id().label());
+        if take_projected_tool_slot(ui, layout)
+            && labeled_icon_button_sized(
+                ui,
+                WorkbenchIcon::ArrowLeft,
+                &label,
+                false,
+                explicit_label_width(&label),
+                layout.toolbar_control_height,
+            )
+            .clicked()
+        {
+            app.state
+                .workbench
+                .navigate_back(RouteTransitionSource::User);
+            return;
+        }
+        context_separator(ui, layout);
+    }
+    toolbar_text_command(
+        ui,
+        app,
+        Command::ModelSaveRevision,
+        WorkbenchIcon::Save,
+        "Save model revision",
+        layout,
+    );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::ModelValidate,
+        WorkbenchIcon::Check,
+        "Validate model",
+        layout,
+    );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::ModelRunQualificationTests,
+        WorkbenchIcon::Run,
+        "Run qualification tests",
+        layout,
+    );
+    toolbar_text_command(
+        ui,
+        app,
+        Command::ModelCompareRelease,
+        WorkbenchIcon::Compare,
+        "Compare with release",
+        layout,
+    );
+}
+
 fn verification_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_icon_command(
         ui,
@@ -636,6 +696,10 @@ fn toolbar_command(
     if !take_projected_tool_slot(ui, layout) {
         return;
     }
+    let availability = command.availability(app);
+    if availability == CommandAvailability::Hidden {
+        return;
+    }
     let spec = command.spec();
     let (icon, base_label, show_label, selected) = match presentation {
         ToolbarCommandPresentation::Icon { icon, selected } => (icon, spec.label, false, selected),
@@ -653,7 +717,7 @@ fn toolbar_command(
     } else {
         format!("{base_label} ({shortcut})")
     };
-    let enabled = command.is_enabled(app);
+    let enabled = availability == CommandAvailability::Available;
     let response = ui.add_enabled_ui(enabled, |ui| {
         if show_label {
             labeled_icon_button_sized(
@@ -668,12 +732,16 @@ fn toolbar_command(
             icon_button(ui, icon, &label, selected, toolbar_icon_button_size(layout))
         }
     });
+    let response = match availability {
+        CommandAvailability::Disabled(reason) => response.inner.on_disabled_hover_text(reason),
+        CommandAvailability::Available | CommandAvailability::Hidden => response.inner,
+    };
     if enabled && !shortcut.is_empty() {
-        ui.ctx().accesskit_node_builder(response.inner.id, |node| {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_keyboard_shortcut(shortcut.as_str());
         });
     }
-    if response.inner.clicked() {
+    if response.clicked() {
         command.execute(app);
     }
 }

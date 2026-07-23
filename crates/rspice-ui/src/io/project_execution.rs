@@ -5,20 +5,21 @@
 //! flags (open dialogs, palette filters, validation messages, browser expansion)
 //! are reconstructed and never enter a project file.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::common::app::SimSetupState;
-use crate::product::ProjectId;
+use crate::product::{ContentDigest, ProjectId};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
     DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
-    ModelQualificationState, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
-    ModelSourcePin, ParameterDataType, ParameterValue, ProcessCorner as LibraryProcessCorner,
+    ModelQualificationState, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
+    ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ParameterDataType, ParameterValue,
+    ProcessCorner as LibraryProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
     first_unreachable_source, is_portable_absolute_path,
 };
 
@@ -359,22 +360,71 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
 impl ProjectModelLibrary {
     fn into_model_library(mut self) -> ModelLibrary {
         if let ModelSourceAuthority::ProjectOwned { source_id, .. } = self.source_authority {
+            let persisted_root = self
+                .root_path
+                .clone()
+                .expect("validated project-owned library has a root identity");
             let host_root = crate::state::model_library::project_owned_source_path(source_id);
+            let mut path_map = BTreeMap::new();
+            path_map.insert(persisted_root.clone(), host_root.clone());
+            let host_parent = host_root
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            for (index, source) in self
+                .source_closure
+                .iter()
+                .filter(|source| source.path != persisted_root)
+                .enumerate()
+            {
+                path_map.insert(
+                    source.path.clone(),
+                    host_parent.join(format!("member-{:04}.model-source", index + 1)),
+                );
+            }
             self.root_path = Some(host_root.clone());
             for source in &mut self.source_closure {
-                source.path = host_root.clone();
+                source.path = path_map
+                    .get(&source.path)
+                    .expect("validated closure member has a restored path identity")
+                    .clone();
             }
             for content in &mut self.source_contents {
-                content.path = host_root.clone();
+                content.path = path_map
+                    .get(&content.path)
+                    .expect("validated retained source has a restored path identity")
+                    .clone();
+            }
+            for edge in &mut self.source_edges {
+                edge.owner = path_map
+                    .get(&edge.owner)
+                    .expect("validated dependency owner has a restored path identity")
+                    .clone();
+                edge.target = path_map
+                    .get(&edge.target)
+                    .expect("validated dependency target has a restored path identity")
+                    .clone();
             }
             for model in self.models.values_mut() {
-                model.file_path = Some(host_root.clone());
-            }
-            for corner in self.corners.values_mut() {
-                if corner.file_path.is_some() {
-                    corner.file_path = Some(host_root.clone());
+                if let Some(path) = model.file_path.as_mut() {
+                    *path = path_map
+                        .get(path)
+                        .expect("validated model source has a restored path identity")
+                        .clone();
                 }
             }
+            for corner in self.corners.values_mut() {
+                if let Some(path) = corner.file_path.as_mut() {
+                    *path = path_map
+                        .get(path)
+                        .expect("validated corner source has a restored path identity")
+                        .clone();
+                }
+            }
+            self.source_closure
+                .sort_by(|left, right| left.path.cmp(&right.path));
+            self.source_contents
+                .sort_by(|left, right| left.path.cmp(&right.path));
+            self.source_edges.sort();
         }
         ModelLibrary {
             name: self.name,
@@ -604,15 +654,25 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                         "{context}.source_authority project_owned requires a root identity"
                     ));
                 };
-                if library.source_closure.len() != 1
-                    || library.source_contents.len() != 1
-                    || !library.source_edges.is_empty()
-                    || library.source_closure[0].path != *root_path
-                    || library.source_contents[0].path != *root_path
-                    || library.source_closure[0].digest != digest
+                if library.source_closure.is_empty()
+                    || library.source_closure.len() != library.source_contents.len()
                 {
                     return Err(format!(
-                        "{context}.source_authority project_owned requires one exact retained root source with the authority digest and no dependency edges"
+                        "{context}.source_authority project_owned requires exact retained bytes for its complete source closure"
+                    ));
+                }
+                let root_pin = library
+                    .source_closure
+                    .iter()
+                    .find(|source| source.path == *root_path)
+                    .ok_or_else(|| {
+                        format!(
+                            "{context}.source_authority project_owned closure does not contain its root identity"
+                        )
+                    })?;
+                if root_pin.digest != digest {
+                    return Err(format!(
+                        "{context}.source_authority project_owned root bytes do not match the authority digest"
                     ));
                 }
             }
@@ -754,7 +814,10 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.source_edges must be strictly sorted by owner, requested path, and target"
                 ));
             }
-            if !library.source_edges.is_empty()
+            if (matches!(
+                library.source_authority,
+                ModelSourceAuthority::ProjectOwned { .. }
+            ) || !library.source_edges.is_empty())
                 && let Some(unreachable) = first_unreachable_source(
                     root_path,
                     &library.source_closure,
@@ -765,6 +828,9 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.source_closure member '{}' is not reachable from root_path by authenticated resolution edges",
                     unreachable.display()
                 ));
+            }
+            if !library.source_contents.is_empty() {
+                validate_authenticated_source_projection(&context, library, &source_paths)?;
             }
         }
         if let Some(selected) = &library.selected_corner
@@ -794,9 +860,9 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     "{context}.corners['{corner_key}'] contains an invalid temperature or supply scaling"
                 ));
             }
-            if corner.file_path != library.root_path {
+            if !source_path_is_authorized(library, corner.file_path.as_ref()) {
                 return Err(format!(
-                    "{context}.corners['{corner_key}'] source path does not match the library root path"
+                    "{context}.corners['{corner_key}'] source path is not a member of the authenticated library closure"
                 ));
             }
         }
@@ -810,9 +876,9 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                     model.name
                 ));
             }
-            if model.file_path != library.root_path {
+            if !source_path_is_authorized(library, model.file_path.as_ref()) {
                 return Err(format!(
-                    "{context}.models['{model_key}'] source path does not match the library root path"
+                    "{context}.models['{model_key}'] source path is not a member of the authenticated library closure"
                 ));
             }
             validate_model_numbers(&context, model_key, model)?;
@@ -820,6 +886,160 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
         validate_model_authoring_records(&context, library)?;
     }
     Ok(())
+}
+
+fn source_path_is_authorized(library: &ProjectModelLibrary, source_path: Option<&PathBuf>) -> bool {
+    if library.source_closure.is_empty() {
+        match library.source_authority {
+            // Legacy external projects may retain parsed models from include
+            // members while lacking the authenticated closure introduced by
+            // later schemas. Keep those absolute identities diagnosable; the
+            // empty closure still blocks every execution path until refresh.
+            ModelSourceAuthority::External => {
+                source_path.is_some_and(|path| is_portable_absolute_path(path))
+            }
+            ModelSourceAuthority::BuiltIn => source_path.is_none(),
+            ModelSourceAuthority::ProjectOwned { .. } => false,
+        }
+    } else {
+        source_path.is_some_and(|path| {
+            library
+                .source_closure
+                .iter()
+                .any(|source| source.path == *path)
+        })
+    }
+}
+
+fn validate_authenticated_source_projection(
+    context: &str,
+    library: &ProjectModelLibrary,
+    source_paths: &HashSet<&PathBuf>,
+) -> Result<(), String> {
+    let root = library
+        .root_path
+        .as_ref()
+        .expect("authenticated closure validation requires a root path");
+    let sources = library
+        .source_contents
+        .iter()
+        .map(|content| (content.path.clone(), content.bytes.clone()));
+    let dependencies =
+        library
+            .source_edges
+            .iter()
+            .map(|edge| rspice_core::library::ResolvedLibDependency {
+                owner: edge.owner.clone(),
+                requested_path: edge.requested_path.clone(),
+                target: edge.target.clone(),
+            });
+    let mut parser = rspice_core::library::LibParser::new(
+        root.parent().unwrap_or_else(|| std::path::Path::new(".")),
+    );
+    let parsed = parser
+        .parse_authenticated_closure(root.clone(), sources, dependencies)
+        .map_err(|error| format!("{context}.source_contents cannot be authenticated: {error}"))?;
+    if !parsed.is_ok() {
+        return Err(format!(
+            "{context}.source_contents do not form a valid authenticated library closure: {}",
+            parsed
+                .errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+
+    let observed_sources = parsed
+        .resolved_sources
+        .iter()
+        .map(|source| &source.path)
+        .collect::<BTreeSet<_>>();
+    let expected_sources = source_paths.iter().copied().collect::<BTreeSet<_>>();
+    if observed_sources != expected_sources {
+        return Err(format!(
+            "{context}.source_closure contains retained members that are not consumed by the authenticated parse"
+        ));
+    }
+    let observed_dependencies = parsed
+        .resolved_dependencies
+        .iter()
+        .map(|edge| (&edge.owner, edge.requested_path.as_str(), &edge.target))
+        .collect::<BTreeSet<_>>();
+    let expected_dependencies = library
+        .source_edges
+        .iter()
+        .map(|edge| (&edge.owner, edge.requested_path.as_str(), &edge.target))
+        .collect::<BTreeSet<_>>();
+    if observed_dependencies != expected_dependencies {
+        return Err(format!(
+            "{context}.source_edges do not exactly describe the dependencies consumed by the authenticated parse"
+        ));
+    }
+
+    if matches!(
+        library.source_authority,
+        ModelSourceAuthority::ProjectOwned { .. }
+    ) {
+        let mut executable_models = parsed.top_level_models.iter().collect::<Vec<_>>();
+        if let Some(selected_corner) = library.selected_corner.as_deref()
+            && let Some(section) = parsed.get_section(selected_corner)
+        {
+            executable_models.extend(&section.models);
+        }
+        let parsed_models = executable_models
+            .into_iter()
+            .map(|model| ModelLibraryManager::convert_parsed_model(model, root))
+            .collect::<Vec<_>>();
+        for (model_name, model) in &library.models {
+            if !parsed_models
+                .iter()
+                .any(|candidate| parsed_model_projection_matches(model, candidate))
+            {
+                return Err(format!(
+                    "{context}.models['{model_name}'] is not an exact projection of any model card in the authenticated source closure"
+                ));
+            }
+        }
+        let expected_model_names = parsed_models
+            .iter()
+            .map(|model| model.name.as_str())
+            .collect::<BTreeSet<_>>();
+        if library.models.len() != expected_model_names.len()
+            || expected_model_names
+                .iter()
+                .any(|model_name| !library.models.contains_key(*model_name))
+        {
+            return Err(format!(
+                "{context}.models does not exactly cover the top-level and selected-section model cards in the authenticated source closure"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parsed_model_projection_matches(persisted: &DeviceModel, parsed: &DeviceModel) -> bool {
+    persisted.name == parsed.name
+        && persisted.model_type == parsed.model_type
+        && persisted.spice_type == parsed.spice_type
+        && persisted.level == parsed.level
+        && persisted.spice_level == parsed.spice_level
+        && persisted.model_version.map(f64::to_bits) == parsed.model_version.map(f64::to_bits)
+        && persisted.l_min.map(f64::to_bits) == parsed.l_min.map(f64::to_bits)
+        && persisted.l_max.map(f64::to_bits) == parsed.l_max.map(f64::to_bits)
+        && persisted.w_min.map(f64::to_bits) == parsed.w_min.map(f64::to_bits)
+        && persisted.w_max.map(f64::to_bits) == parsed.w_max.map(f64::to_bits)
+        && persisted.file_path == parsed.file_path
+        && persisted.parameters.len() == parsed.parameters.len()
+        && persisted.parameters.iter().all(|(name, value)| {
+            parsed
+                .parameters
+                .get(name)
+                .is_some_and(|candidate| candidate.to_bits() == value.to_bits())
+        })
+        && persisted.string_parameters == parsed.string_parameters
+        && persisted.source_line == parsed.source_line
 }
 
 fn validate_model_authoring_records(
@@ -902,6 +1122,130 @@ fn validate_model_authoring_records(
             .map_err(|error| {
                 format!("{context}.model_qualification['{model_name}'] is invalid: {error}")
             })?;
+    }
+
+    for (model_name, metadata) in &library.model_definition_metadata {
+        if metadata.source_identity.is_none() && metadata.sections.is_empty() {
+            continue;
+        }
+        let model = &library.models[model_name];
+        let ModelSourceAuthority::ProjectOwned { source_id, .. } = library.source_authority else {
+            return Err(format!(
+                "{context}.model_definition_metadata['{model_name}'] source identity requires a project-owned source authority"
+            ));
+        };
+        let definition = ProjectModelRevisionDefinition::new(
+            ProjectModelDefinition::from_device_model(model),
+            metadata.clone(),
+        );
+        let expected_digest = definition.expected_source_digest().map_err(|error| {
+            format!(
+                "{context}.model_definition_metadata['{model_name}'] cannot produce an authoritative model revision: {error}"
+            )
+        })?;
+        let identity = definition
+            .project_source_identity()
+            .map_err(|error| {
+                format!(
+                    "{context}.model_definition_metadata['{model_name}'] has an invalid model source identity: {error}"
+                )
+            })?
+            .ok_or_else(|| {
+                format!(
+                    "{context}.model_definition_metadata['{model_name}'] has no canonical source identity"
+                )
+            })?;
+        if identity.source_id != source_id {
+            return Err(format!(
+                "{context}.model_definition_metadata['{model_name}'] is bound to a different project source identity"
+            ));
+        }
+        if identity.content_digest != expected_digest {
+            return Err(format!(
+                "{context}.model_definition_metadata['{model_name}'] is not bound to the exact canonical model digest"
+            ));
+        }
+        let canonical_source = definition.canonical_source().map_err(|error| {
+            format!(
+                "{context}.model_definition_metadata['{model_name}'] canonical source is invalid: {error}"
+            )
+        })?;
+        let model_path = model.file_path.as_ref().ok_or_else(|| {
+            format!(
+                "{context}.models['{model_name}'] has no authenticated source member for its canonical definition"
+            )
+        })?;
+        let retained_source = library
+            .source_contents
+            .iter()
+            .find(|content| content.path == *model_path)
+            .ok_or_else(|| {
+                format!(
+                    "{context}.models['{model_name}'] canonical definition points outside the retained source closure"
+                )
+            })?;
+        let occurrences = retained_source
+            .bytes
+            .windows(canonical_source.len())
+            .filter(|bytes| *bytes == canonical_source.as_bytes())
+            .count();
+        if occurrences != 1 {
+            return Err(format!(
+                "{context}.models['{model_name}'] canonical definition must occur exactly once in authenticated source '{}' (found {occurrences})",
+                model_path.display()
+            ));
+        }
+
+        let source = ModelSourceEvidenceBinding::try_new_project_bound(
+            model_name,
+            identity.source_id,
+            identity.content_digest,
+            identity.revision,
+        )
+        .map_err(|error| {
+            format!(
+                "{context}.model_definition_metadata['{model_name}'] has an invalid evidence source binding: {error}"
+            )
+        })?;
+        for section in &metadata.sections {
+            let ModelSectionQualification::Qualified { evidence_digest } = &section.qualification
+            else {
+                continue;
+            };
+            let qualification = library.model_qualification.get(model_name).ok_or_else(|| {
+                format!(
+                    "{context}.model_definition_metadata['{model_name}'].sections['{}'] claims qualified evidence without a retained qualification record",
+                    section.name
+                )
+            })?;
+            let evidence_digest = evidence_digest
+                .as_deref()
+                .ok_or_else(|| {
+                    format!(
+                        "{context}.model_definition_metadata['{model_name}'].sections['{}'] is qualified without an evidence digest",
+                        section.name
+                    )
+                })?
+                .parse::<ContentDigest>()
+                .map_err(|error| {
+                    format!(
+                        "{context}.model_definition_metadata['{model_name}'].sections['{}'] has an invalid evidence digest: {error}",
+                        section.name
+                    )
+                })?;
+            qualification
+                .validate_exact_section_evidence_digest(
+                    &source,
+                    &section.name,
+                    evidence_digest,
+                )
+                .map_err(|error| {
+                    format!(
+                        "{context}.model_definition_metadata['{model_name}'].sections['{}'] does not resolve to passing evidence for the exact canonical model source: {error}",
+                        section.name
+                    )
+                })?;
+        }
     }
     Ok(())
 }
@@ -1388,6 +1732,317 @@ mod tests {
         restored_manager
             .seal_execution_sources()
             .expect("desktop execution consumes retained project bytes");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn project_owned_multifile_closure_restores_distinct_member_identities() {
+        let (directory, path) = model_fixture();
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .load_library_file(&path, Some("TT"))
+            .expect("load authenticated multi-file fixture");
+        let source_id = crate::product::ModelSourceId::new();
+        let library = manager
+            .get_library_mut("foundry")
+            .expect("fixture library exists");
+        let root = library.root_path.clone().expect("fixture has a root");
+        let root_digest = library
+            .source_closure
+            .iter()
+            .find(|source| source.path == root)
+            .expect("root is pinned")
+            .digest;
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision: crate::product::ObjectRevision::INITIAL,
+            digest: root_digest,
+        };
+        let context = context_from_state(&SimSetupState::new(), &manager)
+            .expect("multi-file project-owned closure validates");
+        std::fs::remove_dir_all(directory).expect("retained restore must not need fixture files");
+
+        let (_, restored, warnings) = context
+            .into_state(project_id())
+            .expect("multi-file project-owned closure restores from retained bytes");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let library = restored.get_library("foundry").expect("library restores");
+        assert_eq!(library.source_closure.len(), 2);
+        assert_eq!(library.source_contents.len(), 2);
+        assert_eq!(library.source_edges.len(), 1);
+        let restored_root = library.root_path.as_ref().expect("root restores");
+        assert_eq!(&library.source_edges[0].owner, restored_root);
+        assert_ne!(library.source_edges[0].target, *restored_root);
+        assert_eq!(
+            library.models["helper"].file_path.as_ref(),
+            Some(&library.source_edges[0].target)
+        );
+        assert_eq!(library.models["helper"].source_line, Some(1));
+        restored
+            .seal_execution_sources()
+            .expect("execution seals the complete retained project closure");
+    }
+
+    #[test]
+    fn project_model_identity_is_bound_to_its_member_digest_and_independent_revision() {
+        let definition = ProjectModelDefinition {
+            name: "member_nch".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Included canonical model".to_owned(),
+            numeric_parameters: std::collections::BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("kp".to_owned(), 0.001),
+            ]),
+            string_parameters: std::collections::BTreeMap::new(),
+        };
+        let mut manager = ModelLibraryManager::new();
+        let base = manager
+            .create_project_model("base-model", &definition)
+            .expect("base metadata is synthesized");
+        let mut metadata = base.after.model_definition_metadata["member_nch"].clone();
+        metadata
+            .sections
+            .push(crate::state::model_library::ModelSectionDefinition {
+                name: "TT".to_owned(),
+                parent: None,
+                overrides: std::collections::BTreeMap::new(),
+                model_files: Vec::new(),
+                qualification: ModelSectionQualification::Unqualified,
+            });
+        let revision = ProjectModelRevisionDefinition::new(definition, metadata);
+        manager
+            .create_project_model_revision(
+                "sectioned-model",
+                &revision,
+                &ModelQualificationState::default(),
+            )
+            .expect("sectioned source is published");
+        let library = manager
+            .get_library_mut("sectioned-model")
+            .expect("sectioned library exists");
+        let root = library
+            .root_path
+            .clone()
+            .expect("project source has a root");
+        let member = root.with_file_name("model-member.lib");
+        let member_bytes = library.source_contents[0].bytes.clone();
+        let member_digest = ContentDigest::from_bytes(Sha256::digest(&member_bytes).into());
+        let root_bytes = b".include \"model-member.lib\"\n".to_vec();
+        let root_digest = ContentDigest::from_bytes(Sha256::digest(&root_bytes).into());
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision: library_revision,
+            ..
+        } = library.source_authority
+        else {
+            panic!("fixture is project-owned");
+        };
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision: library_revision,
+            digest: root_digest,
+        };
+        library.source_closure = vec![
+            ModelSourcePin {
+                path: root.clone(),
+                digest: root_digest,
+            },
+            ModelSourcePin {
+                path: member.clone(),
+                digest: member_digest,
+            },
+        ];
+        library
+            .source_closure
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        library.source_contents = vec![
+            ModelSourceContent {
+                path: root.clone(),
+                bytes: root_bytes,
+            },
+            ModelSourceContent {
+                path: member.clone(),
+                bytes: member_bytes,
+            },
+        ];
+        library
+            .source_contents
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        library.source_edges = vec![ModelSourceEdge {
+            owner: root,
+            requested_path: "model-member.lib".to_owned(),
+            target: member.clone(),
+        }];
+        library
+            .models
+            .get_mut("member_nch")
+            .expect("model projection exists")
+            .file_path = Some(member.clone());
+        for corner in library.corners.values_mut() {
+            corner.file_path = Some(member.clone());
+        }
+        let model_revision = crate::product::ObjectRevision::new(7).expect("fixture revision");
+        let metadata = library
+            .model_definition_metadata
+            .get_mut("member_nch")
+            .expect("typed metadata exists");
+        metadata
+            .source_identity
+            .as_mut()
+            .expect("base model identity is retained")
+            .revision = model_revision.get();
+        for section in &mut metadata.sections {
+            section.model_files[0].revision = model_revision.get();
+        }
+
+        let context = context_from_state(&SimSetupState::new(), &manager).expect(
+            "model identity may use its canonical member digest and revision independently of the library root",
+        );
+        let persisted = context
+            .model_libraries
+            .iter()
+            .find(|library| library.name == "sectioned-model")
+            .expect("sectioned model persists");
+        let ModelSourceAuthority::ProjectOwned {
+            revision: persisted_library_revision,
+            digest: persisted_root_digest,
+            ..
+        } = persisted.source_authority
+        else {
+            panic!("persisted fixture is project-owned");
+        };
+        let identity = persisted.model_definition_metadata["member_nch"]
+            .source_identity
+            .as_ref()
+            .expect("model identity persists");
+        assert_eq!(identity.revision, model_revision.get());
+        assert_ne!(identity.revision, persisted_library_revision.get());
+        assert_eq!(identity.content_digest, member_digest.to_string());
+        assert_ne!(member_digest, persisted_root_digest);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn project_owned_load_rejects_a_tampered_serialized_model_projection() {
+        let (directory, path) = model_fixture();
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .load_library_file(&path, Some("TT"))
+            .expect("load authenticated multi-file fixture");
+        let source_id = crate::product::ModelSourceId::new();
+        let library = manager
+            .get_library_mut("foundry")
+            .expect("fixture library exists");
+        let root = library.root_path.clone().expect("fixture has a root");
+        let root_digest = library
+            .source_closure
+            .iter()
+            .find(|source| source.path == root)
+            .expect("root is pinned")
+            .digest;
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision: crate::product::ObjectRevision::INITIAL,
+            digest: root_digest,
+        };
+        let mut context = context_from_state(&SimSetupState::new(), &manager)
+            .expect("untampered projection validates");
+        std::fs::remove_dir_all(directory).expect("remove model fixture");
+        context.model_libraries[0]
+            .models
+            .get_mut("helper")
+            .expect("helper projection exists")
+            .parameters
+            .insert("kp".to_owned(), 0.75);
+
+        let error = context
+            .validate()
+            .expect_err("serialized projection cannot diverge from retained model cards");
+        assert!(error.contains("not an exact projection"), "{error}");
+    }
+
+    #[test]
+    fn project_load_rejects_qualified_section_without_exact_retained_evidence() {
+        let definition = crate::state::model_library::ProjectModelDefinition {
+            name: "owned_nch".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Persisted project model".to_owned(),
+            numeric_parameters: std::collections::BTreeMap::from([
+                ("level".to_owned(), 1.0),
+                ("kp".to_owned(), 0.001),
+            ]),
+            string_parameters: std::collections::BTreeMap::new(),
+        };
+        let mut manager = ModelLibraryManager::new();
+        manager
+            .create_project_model("owned-models", &definition)
+            .expect("create project model");
+        let mut context =
+            context_from_state(&SimSetupState::new(), &manager).expect("base context validates");
+        let library = context
+            .model_libraries
+            .iter_mut()
+            .find(|library| library.name == "owned-models")
+            .expect("project model library persists");
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            digest,
+        } = library.source_authority
+        else {
+            panic!("fixture source is project-owned");
+        };
+        library
+            .model_definition_metadata
+            .get_mut("owned_nch")
+            .expect("fixture metadata")
+            .sections
+            .push(crate::state::model_library::ModelSectionDefinition {
+                name: "TT".to_owned(),
+                parent: None,
+                overrides: std::collections::BTreeMap::new(),
+                model_files: vec![crate::state::model_library::ModelFileIdentity {
+                    source_id: source_id.to_string(),
+                    revision: revision.get(),
+                    content_digest: digest.to_string(),
+                    display_name: "definition.model".to_owned(),
+                }],
+                qualification: ModelSectionQualification::Qualified {
+                    evidence_digest: Some("0".repeat(64)),
+                },
+            });
+        let bound = ProjectModelRevisionDefinition::new(
+            ProjectModelDefinition::from_device_model(&library.models["owned_nch"]),
+            library.model_definition_metadata["owned_nch"].clone(),
+        )
+        .bind_project_source_identity(source_id, revision, "definition.model")
+        .expect("fixture section identity binds to its canonical model digest");
+        let canonical_source = bound
+            .canonical_source()
+            .expect("fixture canonical source renders")
+            .into_bytes();
+        let identity = bound
+            .project_source_identity()
+            .expect("fixture source identity validates")
+            .expect("sectioned fixture has a source identity");
+        library
+            .model_definition_metadata
+            .insert("owned_nch".to_owned(), bound.metadata);
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision,
+            digest: identity.content_digest,
+        };
+        library.source_closure[0].digest = identity.content_digest;
+        library.source_contents[0].bytes = canonical_source;
+
+        let error = context
+            .validate()
+            .expect_err("a qualified section cannot invent its evidence digest");
+        assert!(
+            error.contains("claims qualified evidence without a retained qualification record"),
+            "{error}"
+        );
     }
 
     #[test]

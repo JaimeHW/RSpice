@@ -61,10 +61,11 @@ struct EffectiveParameters {
 impl ProjectModelRevisionDefinition {
     #[must_use]
     pub fn new(base: ProjectModelDefinition, metadata: ModelDefinitionMetadata) -> Self {
+        let source_identity = metadata.source_identity.clone();
         Self {
             base,
             metadata,
-            source_identity: None,
+            source_identity,
         }
     }
 
@@ -87,6 +88,7 @@ impl ProjectModelRevisionDefinition {
         };
         validate_source_display_name(&identity.display_name)?;
         self.source_identity = Some(identity.clone());
+        self.metadata.source_identity = Some(identity.clone());
         for section in &mut self.metadata.sections {
             section.model_files = vec![identity.clone()];
         }
@@ -99,6 +101,13 @@ impl ProjectModelRevisionDefinition {
             );
         };
         bound_identity.content_digest.clone_from(&digest);
+        let Some(metadata_identity) = self.metadata.source_identity.as_mut() else {
+            return invalid(
+                "metadata.source_identity",
+                "project source identity was not retained in model metadata",
+            );
+        };
+        metadata_identity.content_digest.clone_from(&digest);
         for section in &mut self.metadata.sections {
             section.model_files[0].content_digest.clone_from(&digest);
         }
@@ -170,6 +179,56 @@ impl ProjectModelRevisionDefinition {
             );
         }
         self.verify_parsed_source(source, &prepared)
+    }
+
+    /// Render the exact standalone model card executed by a qualification
+    /// vector. `None` selects the top-level base card; a named section selects
+    /// that section's fully resolved effective card. The returned bytes are a
+    /// literal contiguous slice of [`Self::canonical_source`], allowing the
+    /// qualification domain to prove section selection without consulting
+    /// mutable manager state or reconstructing an override graph.
+    pub fn qualification_model_source(
+        &self,
+        section: Option<&str>,
+    ) -> Result<String, ProjectModelRevisionError> {
+        let prepared = self.prepare()?;
+        let source = match section {
+            None => self
+                .base
+                .canonical_source()
+                .map_err(ProjectModelRevisionError::BaseDefinition)?,
+            Some(section_name) => {
+                let section = prepared
+                    .sections
+                    .iter()
+                    .find(|candidate| candidate.name.eq_ignore_ascii_case(section_name))
+                    .ok_or_else(|| ProjectModelRevisionError::Invalid {
+                        path: "qualification.section".to_owned(),
+                        message: format!("model section {section_name:?} does not exist"),
+                    })?;
+                ProjectModelDefinition {
+                    name: self.base.name.clone(),
+                    spice_type: self.base.spice_type.clone(),
+                    description: String::new(),
+                    numeric_parameters: section.parameters.numeric.clone(),
+                    string_parameters: section.parameters.strings.clone(),
+                }
+                .canonical_source()
+                .map_err(ProjectModelRevisionError::BaseDefinition)?
+            }
+        };
+        let canonical = self.render_prepared(&prepared)?;
+        if !canonical
+            .as_bytes()
+            .windows(source.len())
+            .any(|bytes| bytes == source.as_bytes())
+        {
+            return invalid(
+                "qualification.model_source",
+                "qualification model card is not a literal member of the canonical source",
+            );
+        }
+        Ok(source)
     }
 
     /// Return the one typed source identity shared by every section. A
@@ -287,7 +346,20 @@ impl ProjectModelRevisionDefinition {
     fn validate_source_identity_contract(
         &self,
     ) -> Result<Option<ProjectModelSourceIdentity>, ProjectModelRevisionError> {
-        let mut shared = self.source_identity.as_ref();
+        let mut shared = self
+            .source_identity
+            .as_ref()
+            .or(self.metadata.source_identity.as_ref());
+        if let (Some(internal), Some(metadata)) = (
+            self.source_identity.as_ref(),
+            self.metadata.source_identity.as_ref(),
+        ) && internal != metadata
+        {
+            return invalid(
+                "metadata.source_identity",
+                "metadata identity does not match the revision source identity",
+            );
+        }
         for (index, section) in self.metadata.sections.iter().enumerate() {
             if section.model_files.len() != 1 {
                 return invalid(
@@ -754,6 +826,7 @@ mod tests {
         let source = source_identity();
         let metadata = ModelDefinitionMetadata {
             schema_version: MODEL_DEFINITION_METADATA_SCHEMA_VERSION,
+            source_identity: None,
             parameters: vec![
                 parameter("vth0", ParameterValue::Numeric(finite(0.45))),
                 parameter("mode", ParameterValue::String("physical".to_owned())),
@@ -796,12 +869,12 @@ mod tests {
         assert_eq!(
             source,
             "* Project-owned model\n\
-.model owned_nch NMOS ( LEVEL=1 VTH0=0.45 MODE=physical )\n\
+.model owned_nch NMOS ( LEVEL=1 VTH0=0.45 MODE=\"physical\" )\n\
 .lib SS\n\
-.model owned_nch NMOS ( LEVEL=1 VTH0=0.5 MODE=empirical )\n\
+.model owned_nch NMOS ( LEVEL=1 VTH0=0.5 MODE=\"empirical\" )\n\
 .endl SS\n\
 .lib TT\n\
-.model owned_nch NMOS ( LEVEL=1 VTH0=0.5 MODE=physical )\n\
+.model owned_nch NMOS ( LEVEL=1 VTH0=0.5 MODE=\"physical\" )\n\
 .endl TT\n"
         );
         assert_eq!(source, revision.canonical_source().expect("repeat render"));
@@ -892,8 +965,12 @@ mod tests {
     }
 
     #[test]
-    fn parser_detects_string_values_that_cannot_preserve_their_type() {
+    fn quoted_numeric_looking_string_values_preserve_their_type() {
         let mut revision = revision_fixture();
+        let source_identity = revision
+            .project_source_identity()
+            .expect("fixture identity validates")
+            .expect("fixture is project-bound");
         revision
             .base
             .string_parameters
@@ -905,10 +982,23 @@ mod tests {
             .find(|parameter| parameter.name == "mode")
             .expect("mode metadata")
             .value = ParameterValue::String("1".to_owned());
-        let error = revision
+        revision = revision
+            .bind_project_source_identity(
+                source_identity.source_id,
+                source_identity.revision,
+                source_identity.display_name,
+            )
+            .expect("changed source is rebound to its content-derived identity");
+        revision
             .expected_source_digest()
-            .expect_err("numeric-looking string cannot round-trip as a string");
-        assert!(matches!(error, ProjectModelRevisionError::RoundTrip { .. }));
+            .expect("quoted numeric-looking string round-trips as a string");
+        let source = revision
+            .canonical_source()
+            .expect("numeric-looking string renders canonically");
+        assert!(source.contains("MODE=\"1\""));
+        revision
+            .verify_source_round_trip(&source)
+            .expect("quoted numeric-looking string preserves its type");
     }
 
     #[test]
@@ -937,6 +1027,7 @@ mod tests {
         };
         let metadata = ModelDefinitionMetadata {
             schema_version: MODEL_DEFINITION_METADATA_SCHEMA_VERSION,
+            source_identity: None,
             parameters: vec![parameter("is", ParameterValue::Numeric(finite(1.0e-14)))],
             sections: Vec::new(),
             statistics: StatisticalDefinition::default(),

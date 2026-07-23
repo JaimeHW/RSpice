@@ -115,8 +115,14 @@ impl ProjectModelDefinition {
         for (name, value) in &self.string_parameters {
             source.push(' ');
             source.push_str(&name.to_ascii_uppercase());
-            source.push('=');
-            source.push_str(value);
+            source.push_str("=\"");
+            for character in value.chars() {
+                if matches!(character, '\\' | '"') {
+                    source.push('\\');
+                }
+                source.push(character);
+            }
+            source.push('"');
         }
         source.push_str(" )\n");
         Ok(source)
@@ -165,7 +171,14 @@ mod tests {
         };
         assert_eq!(
             definition.canonical_source().expect("valid source"),
-            "* Project model\n.model nch_owned NMOS ( LEVEL=1 VTH0=0.48 VERSION_TAG=r1 )\n"
+            "* Project model\n.model nch_owned NMOS ( LEVEL=1 VTH0=0.48 VERSION_TAG=\"r1\" )\n"
+        );
+
+        definition.string_parameters =
+            BTreeMap::from([("version_tag".to_owned(), "r\\1".to_owned())]);
+        assert_eq!(
+            definition.canonical_source().expect("escaped source"),
+            "* Project model\n.model nch_owned NMOS ( LEVEL=1 VTH0=0.48 VERSION_TAG=\"r\\\\1\" )\n"
         );
 
         definition

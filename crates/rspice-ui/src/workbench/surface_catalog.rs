@@ -267,7 +267,7 @@ define_surface_catalog! {
     MeasurementInterchangeWorkbench => { id: "measurement-interchange-workbench", label: "Measurement data interchange", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=measurement-interchange-workbench" },
     StatisticalVisualizationWorkbench => { id: "statistical-visualization-workbench", label: "Statistical visualization laboratory", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=statistical-visualization-workbench" },
     ReportAuthoring => { id: "report-authoring", label: "Verification report · RC-19", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=report-authoring" },
-    ModelEditor => { id: "model-editor", label: "Device model editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
+    ModelEditor => { id: "model-editor", label: "Device model and parameter editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
     PcellDesigner => { id: "pcell-designer", label: "Parameterized-cell designer", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=pcell-designer" },
     ModelExtraction => { id: "model-extraction", label: "Model extraction · BSIM4 candidate", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-extraction" },
     ModelCorrelation => { id: "model-correlation", label: "Measurement correlation · OPA189_A", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-correlation" },

@@ -474,6 +474,7 @@ pub struct Dialog<'a> {
     initial_focus: DialogInitialFocus,
     retained_cancel_focus: Option<DialogInitialFocus>,
     initial_height: Option<f32>,
+    fixed_height: Option<f32>,
 }
 
 impl<'a> Dialog<'a> {
@@ -502,6 +503,7 @@ impl<'a> Dialog<'a> {
             initial_focus: DialogInitialFocus::Container,
             retained_cancel_focus: None,
             initial_height: None,
+            fixed_height: None,
         }
     }
 
@@ -516,6 +518,14 @@ impl<'a> Dialog<'a> {
     /// this removes the provisional max-height jump before that measurement.
     pub fn initial_height(mut self, height: f32) -> Self {
         self.initial_height = height.is_finite().then(|| height.max(1.0));
+        self
+    }
+
+    /// Hold a workflow surface at one authored desktop height across validation,
+    /// error, and progress states. Narrow edge-to-edge layouts still use the
+    /// available viewport height, and overflowing body content remains scrollable.
+    pub fn fixed_height(mut self, height: f32) -> Self {
+        self.fixed_height = height.is_finite().then(|| height.max(1.0));
         self
     }
 
@@ -663,9 +673,10 @@ impl<'a> Dialog<'a> {
         let id = Id::new(("rspice.dialog", self.title));
         let measured_height_id =
             id.with(("measured-surface-height", self.transaction_state.is_some()));
-        let measured_height = ctx
-            .data(|data| data.get_temp::<f32>(measured_height_id))
-            .or(self.initial_height);
+        let measured_height = self.fixed_height.or_else(|| {
+            ctx.data(|data| data.get_temp::<f32>(measured_height_id))
+                .or(self.initial_height)
+        });
         let layout = DialogLayout::resolve(self.size, screen, measured_height);
         let large_targets = layout.narrow
             || (self.size == DialogSize::AnalysisCatalog && screen.width() <= 820.0)
@@ -852,7 +863,8 @@ impl<'a> Dialog<'a> {
             rendered_surface_height = Some(surface_output.response.rect.height());
         });
 
-        if !layout.fill_height
+        if self.fixed_height.is_none()
+            && !layout.fill_height
             && let Some(height) = rendered_surface_height
         {
             let maximum = self.size.spec().max_height.min(screen.height().max(1.0));
@@ -1636,6 +1648,22 @@ mod tests {
         let layout = DialogLayout::resolve(DialogSize::Transaction, screen, dialog.initial_height);
         assert_eq!(layout.surface_rect.size(), vec2(760.0, 370.0));
         assert_eq!(layout.surface_rect.center(), screen.center());
+    }
+
+    #[test]
+    fn authored_fixed_height_is_stable_and_rejects_invalid_values() {
+        let fixed = Dialog::new("Test", TEST_TITLE, "Accept").fixed_height(612.0);
+        assert_eq!(fixed.fixed_height, Some(612.0));
+
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 900.0));
+        let layout = DialogLayout::resolve(DialogSize::WideWorkflow, screen, fixed.fixed_height);
+        assert_eq!(layout.surface_rect.size(), vec2(980.0, 612.0));
+        assert_eq!(layout.surface_rect.center(), screen.center());
+
+        let clamped = Dialog::new("Test", TEST_TITLE, "Accept").fixed_height(0.0);
+        assert_eq!(clamped.fixed_height, Some(1.0));
+        let ignored = Dialog::new("Test", TEST_TITLE, "Accept").fixed_height(f32::NAN);
+        assert_eq!(ignored.fixed_height, None);
     }
 
     #[test]
