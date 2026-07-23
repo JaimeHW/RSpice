@@ -23223,6 +23223,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if command.eq_ignore_ascii_case(".sens") {
                 continue;
             }
+            if command.eq_ignore_ascii_case(".lin") {
+                if Self::lin_directive_is_ac_only(&trimmed)? {
+                    continue;
+                }
+                return Err(
+                    "wrapper-origin frequency-domain static output contract does not cover .LIN directives other than SPARCALC=0"
+                        .to_string(),
+                );
+            }
             if Self::is_extra_wrapper_ac_output_analysis_command(command) {
                 return Err(format!(
                     "wrapper-origin frequency-domain static output contract does not cover {command} directives"
@@ -23287,6 +23296,37 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             );
         }
         Ok(())
+    }
+
+    fn lin_directive_is_ac_only(line: &str) -> Result<bool, String> {
+        let fields = Self::split_grouped_whitespace_fields(line, ".LIN directive")?;
+        if fields
+            .first()
+            .is_none_or(|command| !command.eq_ignore_ascii_case(".lin"))
+        {
+            return Ok(false);
+        }
+        let token_refs = fields.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut index = 1usize;
+        let mut sparcalc = None;
+        while index < token_refs.len() {
+            let Some((key, value, consumed)) = Self::print_option_assignment(&token_refs, index)
+            else {
+                return Ok(false);
+            };
+            if !key.eq_ignore_ascii_case("SPARCALC") || sparcalc.is_some() {
+                return Ok(false);
+            }
+            let Ok(parsed) = crate::netlist::lexer::parse_spice_value(value) else {
+                return Ok(false);
+            };
+            if !parsed.is_finite() || parsed.fract() != 0.0 || !(0.0..=1.0).contains(&parsed) {
+                return Ok(false);
+            }
+            sparcalc = Some(parsed as i32);
+            index += consumed;
+        }
+        Ok(sparcalc == Some(0))
     }
 
     fn validate_native_static_csd_tran_wrapper_contract(source: &str) -> Result<(), String> {
@@ -50716,8 +50756,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .copied()
             .filter(|frequency| frequency.is_finite())
             .fold(0.0_f64, f64::max);
+        let lin_ac_only = netlist.lin_analysis == Some(crate::netlist::LinAnalysis::AcOnly);
         for element in &netlist.elements {
             match &element.kind {
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::RfPort { .. })
+                | ElementKind::CurrentSource(crate::netlist::SourceSpec::RfPort { .. })
+                    if lin_ac_only => {}
                 ElementKind::VoltageSource(crate::netlist::SourceSpec::RfPort { .. })
                 | ElementKind::CurrentSource(crate::netlist::SourceSpec::RfPort { .. }) => {
                     return Err(format!(
@@ -86083,6 +86127,60 @@ Q1 c b 0 QN
         let error = XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(source, false)
             .expect_err(".LIN must not be silently ignored by the static AC output contract");
         assert!(error.contains(".LIN") || error.contains(".lin"), "{error}");
+    }
+
+    #[test]
+    fn wrapper_static_ac_contract_accepts_explicit_sparcalc_zero() {
+        let source = "ordinary AC fixture with explicit LIN mode\n\
+                      V1 in 0 AC 1\n\
+                      R1 in out 1k\n\
+                      C1 out 0 1u\n\
+                      .AC LIN 2 1 2\n\
+                      .PRINT AC VM(out)\n\
+                      .LIN SPARCALC=0\n\
+                      .END\n";
+
+        XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(source, false)
+            .expect("SPARCALC=0 explicitly selects ordinary AC output");
+        let netlist = Netlist::parse(source).expect("SPARCALC=0 parses as typed LIN metadata");
+        assert_eq!(
+            netlist.lin_analysis,
+            Some(crate::netlist::LinAnalysis::AcOnly)
+        );
+
+        let sparcalc_one = source.replace("SPARCALC=0", "SPARCALC=1");
+        assert!(
+            XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(&sparcalc_one, false)
+                .is_err(),
+            "SPARCALC=1 remains outside the ordinary-AC contract"
+        );
+        assert!(
+            Netlist::parse(&sparcalc_one).is_err(),
+            "SPARCALC=1 must not be silently ignored by the typed parser"
+        );
+    }
+
+    #[test]
+    fn static_ac_contract_admits_rf_port_only_with_sparcalc_zero() {
+        let source = "RF port ordinary AC fixture\n\
+                      V1 in 0 AC 1 PORT=1 Z0=50\n\
+                      R1 in out 1k\n\
+                      C1 out 0 1u\n\
+                      .AC LIN 2 1 2\n\
+                      .PRINT AC VM(out)\n\
+                      .LIN SPARCALC=0\n\
+                      .END\n";
+        let netlist = Netlist::parse(source).expect("RF port SPARCALC=0 fixture parses");
+        assert!(netlist.elements.iter().any(|element| {
+            matches!(
+                &element.kind,
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::RfPort { .. })
+            )
+        }));
+        let ac = XyceTestRunner::single_ac_analysis(&netlist)
+            .expect("RF port SPARCALC=0 fixture has one AC analysis");
+        XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+            .expect("RF port is ordinary AC when SPARCALC=0 is explicit");
     }
 
     #[test]

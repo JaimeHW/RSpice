@@ -69,6 +69,7 @@ pub(super) struct ParseState {
     pub(super) elements: Vec<Element>,
     pub(super) element_names: ElementNameRegistry,
     pub(super) analyses: Vec<AnalysisCommand>,
+    pub(super) lin_analysis: Option<LinAnalysis>,
     pub(super) fft_analyses: Vec<FftAnalysis>,
     pub(super) data_tables: Vec<DataTable>,
     pub(super) models: Vec<ModelDef>,
@@ -107,6 +108,7 @@ impl ParseState {
             elements: Vec::new(),
             element_names: ElementNameRegistry::default(),
             analyses: Vec::new(),
+            lin_analysis: None,
             fft_analyses: Vec::new(),
             data_tables: Vec::new(),
             models: Vec::new(),
@@ -169,6 +171,7 @@ impl ParseState {
             title,
             elements: self.elements,
             analyses: self.analyses,
+            lin_analysis: self.lin_analysis,
             fft_analyses: self.fft_analyses,
             data_tables: self.data_tables,
             models: self.models,
@@ -236,6 +239,7 @@ impl ParseState {
 
 pub(super) struct ParseLineContext<'a> {
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
+    pub(super) lin_analysis: &'a mut Option<LinAnalysis>,
     pub(super) fft_analyses: &'a mut Vec<FftAnalysis>,
     pub(super) unknown_warned: &'a mut HashSet<String>,
     pub(super) models: &'a mut Vec<ModelDef>,
@@ -256,6 +260,7 @@ pub(super) struct ParseLineContext<'a> {
 
 pub(super) struct ParseCommandContext<'a> {
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
+    pub(super) lin_analysis: &'a mut Option<LinAnalysis>,
     pub(super) fft_analyses: &'a mut Vec<FftAnalysis>,
     pub(super) unknown_warned: &'a mut HashSet<String>,
     pub(super) models: &'a mut Vec<ModelDef>,

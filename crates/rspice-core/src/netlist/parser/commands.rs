@@ -11,6 +11,7 @@ pub(super) fn parse_command(
 ) -> Result<(), ParseError> {
     let ParseCommandContext {
         analyses,
+        lin_analysis,
         fft_analyses,
         unknown_warned,
         models,
@@ -100,6 +101,9 @@ pub(super) fn parse_command(
                 start_freq,
                 stop_freq,
             });
+        }
+        ".LIN" => {
+            parse_lin_command(stream, line_num, params, lin_analysis)?;
         }
         ".HB" => {
             let mut frequencies = Vec::new();
@@ -441,6 +445,75 @@ pub(super) fn parse_command(
         reject_unconsumed_command_tokens(stream, line_num, &cmd)?;
     }
 
+    Ok(())
+}
+
+fn parse_lin_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    lin_analysis: &mut Option<crate::netlist::LinAnalysis>,
+) -> Result<(), ParseError> {
+    let mut sparcalc = None;
+    let mut saw_assignment = false;
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+        let key = expect_ident(stream, line_num)?;
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    ".LIN parameter '{key}' requires an explicit NAME=value assignment"
+                ),
+            });
+        }
+        let value = expect_value(stream, line_num, params)?;
+        saw_assignment = true;
+        if key.eq_ignore_ascii_case("SPARCALC") {
+            if sparcalc.is_some() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".LIN SPARCALC may be specified only once".to_string(),
+                });
+            }
+            if !value.is_finite() || value.fract() != 0.0 || !(0.0..=1.0).contains(&value) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        ".LIN SPARCALC requires a finite integer 0 or 1, found {value}"
+                    ),
+                });
+            }
+            sparcalc = Some(value as i32);
+        } else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    ".LIN parameter '{key}' is not in the executable SPARCALC=0 subset"
+                ),
+            });
+        }
+    }
+
+    if !saw_assignment || sparcalc != Some(0) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".LIN currently executes only the explicit SPARCALC=0 ordinary-AC mode"
+                .to_string(),
+        });
+    }
+    if lin_analysis
+        .replace(crate::netlist::LinAnalysis::AcOnly)
+        .is_some()
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".LIN may appear only once in a netlist".to_string(),
+        });
+    }
     Ok(())
 }
 

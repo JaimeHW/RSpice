@@ -1796,6 +1796,17 @@ impl FftAnalysis {
     pub const DEFAULT_ALPHA: Value = 3.0;
 }
 
+/// Semantic subset of Xyce's `.LIN` linear-network directive.
+///
+/// `SPARCALC=0` explicitly selects the ordinary AC calculation and leaves
+/// `.PRINT AC` as the primary output.  Other `.LIN` modes require the full
+/// multi-port Touchstone contract and remain fail-closed in the Xyce runner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinAnalysis {
+    /// Disable S-parameter calculation; execute the deck's normal `.AC`.
+    AcOnly,
+}
+
 /// Analysis command from netlist
 #[derive(Debug, Clone)]
 pub enum AnalysisCommand {

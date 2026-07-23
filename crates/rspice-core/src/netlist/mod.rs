@@ -635,6 +635,11 @@ pub struct Netlist {
     pub elements: Vec<Element>,
     /// Analysis commands
     pub analyses: Vec<AnalysisCommand>,
+    /// Optional `.LIN` directive semantics.  Only `SPARCALC=0` is currently
+    /// executable as an ordinary AC analysis; full Touchstone `.LIN` output
+    /// remains an explicit runner contract until its multi-port solver is
+    /// wired through.
+    pub lin_analysis: Option<LinAnalysis>,
     /// Typed `.FFT` post-processing requests. These remain inert unless the
     /// selected primary analysis is transient.
     pub fft_analyses: Vec<FftAnalysis>,
@@ -2475,6 +2480,7 @@ impl Default for Netlist {
             title: String::new(),
             elements: Vec::new(),
             analyses: Vec::new(),
+            lin_analysis: None,
             fft_analyses: Vec::new(),
             data_tables: Vec::new(),
             models: Vec::new(),

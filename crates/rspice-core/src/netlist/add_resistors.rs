@@ -798,6 +798,7 @@ fn clone_netlist_with_abort(
         title,
         elements,
         analyses,
+        lin_analysis: source.lin_analysis,
         fft_analyses,
         data_tables,
         models,
