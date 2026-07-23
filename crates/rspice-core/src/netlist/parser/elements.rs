@@ -852,6 +852,7 @@ pub(super) fn parse_pspice_u_device(
 
     let (kind, count) = parse_pspice_u_kind_and_count(&fields[1]);
     match kind.as_str() {
+        "ADD" => parse_pspice_u_add(&name, &fields, line_num, elements, params),
         "BUF3" | "BUF3A" => parse_pspice_u_tristate(
             &name,
             &fields,
@@ -1167,6 +1168,165 @@ pub(super) fn parse_pspice_u_device(
             message: format!(
                 "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, CONSTRAINT, DFF, DLTCH, DLYLINE, JKFF, TFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
+            ),
+        }),
+    }
+}
+
+fn parse_pspice_u_add(
+    name: &str,
+    fields: &[String],
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let pins = &fields[4..];
+    let required = 3 + 2 + 1;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice ADD U-device '{}' requires three input pins, two output pins, and a timing model",
+                name
+            ),
+        });
+    }
+
+    let timing_model =
+        pspice_u_timing_model_token(&pins[required - 1]).ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice ADD U-device '{}' requires a timing model after its output pins",
+                name
+            ),
+        })?;
+    let mut pspice_u_timing =
+        pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num).ok_or_else(
+            || ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "PSpice ADD U-device '{}' requires a valid timing model",
+                    name
+                ),
+            },
+        )?;
+    pspice_u_timing.power_pins = Some((
+        normalize_pspice_u_node(&fields[2]),
+        normalize_pspice_u_node(&fields[3]),
+    ));
+    debug_assert_eq!(pspice_u_timing.timing_model, timing_model);
+
+    for (role, pin) in [
+        ("input", &pins[0]),
+        ("input", &pins[1]),
+        ("input", &pins[2]),
+        ("sum output", &pins[3]),
+        ("carry output", &pins[4]),
+    ] {
+        if pspice_u_is_no_connect(pin) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "PSpice ADD U-device '{}' cannot use {} as a required {}",
+                    name, pin, role
+                ),
+            });
+        }
+    }
+
+    let instance_params = parse_pspice_u_add_ic_params(&pins[required..], name, line_num)?;
+    let ports = vec![
+        XspicePort::Analog(normalize_pspice_u_node(&fields[2])),
+        XspicePort::Analog(normalize_pspice_u_node(&fields[3])),
+        XspicePort::AnalogVector(
+            pins[..3]
+                .iter()
+                .map(|pin| normalize_pspice_u_node(pin))
+                .collect(),
+        ),
+        XspicePort::Conductance(normalize_pspice_u_node(&pins[3])),
+        XspicePort::Conductance(normalize_pspice_u_node(&pins[4])),
+    ];
+    push_pspice_u_xspice_element_with_params(
+        elements,
+        name.to_string(),
+        "d_add",
+        ports,
+        instance_params,
+        Some(pspice_u_timing),
+    );
+    Ok(())
+}
+
+fn parse_pspice_u_add_ic_params(
+    tokens: &[String],
+    name: &str,
+    line_num: usize,
+) -> Result<Vec<(String, Value)>, ParseError> {
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        let Some((key, raw_value)) = token.split_once('=') else {
+            index += 1;
+            continue;
+        };
+        let key = key.trim().to_ascii_uppercase();
+        let raw_value = raw_value.trim();
+        match key.as_str() {
+            "IC" => {
+                let mut parts = raw_value.split(',').map(str::trim).collect::<Vec<_>>();
+                if parts.len() == 1 && index + 1 < tokens.len() && !tokens[index + 1].contains('=')
+                {
+                    parts.push(tokens[index + 1].trim());
+                    index += 1;
+                }
+                if parts.len() != 2 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "PSpice ADD U-device '{}' IC= requires exactly two output states",
+                            name
+                        ),
+                    });
+                }
+                values.push((
+                    "ic_sum".to_string(),
+                    parse_pspice_u_add_ic_value(parts[0], name, line_num)?,
+                ));
+                values.push((
+                    "ic_carry".to_string(),
+                    parse_pspice_u_add_ic_value(parts[1], name, line_num)?,
+                ));
+            }
+            "IC1" | "IC2" => {
+                let parameter = if key == "IC1" { "ic_sum" } else { "ic_carry" };
+                values.push((
+                    parameter.to_string(),
+                    parse_pspice_u_add_ic_value(raw_value, name, line_num)?,
+                ));
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    Ok(values)
+}
+
+fn parse_pspice_u_add_ic_value(
+    raw: &str,
+    name: &str,
+    line_num: usize,
+) -> Result<Value, ParseError> {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "FALSE" | "LOW" | "0" => Ok(0.0),
+        "TRUE" | "HIGH" | "1" => Ok(1.0),
+        _ => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice ADD U-device '{}' IC state '{}' is not TRUE/FALSE",
+                name,
+                raw.trim()
             ),
         }),
     }
