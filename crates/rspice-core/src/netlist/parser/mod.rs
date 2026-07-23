@@ -2683,7 +2683,7 @@ fn normalize_pspice_u_timing_in_elements_with_abort(
             continue;
         };
 
-        let Some(timing) = pspice_u_timing.take() else {
+        let Some(timing) = pspice_u_timing.as_ref() else {
             continue;
         };
         let Some(timing_model) = source_models
@@ -2695,6 +2695,9 @@ fn normalize_pspice_u_timing_in_elements_with_abort(
         if !pspice_u_timing_model_supported(model, timing_model) {
             continue;
         }
+        let timing = pspice_u_timing
+            .take()
+            .expect("PSpice U timing metadata should still be present");
         let alias_name = unique_pspice_u_timing_model_name(scope, &element.name, existing_names);
         let alias =
             pspice_u_timing_alias_model(&alias_name, model, timing_model, timing.delay_mode)
@@ -2791,7 +2794,10 @@ fn pspice_u_gate_model_accepts_ugate_timing(model: &str) -> bool {
 }
 
 fn pspice_u_edge_ff_model_accepts_ueff_timing(model: &str) -> bool {
-    matches!(model.to_ascii_lowercase().as_str(), "d_dff" | "d_jkff")
+    matches!(
+        model.to_ascii_lowercase().as_str(),
+        "d_dff" | "d_jkff" | "d_tff"
+    )
 }
 
 fn pspice_u_tristate_model_accepts_utgate_timing(model: &str) -> bool {

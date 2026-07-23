@@ -879,6 +879,7 @@ pub(super) fn parse_pspice_u_device(
             elements,
             params,
         ),
+        "TFF" => parse_pspice_u_tff(&name, &fields, line_num, elements, params),
         "DLYLINE" => parse_pspice_u_dlyline(&name, &fields, line_num, elements, params),
         "DLTCH" => parse_pspice_u_dlatch(
             &name,
@@ -1164,7 +1165,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, CONSTRAINT, DFF, DLTCH, DLYLINE, JKFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, CONSTRAINT, DFF, DLTCH, DLYLINE, JKFF, TFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
             ),
         }),
@@ -1373,6 +1374,44 @@ fn parse_pspice_u_dff(
             pspice_u_timing.clone(),
         );
     }
+
+    Ok(())
+}
+
+fn parse_pspice_u_tff(
+    name: &str,
+    fields: &[String],
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let pins = &fields[4..];
+    let required = 5;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice TFF U-device '{}' requires T input, CLK input, Q output, QBAR output, and a timing model",
+                name
+            ),
+        });
+    }
+
+    let dpwr = XspicePort::Analog(normalize_pspice_u_node(&fields[2]));
+    let dgnd = XspicePort::Analog(normalize_pspice_u_node(&fields[3]));
+    let toggle = pspice_u_required_digital_port(&pins[0], "T input", fields, line_num, elements)?;
+    let clock = pspice_u_required_digital_port(&pins[1], "clock", fields, line_num, elements)?;
+    let output = pspice_u_nullable_conductance_output_port(&pins[2]);
+    let inverted_output = pspice_u_nullable_conductance_output_port(&pins[3]);
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
+
+    push_pspice_u_xspice_element_with_timing(
+        elements,
+        name.to_string(),
+        "xyce_d_tff",
+        vec![dpwr, dgnd, toggle, clock, output, inverted_output],
+        pspice_u_timing,
+    );
 
     Ok(())
 }
@@ -3231,6 +3270,14 @@ fn pspice_u_nullable_output_port(raw: &str) -> XspicePort {
         XspicePort::Null
     } else {
         XspicePort::Digital(normalize_pspice_u_node(raw))
+    }
+}
+
+fn pspice_u_nullable_conductance_output_port(raw: &str) -> XspicePort {
+    if pspice_u_is_no_connect(raw) {
+        XspicePort::Null
+    } else {
+        XspicePort::Conductance(normalize_pspice_u_node(raw))
     }
 }
 

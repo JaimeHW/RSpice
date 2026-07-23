@@ -9692,6 +9692,40 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_tff_lowers_to_xspice_toggle_flip_flop() {
+        let netlist = Netlist::parse(
+            "pspice u tff\n\
+             U1 TFF $G_DPWR $G_DGND toggle clk q qb dly\n\
+             .end\n",
+        )
+        .expect("PSpice TFF U-device should lower to the Xyce DIG-compatible model");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U1")
+            .expect("U1 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "xyce_d_tff");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Analog("$G_DPWR".to_string()),
+                        XspicePort::Analog("$G_DGND".to_string()),
+                        XspicePort::Digital("TOGGLE".to_string()),
+                        XspicePort::Digital("CLK".to_string()),
+                        XspicePort::Conductance("Q".to_string()),
+                        XspicePort::Conductance("QB".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_digital_constants_create_xspice_drivers() {
         let netlist = Netlist::parse(
             "pspice u digital constants\n\
