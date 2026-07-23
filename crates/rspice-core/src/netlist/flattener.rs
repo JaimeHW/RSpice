@@ -815,6 +815,23 @@ impl<'a> Flattener<'a> {
                 instance_params: instance_params.clone(),
                 deferred_params: deferred_params.clone(),
             },
+            ElementKind::Capacitor {
+                value,
+                value_expr,
+                initial_voltage,
+                model,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Capacitor {
+                value: *value,
+                value_expr: value_expr
+                    .as_ref()
+                    .map(|expr| self.remap_behavioral_expression(expr, prefix, node_map)),
+                initial_voltage: *initial_voltage,
+                model: model.clone(),
+                instance_params: instance_params.clone(),
+                deferred_params: deferred_params.clone(),
+            },
             ElementKind::BehavioralVoltage {
                 expression,
                 tc1,
@@ -1212,23 +1229,27 @@ impl<'a> Flattener<'a> {
                 model,
                 instance_params,
                 deferred_params,
-            } => ElementKind::Capacitor {
-                value: self.resolve_optional_value_expr(*value, value_expr, scope)?,
-                value_expr: None,
-                initial_voltage: *initial_voltage,
-                model: self.resolve_optional_scoped_model(
-                    model,
-                    scope,
-                    element_path,
-                    model_scope_path,
-                )?,
-                instance_params: self.merge_deferred_params(
-                    instance_params,
-                    deferred_params,
-                    scope,
-                )?,
-                deferred_params: Vec::new(),
-            },
+            } => {
+                let (value, value_expr) =
+                    self.resolve_passive_value_expr(*value, value_expr, scope, element_path)?;
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage: *initial_voltage,
+                    model: self.resolve_optional_scoped_model(
+                        model,
+                        scope,
+                        element_path,
+                        model_scope_path,
+                    )?,
+                    instance_params: self.merge_deferred_params(
+                        instance_params,
+                        deferred_params,
+                        scope,
+                    )?,
+                    deferred_params: Vec::new(),
+                }
+            }
             ElementKind::Inductor {
                 value,
                 value_expr,
@@ -3711,6 +3732,81 @@ R1 out 0 1k
         assert!(
             !expression.to_ascii_lowercase().contains("x1.in_1"),
             "subcircuit port probe must not be prefixed as an internal node: {expression}"
+        );
+    }
+
+    #[test]
+    fn top_level_dynamic_capacitor_value_expression_is_preserved() {
+        let netlist = Netlist::parse(
+            "top-level solution-dependent capacitor\n\
+             VCTRL ctrl 0 2.0\n\
+             C1 out 0 C={1p+V(ctrl)}\n\
+             .end\n",
+        )
+        .expect("top-level dynamic capacitor deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("top-level dynamic capacitor deck flattens");
+        let (value, value_expr) = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Capacitor {
+                    value, value_expr, ..
+                } if element.name.eq_ignore_ascii_case("C1") => Some((*value, value_expr)),
+                _ => None,
+            })
+            .expect("flattened top-level capacitor exists");
+
+        assert!(
+            value.is_nan(),
+            "runtime-dependent capacitor values stay unresolved until runtime"
+        );
+        let expression = value_expr
+            .as_deref()
+            .expect("runtime-dependent capacitor expression is preserved");
+        assert!(
+            expression.to_ascii_lowercase().contains("v(ctrl)"),
+            "top-level capacitor probe should remain addressable, got {expression}"
+        );
+    }
+
+    #[test]
+    fn subckt_dynamic_capacitor_value_expression_remaps_voltage_probe() {
+        let netlist = Netlist::parse(
+            "subckt solution dependent capacitor\n\
+             X1 out 0 soldepcap\n\
+             .subckt soldepcap p n\n\
+             Vcontrol cntl n 2.0\n\
+             C1 p n C={1p+V(cntl)}\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("solution-dependent capacitor subcircuit parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("solution-dependent capacitor subcircuit flattens");
+        let (value, value_expr) = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Capacitor {
+                    value, value_expr, ..
+                } if element.name.eq_ignore_ascii_case("X1.C1") => Some((*value, value_expr)),
+                _ => None,
+            })
+            .expect("flattened subcircuit capacitor exists");
+
+        assert!(
+            value.is_nan(),
+            "runtime-dependent capacitor values stay unresolved until runtime"
+        );
+        let expression = value_expr
+            .as_deref()
+            .expect("runtime-dependent capacitor expression is preserved");
+        assert!(
+            expression.to_ascii_lowercase().contains("v(x1.cntl)"),
+            "subcircuit-local capacitor probe should follow flattened hierarchy, got {expression}"
         );
     }
 
