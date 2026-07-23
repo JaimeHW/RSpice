@@ -1605,6 +1605,13 @@ fn pspice_u_dig_model_params(
                 | "xyce_d_or"
                 | "xyce_d_xnor"
                 | "xyce_d_xor"
+                | "xyce_legacy_d_and"
+                | "xyce_legacy_d_inverter"
+                | "xyce_legacy_d_nand"
+                | "xyce_legacy_d_nor"
+                | "xyce_legacy_d_or"
+                | "xyce_legacy_d_xnor"
+                | "xyce_legacy_d_xor"
         );
     if !is_xyce_dig_model {
         return Vec::new();
@@ -1623,13 +1630,25 @@ fn pspice_u_dig_gate_model(
     timing: Option<&crate::netlist::PspiceUTiming>,
 ) -> Option<&'static str> {
     let timing = timing?;
-    timing.power_pins.as_ref()?;
     let timing_model = find_model_def(netlist, &timing.timing_model)?;
     if !timing_model.model_type.eq_ignore_ascii_case("DIG") {
         return None;
     }
+    let is_legacy = model
+        .to_ascii_lowercase()
+        .starts_with("xyce_legacy_d_");
+    if !is_legacy {
+        timing.power_pins.as_ref()?;
+    }
 
     match model.to_ascii_lowercase().as_str() {
+        "xyce_legacy_d_and" => Some("xyce_legacy_d_and"),
+        "xyce_legacy_d_inverter" => Some("xyce_legacy_d_inverter"),
+        "xyce_legacy_d_nand" => Some("xyce_legacy_d_nand"),
+        "xyce_legacy_d_nor" => Some("xyce_legacy_d_nor"),
+        "xyce_legacy_d_or" => Some("xyce_legacy_d_or"),
+        "xyce_legacy_d_xnor" => Some("xyce_legacy_d_xnor"),
+        "xyce_legacy_d_xor" => Some("xyce_legacy_d_xor"),
         "d_add" => Some("xyce_d_add"),
         "d_and" => Some("xyce_d_and"),
         "d_buffer" => Some("xyce_d_buffer"),
@@ -1648,8 +1667,15 @@ fn pspice_u_dig_gate_ports(
     timing: &crate::netlist::PspiceUTiming,
     model: &str,
 ) -> Option<Vec<XspicePort>> {
-    let (dpwr, dgnd) = timing.power_pins.as_ref()?;
-    let (inputs, outputs) = if model.eq_ignore_ascii_case("d_add") {
+    let is_legacy = model
+        .to_ascii_lowercase()
+        .starts_with("xyce_legacy_d_");
+    let (inputs, outputs) = if is_legacy {
+        let [inputs, output] = ports else {
+            return None;
+        };
+        (inputs, vec![output])
+    } else if model.eq_ignore_ascii_case("d_add") {
         let [inputs, sum, carry] = ports else {
             return None;
         };
@@ -1669,11 +1695,16 @@ fn pspice_u_dig_gate_ports(
         }
         _ => return None,
     };
-    let mut effective_ports = vec![
-        XspicePort::Analog(dpwr.clone()),
-        XspicePort::Analog(dgnd.clone()),
-        analog_inputs,
-    ];
+    let mut effective_ports = if is_legacy {
+        vec![analog_inputs]
+    } else {
+        let (dpwr, dgnd) = timing.power_pins.as_ref()?;
+        vec![
+            XspicePort::Analog(dpwr.clone()),
+            XspicePort::Analog(dgnd.clone()),
+            analog_inputs,
+        ]
+    };
     for output in outputs {
         let analog_output = match output {
             XspicePort::Digital(node)
