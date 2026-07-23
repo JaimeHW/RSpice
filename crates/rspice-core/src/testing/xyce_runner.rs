@@ -50859,6 +50859,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     ) || Self::netlist_device_is_single_native_ac_supported_bsim3(
                         netlist,
                         &element.name,
+                    ) || Self::netlist_device_is_single_native_ac_supported_b3soi(
+                        netlist,
+                        &element.name,
                     ) || Self::netlist_device_is_single_native_ac_supported_bsim4(
                         netlist,
                         &element.name,
@@ -50885,7 +50888,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, validated single-device BSIM4 LEVEL=14/54 cards, and validated native legacy level-1 NPN Gummel-Poon sweeps through 10 GHz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, validated single-device BSIMSOI LEVEL=10 cards with explicit SOIMOD=1, validated single-device BSIM4 LEVEL=14/54 cards, and validated native legacy level-1 NPN Gummel-Poon sweeps through 10 GHz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -57684,6 +57687,86 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 && names.insert(name.to_ascii_uppercase())
         }) && names.contains("L")
             && names.contains("W")
+    }
+
+    /// The native BSIMSOI AC path is currently validated for the Xyce
+    /// BSIMSOI3 dynamic-depletion route selected by an explicit LEVEL=10 /
+    /// SOIMOD=1 model card.  Keep the admission structural and fail closed
+    /// around compact/deferred geometry, instance SOIMOD overrides, and
+    /// non-literal model parameters; the native B3SOIDD constructor remains
+    /// the source of truth for the complete numeric model surface.
+    fn netlist_device_is_single_native_ac_supported_b3soi(
+        netlist: &Netlist,
+        instance_name: &str,
+    ) -> bool {
+        let mut matched = false;
+        let mut count = 0usize;
+        for element in &netlist.elements {
+            let ElementKind::Mosfet {
+                model,
+                compact_syntax,
+                instance_params,
+                deferred_params,
+                ..
+            } = &element.kind
+            else {
+                continue;
+            };
+            count += 1;
+            matched |= Self::device_instance_names_match(&element.name, instance_name);
+            if element.nodes.len() != 4
+                || *compact_syntax
+                || !deferred_params.is_empty()
+                || !Self::native_ac_b3soi_instance_params_are_valid(instance_params)
+                || !Self::find_unique_model_in(&netlist.models, model)
+                    .is_some_and(Self::model_is_native_ac_supported_b3soi)
+            {
+                return false;
+            }
+        }
+        matched && count == 1
+    }
+
+    fn native_ac_b3soi_instance_params_are_valid(params: &[(String, Value)]) -> bool {
+        let mut names = BTreeSet::new();
+        params.iter().all(|(name, value)| {
+            value.is_finite()
+                && *value > 0.0
+                && matches!(name.to_ascii_uppercase().as_str(), "L" | "W")
+                && names.insert(name.to_ascii_uppercase())
+        }) && names.contains("L")
+            && names.contains("W")
+    }
+
+    fn model_is_native_ac_supported_b3soi(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+
+        let mut names = BTreeSet::new();
+        let mut level = false;
+        let mut soimod = false;
+        for (name, value) in &model.params {
+            let key = name.to_ascii_uppercase();
+            if !value.is_finite() || !names.insert(key.clone()) {
+                return false;
+            }
+            match key.as_str() {
+                "LEVEL" if (*value - 10.0).abs() <= 1.0e-9 => level = true,
+                "SOIMOD" if (*value - 1.0).abs() <= 1.0e-9 => soimod = true,
+                _ => {}
+            }
+        }
+        level && soimod
     }
 
     fn model_is_native_ac_supported_bsim3(model: &crate::netlist::ModelDef) -> bool {
@@ -86117,6 +86200,69 @@ Q1 c b 0 QN
             XyceTestRunner::validate_native_relational_transient_contract(&unqualified_bjt)
                 .is_err(),
             "a relational family name must not bypass the qualified nonlinear-device policy"
+        );
+    }
+
+    #[test]
+    fn bsim3soi_gain_stage_static_ac_admission_is_exact_and_oracle_backed() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/ACtests/bsim3soi/gain-stagesoi.cir";
+        let path = root.join(relative);
+        let source = fs::read_to_string(&path).expect("read BSIMSOI gain-stage deck");
+        let netlist =
+            XyceTestRunner::parse_xyce_netlist(&source, &path).expect("BSIMSOI deck parses");
+
+        assert!(
+            XyceTestRunner::netlist_device_is_single_native_ac_supported_b3soi(&netlist, "M1"),
+            "the canonical one-device BSIMSOI LEVEL=10/SOIMOD=1 AC envelope admits gain-stagesoi"
+        );
+        let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+        assert!(result.passed, "BSIMSOI gain-stage oracle failed: {result:?}");
+        assert!(
+            !result.expected_unsupported,
+            "BSIMSOI gain-stagesoi must execute"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "unexpected mismatches: {result:?}"
+        );
+
+        let default_relative = "Netlists/ACtests/bsim3soi/gain-stagesoi_default.cir";
+        let default_path = root.join(default_relative);
+        let default_source =
+            fs::read_to_string(&default_path).expect("read default-SOIMOD BSIMSOI deck");
+        let default_netlist = XyceTestRunner::parse_xyce_netlist(&default_source, &default_path)
+            .expect("default-SOIMOD BSIMSOI deck parses");
+        assert!(
+            !XyceTestRunner::netlist_device_is_single_native_ac_supported_b3soi(
+                &default_netlist,
+                "M1"
+            ),
+            "SOIMOD omission must remain fail-closed until its AC oracle is independently qualified"
+        );
+
+        let mut invalid_selector = netlist;
+        let model = invalid_selector
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("nmos"))
+            .expect("nmos model");
+        model
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("SOIMOD"))
+            .expect("SOIMOD parameter")
+            .1 = 2.0;
+        assert!(
+            !XyceTestRunner::netlist_device_is_single_native_ac_supported_b3soi(
+                &invalid_selector,
+                "M1"
+            ),
+            "a non-DD SOIMOD selector must fail closed"
         );
     }
 
