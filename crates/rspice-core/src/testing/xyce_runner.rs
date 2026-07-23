@@ -50815,6 +50815,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     ) || Self::netlist_device_is_single_native_ac_supported_bsim3(
                         netlist,
                         &element.name,
+                    ) || Self::netlist_device_is_single_native_ac_supported_bsim4(
+                        netlist,
+                        &element.name,
                     ) => {}
                 ElementKind::Bjt { .. }
                     if max_frequency <= 100.0
@@ -50838,7 +50841,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, and validated native legacy NPN sweeps through 100 MHz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, validated single-device BSIM4 LEVEL=14/54 cards, and validated native legacy NPN sweeps through 100 MHz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -57240,6 +57243,132 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             name.eq_ignore_ascii_case("VERSION")
                 && matches!(value.to_ascii_lowercase().as_str(), "3.2.2" | "3.3.0")
         })
+    }
+
+    /// The native BSIM4 v4.8 port has a separately validated AC envelope for
+    /// Xyce LEVEL=14/54 cards.  Keep the runner admission fail-closed around
+    /// the same canonical external geometry used by the native builder: one
+    /// four-terminal MOSFET with literal positive L/W and a numeric BSIM4
+    /// model card.  Model construction remains the source of truth for the
+    /// full BSIM4 parameter/selectors surface; this guard only prevents
+    /// compact/deferred cards and non-native model families from falling
+    /// through to a simplified MOS implementation.
+    fn netlist_device_is_single_native_ac_supported_bsim4(
+        netlist: &Netlist,
+        instance_name: &str,
+    ) -> bool {
+        let mut matched = false;
+        let mut count = 0usize;
+        for element in &netlist.elements {
+            let ElementKind::Mosfet {
+                model,
+                compact_syntax,
+                instance_params,
+                deferred_params,
+                ..
+            } = &element.kind
+            else {
+                continue;
+            };
+            count += 1;
+            matched |= Self::device_instance_names_match(&element.name, instance_name);
+            if element.nodes.len() != 4
+                || *compact_syntax
+                || !deferred_params.is_empty()
+                || !Self::native_ac_bsim4_instance_params_are_valid(instance_params)
+                || !Self::find_unique_model_in(&netlist.models, model)
+                    .is_some_and(Self::model_is_native_ac_supported_bsim4)
+            {
+                return false;
+            }
+        }
+        matched && count == 1
+    }
+
+    fn native_ac_bsim4_instance_params_are_valid(params: &[(String, Value)]) -> bool {
+        let mut names = BTreeSet::new();
+        params.iter().all(|(name, value)| {
+            value.is_finite()
+                && *value > 0.0
+                && matches!(name.to_ascii_uppercase().as_str(), "L" | "W")
+                && names.insert(name.to_ascii_uppercase())
+        }) && names.contains("L")
+            && names.contains("W")
+    }
+
+    fn model_is_native_ac_supported_bsim4(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || !model.expr_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+        let mut params = HashMap::with_capacity(model.params.len() + 1);
+        let mut names = BTreeSet::new();
+        let mut level = None;
+        for (name, value) in &model.params {
+            let key = name.to_ascii_uppercase();
+            if !value.is_finite() || !names.insert(key.clone()) {
+                return false;
+            }
+            if key == "LEVEL" {
+                if ![14.0, 54.0].contains(value) {
+                    return false;
+                }
+                level = Some(());
+            }
+            params.insert(key, *value);
+        }
+        if level.is_none() {
+            return false;
+        }
+        for (name, value) in &model.string_params {
+            if !name.eq_ignore_ascii_case("VERSION") {
+                return false;
+            }
+            let version = value.trim().trim_matches(['"', '\'']);
+            let mut parts = version.split('.');
+            let Some(major) = parts.next() else {
+                return false;
+            };
+            let Some(minor) = parts.next() else {
+                return false;
+            };
+            if major.is_empty()
+                || minor.is_empty()
+                || !major.chars().all(|ch| ch.is_ascii_digit())
+                || !minor.chars().all(|ch| ch.is_ascii_digit())
+                || parts
+                    .clone()
+                    .any(|part| part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()))
+            {
+                return false;
+            }
+            let patch = parts.collect::<Vec<_>>().join("");
+            let Ok(version_value) = format!("{major}.{minor}{patch}").parse::<Value>() else {
+                return false;
+            };
+            if !version_value.is_finite()
+                || params
+                    .insert("VERSION".to_string(), version_value)
+                    .is_some()
+            {
+                return false;
+            }
+        }
+        let Ok(native_model) = crate::device::Bsim4v8Model::try_from_params(
+            &params,
+            model.model_type.eq_ignore_ascii_case("PMOS"),
+            300.15,
+        ) else {
+            return false;
+        };
+        native_model.cvcharge_mod_supported_for_charges() || native_model.xpart < 0.0
     }
 
     fn netlist_element_is_native_ac_supported_bulk_mosfet(
@@ -85475,6 +85604,93 @@ Q1 c b 0 QN
             XyceTestRunner::validate_native_relational_transient_contract(&unqualified_bjt)
                 .is_err(),
             "a relational family name must not bypass the qualified nonlinear-device policy"
+        );
+    }
+
+    #[test]
+    fn bsim4_gstage_static_ac_admission_is_exact_and_oracle_backed() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/ACtests/bsim4/gstage.cir";
+        let path = root.join(relative);
+        let source = fs::read_to_string(&path).expect("read BSIM4 gstage deck");
+        let netlist =
+            XyceTestRunner::parse_xyce_netlist(&source, &path).expect("BSIM4 gstage deck parses");
+
+        assert!(
+            XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(&netlist, "M1"),
+            "the canonical one-device BSIM4 AC envelope admits gstage"
+        );
+        let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+        assert!(result.passed, "BSIM4 gstage oracle failed: {result:?}");
+        assert!(!result.expected_unsupported, "BSIM4 gstage must execute");
+        assert!(
+            result.mismatches.is_empty(),
+            "unexpected mismatches: {result:?}"
+        );
+
+        let mut extra_instance_param = netlist.clone();
+        let mos = extra_instance_param
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 element");
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut mos.kind
+        else {
+            panic!("M1 remains a MOSFET");
+        };
+        instance_params.push(("NF".to_string(), 1.0));
+        assert!(
+            !XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(
+                &extra_instance_param,
+                "M1"
+            ),
+            "non-canonical BSIM4 instance geometry must fail closed"
+        );
+
+        let mut invalid_level = netlist.clone();
+        let model = invalid_level
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("N1"))
+            .expect("N1 model");
+        model
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .expect("LEVEL parameter")
+            .1 = 9.0;
+        assert!(
+            !XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(
+                &invalid_level,
+                "M1"
+            ),
+            "a non-BSIM4 model level must fail closed"
+        );
+
+        let mut invalid_selector = netlist;
+        let model = invalid_selector
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("N1"))
+            .expect("N1 model");
+        model
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("CVCHARGEMOD"))
+            .expect("CVCHARGEMOD parameter")
+            .1 = 4.0;
+        assert!(
+            !XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(
+                &invalid_selector,
+                "M1"
+            ),
+            "an unsupported native BSIM4 selector must fail closed"
         );
     }
 
