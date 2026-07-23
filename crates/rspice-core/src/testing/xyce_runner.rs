@@ -50867,7 +50867,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if max_frequency <= 100.0
                         && Self::netlist_device_is_native_legacy_bjt(netlist, &element.name) => {}
                 ElementKind::Bjt { .. }
-                    if max_frequency <= 100.0e6 + 1.0e-6
+                    if max_frequency <= 10.0e9 + 1.0e-3
                         && Self::netlist_device_is_native_static_ac_legacy_npn_bjt(
                             netlist,
                             &element.name,
@@ -50885,7 +50885,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, validated single-device BSIM4 LEVEL=14/54 cards, and validated native legacy NPN sweeps through 100 MHz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, validated single-device BSIM4 LEVEL=14/54 cards, and validated native legacy level-1 NPN Gummel-Poon sweeps through 10 GHz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -57480,9 +57480,24 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             if !Self::device_instance_names_match(&element.name, instance_name) {
                 return false;
             }
-            let ElementKind::Bjt { model, .. } = &element.kind else {
+            let ElementKind::Bjt {
+                model,
+                instance_params,
+                deferred_params,
+                ..
+            } = &element.kind
+            else {
                 return false;
             };
+            let topology_is_qualified = match element.nodes.as_slice() {
+                [_, _, _] => true,
+                [_, _, _, substrate] => Self::node_name_is_ground(substrate),
+                _ => false,
+            };
+            if !topology_is_qualified || !instance_params.is_empty() || !deferred_params.is_empty()
+            {
+                return false;
+            }
             Self::find_model(scoped_models, model)
                 .or_else(|| Self::find_model(models, model))
                 .is_some_and(Self::model_is_native_static_ac_legacy_npn_bjt)
@@ -57501,32 +57516,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn model_is_native_static_ac_legacy_npn_bjt(model: &crate::netlist::ModelDef) -> bool {
-        model.model_type.eq_ignore_ascii_case("NPN")
-            && model.expr_params.is_empty()
-            && model.string_params.is_empty()
-            && model.string_vector_params.is_empty()
-            && model.real_vector_params.is_empty()
-            && model.real_vector_expr_params.is_empty()
-            && model.integer_vector_params.is_empty()
-            && model.params.len() == 6
-            && model.params.iter().all(|(name, value)| {
-                value.is_finite()
-                    && match name.to_ascii_uppercase().as_str() {
-                        "IS" | "BF" | "VAF" | "RB" | "CJC" | "TF" => *value >= 0.0,
-                        _ => false,
-                    }
-            })
-            && ["IS", "BF", "VAF", "RB", "CJC", "TF"].iter().all(|name| {
-                model
-                    .params
-                    .iter()
-                    .filter(|(param, _)| param.eq_ignore_ascii_case(name))
-                    .count()
-                    == 1
-            })
-            && Self::numeric_param_value(&model.params, "IS").is_some_and(|value| value > 0.0)
-            && Self::numeric_param_value(&model.params, "BF").is_some_and(|value| value > 0.0)
-            && Self::numeric_param_value(&model.params, "VAF").is_some_and(|value| value > 0.0)
+        // The native legacy AC companion uses the same Level-1 Gummel-Poon
+        // model equations and parameter envelope that is already validated by
+        // the native Level-1 transient contract. Keep the AC admission tied to
+        // that structural envelope instead of allowing arbitrary BJT cards.
+        Self::model_is_native_transient_level1_npn(model)
     }
 
     fn model_is_native_legacy_diode(model: &crate::netlist::ModelDef) -> bool {
