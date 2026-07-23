@@ -51356,6 +51356,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             });
         let has_qualified_bsim4_capacitor = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_bsim4_capacitor(netlist);
+        let has_qualified_bsim3_capacitor = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_transient_bsim3_capacitor(netlist);
         if (has_qualified_bjt
             || has_qualified_level1_mos
             || has_qualified_ekv26
@@ -51365,8 +51367,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_minimum_diode
             || has_qualified_legacy_diode
             || has_qualified_level9_bsim3
-            || has_qualified_bsim4_capacitor)
+            || has_qualified_bsim4_capacitor
+            || has_qualified_bsim3_capacitor)
             && !has_qualified_bsim4_capacitor
+            && !has_qualified_bsim3_capacitor
             && !Self::native_transient_uses_standard_startup(netlist)
         {
             return Err(
@@ -51550,6 +51554,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         ) => {}
                 ElementKind::Mosfet { .. }
                     if has_qualified_bsim4_capacitor => {}
+                ElementKind::Mosfet { .. }
+                    if has_qualified_bsim3_capacitor => {}
                 ElementKind::Mosfet { .. }
                     if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
                 ElementKind::Mosfet { .. }
@@ -56181,6 +56187,151 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }) && has_length
             && has_width
+    }
+
+    /// The native BSIM3v3 transient implementation has a narrowly qualified
+    /// charge-integration envelope for the Xyce BUG_710_SON BSIM3-as-capacitor
+    /// topology.  This guard is structural: one four-terminal NMOS with
+    /// D/S/B at ground, one positive DC current source injecting the gate, and
+    /// an explicit zero gate initial condition.  Other BSIM3 transient
+    /// networks remain fail-closed until independently reference-backed.
+    fn netlist_is_native_transient_bsim3_capacitor(netlist: &Netlist) -> bool {
+        if !netlist.subcircuits.is_empty()
+            || netlist.models.len() != 1
+            || netlist.elements.len() != 2
+            || netlist.initial_conditions.len() != 1
+            || Self::tran_uses_uic(netlist)
+            || !netlist.node_sets.is_empty()
+            || netlist
+                .analyses
+                .iter()
+                .any(|analysis| matches!(analysis, AnalysisCommand::Temp { .. }))
+            || !netlist
+                .options
+                .temp
+                .is_none_or(|temp| temp.is_finite() && (temp - 27.0).abs() <= 1.0e-9)
+            || !netlist
+                .options
+                .tnom
+                .is_none_or(|tnom| tnom.is_finite() && (tnom - 27.0).abs() <= 1.0e-9)
+            || netlist.initial_conditions[0].voltage_expr.is_some()
+            || !netlist.initial_conditions[0].voltage.is_finite()
+            || netlist.initial_conditions[0].voltage != 0.0
+        {
+            return false;
+        }
+        let Some(mosfet) = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+        else {
+            return false;
+        };
+        let Some(current_source) = netlist
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::CurrentSource(_)))
+        else {
+            return false;
+        };
+        if mosfet.nodes.len() != 4
+            || !mosfet.nodes[0].eq_ignore_ascii_case("0")
+            || !mosfet.nodes[2].eq_ignore_ascii_case("0")
+            || !mosfet.nodes[3].eq_ignore_ascii_case("0")
+            || !netlist.initial_conditions[0]
+                .node
+                .eq_ignore_ascii_case(&mosfet.nodes[1])
+            || current_source.nodes.len() != 2
+            || !current_source.nodes[0].eq_ignore_ascii_case("0")
+            || !current_source.nodes[1].eq_ignore_ascii_case(&mosfet.nodes[1])
+        {
+            return false;
+        }
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &mosfet.kind
+        else {
+            return false;
+        };
+        if *compact_syntax
+            || !deferred_params.is_empty()
+            || !Self::native_transient_bsim3_capacitor_instance_params_are_valid(instance_params)
+            || !Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_transient_bsim3_capacitor)
+        {
+            return false;
+        }
+        let ElementKind::CurrentSource(crate::netlist::SourceSpec::Dc(value)) =
+            &current_source.kind
+        else {
+            return false;
+        };
+        value.is_finite() && *value > 0.0
+    }
+
+    fn native_transient_bsim3_capacitor_instance_params_are_valid(
+        params: &[(String, Value)],
+    ) -> bool {
+        let mut names = BTreeSet::new();
+        let mut has_length = false;
+        let mut has_width = false;
+        params.iter().all(|(name, value)| {
+            let key = name.to_ascii_uppercase();
+            if !value.is_finite() || !names.insert(key.clone()) {
+                return false;
+            }
+            match key.as_str() {
+                "L" => {
+                    has_length = *value > 0.0;
+                    has_length
+                }
+                "W" => {
+                    has_width = *value > 0.0;
+                    has_width
+                }
+                "M" | "AD" | "AS" | "PD" | "PS" => *value > 0.0,
+                _ => false,
+            }
+        }) && has_length
+            && has_width
+    }
+
+    fn model_is_native_transient_bsim3_capacitor(model: &crate::netlist::ModelDef) -> bool {
+        if !model.model_type.eq_ignore_ascii_case("NMOS")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+        let mut names = BTreeSet::new();
+        let mut level = false;
+        let mut tox = false;
+        model.params.iter().all(|(name, value)| {
+            let key = name.to_ascii_uppercase();
+            if !value.is_finite() || !names.insert(key.clone()) {
+                return false;
+            }
+            match key.as_str() {
+                "LEVEL" => {
+                    level = (*value - 9.0).abs() <= 1.0e-9;
+                    level
+                }
+                "TOX" => {
+                    tox = *value > 0.0;
+                    tox
+                }
+                _ => false,
+            }
+        }) && level
+            && tox
     }
 
     fn netlist_element_is_native_level9_xyce_verify_supported(
@@ -85904,6 +86055,69 @@ Q1 c b 0 QN
         assert!(
             !XyceTestRunner::netlist_is_native_transient_bsim4_capacitor(&reversed_source),
             "a reversed current-source topology must fail closed"
+        );
+    }
+
+    #[test]
+    fn bsim3_capacitor_transient_admission_is_exact_and_oracle_backed() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Certification_Tests/BUG_710_SON/b3cap.cir";
+        let path = root.join(relative);
+        let source = fs::read_to_string(&path).expect("read BSIM3 capacitor deck");
+        let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("BSIM3 capacitor deck parses");
+        assert!(
+            XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(&netlist),
+            "the canonical one-device BSIM3 capacitor envelope admits b3cap"
+        );
+        let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+        assert!(result.passed, "BSIM3 capacitor oracle failed: {result:?}");
+        assert!(!result.expected_unsupported, "b3cap must execute");
+        assert!(
+            result.mismatches.is_empty(),
+            "unexpected mismatches: {result:?}"
+        );
+
+        let mut nonzero_initial_condition = netlist.clone();
+        nonzero_initial_condition.initial_conditions[0].voltage = 1.0;
+        assert!(
+            !XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(
+                &nonzero_initial_condition
+            ),
+            "nonzero gate initial conditions must fail closed"
+        );
+
+        let mut reversed_source = netlist.clone();
+        let source = reversed_source
+            .elements
+            .iter_mut()
+            .find(|element| matches!(element.kind, ElementKind::CurrentSource(_)))
+            .expect("I2 element");
+        source.nodes.swap(0, 1);
+        assert!(
+            !XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(&reversed_source),
+            "a reversed current-source topology must fail closed"
+        );
+
+        let mut invalid_level = netlist;
+        let model = invalid_level
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("NCH"))
+            .expect("NCH model");
+        model
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .expect("LEVEL parameter")
+            .1 = 14.0;
+        assert!(
+            !XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(&invalid_level),
+            "a non-BSIM3 model level must fail closed"
         );
     }
 
