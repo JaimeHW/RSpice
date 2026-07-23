@@ -50975,7 +50975,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     Self::validate_static_step_resistor_contract(netlist, &element.name)?;
                 }
                 ElementKind::Capacitor { .. } => {
-                    Self::validate_static_step_capacitor_contract(netlist, &element.name, false)?
+                    Self::validate_static_step_capacitor_contract(netlist, &element.name)?
                 }
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
@@ -51116,9 +51116,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     fn validate_static_step_capacitor_contract(
         netlist: &Netlist,
         element_name: &str,
-        allow_age_params: bool,
     ) -> Result<(), String> {
-        Self::validate_xyce_capacitor_contract_params(netlist, element_name, allow_age_params)?;
+        Self::validate_xyce_capacitor_contract_params(netlist, element_name)?;
         if Self::capacitor_uses_solution_dependent_value(netlist, element_name) {
             return Ok(());
         }
@@ -51165,7 +51164,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     fn validate_xyce_capacitor_contract_params(
         netlist: &Netlist,
         element_name: &str,
-        allow_age_params: bool,
     ) -> Result<(), String> {
         let element = Self::find_capacitor_element(netlist, element_name)
             .ok_or_else(|| format!("capacitor '{}' not found", element_name))?;
@@ -51209,13 +51207,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
 
-        const INSTANCE_PARAMS: &[&str] = &["L", "W", "M", "TEMP", "DTEMP", "TC1", "TC2"];
+        const INSTANCE_PARAMS: &[&str] = &[
+            "L", "W", "M", "MULT", "SCALE", "TEMP", "DTEMP", "TC1", "TC2", "AGE", "D",
+        ];
         for (name, value) in instance_params {
             if !INSTANCE_PARAMS
                 .iter()
                 .any(|candidate| name.eq_ignore_ascii_case(candidate))
-                && !(allow_age_params
-                    && (name.eq_ignore_ascii_case("AGE") || name.eq_ignore_ascii_case("D")))
             {
                 return Err(format!(
                     "native static .PRINT TRAN comparison does not yet support Xyce capacitor instance parameter {} on element '{}'",
@@ -51226,6 +51224,22 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 return Err(format!(
                     "native static .PRINT TRAN comparison does not support capacitor '{}' with non-finite instance parameter {}={}",
                     element_name, name, value
+                ));
+            }
+            if (name.eq_ignore_ascii_case("M")
+                || name.eq_ignore_ascii_case("MULT")
+                || name.eq_ignore_ascii_case("SCALE"))
+                && *value <= 0.0
+            {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison does not support capacitor '{}' with non-positive instance parameter {}={}",
+                    element_name, name, value
+                ));
+            }
+            if name.eq_ignore_ascii_case("AGE") && *value < 0.0 {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison does not support capacitor '{}' with negative AGE={}",
+                    element_name, value
                 ));
             }
         }
@@ -51595,7 +51609,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Capacitor { .. } => Self::validate_static_step_capacitor_contract(
                     netlist,
                     &element.name,
-                    purpose == XyceStaticTranPlanPurpose::AgeCapRelationalFamily,
                 )?,
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
