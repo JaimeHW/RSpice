@@ -56127,8 +56127,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         model_name: &str,
         timing: Option<&crate::netlist::PspiceUTiming>,
     ) -> bool {
+        let model = model_name.to_ascii_lowercase();
+        let is_legacy = model.starts_with("xyce_legacy_d_");
         if !matches!(
-            model_name.to_ascii_lowercase().as_str(),
+            model.as_str(),
             "d_add"
                 | "d_and"
                 | "d_buffer"
@@ -56138,13 +56140,22 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 | "d_or"
                 | "d_xnor"
                 | "d_xor"
+        ) && !matches!(
+            model.as_str(),
+            "xyce_legacy_d_and"
+                | "xyce_legacy_d_inverter"
+                | "xyce_legacy_d_nand"
+                | "xyce_legacy_d_nor"
+                | "xyce_legacy_d_or"
+                | "xyce_legacy_d_xnor"
+                | "xyce_legacy_d_xor"
         ) {
             return false;
         }
         let Some(timing) = timing else {
             return false;
         };
-        timing.power_pins.is_some()
+        (is_legacy || timing.power_pins.is_some())
             && Self::find_unique_model_in(&netlist.models, &timing.timing_model)
                 .is_some_and(|model| model.model_type.eq_ignore_ascii_case("DIG"))
     }
