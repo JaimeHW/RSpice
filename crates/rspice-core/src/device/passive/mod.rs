@@ -9,7 +9,9 @@ mod jiles_atherton;
 mod resistor;
 mod saturable_inductor;
 
-pub use capacitor::Capacitor;
+pub use capacitor::{
+    Capacitor, SolutionDependentCapacitor, SolutionDependentCapacitorLinearization,
+};
 pub use coupled_inductors::{CoupledInductorPair, InductorCoupling, MultiWindingTransformer};
 pub use inductor::Inductor;
 pub use jiles_atherton::{JilesAthertonInductor, JilesAthertonParams};

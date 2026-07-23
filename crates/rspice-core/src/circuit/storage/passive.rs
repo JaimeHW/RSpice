@@ -274,6 +274,14 @@ pub struct Capacitors {
     pub stamps: Vec<TwoTerminalStamp>,
     /// Capacitance values in Farads
     pub capacitances: Vec<Value>,
+    /// Optional compiled solution-dependent capacitance expressions aligned
+    /// with `names` and the other capacitor storage fields.
+    ///
+    /// Static capacitors carry `None`; expression-valued capacitors retain
+    /// their compiled evaluator here until a later circuit phase binds and
+    /// evaluates it. Keeping this separate from the numeric capacitance
+    /// preserves the existing companion-model storage layout.
+    pub value_expressions: Vec<Option<SolutionDependentCapacitor>>,
     /// Previous timestep voltage (t - dt)
     pub v_prev: Vec<Value>,
     /// Voltage from 2 steps ago (t - 2*dt) for Gear2/BDF2
@@ -306,6 +314,7 @@ impl Capacitors {
         self.internal.push(false);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.capacitances.push(capacitance);
+        self.value_expressions.push(None);
         self.v_prev.push(0.0);
         self.v_prev_prev.push(0.0);
         self.v_prev_prev_prev.push(0.0);
@@ -336,6 +345,111 @@ impl Capacitors {
         self.ic.push(Some(ic));
         self.ic_branch_indices.push(None);
         self.ic_branch_csc_indices.push([None; 5]);
+    }
+
+    /// Add a capacitor with a compiled solution-dependent capacitance
+    /// expression. The numeric value is retained as the parse-time fallback
+    /// until a circuit phase evaluates and validates the expression.
+    pub fn add_with_value_expression(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        capacitance: Value,
+        value_expression: SolutionDependentCapacitor,
+    ) {
+        self.add(name, node_pos, node_neg, capacitance);
+        *self
+            .value_expressions
+            .last_mut()
+            .expect("capacitor expression storage follows capacitor storage") =
+            Some(value_expression);
+    }
+
+    /// Bind all retained solution-dependent capacitance expressions to the
+    /// circuit's node and branch maps.
+    pub fn bind_value_expression_references<FN, FB>(
+        &mut self,
+        resolve_node: FN,
+        resolve_branch: FB,
+    ) -> Result<(), String>
+    where
+        FN: Fn(&str) -> Option<usize> + Copy,
+        FB: Fn(&str) -> Option<usize> + Copy,
+    {
+        for expression in self.value_expressions.iter_mut().flatten() {
+            expression.bind_references(resolve_node, resolve_branch)?;
+        }
+        Ok(())
+    }
+
+    /// Access a retained solution-dependent capacitance evaluator by storage
+    /// index.
+    pub fn value_expression(&self, index: usize) -> Option<&SolutionDependentCapacitor> {
+        self.value_expressions
+            .get(index)
+            .and_then(Option::as_ref)
+    }
+
+    /// Mutably access a retained solution-dependent capacitance evaluator by
+    /// storage index for analysis-time evaluation and state updates.
+    pub fn value_expression_mut(
+        &mut self,
+        index: usize,
+    ) -> Option<&mut SolutionDependentCapacitor> {
+        self.value_expressions
+            .get_mut(index)
+            .and_then(Option::as_mut)
+    }
+
+    /// Evaluate a retained solution-dependent capacitance expression.
+    pub fn evaluate_value_expression(
+        &mut self,
+        index: usize,
+        solution: &[Value],
+        time: Value,
+    ) -> Option<Value> {
+        self.value_expression_mut(index)
+            .map(|expression| expression.evaluate(solution, time))
+    }
+
+    /// Evaluate the effective capacitance, applying the static instance/model
+    /// scale stored in `capacitances` to a retained solution-dependent value.
+    /// Static capacitors simply return their stored numeric capacitance.
+    pub fn evaluate_effective_capacitance(
+        &mut self,
+        index: usize,
+        solution: &[Value],
+        time: Value,
+    ) -> Option<Value> {
+        let scale = *self.capacitances.get(index)?;
+        Some(
+            self.evaluate_value_expression(index, solution, time)
+                .unwrap_or(scale)
+                * if self.value_expression(index).is_some() {
+                    scale
+                } else {
+                    1.0
+                },
+        )
+    }
+
+    /// Linearize an effective solution-dependent capacitance, including the
+    /// static instance/model scale. Returns `None` for a static capacitor.
+    pub fn linearize_effective_capacitance(
+        &mut self,
+        index: usize,
+        solution: &[Value],
+        time: Value,
+    ) -> Option<SolutionDependentCapacitorLinearization> {
+        let scale = *self.capacitances.get(index)?;
+        let expression = self.value_expression_mut(index)?;
+        let mut linearization = expression.linearize(solution, time);
+        linearization.value *= scale;
+        for (_, partial) in &mut linearization.partials {
+            *partial *= scale;
+        }
+        Some(linearization)
     }
 
     /// Add a simulator-generated capacitor that owns private integration
@@ -427,6 +541,12 @@ impl Capacitors {
 
     pub fn is_empty(&self) -> bool {
         self.names.is_empty()
+    }
+
+    /// Whether any retained capacitor value must be evaluated from the trial
+    /// circuit solution rather than treated as a fixed numeric value.
+    pub fn has_solution_dependent_values(&self) -> bool {
+        self.value_expressions.iter().any(Option::is_some)
     }
 
     /// Link all stamps to a StaticMatrix for O(1) access
@@ -910,5 +1030,42 @@ mod capacitor_state_tests {
         assert_close(solution[0] + solution[1], 0.0);
         assert!((solution[0] - 1.0).abs() < 2.0e-10);
         assert!((solution[1] + 1.0).abs() < 2.0e-10);
+    }
+
+    #[test]
+    fn solution_dependent_value_expression_stays_aligned_with_capacitor_state() {
+        let mut capacitors = Capacitors::new();
+        capacitors.add("Cstatic".to_string(), 1, 0, 1.0e-12);
+        let expression = SolutionDependentCapacitor::new("Cdynamic".to_string(), "V(ctrl)")
+            .expect("solution-dependent capacitor expression parses");
+        capacitors.add_with_value_expression("Cdynamic".to_string(), 2, 0, 2.0, expression);
+
+        assert!(capacitors.value_expression(0).is_none());
+        assert_eq!(
+            capacitors
+                .value_expression(1)
+                .map(|expression| expression.name.as_str()),
+            Some("Cdynamic")
+        );
+
+        capacitors
+            .bind_value_expression_references(
+                |name| (name.eq_ignore_ascii_case("ctrl")).then_some(1),
+                |_| None,
+            )
+            .expect("capacitor expression references bind");
+        assert_eq!(
+            capacitors.evaluate_value_expression(1, &[2.5], 0.0),
+            Some(2.5)
+        );
+        assert_eq!(
+            capacitors.evaluate_effective_capacitance(1, &[2.5], 0.0),
+            Some(5.0)
+        );
+        let linearization = capacitors
+            .linearize_effective_capacitance(1, &[2.5], 0.0)
+            .expect("dynamic capacitor linearization exists");
+        assert_eq!(linearization.value, 5.0);
+        assert_eq!(linearization.partials, vec![(0, 2.0)]);
     }
 }

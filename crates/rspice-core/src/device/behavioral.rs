@@ -851,6 +851,66 @@ fn analytic_expression_partial(
     derivative.is_finite().then_some(derivative)
 }
 
+/// Evaluate the analytic derivative of a compiled behavioral expression with
+/// respect to one expression-local node voltage. Passive behavioral-value
+/// evaluators use this shared implementation so their Jacobian semantics stay
+/// aligned with B-sources; callers provide a finite-difference fallback when
+/// an expression operator has no analytic derivative.
+pub(crate) fn compiled_expression_node_partial(
+    expr: &Expr,
+    program: &CompiledExpr,
+    node_values: &[Value],
+    branch_values: &[Value],
+    time: Value,
+    frequency: Value,
+    temperature: Value,
+    gmin: Value,
+    expression_dialect: ExpressionDialect,
+    node_index: usize,
+) -> Option<Value> {
+    analytic_expression_partial(
+        expr,
+        program,
+        node_values,
+        branch_values,
+        time,
+        frequency,
+        temperature,
+        gmin,
+        expression_dialect,
+        DerivativeTarget::Node(node_index),
+    )
+}
+
+/// Evaluate the analytic derivative of a compiled behavioral expression with
+/// respect to one expression-local branch current. See
+/// [`compiled_expression_node_partial`] for the shared derivative contract.
+pub(crate) fn compiled_expression_branch_partial(
+    expr: &Expr,
+    program: &CompiledExpr,
+    node_values: &[Value],
+    branch_values: &[Value],
+    time: Value,
+    frequency: Value,
+    temperature: Value,
+    gmin: Value,
+    expression_dialect: ExpressionDialect,
+    branch_index: usize,
+) -> Option<Value> {
+    analytic_expression_partial(
+        expr,
+        program,
+        node_values,
+        branch_values,
+        time,
+        frequency,
+        temperature,
+        gmin,
+        expression_dialect,
+        DerivativeTarget::Branch(branch_index),
+    )
+}
+
 fn eval_behavioral_expr_with_derivative_at_boundary(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,

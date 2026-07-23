@@ -7,7 +7,8 @@
 use super::{NodeId, TwoTerminalStamp, project_two_terminal_voltage};
 use crate::analysis::{CompanionCoefficients, IntegrationMethod};
 use crate::device::{
-    Bjt, Diode, Ekv3Device, EkvMosfet, MatrixStamper, Mosfet, NonlinearConvergenceCriteria, Vdmos,
+    Bjt, Diode, Ekv3Device, EkvMosfet, MatrixStamper, Mosfet, NonlinearConvergenceCriteria,
+    SolutionDependentCapacitor, SolutionDependentCapacitorLinearization, Vdmos,
 };
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::{Complex64, Value};

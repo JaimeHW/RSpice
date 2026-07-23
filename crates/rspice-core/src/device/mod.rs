@@ -52,7 +52,7 @@ pub use mosfet::{
 };
 pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
-    SaturableInductor,
+    SaturableInductor, SolutionDependentCapacitor, SolutionDependentCapacitorLinearization,
 };
 pub use semiconductor::{Bjt, BjtType, Diode};
 
