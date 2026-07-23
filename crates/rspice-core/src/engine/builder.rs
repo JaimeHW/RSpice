@@ -1588,6 +1588,7 @@ fn pspice_u_dig_model_params(
         || matches!(
             model.to_ascii_lowercase().as_str(),
             "d_and"
+                | "d_add"
                 | "d_buffer"
                 | "d_inverter"
                 | "d_nand"
@@ -1596,6 +1597,7 @@ fn pspice_u_dig_model_params(
                 | "d_xnor"
                 | "d_xor"
                 | "xyce_d_and"
+                | "xyce_d_add"
                 | "xyce_d_buffer"
                 | "xyce_d_inverter"
                 | "xyce_d_nand"
@@ -1628,6 +1630,7 @@ fn pspice_u_dig_gate_model(
     }
 
     match model.to_ascii_lowercase().as_str() {
+        "d_add" => Some("xyce_d_add"),
         "d_and" => Some("xyce_d_and"),
         "d_buffer" => Some("xyce_d_buffer"),
         "d_inverter" => Some("xyce_d_inverter"),
@@ -1643,10 +1646,19 @@ fn pspice_u_dig_gate_model(
 fn pspice_u_dig_gate_ports(
     ports: &[XspicePort],
     timing: &crate::netlist::PspiceUTiming,
+    model: &str,
 ) -> Option<Vec<XspicePort>> {
     let (dpwr, dgnd) = timing.power_pins.as_ref()?;
-    let [inputs, output] = ports else {
-        return None;
+    let (inputs, outputs) = if model.eq_ignore_ascii_case("d_add") {
+        let [inputs, sum, carry] = ports else {
+            return None;
+        };
+        (inputs, vec![sum, carry])
+    } else {
+        let [inputs, output] = ports else {
+            return None;
+        };
+        (inputs, vec![output])
     };
     let analog_inputs = match inputs {
         XspicePort::Digital(node)
@@ -1657,19 +1669,22 @@ fn pspice_u_dig_gate_ports(
         }
         _ => return None,
     };
-    let analog_output = match output {
-        XspicePort::Digital(node)
-        | XspicePort::ExplicitDigital(node)
-        | XspicePort::Analog(node)
-        | XspicePort::Conductance(node) => XspicePort::Conductance(node.clone()),
-        _ => return None,
-    };
-    Some(vec![
+    let mut effective_ports = vec![
         XspicePort::Analog(dpwr.clone()),
         XspicePort::Analog(dgnd.clone()),
         analog_inputs,
-        analog_output,
-    ])
+    ];
+    for output in outputs {
+        let analog_output = match output {
+            XspicePort::Digital(node)
+            | XspicePort::ExplicitDigital(node)
+            | XspicePort::Analog(node)
+            | XspicePort::Conductance(node) => XspicePort::Conductance(node.clone()),
+            _ => return None,
+        };
+        effective_ports.push(analog_output);
+    }
+    Some(effective_ports)
 }
 
 fn merge_pspice_u_numeric_params(
@@ -7001,7 +7016,7 @@ impl Engine {
                         .and_then(|_| {
                             pspice_u_timing
                                 .as_ref()
-                                .and_then(|timing| pspice_u_dig_gate_ports(ports, timing))
+                                .and_then(|timing| pspice_u_dig_gate_ports(ports, timing, model))
                         })
                         .unwrap_or_else(|| ports.clone());
                     let dig_model_params = pspice_u_dig_model_params(
