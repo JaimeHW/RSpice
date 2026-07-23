@@ -1103,6 +1103,43 @@ fn xyce_parser_retains_runtime_ordinary_params_and_folds_forward_static_params()
 }
 
 #[test]
+fn xyce_file_table_parameter_expressions_remain_runtime() {
+    let options = crate::netlist::NetlistParseOptions {
+        expression_dialect: ExpressionDialect::Xyce,
+        ..crate::netlist::NetlistParseOptions::default()
+    };
+    let netlist = crate::netlist::Netlist::parse_with_options(
+        "file-backed parameter expression\n\
+         .param table_val={table(\"table.txt\")}\n\
+         .param rvalue={(table_val>0.0)?table_val:0.0}\n\
+         b1 out 0 v={rvalue}\n\
+         .tran 1n 2n\n\
+         .end\n",
+        options,
+    )
+    .expect("Xyce file-backed TABLE parameters parse");
+
+    assert_eq!(
+        netlist.params.get_parameter_expression("TABLE_VAL"),
+        Some("table(\"table.txt\")")
+    );
+    assert_eq!(
+        netlist.params.get_parameter_expression("RVALUE"),
+        Some("(table_val>0.0)?table_val:0.0")
+    );
+
+    let prepared = prepare_behavioral_expression("rvalue", &netlist.params)
+        .expect("nested file-backed parameter expression prepares");
+    assert!(
+        prepared.contains("TABLE(\"table.txt\")"),
+        "prepared expression must preserve the file literal: {prepared}"
+    );
+    assert!(behavioral_expression_references_runtime_quantity(&prepared));
+    crate::expr::parse_expression_strict(&prepared)
+        .expect("prepared file-backed expression compiles for runtime evaluation");
+}
+
+#[test]
 fn xyce_ordinary_parameter_cycles_fail_and_ngspice_behavior_is_unchanged() {
     let xyce = crate::netlist::NetlistParseOptions {
         expression_dialect: ExpressionDialect::Xyce,

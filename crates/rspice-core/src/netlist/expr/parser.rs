@@ -421,6 +421,30 @@ impl<'a> ExprParser<'a> {
             return Ok(expr);
         }
 
+        // Double quotes denote string literals in file-backed expression
+        // functions such as TABLE("wave.dat").  Preserve the unquoted value
+        // in the AST; the runtime behavioral compiler performs the actual
+        // file lookup after parameter expansion.
+        if self.consume('"') {
+            let mut value = String::new();
+            loop {
+                let Some(character) = self.advance() else {
+                    return Err(ExprError::MissingCloseQuote);
+                };
+                match character {
+                    '"' => break,
+                    '\\' => {
+                        let Some(escaped) = self.advance() else {
+                            return Err(ExprError::MissingCloseQuote);
+                        };
+                        value.push(escaped);
+                    }
+                    _ => value.push(character),
+                }
+            }
+            return Ok(Expr::StringLiteral(value));
+        }
+
         // Number
         if let Some(c) = self.peek()
             && (c.is_ascii_digit() || c == '.')

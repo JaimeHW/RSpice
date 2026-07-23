@@ -59,6 +59,14 @@ pub enum Expr {
     Number(Value),
     /// Complex numeric literal
     ComplexNumber(ComplexValue),
+    /// Quoted string literal used by file-backed expression functions.
+    ///
+    /// Parameter expressions are normally numeric, but Xyce permits a
+    /// file-backed TABLE expression (for example, `table("wave.dat")`) to
+    /// flow through a runtime parameter.  Keeping the literal in this AST
+    /// lets the behavioral expansion pass preserve it for the strict
+    /// runtime compiler, which resolves the file-backed lookup.
+    StringLiteral(String),
     /// Parameter reference
     Param(String),
     /// Binary operation

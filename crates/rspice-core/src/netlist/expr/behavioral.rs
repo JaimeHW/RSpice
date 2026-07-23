@@ -171,7 +171,10 @@ fn net_parameter_circuit_probe(expression: &NetExpr) -> Option<ParameterCircuitP
         NetExpr::FnCall { args, .. } => args.iter().fold(None, |current, argument| {
             preferred_parameter_probe(current, net_parameter_circuit_probe(argument))
         }),
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::Param(_) => None,
+        NetExpr::Number(_)
+        | NetExpr::ComplexNumber(_)
+        | NetExpr::StringLiteral(_)
+        | NetExpr::Param(_) => None,
     }
 }
 
@@ -394,8 +397,9 @@ fn strict_expr_references_runtime_quantity(expression: &crate::expr::Expr) -> bo
             strict_expr_references_runtime_quantity(left)
                 || strict_expr_references_runtime_quantity(right)
         }
-        crate::expr::Expr::Function { args, .. } => {
-            args.iter().any(strict_expr_references_runtime_quantity)
+        crate::expr::Expr::Function { func, args } => {
+            strict_file_table_function(*func, args)
+                || args.iter().any(strict_expr_references_runtime_quantity)
         }
         crate::expr::Expr::Const(_) | crate::expr::Expr::StringLiteral(_) => false,
     }
@@ -579,7 +583,7 @@ fn net_expr_references_special(expression: &NetExpr, special: RuntimeSpecialQuan
         NetExpr::FnCall { args, .. } => args
             .iter()
             .any(|argument| net_expr_references_special(argument, special)),
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => false,
     }
 }
 
@@ -592,10 +596,52 @@ fn net_expr_references_runtime_quantity(expression: &NetExpr) -> bool {
                 || net_expr_references_runtime_quantity(right)
         }
         NetExpr::FnCall { name, args } => {
-            is_circuit_probe(name) || args.iter().any(net_expr_references_runtime_quantity)
+            is_circuit_probe(name)
+                || is_file_table_call(name, args)
+                || args.iter().any(net_expr_references_runtime_quantity)
         }
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => false,
     }
+}
+
+fn strict_file_table_function(function: crate::expr::Function, args: &[crate::expr::Expr]) -> bool {
+    let file_capable = matches!(
+        function,
+        crate::expr::Function::Table
+            | crate::expr::Function::TableFile
+            | crate::expr::Function::FastTable
+            | crate::expr::Function::FastTableFile
+            | crate::expr::Function::Cubic
+            | crate::expr::Function::CubicFile
+            | crate::expr::Function::Akima
+            | crate::expr::Function::AkimaFile
+            | crate::expr::Function::Wodicka
+            | crate::expr::Function::WodickaFile
+            | crate::expr::Function::Barycentric
+            | crate::expr::Function::BarycentricFile
+    );
+    file_capable && matches!(args.first(), Some(crate::expr::Expr::StringLiteral(_)))
+}
+
+fn is_file_table_call(name: &str, args: &[NetExpr]) -> bool {
+    let file_capable = matches!(
+        name.to_ascii_uppercase().as_str(),
+        "TABLE"
+            | "TABLEFILE"
+            | "FASTTABLE"
+            | "FASTTABLEFILE"
+            | "CUBIC"
+            | "CUBICFILE"
+            | "AKIMA"
+            | "AKIMAFILE"
+            | "SPLINE"
+            | "SPLINEFILE"
+            | "WODICKA"
+            | "WODICKAFILE"
+            | "BLI"
+            | "BLIFILE"
+    );
+    file_capable && matches!(args.first(), Some(NetExpr::StringLiteral(_)))
 }
 
 fn net_expr_references_frequency(expression: &NetExpr) -> bool {
@@ -607,7 +653,7 @@ fn net_expr_references_frequency(expression: &NetExpr) -> bool {
         }
         NetExpr::FnCall { name, .. } if is_circuit_probe(name) => false,
         NetExpr::FnCall { args, .. } => args.iter().any(net_expr_references_frequency),
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => false,
     }
 }
 
@@ -625,7 +671,7 @@ fn net_expr_references_unbound_frequency(expression: &NetExpr, params: &ParamCon
         NetExpr::FnCall { args, .. } => args
             .iter()
             .any(|argument| net_expr_references_unbound_frequency(argument, params)),
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => false,
     }
 }
 
@@ -638,7 +684,10 @@ fn net_expr_contains_circuit_probe(expression: &NetExpr) -> bool {
         NetExpr::FnCall { name, args } => {
             is_circuit_probe(name) || args.iter().any(net_expr_contains_circuit_probe)
         }
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::Param(_) => false,
+        NetExpr::Number(_)
+        | NetExpr::ComplexNumber(_)
+        | NetExpr::StringLiteral(_)
+        | NetExpr::Param(_) => false,
     }
 }
 
@@ -650,7 +699,7 @@ fn first_unresolved_global_identifier(expression: &NetExpr) -> Option<&str> {
         NetExpr::BinOp { left, right, .. } => first_unresolved_global_identifier(left)
             .or_else(|| first_unresolved_global_identifier(right)),
         NetExpr::FnCall { args, .. } => args.iter().find_map(first_unresolved_global_identifier),
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => None,
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => None,
     }
 }
 
@@ -764,6 +813,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         NetExpr::Number(value) => values.push(NetExpr::Number(value)),
                         NetExpr::ComplexNumber(value) => {
                             values.push(NetExpr::Number(value.real_projection()));
+                        }
+                        NetExpr::StringLiteral(value) => {
+                            values.push(NetExpr::StringLiteral(value));
                         }
                         NetExpr::Param(name)
                             if is_behavioral_runtime_symbol(&name)
@@ -1382,6 +1434,7 @@ fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> 
     match expr {
         NetExpr::Number(v) => NetExpr::Number(*v),
         NetExpr::ComplexNumber(v) => NetExpr::Number(v.real_projection()),
+        NetExpr::StringLiteral(value) => NetExpr::StringLiteral(value.clone()),
         NetExpr::Param(name) => args
             .get(&name.to_ascii_uppercase())
             .cloned()
@@ -1443,6 +1496,17 @@ fn serialize_expr(expr: &NetExpr) -> String {
                 } else {
                     output.push_str(&projection.to_string());
                 }
+            }
+            Task::Expr(NetExpr::StringLiteral(value)) => {
+                output.push('"');
+                for character in value.chars() {
+                    match character {
+                        '\\' => output.push_str("\\\\"),
+                        '"' => output.push_str("\\\""),
+                        _ => output.push(character),
+                    }
+                }
+                output.push('"');
             }
             Task::Expr(NetExpr::Param(name)) => output.push_str(name),
             Task::Expr(NetExpr::UnaryOp { op, operand }) => {

@@ -127,6 +127,11 @@ impl<'a> ExpressionEvaluator<'a> {
                 EvalFrame::Eval(expr, scope) => match expr {
                     Expr::Number(value) => values.push(ComplexValue::real(value)),
                     Expr::ComplexNumber(value) => values.push(value),
+                    Expr::StringLiteral(value) => {
+                        return Err(ExprError::InvalidArgument(format!(
+                            "string literal \"{value}\" is only valid as a file-backed expression argument"
+                        )));
+                    }
                     Expr::Param(name) => {
                         self.push_param_eval(&mut frames, &mut values, name, scope)?
                     }

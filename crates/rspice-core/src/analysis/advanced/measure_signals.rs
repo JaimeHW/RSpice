@@ -440,7 +440,9 @@ fn bind_equation_expression(
                 .map(|arg| bind_equation_expression(arg, row, signals, measures))
                 .collect::<Result<Vec<_>, _>>()?,
         },
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => expression.clone(),
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => {
+            expression.clone()
+        }
     })
 }
 

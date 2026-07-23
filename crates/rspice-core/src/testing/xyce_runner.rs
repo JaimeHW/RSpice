@@ -4834,6 +4834,7 @@ enum XycePrintSemanticFingerprint {
 enum XyceExpressionAstFingerprint {
     Number(u64),
     Complex(u64, u64),
+    String(String),
     Parameter(String),
     Binary(
         crate::netlist::expr::BinOpKind,
@@ -39294,6 +39295,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             NetlistExpr::ComplexNumber(value) => {
                 XyceExpressionAstFingerprint::Complex(value.re.to_bits(), value.im.to_bits())
             }
+            NetlistExpr::StringLiteral(value) => {
+                XyceExpressionAstFingerprint::String(value.clone())
+            }
             NetlistExpr::Param(name) => {
                 XyceExpressionAstFingerprint::Parameter(name.trim().to_ascii_lowercase())
             }
@@ -58640,6 +58644,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         );
         Self::add_runtime_scalar_parameter_bindings(&mut context);
         Self::add_resistor_parameter_bindings(netlist, &mut context);
+        Self::add_independent_source_parameter_bindings(netlist, &mut context);
         context
     }
 
@@ -58651,6 +58656,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let mut context = Self::print_eval_context(netlist, None, None);
         context.set("TIME", time);
         Self::add_runtime_scalar_parameter_bindings(&mut context);
+        Self::add_runtime_file_table_parameter_bindings(netlist, &mut context, time);
         for measurement in &netlist.measurements {
             if measurement.analysis.eq_ignore_ascii_case("TRAN") {
                 if matches!(
@@ -58669,6 +58675,88 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
         context
+    }
+
+    fn add_runtime_file_table_parameter_bindings(
+        netlist: &Netlist,
+        context: &mut crate::netlist::ParamContext,
+        time: Value,
+    ) {
+        let mut expressions = context.all_parameter_expressions();
+        expressions.extend(context.all_global_expressions());
+        expressions.sort_by(|left, right| left.0.cmp(&right.0));
+        expressions.dedup_by(|left, right| left.0.eq_ignore_ascii_case(&right.0));
+
+        for (name, expression) in expressions {
+            let Ok(prepared) = prepare_behavioral_expression(&expression, context) else {
+                continue;
+            };
+            let Ok(ast) = parse_expression_strict(&prepared) else {
+                continue;
+            };
+            if !Self::strict_expression_contains_file_table(&ast) {
+                continue;
+            }
+            let Ok(ast) = crate::expr::resolve_file_lookup_functions_with_limits(
+                ast,
+                netlist.source_path.as_deref(),
+                crate::resource::ResourceLimits::default(),
+            ) else {
+                continue;
+            };
+            let program = compile(&ast);
+            let temperature = context.get("TEMP").unwrap_or(27.0);
+            let gmin = context.get("GMIN").unwrap_or(crate::constants::GMIN);
+            let eval_context = Context::transient(&[], &[], time)
+                .with_temperature(temperature)
+                .with_gmin(gmin)
+                .with_expression_dialect(ExpressionDialect::Xyce);
+            let value = Vm::new().execute(&program, &eval_context);
+            if value.is_finite() {
+                context.set(&name, value);
+            }
+        }
+    }
+
+    fn strict_expression_contains_file_table(expression: &Expr) -> bool {
+        match expression {
+            Expr::Function { func, args } => {
+                let file_function = matches!(
+                    func,
+                    crate::expr::Function::Table
+                        | crate::expr::Function::TableFile
+                        | crate::expr::Function::FastTable
+                        | crate::expr::Function::FastTableFile
+                        | crate::expr::Function::Cubic
+                        | crate::expr::Function::CubicFile
+                        | crate::expr::Function::Akima
+                        | crate::expr::Function::AkimaFile
+                        | crate::expr::Function::Wodicka
+                        | crate::expr::Function::WodickaFile
+                        | crate::expr::Function::Barycentric
+                        | crate::expr::Function::BarycentricFile
+                ) && matches!(args.first(), Some(Expr::StringLiteral(_)));
+                file_function
+                    || args
+                        .iter()
+                        .any(Self::strict_expression_contains_file_table)
+            }
+            Expr::Unary { operand, .. } => Self::strict_expression_contains_file_table(operand),
+            Expr::Binary { left, right, .. } => {
+                Self::strict_expression_contains_file_table(left)
+                    || Self::strict_expression_contains_file_table(right)
+            }
+            Expr::Const(_)
+            | Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
+            | Expr::StringLiteral(_)
+            | Expr::LookupTable(_)
+            | Expr::Time
+            | Expr::Frequency
+            | Expr::Temperature
+            | Expr::ThermalVoltage
+            | Expr::Gmin => false,
+        }
     }
 
     fn add_resistor_parameter_bindings(
@@ -58700,6 +58788,52 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 continue;
             };
             context.set(&element.name, resistance);
+        }
+    }
+
+    /// Xyce exposes an independent source's named DC value as a scalar in
+    /// brace expressions (for example, `Vsrc/I(Vsrc)`).  Preserve explicit
+    /// user parameters with the same spelling; otherwise bind the source's
+    /// canonical operating-point value just as the native source evaluator
+    /// does at TIME=0.
+    fn add_independent_source_parameter_bindings(
+        netlist: &Netlist,
+        context: &mut crate::netlist::ParamContext,
+    ) {
+        for element in &netlist.elements {
+            let (ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec)) = &element.kind
+            else {
+                continue;
+            };
+            if context.has_parameter_binding(&element.name)
+                || context.get_global_expression(&element.name).is_some()
+            {
+                continue;
+            }
+            let value = Self::independent_source_dcv0(spec);
+            if value.is_finite() {
+                context.set(&element.name, value);
+            }
+        }
+    }
+
+    fn independent_source_dcv0(spec: &crate::netlist::SourceSpec) -> Value {
+        match spec {
+            crate::netlist::SourceSpec::Distortion { inner, .. }
+            | crate::netlist::SourceSpec::RfPort { inner, .. } => {
+                Self::independent_source_dcv0(inner)
+            }
+            crate::netlist::SourceSpec::Dc(value)
+            | crate::netlist::SourceSpec::DcAc {
+                dc_value: value, ..
+            }
+            | crate::netlist::SourceSpec::DcTransient {
+                dc_value: value, ..
+            }
+            | crate::netlist::SourceSpec::DcAcTransient {
+                dc_value: value, ..
+            } => *value,
+            _ => 0.0,
         }
     }
 
