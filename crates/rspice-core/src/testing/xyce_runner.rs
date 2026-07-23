@@ -50828,7 +50828,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, and validated native legacy NPN sweeps through 100 MHz; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, and validated native legacy NPN sweeps through 100 MHz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
