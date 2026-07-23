@@ -1,6 +1,7 @@
 //! Device and subcircuit element parsers.
 
 use super::*;
+use crate::netlist::lexer::Token;
 use crate::netlist::{ElementProvenance, GeneratedPassiveHelperRole, XspicePort};
 
 pub(super) fn parse_resistor(
@@ -4425,7 +4426,13 @@ pub(super) fn parse_lossy_tline(
         return parse_xyce_memristor(stream, line_num, elements, params, defer_simple_param_refs);
     }
     if name.eq_ignore_ascii_case("YNOT") {
+        if xyce_ydevice_remaining_fields(stream) < 6 {
+            return parse_xyce_y_legacy_gate(stream, line_num, elements, params, "YNOT");
+        }
         return parse_xyce_y_not(stream, line_num, elements);
+    }
+    if xyce_legacy_y_gate_spec(&name).is_some() {
+        return parse_xyce_y_legacy_gate(stream, line_num, elements, params, &name);
     }
     if let Some(keyword) = xyce_ydevice_keyword(&name) {
         return Err(ParseError::Syntax {
@@ -4462,6 +4469,118 @@ pub(super) fn parse_lossy_tline(
     });
 
     Ok(())
+}
+
+fn xyce_ydevice_remaining_fields(stream: &TokenStream) -> usize {
+    let mut probe = stream.clone();
+    probe
+        .collect_line()
+        .into_iter()
+        .filter(|token| !matches!(token.kind, TokenKind::Comma))
+        .count()
+}
+
+fn xyce_legacy_y_gate_spec(name: &str) -> Option<(&'static str, usize)> {
+    match name.to_ascii_uppercase().as_str() {
+        "YAND" => Some(("xyce_legacy_d_and", 2)),
+        "YNAND" => Some(("xyce_legacy_d_nand", 2)),
+        "YNOR" => Some(("xyce_legacy_d_nor", 2)),
+        "YOR" => Some(("xyce_legacy_d_or", 2)),
+        "YXNOR" => Some(("xyce_legacy_d_xnor", 2)),
+        "YXOR" => Some(("xyce_legacy_d_xor", 2)),
+        "YNOT" => Some(("xyce_legacy_d_inverter", 1)),
+        _ => None,
+    }
+}
+
+fn parse_xyce_y_legacy_gate(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    keyword: &str,
+) -> Result<(), ParseError> {
+    let Some((model, input_count)) = xyce_legacy_y_gate_spec(keyword) else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Unsupported legacy Xyce Y-device keyword '{keyword}'"),
+        });
+    };
+    let instance_name = expect_element_name(stream, line_num)?;
+    let mut inputs = Vec::with_capacity(input_count);
+    for _ in 0..input_count {
+        inputs.push(expect_node(stream, line_num)?);
+    }
+    let output = expect_node(stream, line_num)?;
+    let timing_model = expect_ident(stream, line_num)?;
+    let mut instance_params = Vec::new();
+
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+        let parameter = expect_ident(stream, line_num)?.to_ascii_uppercase();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Legacy Xyce {keyword} device parameter '{parameter}' requires '='"
+                ),
+            });
+        }
+        let value_token = stream.peek().clone();
+        stream.advance();
+        if parameter.eq_ignore_ascii_case("IC") {
+            if let Some(value) = parse_xyce_y_ic_value(&value_token, params) {
+                instance_params.push(("ic".to_string(), value));
+            }
+        }
+    }
+
+    let input_port = if input_count == 1 {
+        XspicePort::Digital(inputs[0].clone())
+    } else {
+        XspicePort::DigitalVector(inputs)
+    };
+    elements.push(Element {
+        name: instance_name,
+        kind: ElementKind::Xspice {
+            model: model.to_string(),
+            pspice_u_timing: Some(PspiceUTiming {
+                timing_model,
+                delay_mode: PspiceUTimingMode::Typ,
+                power_pins: None,
+            }),
+            ports: vec![input_port, XspicePort::Digital(output)],
+            params: instance_params,
+            expr_params: Vec::new(),
+            string_params: Vec::new(),
+            string_expr_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            string_vector_expr_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: Vec::new(),
+        },
+        nodes: Vec::new(),
+        provenance: crate::netlist::ElementProvenance::Authored,
+    });
+    Ok(())
+}
+
+fn parse_xyce_y_ic_value(token: &Token, params: &ParamContext) -> Option<Value> {
+    match &token.kind {
+        TokenKind::Ident(raw) => {
+            let raw = raw.as_str();
+            match raw.to_ascii_uppercase().as_str() {
+                "FALSE" | "LOW" => Some(0.0),
+                "TRUE" | "HIGH" => Some(1.0),
+                _ => params.get(raw),
+            }
+        }
+        TokenKind::Number(value) => Some(*value),
+        _ => None,
+    }
 }
 
 /// Parse Xyce's legacy Y-device inverter keyword.
