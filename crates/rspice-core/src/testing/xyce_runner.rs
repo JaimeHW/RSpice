@@ -19362,13 +19362,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         for probe in &request.probes {
-            let normalized = Self::normalize_probe(probe);
-            let unsupported_device_probe = normalized.contains("i(")
-                || ["id(", "ig(", "is(", "ib(", "ic(", "ie(", "p(", "w("]
-                    .iter()
-                    .any(|prefix| normalized.starts_with(prefix))
-                || normalized.contains('@');
-            if unsupported_device_probe {
+            if Self::static_hb_probe_is_unsupported(probe) {
                 return Err(format!(
                     "static HB wrapper contract does not yet support branch, device-current, or device-parameter probe '{probe}'"
                 ));
@@ -19434,6 +19428,58 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ic_reference_path,
             wrapper: self.requires_upstream_wrapper(&deck.relative_path),
         })
+    }
+
+    /// Classify HB print probes structurally instead of using substring
+    /// matching.  The old `contains("i(")` check misclassified voltage
+    /// accessors such as `VI(1)` and `VDB(1)` as branch-current probes.  This
+    /// scanner preserves support for voltage-only expressions while rejecting
+    /// actual branch, lead-current, power, and device-parameter probes.
+    fn static_hb_probe_is_unsupported(probe: &str) -> bool {
+        let expression = Self::print_expression_inner(probe).unwrap_or(probe);
+        let normalized = Self::normalize_probe(expression);
+        if normalized.contains('@') || Self::parse_device_parameter_probe(&normalized).is_some() {
+            return true;
+        }
+        if Self::parse_voltage_probe(&normalized).is_some() {
+            return false;
+        }
+        if Self::parse_current_probe(&normalized).is_some()
+            || Self::parse_ac_current_probe(&normalized).is_some()
+            || Self::parse_lead_current_probe(&normalized).is_some()
+            || Self::parse_power_probe(&normalized).is_some()
+            || Self::parse_device_operating_point_probe(&normalized).is_some()
+        {
+            return true;
+        }
+
+        let mut index = 0usize;
+        while index < expression.len() {
+            if let Some(open_index) = Self::print_probe_call_open_index(expression, index) {
+                let Ok(close_index) = Self::matching_parenthesis_index(expression, open_index)
+                else {
+                    return true;
+                };
+                let call = &expression[index..=close_index];
+                let normalized_call = Self::normalize_probe(call);
+                if Self::parse_current_probe(&normalized_call).is_some()
+                    || Self::parse_ac_current_probe(&normalized_call).is_some()
+                    || Self::parse_lead_current_probe(&normalized_call).is_some()
+                    || Self::parse_power_probe(&normalized_call).is_some()
+                    || Self::parse_device_operating_point_probe(&normalized_call).is_some()
+                {
+                    return true;
+                }
+                index = close_index + 1;
+                continue;
+            }
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid character boundary");
+            index += ch.len_utf8();
+        }
+        false
     }
 
     fn static_tran_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticTranPlan, String> {
@@ -74078,6 +74124,31 @@ Values:
         .expect("one request");
         assert_eq!(double_quoted.file.as_deref(), Some("double-output.prn"));
         assert_eq!(double_quoted.probes, ["V(1)"]);
+    }
+
+    #[test]
+    fn static_hb_probe_classifier_distinguishes_voltage_accessors_from_currents() {
+        for probe in ["VI(1)", "VDB(1)", "{vi(1)}", "{abs(VI(1)) + 1.0}"] {
+            assert!(
+                !XyceTestRunner::static_hb_probe_is_unsupported(probe),
+                "voltage-only HB probe should be admitted: {probe}"
+            );
+        }
+
+        for probe in [
+            "I(V1)",
+            "IR(V1)",
+            "ID(M1)",
+            "P(V1)",
+            "N(M1:IDS)",
+            "{abs(I(V1))}",
+            "V(1)@mismatch",
+        ] {
+            assert!(
+                XyceTestRunner::static_hb_probe_is_unsupported(probe),
+                "branch/device probe should remain fail-closed: {probe}"
+            );
+        }
     }
 
     #[test]
