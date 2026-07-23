@@ -27593,6 +27593,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         let capacitor_branch_print =
             Self::transient_print_requests_linear_capacitor_branch_quantity(&netlist, &plan.print);
+        let has_solution_dependent_capacitor = netlist.elements.iter().any(|element| {
+            matches!(
+                &element.kind,
+                ElementKind::Capacitor {
+                    value,
+                    value_expr: Some(_),
+                    ..
+                } if !value.is_finite()
+            )
+        });
 
         let locked_engine =
             self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
@@ -27663,7 +27673,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
 
-        if !capacitor_branch_print {
+        if !capacitor_branch_print && !has_solution_dependent_capacitor {
             let backward_euler_engine = self
                 .create_xyce_static_tran_engine_with_integration_method(
                     Some(reference_time_grid.clone()),
@@ -27737,7 +27747,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
 
-        if plan.timeint_conststep && !capacitor_branch_print {
+        if plan.timeint_conststep && !capacitor_branch_print && !has_solution_dependent_capacitor {
             let gear12_engine = self.create_xyce_static_tran_engine_with_integration_method(
                 Some(reference_time_grid),
                 crate::analysis::IntegrationMethod::Gear2,
@@ -50818,8 +50828,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::VoltageSource(_)
                 | ElementKind::CurrentSource(_)
                 | ElementKind::Resistor { .. }
-                | ElementKind::Capacitor { .. }
                 | ElementKind::Inductor { .. } => {}
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    ..
+                } if value_expr.is_some() && !value.is_finite() => {
+                    return Err(format!(
+                        "native static .PRINT AC comparison does not support solution-dependent capacitor value expression on element '{}'",
+                        element.name
+                    ));
+                }
+                ElementKind::Capacitor { .. } => {}
                 ElementKind::Coupling { coefficient, .. } => {
                     if !coefficient.is_finite() {
                         return Err(format!(
@@ -51099,6 +51119,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         allow_age_params: bool,
     ) -> Result<(), String> {
         Self::validate_xyce_capacitor_contract_params(netlist, element_name, allow_age_params)?;
+        if Self::capacitor_uses_solution_dependent_value(netlist, element_name) {
+            return Ok(());
+        }
         let capacitance = Engine::new(SimulationConfig {
             spice_dialect: SpiceDialect::Xyce,
             ..SimulationConfig::default()
@@ -51126,6 +51149,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    fn capacitor_uses_solution_dependent_value(netlist: &Netlist, element_name: &str) -> bool {
+        Self::find_capacitor_element(netlist, element_name).is_some_and(|element| {
+            matches!(
+                &element.kind,
+                ElementKind::Capacitor {
+                    value,
+                    value_expr: Some(_),
+                    ..
+                } if !value.is_finite()
+            )
+        })
+    }
+
     fn validate_xyce_capacitor_contract_params(
         netlist: &Netlist,
         element_name: &str,
@@ -51136,8 +51172,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let ElementKind::Capacitor {
             value,
             value_expr,
+            initial_voltage,
             model,
             instance_params,
+            deferred_params,
             ..
         } = &element.kind
         else {
@@ -51146,8 +51184,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         if !value.is_finite() {
             if let Some(expression) = value_expr.as_deref() {
-                Self::validate_static_transient_passive_value_expression(
-                    "capacitor",
+                if initial_voltage.is_some() {
+                    return Err(format!(
+                        "native static .PRINT TRAN comparison does not support solution-dependent capacitor '{}' with an explicit initial voltage",
+                        element_name
+                    ));
+                }
+                if !deferred_params.is_empty() {
+                    return Err(format!(
+                        "native static .PRINT TRAN comparison does not support unresolved instance parameters on solution-dependent capacitor '{}'",
+                        element_name
+                    ));
+                }
+                Self::validate_solution_dependent_capacitor_expression(
                     element_name,
                     expression,
                     &netlist.params,
@@ -51244,6 +51293,39 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Err(format!(
                 "native static .PRINT TRAN comparison does not support non-scalar capacitor model parameters on model '{}'",
                 model_name
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_solution_dependent_capacitor_expression(
+        element_name: &str,
+        expression: &str,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(), String> {
+        let prepared = prepare_behavioral_expression(expression, params).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison could not prepare capacitor value expression '{expression}' on element '{element_name}': {err}"
+            )
+        })?;
+        let ast = parse_expression_strict(&prepared).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison does not yet support capacitor value expression '{expression}' on element '{element_name}': {err}"
+            )
+        })?;
+        if Self::expression_depends_on_frequency(&ast) {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not support frequency-dependent capacitor value expression '{expression}' on element '{element_name}'"
+            ));
+        }
+        if Self::expression_contains_sdt(&ast) {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not support stateful SDT in capacitor value expression '{expression}' on element '{element_name}'"
+            ));
+        }
+        if !Self::passive_value_expression_depends_on_runtime_quantity(&ast) {
+            return Err(format!(
+                "native static .PRINT TRAN comparison requires capacitor value expression '{expression}' on element '{element_name}' to depend on a transient runtime quantity"
             ));
         }
         Ok(())
@@ -52099,6 +52181,29 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | Expr::LookupTable(_)
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
+            | Expr::Temperature
+            | Expr::ThermalVoltage
+            | Expr::Gmin => false,
+        }
+    }
+
+    fn expression_depends_on_frequency(expression: &Expr) -> bool {
+        match expression {
+            Expr::Frequency => true,
+            Expr::Unary { operand, .. } => Self::expression_depends_on_frequency(operand),
+            Expr::Binary { left, right, .. } => {
+                Self::expression_depends_on_frequency(left)
+                    || Self::expression_depends_on_frequency(right)
+            }
+            Expr::Function { args, .. } => args
+                .iter()
+                .any(Self::expression_depends_on_frequency),
+            Expr::Const(_)
+            | Expr::StringLiteral(_)
+            | Expr::LookupTable(_)
+            | Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
+            | Expr::Time
             | Expr::Temperature
             | Expr::ThermalVoltage
             | Expr::Gmin => false,
@@ -55565,6 +55670,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 "capacitor parameter probe '{name}:C' targets a non-capacitor element"
             ));
         };
+        if let Some(waveform) = result.try_device_op_waveform_named(name, "c") {
+            return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
+        }
         if (model.is_some()
             || Self::capacitor_instance_params_affect_effective_value(instance_params))
             && let Some(capacitance) = Self::effective_capacitor_value(netlist, name)

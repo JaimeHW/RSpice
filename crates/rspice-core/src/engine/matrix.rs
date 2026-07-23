@@ -52,6 +52,26 @@ impl Engine {
             }
         }
 
+        // Solution-dependent capacitor expressions contribute charge
+        // derivatives from each terminal row to every referenced solution
+        // variable.  Reserve those columns before freezing the CSC pattern;
+        // the transient companion then stamps them with O(1) matrix updates.
+        for (index, expression) in circuit.capacitors.value_expressions.iter().enumerate() {
+            let Some(expression) = expression.as_ref() else {
+                continue;
+            };
+            let stamp = &circuit.capacitors.stamps[index];
+            let referenced_cols: Vec<usize> = expression.bound_solution_indices().collect();
+            for &row in &[stamp.pp.row, stamp.nn.row] {
+                if row == 0 {
+                    continue;
+                }
+                for &col in &referenced_cols {
+                    triplets.push((row - 1, col, 0.0));
+                }
+            }
+        }
+
         // Xyce capacitor IC branches enforce the initial voltage during the
         // operating point and carry the physical terminal-KCL current during
         // transient/small-signal analyses. Reserve the union of both stamps.

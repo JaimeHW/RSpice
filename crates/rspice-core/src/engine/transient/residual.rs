@@ -188,6 +188,17 @@ impl Engine {
             .capacitors
             .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
         circuit
+            .capacitors
+            .stamp_solution_dependent_transient_companion(
+                matrix,
+                rhs,
+                solution,
+                time,
+                dt,
+                &companion_coeff,
+            )
+            .map_err(SimulationError::Circuit)?;
+        circuit
             .inductors
             .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);

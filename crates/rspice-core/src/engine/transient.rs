@@ -1237,6 +1237,16 @@ impl Engine {
             .signals
             .iter()
             .any(|signal| matches!(signal, SaveSignal::DeviceParam { .. }))
+            || netlist.elements.iter().any(|element| {
+                matches!(
+                    &element.kind,
+                    crate::netlist::ElementKind::Capacitor {
+                        value,
+                        value_expr: Some(_),
+                        ..
+                    } if !value.is_finite()
+                )
+            })
     }
 
     fn run_tran_with_abort_resolved(
@@ -1917,6 +1927,15 @@ impl Engine {
                 np,
                 nn
             );
+        }
+        circuit
+            .capacitors
+            .initialize_solution_dependent_from_dc(&solution, 0.0);
+        if record_device_op_traces {
+            // The initial report is created before capacitor histories are
+            // initialized. Refresh its sample so solution-dependent C probes
+            // expose the DC-evaluated capacitance at t=0.
+            result.record_device_op_sample(circuit.device_op_report());
         }
 
         // Initialize inductor current and voltage history from DC solution

@@ -338,6 +338,36 @@ impl CircuitData {
             });
         }
 
+        // A solution-dependent capacitor exposes its effective instantaneous
+        // C value through the same operating-point trace channel used by
+        // compact-model parameters. The transient engine refreshes this value
+        // on every accepted point before collecting the report.
+        for (index, name) in self.capacitors.names.iter().enumerate() {
+            if self.capacitors.is_internal(index)
+                || self
+                    .capacitors
+                    .value_expressions
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .is_none()
+            {
+                continue;
+            }
+            entries.push(DeviceOpEntry {
+                name: name.clone(),
+                device_kind: "CAPACITOR",
+                region: None,
+                params: vec![(
+                    "c",
+                    self.capacitors
+                        .effective_capacitances
+                        .get(index)
+                        .copied()
+                        .unwrap_or(Value::NAN),
+                )],
+            });
+        }
+
         DeviceOpReport { entries }
     }
 

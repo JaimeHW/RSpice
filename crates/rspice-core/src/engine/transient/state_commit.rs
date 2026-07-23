@@ -35,6 +35,15 @@ impl Engine {
     ) {
         let num_nodes = circuit.num_nodes();
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            if circuit
+                .capacitors
+                .value_expressions
+                .get(cap_idx)
+                .and_then(Option::as_ref)
+                .is_some()
+            {
+                continue;
+            }
             let np = cap.pp.row;
             let nn = cap.nn.row;
             let v_new = Self::differential_voltage(accepted_solution, np, nn);
@@ -64,6 +73,14 @@ impl Engine {
             circuit.capacitors.v_prev[cap_idx] = v_new;
             circuit.capacitors.i_prev[cap_idx] = i_new;
         }
+        circuit
+            .capacitors
+            .update_solution_dependent_state_with_coefficients(
+                accepted_solution,
+                accepted_time,
+                dt,
+                coeff,
+            );
 
         for l_idx in 0..circuit.inductors.names.len() {
             let br = circuit.inductors.branch_indices[l_idx];

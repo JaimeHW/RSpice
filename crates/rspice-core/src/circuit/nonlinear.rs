@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NonlinearDeviceStateSnapshot {
+    capacitors: Capacitors,
     inductors: Inductors,
     jiles_atherton_inductors: Vec<JilesAthertonBinding>,
     diodes: Vec<crate::device::semiconductor::DiodeNonlinearState>,
@@ -174,7 +175,8 @@ mod tests {
 
 impl CircuitData {
     fn has_non_xspice_nonlinear_devices(&self) -> bool {
-        !self.diodes.is_empty()
+        self.capacitors.has_solution_dependent_values()
+            || !self.diodes.is_empty()
             || !self.bjts.is_empty()
             || !self.mosfets.is_empty()
             || !self.b3soi.is_empty()
@@ -538,6 +540,7 @@ impl CircuitData {
     /// voltages, behavioral-source linearization scratch, or code-model context.
     pub(crate) fn nonlinear_state_snapshot(&self) -> NonlinearDeviceStateSnapshot {
         NonlinearDeviceStateSnapshot {
+            capacitors: self.capacitors.clone(),
             inductors: self.inductors.clone(),
             jiles_atherton_inductors: self.jiles_atherton_inductors.clone(),
             diodes: self.diodes.nonlinear_state_snapshot(),
@@ -574,6 +577,7 @@ impl CircuitData {
 
     /// Restore mutable nonlinear evaluation state after a trial residual probe.
     pub(crate) fn restore_nonlinear_state(&mut self, snapshot: NonlinearDeviceStateSnapshot) {
+        self.capacitors = snapshot.capacitors;
         self.inductors = snapshot.inductors;
         self.jiles_atherton_inductors = snapshot.jiles_atherton_inductors;
         self.diodes.restore_nonlinear_state(snapshot.diodes);

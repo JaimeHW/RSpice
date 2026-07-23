@@ -128,6 +128,19 @@ impl Engine {
         let mut found_branch = false;
 
         for (idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            if circuit
+                .capacitors
+                .value_expressions
+                .get(idx)
+                .and_then(Option::as_ref)
+                .is_some()
+            {
+                // Solution-dependent capacitors own a charge history that is
+                // integrated from C(V) between accepted points. The legacy
+                // static C*V truncation walk is not valid for that law; the
+                // generic accepted-solution LTE estimator remains active.
+                continue;
+            }
             let capacitance = circuit.capacitors.capacitances[idx];
             if !capacitance.is_finite() || capacitance <= 0.0 {
                 continue;

@@ -4350,11 +4350,63 @@ impl Engine {
                 }
                 ElementKind::Capacitor {
                     value,
+                    value_expr,
                     initial_voltage,
                     model,
                     instance_params,
                     ..
                 } => {
+                    let np = circuit.get_or_create_node(&element.nodes[0]);
+                    let nn = circuit.get_or_create_node(&element.nodes[1]);
+
+                    // Xyce permits an explicit capacitor value to be a
+                    // solution-dependent expression (for example
+                    // `C={20u*(1+V(ctrl))}`).  Keep the expression in the
+                    // circuit and use the ordinary capacitor resolver with a
+                    // unit base value to obtain only the static instance/model
+                    // scale (temperature, aging, SCALE, and multiplicity).
+                    // The transient companion evaluates the expression and
+                    // applies this scale at each Newton point.
+                    if let Some(expression) = value_expr.as_deref() {
+                        if initial_voltage.is_some() {
+                            return Err(SimulationError::Circuit(format!(
+                                "Capacitor '{}' combines a solution-dependent value expression with IC=; this combination is not yet supported",
+                                element.name
+                            )));
+                        }
+
+                        let scale = resolve_capacitor_instance_value(
+                            netlist,
+                            &element.name,
+                            1.0,
+                            model.as_deref(),
+                            instance_params,
+                            self.config.temperature,
+                            self.config.spice_dialect,
+                        )?;
+                        let mut evaluator =
+                            crate::device::SolutionDependentCapacitor::new_with_source_path_and_limits(
+                                element.name.clone(),
+                                expression,
+                                netlist.source_path.as_deref(),
+                                self.config.resource_limits,
+                            )
+                            .map_err(SimulationError::Circuit)?;
+                        evaluator.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
+                            self.config.temperature,
+                        ));
+                        evaluator.set_gmin(self.config.convergence_config.junction_gmin_target);
+                        evaluator.set_expression_dialect(netlist.params.expression_dialect());
+                        circuit.capacitors.add_with_value_expression(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            scale,
+                            evaluator,
+                        );
+                        continue;
+                    }
+
                     let capacitance = resolve_capacitor_instance_value(
                         netlist,
                         &element.name,
@@ -4364,8 +4416,6 @@ impl Engine {
                         self.config.temperature,
                         self.config.spice_dialect,
                     )?;
-                    let np = circuit.get_or_create_node(&element.nodes[0]);
-                    let nn = circuit.get_or_create_node(&element.nodes[1]);
                     if let Some(ic) = *initial_voltage {
                         if self.config.spice_dialect == SpiceDialect::Xyce {
                             let branch = circuit.allocate_branch_named(&element.name);
