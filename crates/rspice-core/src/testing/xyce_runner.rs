@@ -50729,12 +50729,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         ac: &XyceAcAnalysis,
     ) -> Result<(), String> {
-        let mut flattened_netlist;
-        let netlist = if netlist
+        let flattened_hierarchy = netlist
             .elements
             .iter()
-            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
-        {
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }));
+        let mut flattened_netlist;
+        let netlist = if flattened_hierarchy {
             let flattened =
                 crate::netlist::flatten_netlist_with_models(netlist).map_err(|error| {
                     format!(
@@ -50871,6 +50871,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         && Self::netlist_device_is_native_legacy_bjt(netlist, &element.name) => {}
                 ElementKind::Bjt { .. }
                     if max_frequency <= 10.0e9 + 1.0e-3
+                        && !flattened_hierarchy
                         && Self::netlist_device_is_native_static_ac_legacy_npn_bjt(
                             netlist,
                             &element.name,
@@ -57667,6 +57668,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         instance_name: &str,
     ) -> bool {
+        // The high-frequency GP companion is qualified only for a flat
+        // netlist.  Flattened hierarchy has a separate exact BF/IS contract
+        // with a 20 kHz limit; do not let the broader top-level model
+        // predicate bypass that scoped-model boundary.
+        if !netlist.subcircuits.is_empty() {
+            return false;
+        }
         if Self::elements_device_is_native_static_ac_legacy_npn_bjt(
             &netlist.elements,
             &netlist.models,
@@ -57751,36 +57759,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn model_is_native_static_ac_legacy_npn_bjt(model: &crate::netlist::ModelDef) -> bool {
-        // The AC companion has a deliberately narrower, independently
-        // validated six-parameter envelope.  The transient Level-1 predicate
-        // admits additional GP parameters that are not covered by this AC
-        // oracle, so do not reuse it here.
-        model.model_type.eq_ignore_ascii_case("NPN")
-            && model.expr_params.is_empty()
-            && model.string_params.is_empty()
-            && model.string_vector_params.is_empty()
-            && model.real_vector_params.is_empty()
-            && model.real_vector_expr_params.is_empty()
-            && model.integer_vector_params.is_empty()
-            && model.params.len() == 6
-            && model.params.iter().all(|(name, value)| {
-                value.is_finite()
-                    && match name.to_ascii_uppercase().as_str() {
-                        "IS" | "BF" | "VAF" | "RB" | "CJC" | "TF" => *value >= 0.0,
-                        _ => false,
-                    }
-            })
-            && ["IS", "BF", "VAF", "RB", "CJC", "TF"].iter().all(|name| {
-                model
-                    .params
-                    .iter()
-                    .filter(|(param, _)| param.eq_ignore_ascii_case(name))
-                    .count()
-                    == 1
-            })
-            && Self::numeric_param_value(&model.params, "IS").is_some_and(|value| value > 0.0)
-            && Self::numeric_param_value(&model.params, "BF").is_some_and(|value| value > 0.0)
-            && Self::numeric_param_value(&model.params, "VAF").is_some_and(|value| value > 0.0)
+        // The native AC companion uses the same scalar Level-1 Gummel-Poon
+        // parameter subset as the validated transient path.  Keep expression,
+        // string, and vector routes out of this high-frequency envelope; the
+        // flat-netlist guard above keeps scoped hierarchy on its narrower
+        // exact BF/IS contract.  Requiring one authored GP parameter beyond
+        // LEVEL/IS/BF is the model-level discriminator that survives flattening.
+        let mut parameter_names = BTreeSet::new();
+        if model.params.iter().any(|(name, _)| {
+            !parameter_names.insert(name.to_ascii_uppercase())
+        }) {
+            return false;
+        }
+        let has_extended_gp_parameter = model
+            .params
+            .iter()
+            .any(|(name, _)| !matches!(name.to_ascii_uppercase().as_str(), "LEVEL" | "IS" | "BF"));
+        has_extended_gp_parameter && Self::model_is_native_transient_level1_npn(model)
     }
 
     fn model_is_native_legacy_diode(model: &crate::netlist::ModelDef) -> bool {
@@ -87133,6 +87128,75 @@ Q1 c b 0 QN
             .expect("legacy BJT AC fixture has one analysis");
         XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
             .expect("validated legacy BJT AC envelope admits 100 MHz");
+    }
+
+    #[test]
+    fn static_ac_contract_admits_checked_in_rca3040_gp_oracle() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let path = root.join("Netlists/ACtests/rca3040.cir");
+        let source = fs::read_to_string(&path).expect("read RCA3040 deck");
+        let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("RCA3040 deck parses in Xyce mode");
+        let ac =
+            XyceTestRunner::single_ac_analysis(&netlist).expect("RCA3040 deck has one AC analysis");
+
+        for element in netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+        {
+            assert!(
+                XyceTestRunner::netlist_device_is_native_static_ac_legacy_npn_bjt(
+                    &netlist,
+                    &element.name,
+                ),
+                "RCA3040 legacy GP device {} remains in the validated flat AC envelope",
+                element.name
+            );
+        }
+        XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+            .expect("RCA3040 legacy GP deck is in the native AC envelope");
+
+        let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+        assert!(result.passed, "RCA3040 oracle failed: {result:?}");
+        assert!(
+            !result.expected_unsupported,
+            "RCA3040 must execute natively"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "unexpected RCA3040 mismatches: {result:?}"
+        );
+
+        let mut duplicate_parameter = netlist.clone();
+        duplicate_parameter
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("QNL"))
+            .expect("QNL model")
+            .params
+            .push(("BF".to_string(), 80.0));
+        assert!(
+            XyceTestRunner::validate_native_static_ac_contract(&duplicate_parameter, &ac).is_err(),
+            "duplicate legacy GP model parameters remain fail-closed"
+        );
+
+        let mut unqualified = netlist;
+        unqualified
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("QNL"))
+            .expect("QNL model")
+            .params
+            .push(("UNQUALIFIED".to_string(), 1.0));
+        assert!(
+            XyceTestRunner::validate_native_static_ac_contract(&unqualified, &ac).is_err(),
+            "unknown legacy GP model parameters remain fail-closed"
+        );
     }
 
     #[test]
