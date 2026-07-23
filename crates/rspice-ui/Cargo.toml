@@ -104,7 +104,7 @@ lopdf = { version = "0.44", default-features = false }
 # Native builds expose egui's semantic tree to platform assistive technology
 # through AccessKit. Keep this target-specific: eframe's browser backend does
 # not currently publish its AccessKit tree to the DOM.
-eframe = { version = "0.34.3", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
+eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
 
 # Default features on: faer-parallel/parallel/simd so the desktop app gets
 # the same fast solver paths as the CLI (incl. the Verilog-A JIT).
