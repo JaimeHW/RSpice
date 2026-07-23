@@ -20536,12 +20536,6 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string(),
             );
         }
-        if output_override {
-            return Err(
-                "frequency-domain output override does not yet cover Xyce .SENS side output"
-                    .to_string(),
-            );
-        }
         if sensitivity_lines.len() != 1 {
             return Err(
                 "native Xyce AC sensitivity contract requires exactly one .SENS directive"
@@ -20559,12 +20553,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     .to_string(),
             );
         }
-        let side_requests = print_requests
+        let mut side_requests = print_requests
             .iter()
             .filter(|request| request.file.is_some())
             .cloned()
             .collect::<Vec<_>>();
-        if primary_requests.is_empty() && side_requests.is_empty() {
+        if !output_override && primary_requests.is_empty() && side_requests.is_empty() {
             return Err(
                 "native Xyce AC sensitivity contract requires one .PRINT SENS output destination"
                     .to_string(),
@@ -20573,13 +20567,29 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         // Xyce permits FILE= sensitivity outputs without a primary destination.
         // In that form, the first side table supplies the canonical schema and
         // every additional destination must be comparable to that same solve.
-        let canonical_request = primary_requests
-            .first()
-            .cloned()
-            .or_else(|| side_requests.first().cloned())
-            .expect("one primary or side .PRINT SENS request");
-        let (reference_format, no_index) =
-            Self::ac_sensitivity_output_schema(canonical_request.format.as_deref())?;
+        let canonical_request = if output_override {
+            // Xyce's `-o` command-line output overrides every FILE= destination
+            // and emits the canonical STD sensitivity table alongside the
+            // overridden AC table.  Keep the probes from all SENS requests,
+            // but deliberately suppress side-output comparisons: those files
+            // are not part of the command-line output contract.
+            side_requests.clear();
+            Self::output_override_print_output_request(source, "SENS")?.ok_or_else(|| {
+                "frequency-domain output override requires one .PRINT SENS request with probes"
+                    .to_string()
+            })?
+        } else {
+            primary_requests
+                .first()
+                .cloned()
+                .or_else(|| side_requests.first().cloned())
+                .expect("one primary or side .PRINT SENS request")
+        };
+        let (reference_format, no_index) = if output_override {
+            (XyceAcSensitivityReferenceFormat::Prn, false)
+        } else {
+            Self::ac_sensitivity_output_schema(canonical_request.format.as_deref())?
+        };
 
         let tokens = Self::split_print_fields(&sensitivity_lines[0])?;
         let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
@@ -85930,6 +85940,40 @@ Q1 c b 0 QN
         assert!(plan.print.is_none());
         assert!(plan.sensitivity.is_some());
         assert_eq!(plan.contract, XyceStaticAcContract::WrapperStatic);
+    }
+
+    #[test]
+    fn xyce_ac_sensitivity_output_override_uses_canonical_sensitivity_oracle() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let relative = "Netlists/Output/Dasho/ac-sens.cir";
+        let deck = XyceDeck {
+            path: root.join(relative),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = runner
+            .static_ac_plan_for_deck(&deck)
+            .expect("Dasho sensitivity output override plan is supported");
+        assert!(plan.output_override);
+        let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+        assert_eq!(
+            sensitivity.reference_format,
+            XyceAcSensitivityReferenceFormat::Prn
+        );
+        assert!(!sensitivity.no_index);
+        assert!(sensitivity.side_outputs.is_empty());
+        assert!(
+            sensitivity
+                .reference_path
+                .to_string_lossy()
+                .ends_with("FD.SENS.prn")
+        );
+        assert_eq!(sensitivity.print.probes, vec!["v(c)", "C1:C"]);
     }
 
     #[test]
