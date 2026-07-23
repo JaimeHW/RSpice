@@ -50802,6 +50802,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     if Self::netlist_device_is_single_native_ac_supported_bulk_mosfet(
                         netlist,
                         &element.name,
+                    ) || Self::netlist_device_is_single_native_ac_supported_bsim3(
+                        netlist,
+                        &element.name,
                     ) => {}
                 ElementKind::Bjt { .. }
                     if max_frequency <= 100.0
@@ -57146,6 +57149,87 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             matched |= Self::device_instance_names_match(&element.name, instance_name);
         }
         matched && count == 1
+    }
+
+    /// The native BSIM3v3.3 port has a separately validated AC envelope for
+    /// Xyce LEVEL=9 cards that use only the canonical L/W instance geometry
+    /// and the model's LEVEL/VERSION selectors.  Keep this admission narrow:
+    /// unsupported BSIM3 parameter surfaces must not silently fall through to
+    /// a different compact-model implementation.
+    fn netlist_device_is_single_native_ac_supported_bsim3(
+        netlist: &Netlist,
+        instance_name: &str,
+    ) -> bool {
+        let mut matched = false;
+        let mut count = 0usize;
+        for element in &netlist.elements {
+            let ElementKind::Mosfet {
+                model,
+                compact_syntax,
+                instance_params,
+                deferred_params,
+                ..
+            } = &element.kind
+            else {
+                continue;
+            };
+            count += 1;
+            matched |= Self::device_instance_names_match(&element.name, instance_name);
+            if element.nodes.len() != 4
+                || *compact_syntax
+                || !deferred_params.is_empty()
+                || !Self::native_ac_bsim3_instance_params_are_valid(instance_params)
+                || !Self::find_unique_model_in(&netlist.models, model)
+                    .is_some_and(Self::model_is_native_ac_supported_bsim3)
+            {
+                return false;
+            }
+        }
+        matched && count == 1
+    }
+
+    fn native_ac_bsim3_instance_params_are_valid(params: &[(String, Value)]) -> bool {
+        let mut names = BTreeSet::new();
+        params.iter().all(|(name, value)| {
+            value.is_finite()
+                && *value > 0.0
+                && matches!(name.to_ascii_uppercase().as_str(), "L" | "W")
+                && names.insert(name.to_ascii_uppercase())
+        }) && names.contains("L")
+            && names.contains("W")
+    }
+
+    fn model_is_native_ac_supported_bsim3(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || !model.expr_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+        let mut level = None;
+        for (name, value) in &model.params {
+            if !value.is_finite() {
+                return false;
+            }
+            match name.to_ascii_uppercase().as_str() {
+                "LEVEL" if level.is_none() && (*value - 9.0).abs() <= 1.0e-9 => {
+                    level = Some(())
+                }
+                _ => return false,
+            }
+        }
+        if level.is_none() {
+            return false;
+        }
+        model.string_params.iter().all(|(name, value)| {
+            name.eq_ignore_ascii_case("VERSION")
+                && matches!(value.to_ascii_lowercase().as_str(), "3.2.2" | "3.3.0")
+        })
     }
 
     fn netlist_element_is_native_ac_supported_bulk_mosfet(
