@@ -190,6 +190,23 @@ pub(super) fn parse_source_spec(
             _ if is_source_port_annotation_keyword(&keyword) => {
                 consume_source_port_annotation(stream, line_num, params, &mut rf_port)?;
             }
+            _ if is_xyce_ignored_source_instance_parameter(&keyword)
+                && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
+            {
+                // Xyce's independent-source reader accepts instance-style
+                // assignments after the source waveform and leaves them to
+                // the source device.  The built-in V/ISRC devices do not
+                // define these parameters, so they have no effect on the
+                // source value.  Consume the assignment here to preserve
+                // that compatibility without inventing ngspice's distinct
+                // current-source multiplier semantics.
+                stream.advance();
+                stream.advance();
+                skip_commas(stream);
+                if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                    stream.advance();
+                }
+            }
             _ if transient.is_none() => {
                 match parse_transient_source_spec_keyword(stream, line_num, params)? {
                     Some(spec) => transient = Some(spec),
@@ -1467,6 +1484,10 @@ fn parse_exp_spec(
     })
 }
 
+fn is_xyce_ignored_source_instance_parameter(keyword: &str) -> bool {
+    keyword.eq_ignore_ascii_case("M")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1500,5 +1521,17 @@ mod tests {
         assert!((fall - 0.1e-9).abs() < 1e-20);
         assert!((width - 15e-9).abs() < 1e-20);
         assert!((period - 30e-9).abs() < 1e-20);
+    }
+
+    #[test]
+    fn xyce_ignored_source_instance_assignment_is_accepted() {
+        let source = parse_source_spec_text(
+            "DC 3.361e-02A M=4.190e-07",
+            1,
+            &ParamContext::new(),
+        )
+        .expect("Xyce source instance assignment parses");
+
+        assert!(matches!(source, SourceSpec::Dc(value) if (value - 3.361e-2).abs() < 1e-15));
     }
 }
