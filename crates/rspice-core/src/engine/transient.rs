@@ -3467,17 +3467,6 @@ impl Engine {
                         }
                         timestep.force_step((dt * 0.5).min(max_step));
                     }
-                    let force_candidate_node_delta =
-                        Self::max_abs_delta_prefix(&solution, &bounded_force_candidate, num_nodes);
-                    let force_candidate_full_delta =
-                        Self::max_abs_delta(&solution, &bounded_force_candidate);
-                    let top_force_nodes = Self::top_abs_delta_prefix_named(
-                        &solution,
-                        &bounded_force_candidate,
-                        &result.node_names,
-                        num_nodes,
-                        4,
-                    );
                     stale_accept_count = 0;
                     force_accepted_rejected_newton_step = true;
 
@@ -3761,9 +3750,6 @@ impl Engine {
                             transient_baseline_diag_gmin,
                         )?);
                     }
-                    if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
-                        log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
-                    }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
                         &circuit,
@@ -3796,25 +3782,6 @@ impl Engine {
                         max_step,
                         force_accept_device_truncation_limit,
                     );
-                    let v0_force = solution.first().copied().unwrap_or(0.0);
-                    static FORCE_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                        std::sync::atomic::AtomicUsize::new(0);
-                    let count = FORCE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if count < 32 || (t > 9.5e-8 && dt < 1.0e-15) {
-                        log::warn!(
-                            "FORCE-ACCEPT at t={:.12e}s accepted_t={:.12e}s dt={:.3e} next_dt={:.3e} node_dv={:.3e} full_dv={:.3e} top_nodes={:?} v0={:.4} trunc_limit={:?} retry_count={}",
-                            t,
-                            t + dt,
-                            dt,
-                            next_force_dt,
-                            force_candidate_node_delta,
-                            force_candidate_full_delta,
-                            top_force_nodes,
-                            v0_force,
-                            force_accept_device_truncation_limit,
-                            retry_count
-                        );
-                    }
                     retry_count = 0; // Reset for next timepoint
                     // Keep the accepted dt and only defer shrink for a couple of retries.
                     // Large cooldowns plus immediate dt growth can trap stiff switching decks
@@ -4690,9 +4657,6 @@ impl Engine {
                             transient_baseline_diag_gmin,
                         )?);
                     }
-                    if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
-                        log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
-                    }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
                         &circuit,
@@ -4724,19 +4688,6 @@ impl Engine {
                         max_step,
                         force_accept_device_truncation_limit,
                     );
-                    if std::env::var_os("RSPICE_GRID_DEBUG").is_some() && t > 9.5e-8 && dt < 1.0e-15
-                    {
-                        log::warn!(
-                            "LTE FORCE-ACCEPT at t={:.12e}s accepted_t={:.12e}s dt={:.3e} next_dt={:.3e} trunc_limit={:?} lte={:.3e} retry_count={}",
-                            t,
-                            t + dt,
-                            dt,
-                            next_force_dt,
-                            force_accept_device_truncation_limit,
-                            lte,
-                            retry_count
-                        );
-                    }
                     retry_count = 0; // Reset for next timepoint
                     force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
                     timestep.force_step(next_force_dt);
@@ -4954,13 +4905,6 @@ impl Engine {
                     t,
                     transient_baseline_diag_gmin,
                 )?);
-            }
-
-            if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
-                eprintln!(
-                    "GRID accept t={:.12e} dt={:.6e} order={} bp={} lte={:.6e} promote={}",
-                    t, dt, step_trap_order, hit_breakpoint, lte, xyce_promotes_order_two,
-                );
             }
 
             // Store results

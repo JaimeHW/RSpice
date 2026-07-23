@@ -13,44 +13,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn top_abs_delta_prefix_named(
-        a: &[Value],
-        b: &[Value],
-        node_names: &[String],
-        count: usize,
-        max_items: usize,
-    ) -> Vec<String> {
-        let mut deltas: Vec<(usize, Value)> = a
-            .iter()
-            .zip(b.iter())
-            .take(count)
-            .enumerate()
-            .map(|(idx, (x, y))| (idx, (x - y).abs()))
-            .filter(|(_, delta)| delta.is_finite() && *delta > 0.0)
-            .collect();
-        deltas.sort_by(|lhs, rhs| rhs.1.total_cmp(&lhs.1));
-        deltas
-            .into_iter()
-            .take(max_items)
-            .map(|(idx, delta)| {
-                let name = node_names
-                    .get(idx)
-                    .map(String::as_str)
-                    .unwrap_or("<unnamed>");
-                format!("{name}:{delta:.3e}")
-            })
-            .collect()
-    }
-
-    #[inline]
-    pub(super) fn max_abs_delta(a: &[Value], b: &[Value]) -> Value {
-        a.iter()
-            .zip(b.iter())
-            .map(|(x, y)| (x - y).abs())
-            .fold(0.0, Value::max)
-    }
-
-    #[inline]
     pub(super) fn max_abs_delta_branch_ordinals(
         a: &[Value],
         b: &[Value],
