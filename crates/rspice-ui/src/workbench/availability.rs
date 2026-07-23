@@ -124,6 +124,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui persistent Visualization Studio result-document executor",
             evidence_boundary: "Versioned pane composition, native waveform/Bode/spectrum/Smith/table/histogram/eye/pole-zero viewers, exact source-row inspection, cursor/marker/annotation entities, retained-run overlays, display LOD policy, and CSV/Touchstone/PNG export are executable. Catalog viewers without a compatible native renderer or qualified external producer remain explicitly unavailable and never receive fabricated fallback data.",
         },
+        SurfaceId::ModelEditor => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui governed project-owned device-model definition editor",
+            evidence_boundary: "A selected coherent project-owned single-card model can be opened, edited through typed parameter, section, statistical, temperature, and executable qualification contracts, parser-validated, compared with retained releases, and committed as guarded source or evidence-only revisions. Qualification runs execute on the current real Desktop or WebAssembly runtime and assemble parity evidence only from an exact retained pair. Promotion remains fail-closed behind complete source-bound evidence, declarations, compatibility, and independent approvals. Built-in and external sources remain read-only.",
+        },
         SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui retained notification and activity center",
             evidence_boundary: "Filtering, read state, retention disclosure, notification settings routing, and clearing retained read activity operate on the real device-local activity stream; no external approval or remote background service is inferred.",
@@ -178,6 +182,7 @@ mod tests {
                 SurfaceId::Models,
                 SurfaceId::Netlist,
                 SurfaceId::VisualizationStudio,
+                SurfaceId::ModelEditor,
                 SurfaceId::ProjectLauncher,
                 SurfaceId::Preferences,
                 SurfaceId::DesignManagement,
@@ -196,6 +201,21 @@ mod tests {
         let error = require_available(route).expect_err("RF route is not implemented");
         assert_eq!(error.surface, SurfaceId::RfWorkbench);
         assert!(error.reason.contains("no complete Rust route executor"));
+    }
+
+    #[test]
+    fn model_editor_has_an_explicit_project_owned_executor_boundary() {
+        let availability = surface_availability(SurfaceId::ModelEditor);
+        assert_eq!(
+            availability,
+            SurfaceExecutionAvailability::Available {
+                executor: "rspice-ui governed project-owned device-model definition editor",
+                evidence_boundary: "A selected coherent project-owned single-card model can be opened, edited through typed parameter, section, statistical, temperature, and executable qualification contracts, parser-validated, compared with retained releases, and committed as guarded source or evidence-only revisions. Qualification runs execute on the current real Desktop or WebAssembly runtime and assemble parity evidence only from an exact retained pair. Promotion remains fail-closed behind complete source-bound evidence, declarations, compatibility, and independent approvals. Built-in and external sources remain read-only.",
+            }
+        );
+        assert!(route_availability(SurfaceRoute::surface(SurfaceId::ModelEditor)).can_open());
+        require_available(SurfaceRoute::surface(SurfaceId::ModelEditor))
+            .expect("model editor route executor is registered");
     }
 
     #[test]

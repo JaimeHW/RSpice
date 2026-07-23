@@ -1160,6 +1160,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::OpenWorkspace(Workspace::Models)
         | Command::ModelsPage(_)
         | Command::ModelBrowser
+        | Command::ModelEditor
         | Command::PdkSettings => WorkbenchIcon::Models,
         Command::OpenWorkspace(Workspace::Netlist) => WorkbenchIcon::Netlist,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
@@ -1167,7 +1168,9 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::NewCell => WorkbenchIcon::Add,
         Command::OpenProject | Command::OpenDocument => WorkbenchIcon::Folder,
         Command::RecentProjects => WorkbenchIcon::History,
-        Command::Save | Command::SaveAs | Command::SaveAll => WorkbenchIcon::Save,
+        Command::Save | Command::SaveAs | Command::SaveAll | Command::ModelSaveRevision => {
+            WorkbenchIcon::Save
+        }
         Command::RevertActiveDocument | Command::ResetActiveView | Command::ResetLayout => {
             WorkbenchIcon::Refresh
         }
@@ -1210,15 +1213,16 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy => WorkbenchIcon::Folder,
-        Command::RunSimulation => WorkbenchIcon::Run,
+        Command::RunSimulation | Command::ModelRunQualificationTests => WorkbenchIcon::Run,
         Command::StopSimulation => WorkbenchIcon::Stop,
-        Command::PreflightChecks | Command::RunChecks | Command::CheckAndSave => {
-            WorkbenchIcon::Check
-        }
+        Command::PreflightChecks
+        | Command::RunChecks
+        | Command::CheckAndSave
+        | Command::ModelValidate => WorkbenchIcon::Check,
         Command::CompileVerilogA => WorkbenchIcon::Code,
         Command::AccountOrganization | Command::License => WorkbenchIcon::User,
         Command::KeyboardShortcuts => WorkbenchIcon::Search,
-        Command::InteroperabilityMatrix => WorkbenchIcon::Compare,
+        Command::InteroperabilityMatrix | Command::ModelCompareRelease => WorkbenchIcon::Compare,
         Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
         Command::VisualizationStudio => WorkbenchIcon::Results,
         Command::AddVisualizationPane => WorkbenchIcon::Add,
@@ -1501,6 +1505,7 @@ fn models_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         "Model & library catalog",
         None,
     );
+    command_item(ui, app, Command::ModelEditor);
     menu_separator(ui);
     command_item_as(
         ui,

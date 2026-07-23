@@ -2385,6 +2385,85 @@ impl SimulationPlan {
         )
     }
 
+    /// Atomically insert a disabled prerequisite draft immediately before its
+    /// consumer and prepare every machine-inferable dependency beneath it.
+    /// This is the guided path for
+    /// prerequisites that require user-owned circuit data which cannot be
+    /// inferred safely (for example, an autonomous PSS oscillator node).
+    /// The returned prerequisite is selected for configuration by the caller.
+    /// Its consumer role remains deliberately unbound until the draft is valid
+    /// and enabled, after which ordinary atomic dependency repair reuses it.
+    pub fn prepare_prerequisite_for_configuration(
+        &mut self,
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+        draft: AnalysisDraft,
+        context: &AnalysisDependencyRepairContext,
+    ) -> Result<(AnalysisInstanceId, AnalysisLifecycleReceipt), AnalysisPlanError> {
+        let actual = draft.kind();
+        if actual != prerequisite {
+            return Err(AnalysisPlanError::DraftKindMismatch {
+                expected: prerequisite,
+                actual,
+            });
+        }
+        let dependent_instance = self
+            .instance(dependent)
+            .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
+        if !dependent_instance
+            .prerequisite_roles()
+            .contains(&prerequisite)
+        {
+            return Err(AnalysisPlanError::UnexpectedDependencyRole {
+                dependent,
+                prerequisite,
+            });
+        }
+        let id = self.fresh_identity();
+        let context = context.clone();
+        let ((), receipt) = self.transact(
+            AnalysisLifecycleCommand::Insert,
+            id,
+            Some(dependent),
+            AnalysisLifecycleState::Disabled,
+            format!(
+                "Disabled {} prerequisite {id} was inserted before analysis {dependent} with its inferable dependency closure and is ready for configuration.",
+                prerequisite.label()
+            ),
+            move |candidate, revision| {
+                candidate.ensure_identity_available(id)?;
+                let dependent_index = candidate.index_of(dependent)?;
+                candidate.ensure_editable(dependent_index)?;
+                candidate.instances.insert(
+                    dependent_index,
+                    AnalysisInstance::fresh(id, draft, false, Vec::new(), revision),
+                );
+                let dependent_index = candidate.index_of(dependent)?;
+                let dependent_instance = &mut candidate.instances[dependent_index];
+                dependent_instance
+                    .dependencies
+                    .retain(|dependency| dependency.prerequisite != prerequisite);
+                dependent_instance.modified_revision = revision;
+                dependent_instance.lifecycle = if dependent_instance.enabled {
+                    AnalysisLifecycleState::Draft
+                } else {
+                    AnalysisLifecycleState::Disabled
+                };
+                let mut repair = AnalysisDependencyRepair::new(id);
+                let mut visiting = Vec::new();
+                candidate.repair_dependency_closure(
+                    id,
+                    revision,
+                    &mut repair,
+                    &mut visiting,
+                    &context,
+                )?;
+                Ok(())
+            },
+        )?;
+        Ok((id, receipt))
+    }
+
     fn repair_dependency_closure(
         &mut self,
         dependent: AnalysisInstanceId,
@@ -3433,6 +3512,76 @@ mod tests {
         .expect("autonomous PSS state edits");
         plan.bind_dependency(pnoise, AnalysisKind::Pss, pss)
             .expect("phase noise accepts an autonomous shooting PSS");
+    }
+
+    #[test]
+    fn guided_prerequisite_configuration_is_atomic_bound_and_fail_closed() {
+        let mut plan = SimulationPlan::empty();
+        let (pnoise, _) = plan.insert(AnalysisKind::Pnoise).expect("PNOISE inserts");
+        plan.edit(pnoise, |draft| {
+            let AnalysisDraft::Pnoise(pnoise) = draft else {
+                panic!("expected PNOISE draft");
+            };
+            pnoise.noise_ref_idx = 2;
+        })
+        .expect("phase-noise state edits");
+        let before_len = plan.instances().len();
+        let mut pss = crate::simulation::dialog::PssDialogState::default();
+        pss.osc_mode = true;
+        pss.osc_node.clear();
+        pss.tone_sources.clear();
+        let (prepared, receipt) = plan
+            .prepare_prerequisite_for_configuration(
+                pnoise,
+                AnalysisKind::Pss,
+                AnalysisDraft::Pss(pss),
+                &exact_periodic_context(),
+            )
+            .expect("guided prerequisite is retained atomically");
+
+        assert_eq!(plan.instances().len(), before_len + 2);
+        assert_eq!(receipt.related_instance_id(), Some(pnoise));
+        assert_eq!(receipt.outcome(), AnalysisLifecycleState::Disabled);
+        let prepared_position = plan
+            .instances()
+            .iter()
+            .position(|instance| instance.id() == prepared)
+            .expect("prepared PSS remains ordered");
+        assert_eq!(
+            plan.instances()[prepared_position].kind(),
+            AnalysisKind::Pss
+        );
+        assert!(!plan.instances()[prepared_position].enabled());
+        let op_dependency = plan.instances()[prepared_position].dependencies()[0];
+        let op_position = plan
+            .instances()
+            .iter()
+            .position(|instance| instance.id() == op_dependency.target())
+            .expect("machine-inferable OP prerequisite is prepared");
+        assert!(op_position < prepared_position);
+        assert_eq!(
+            plan.instances()[op_position].kind(),
+            AnalysisKind::OperatingPoint
+        );
+        assert!(plan.instances()[op_position].enabled());
+        assert!(plan.instance(pnoise).unwrap().dependencies().is_empty());
+        assert!(plan.validation_issues().iter().any(|issue| matches!(
+            issue,
+            AnalysisPlanIssue::MissingPrerequisite { dependent, prerequisite }
+                if *dependent == pnoise && *prerequisite == AnalysisKind::Pss
+        )));
+
+        let before_rejected = snapshot(&plan);
+        assert!(matches!(
+            plan.prepare_prerequisite_for_configuration(
+                pnoise,
+                AnalysisKind::OperatingPoint,
+                AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+                &exact_periodic_context(),
+            ),
+            Err(AnalysisPlanError::UnexpectedDependencyRole { .. })
+        ));
+        assert_eq!(snapshot(&plan), before_rejected);
     }
 
     #[test]

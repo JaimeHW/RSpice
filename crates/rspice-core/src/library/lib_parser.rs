@@ -62,6 +62,8 @@ pub struct ParsedModel {
     pub name: String,
     /// Model type (NMOS, PMOS, D, NPN, etc.)
     pub model_type: ModelType,
+    /// Exact normalized SPICE model type token from the source card.
+    pub spice_type: String,
     /// SPICE level parameter (e.g., 54 for BSIM4)
     pub level: Option<u32>,
     /// Version parameter
@@ -98,6 +100,19 @@ impl ParsedModel {
         Self {
             name: name.into(),
             model_type,
+            spice_type: match model_type {
+                ModelType::Diode => "D",
+                ModelType::NpnBjt => "NPN",
+                ModelType::PnpBjt => "PNP",
+                ModelType::Nmos => "NMOS",
+                ModelType::Pmos => "PMOS",
+                ModelType::Njfet => "NJF",
+                ModelType::Pjfet => "PJF",
+                ModelType::Resistor => "R",
+                ModelType::Capacitor => "C",
+                ModelType::Other => "OTHER",
+            }
+            .to_owned(),
             level: None,
             version: None,
             parameters: HashMap::new(),
@@ -264,6 +279,11 @@ pub struct LibParser {
     top_level_subcircuits: Vec<ParsedSubcircuit>,
     /// Parse errors encountered
     errors: Vec<ParseError>,
+    /// Optional authenticated source resolver. When populated, include
+    /// traversal is satisfied exclusively from these retained bytes and exact
+    /// owner/literal edges; the host filesystem is never consulted.
+    authenticated_sources: Option<HashMap<PathBuf, Arc<[u8]>>>,
+    authenticated_dependencies: Option<HashMap<(PathBuf, String), PathBuf>>,
 }
 
 /// Parse error information
@@ -308,6 +328,8 @@ impl LibParser {
             top_level_models: Vec::new(),
             top_level_subcircuits: Vec::new(),
             errors: Vec::new(),
+            authenticated_sources: None,
+            authenticated_dependencies: None,
         }
     }
 
@@ -341,6 +363,80 @@ impl LibParser {
         self.build_result()
     }
 
+    /// Parse a complete authenticated source closure without consulting the
+    /// host filesystem. Every dependency must resolve through the exact
+    /// retained `(owner, normalized literal) -> target` edge supplied by the
+    /// caller. The result preserves each parsed model's member path and source
+    /// line just like [`Self::parse_file`].
+    pub fn parse_authenticated_closure(
+        &mut self,
+        root: impl Into<PathBuf>,
+        sources: impl IntoIterator<Item = (PathBuf, Vec<u8>)>,
+        dependencies: impl IntoIterator<Item = ResolvedLibDependency>,
+    ) -> Result<LibParseResult, String> {
+        self.reset_parse_state();
+        let root = root.into();
+        let mut authenticated_sources = HashMap::new();
+        for (path, bytes) in sources {
+            if authenticated_sources
+                .insert(path.clone(), Arc::<[u8]>::from(bytes))
+                .is_some()
+            {
+                return Err(format!(
+                    "authenticated library closure repeats source '{}'",
+                    path.display()
+                ));
+            }
+        }
+        let root_bytes = authenticated_sources.get(&root).cloned().ok_or_else(|| {
+            format!(
+                "authenticated library closure does not contain root '{}'",
+                root.display()
+            )
+        })?;
+        let mut authenticated_dependencies = HashMap::new();
+        for dependency in dependencies {
+            if !authenticated_sources.contains_key(&dependency.owner)
+                || !authenticated_sources.contains_key(&dependency.target)
+            {
+                return Err(format!(
+                    "authenticated dependency '{}' -> '{}' references a source outside the retained closure",
+                    dependency.owner.display(),
+                    dependency.target.display()
+                ));
+            }
+            let requested_path =
+                crate::netlist::normalize_source_path_literal(&dependency.requested_path)
+                    .map_err(|error| error.to_string())?;
+            let key = (dependency.owner.clone(), requested_path.clone());
+            if let Some(existing) =
+                authenticated_dependencies.insert(key, dependency.target.clone())
+                && existing != dependency.target
+            {
+                return Err(format!(
+                    "authenticated dependency '{}' in '{}' has conflicting targets '{}' and '{}'",
+                    requested_path,
+                    dependency.owner.display(),
+                    existing.display(),
+                    dependency.target.display()
+                ));
+            }
+        }
+        let content = crate::netlist::decode_source_bytes(&root_bytes)
+            .map_err(|error| format!("authenticated root cannot be decoded: {error}"))?;
+        self.authenticated_sources = Some(authenticated_sources);
+        self.authenticated_dependencies = Some(authenticated_dependencies);
+        self.current_file = Some(root.clone());
+        self.base_dir = root.parent().unwrap_or(Path::new(".")).to_path_buf();
+        self.root_dir = self.base_dir.clone();
+        self.include_depth = 1;
+        self.include_stack.push(root.clone());
+        self.record_resolved_source(root, &root_bytes, &content);
+        self.parse_content(&content);
+        self.include_stack.pop();
+        Ok(self.build_result())
+    }
+
     fn reset_parse_state(&mut self) {
         self.current_file = None;
         self.include_depth = 0;
@@ -353,6 +449,8 @@ impl LibParser {
         self.top_level_models.clear();
         self.top_level_subcircuits.clear();
         self.errors.clear();
+        self.authenticated_sources = None;
+        self.authenticated_dependencies = None;
     }
 
     fn record_resolved_source(&mut self, path: PathBuf, bytes: &[u8], content: &str) {
@@ -578,6 +676,10 @@ impl LibParser {
 
     /// Process an include directive
     fn process_include(&mut self, include_literal: &str, directive_line: usize) {
+        if self.authenticated_sources.is_some() {
+            self.process_authenticated_include(include_literal, directive_line);
+            return;
+        }
         if self.include_depth >= self.max_include_depth {
             self.errors.push(ParseError {
                 message: format!(
@@ -707,6 +809,124 @@ impl LibParser {
         }
     }
 
+    fn process_authenticated_include(&mut self, include_literal: &str, directive_line: usize) {
+        if self.include_depth >= self.max_include_depth {
+            self.errors.push(ParseError {
+                message: format!(
+                    "Maximum include depth ({}) exceeded",
+                    self.max_include_depth
+                ),
+                file: self.current_file.clone(),
+                line: Some(directive_line),
+            });
+            return;
+        }
+        let Some(owner) = self.current_file.clone() else {
+            self.errors.push(ParseError {
+                message: "Authenticated dependency has no owning source identity".to_owned(),
+                file: None,
+                line: Some(directive_line),
+            });
+            return;
+        };
+        let requested_path = match crate::netlist::normalize_source_path_literal(include_literal) {
+            Ok(path) => path,
+            Err(error) => {
+                self.errors.push(ParseError {
+                    message: format!("Invalid authenticated dependency path: {error}"),
+                    file: Some(owner),
+                    line: Some(directive_line),
+                });
+                return;
+            }
+        };
+        let target = self
+            .authenticated_dependencies
+            .as_ref()
+            .and_then(|dependencies| {
+                dependencies
+                    .get(&(owner.clone(), requested_path.clone()))
+                    .cloned()
+            });
+        let Some(target) = target else {
+            self.errors.push(ParseError {
+                message: format!(
+                    "Authenticated dependency '{}' has no retained resolution edge",
+                    requested_path
+                ),
+                file: Some(owner),
+                line: Some(directive_line),
+            });
+            return;
+        };
+        let bytes = self
+            .authenticated_sources
+            .as_ref()
+            .and_then(|sources| sources.get(&target).cloned());
+        let Some(bytes) = bytes else {
+            self.errors.push(ParseError {
+                message: format!(
+                    "Authenticated dependency target '{}' has no retained source bytes",
+                    target.display()
+                ),
+                file: Some(owner),
+                line: Some(directive_line),
+            });
+            return;
+        };
+        if let Err(message) =
+            self.record_resolved_dependency(owner.clone(), &requested_path, target.clone())
+        {
+            self.errors.push(ParseError {
+                message,
+                file: Some(owner),
+                line: Some(directive_line),
+            });
+            return;
+        }
+        if self.include_stack.contains(&target) {
+            let mut cycle = self
+                .include_stack
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>();
+            cycle.push(target.display().to_string());
+            self.errors.push(ParseError {
+                message: format!("Cyclic include dependency: {}", cycle.join(" -> ")),
+                file: Some(owner),
+                line: Some(directive_line),
+            });
+            return;
+        }
+        let content = match crate::netlist::decode_source_bytes(&bytes) {
+            Ok(content) => content,
+            Err(error) => {
+                self.errors.push(ParseError {
+                    message: format!(
+                        "Failed to decode authenticated dependency '{}': {error}",
+                        target.display()
+                    ),
+                    file: Some(owner),
+                    line: Some(directive_line),
+                });
+                return;
+            }
+        };
+        let saved_file = self.current_file.replace(target.clone());
+        let saved_dir = std::mem::replace(
+            &mut self.base_dir,
+            target.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        );
+        self.include_depth += 1;
+        self.include_stack.push(target.clone());
+        self.record_resolved_source(target, &bytes, &content);
+        self.parse_content(&content);
+        self.include_stack.pop();
+        self.include_depth -= 1;
+        self.current_file = saved_file;
+        self.base_dir = saved_dir;
+    }
+
     /// Parse .subckt start line
     fn parse_subckt_start(&self, line: &str) -> Option<ParsedSubcircuit> {
         // Format: .SUBCKT name pin1 pin2 ... [param1=val1 ...]
@@ -770,6 +990,7 @@ impl LibParser {
 
         let model_type = ModelType::from_spice_type(type_str);
         let mut model = ParsedModel::new(name, model_type);
+        model.spice_type = type_str.to_ascii_uppercase();
 
         // Parse parameters from parentheses
         if let Some(params) = params_part {
@@ -823,7 +1044,9 @@ impl LibParser {
                     } else if let Ok(v) = Self::parse_spice_number(val) {
                         model.parameters.insert(key, v);
                     } else {
-                        model.string_params.insert(key, val.to_string());
+                        model
+                            .string_params
+                            .insert(key, Self::parse_model_string_value(val));
                     }
                 }
             } else if in_value && !current_key.is_empty() {
@@ -833,6 +1056,31 @@ impl LibParser {
                 in_value = false;
             }
         }
+    }
+
+    /// Decode one quoted string-valued `.model` parameter while preserving
+    /// the established unquoted-token behavior used by foundry libraries.
+    fn parse_model_string_value(value: &str) -> String {
+        let Some(inner) = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+        else {
+            return value.to_owned();
+        };
+        let mut decoded = String::with_capacity(inner.len());
+        let mut characters = inner.chars();
+        while let Some(character) = characters.next() {
+            if character == '\\' {
+                if let Some(escaped) = characters.next() {
+                    decoded.push(escaped);
+                } else {
+                    decoded.push('\\');
+                }
+            } else {
+                decoded.push(character);
+            }
+        }
+        decoded
     }
 
     /// Parse SPICE number format (handles suffixes like 1e-9, 1n, 1u, etc.)
@@ -1087,6 +1335,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn quoted_model_string_parameters_are_decoded_exactly() {
+        let mut parser = LibParser::new(".");
+        let result = parser
+            .parse_string(".model nch NMOS (LEVEL=1 VERSION_TAG=\"release\\\\candidate\\\"1\")\n");
+
+        assert!(result.is_ok(), "quoted model parameter must parse");
+        let model = result
+            .top_level_models
+            .first()
+            .expect("one top-level model");
+        assert_eq!(
+            model.string_params.get("version_tag").map(String::as_str),
+            Some("release\\candidate\"1")
+        );
+    }
+
+    #[test]
+    fn parser_retains_unknown_spice_model_type_token_exactly() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(".model power_fet VDMOS (LEVEL=1 KP=2e-3)\n");
+
+        assert!(result.is_ok(), "custom model type must parse");
+        let model = result
+            .top_level_models
+            .first()
+            .expect("one top-level model");
+        assert_eq!(model.model_type, ModelType::Other);
+        assert_eq!(model.spice_type, "VDMOS");
+    }
+
     fn write_depth_fixture(directory: &Path, source_count: usize) -> PathBuf {
         std::fs::create_dir_all(directory).expect("create depth fixture");
         for index in 0..source_count {
@@ -1189,5 +1468,62 @@ mod tests {
         assert!(error.contains("sub/device.inc"), "{error}");
         assert_eq!(parser.resolved_dependencies.len(), 1);
         assert_eq!(parser.resolved_dependencies[0].target, first);
+    }
+
+    #[test]
+    fn authenticated_closure_preserves_included_model_identity_without_filesystem_reads() {
+        let root = PathBuf::from(r"C:\retained\root.lib");
+        let included = PathBuf::from(r"C:\retained\models\device.inc");
+        let mut parser = LibParser::new(r"C:\retained");
+        let result = parser
+            .parse_authenticated_closure(
+                root.clone(),
+                [
+                    (root.clone(), b".include \"models/device.inc\"\n".to_vec()),
+                    (
+                        included.clone(),
+                        b"* included card\n.model nested_n NMOS (LEVEL=1 KP=1e-3)\n".to_vec(),
+                    ),
+                ],
+                [ResolvedLibDependency {
+                    owner: root,
+                    requested_path: "models/device.inc".to_owned(),
+                    target: included.clone(),
+                }],
+            )
+            .expect("sealed closure is structurally valid");
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let model = result
+            .find_model("nested_n")
+            .expect("included model parses");
+        assert_eq!(model.source_file.as_ref(), Some(&included));
+        assert_eq!(model.source_line, Some(2));
+        assert_eq!(result.resolved_sources.len(), 2);
+        assert_eq!(result.resolved_dependencies.len(), 1);
+    }
+
+    #[test]
+    fn authenticated_closure_never_falls_back_to_the_host_filesystem() {
+        let root = PathBuf::from(r"C:\retained\root.lib");
+        let included = PathBuf::from(r"C:\retained\device.inc");
+        let mut parser = LibParser::new(r"C:\retained");
+        let result = parser
+            .parse_authenticated_closure(
+                root.clone(),
+                [(root, b".include \"device.inc\"\n".to_vec())],
+                std::iter::empty(),
+            )
+            .expect("sealed closure is structurally valid");
+
+        assert!(!result.is_ok());
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| { error.message.contains("has no retained resolution edge") })
+        );
+        assert!(result.find_model("nested_n").is_none());
+        assert!(!included.exists(), "test must not depend on a host file");
     }
 }

@@ -431,6 +431,11 @@ impl Command {
                 | Self::VerificationPage(_)
                 | Self::ModelsPage(_)
                 | Self::ModelBrowser
+                | Self::ModelEditor
+                | Self::ModelSaveRevision
+                | Self::ModelValidate
+                | Self::ModelRunQualificationTests
+                | Self::ModelCompareRelease
                 | Self::PdkSettings
                 | Self::CompileVerilogA
                 | Self::AutomationConsole
@@ -469,6 +474,9 @@ impl Command {
                 | Self::DesignManagement
                 | Self::ConfigurationSets
                 | Self::CreateHierarchy
+                | Self::ModelEditor
+                | Self::ModelSaveRevision
+                | Self::ModelRunQualificationTests
         )
     }
 
@@ -720,6 +728,46 @@ impl Command {
                 "no retained layout, qualified rule deck, or immutable marker database is available"
             }
             Self::ResetActiveView => "active workspace has no resettable view state",
+            Self::ModelEditor => super::selected_project_model_for_editor(app)
+                .err()
+                .unwrap_or("the selected model cannot be opened for inspection"),
+            Self::ModelSaveRevision if app.state.workbench.safe_mode.project_read_only() => {
+                "the project is open read-only"
+            }
+            Self::ModelSaveRevision
+                if app
+                    .state
+                    .workbench
+                    .model_editor
+                    .qualification_execution
+                    .is_some() =>
+            {
+                "qualification execution is active"
+            }
+            Self::ModelSaveRevision if app.state.workbench.model_editor.draft.is_none() => {
+                "no project-owned model candidate is open"
+            }
+            Self::ModelSaveRevision => "the open model candidate has no changes to save",
+            Self::ModelValidate => "no project-owned model candidate is open",
+            Self::ModelRunQualificationTests
+                if app.state.workbench.safe_mode.project_read_only() =>
+            {
+                "qualification cannot run while the project is read-only"
+            }
+            Self::ModelRunQualificationTests
+                if app
+                    .state
+                    .workbench
+                    .model_editor
+                    .qualification_execution
+                    .is_some() =>
+            {
+                "a model qualification run is already active"
+            }
+            Self::ModelRunQualificationTests => {
+                "validate a clean candidate with at least one qualification suite first"
+            }
+            Self::ModelCompareRelease => "a clean candidate and an immutable release are required",
             _ => "command is unavailable in this context",
         };
         CommandAvailability::Disabled(reason)

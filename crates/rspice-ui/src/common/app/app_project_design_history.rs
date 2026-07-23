@@ -181,8 +181,10 @@ pub(crate) fn publish_model_definition_candidate(
     debug_assert_eq!(committed_revision, expected_revision);
     state.model_library_manager = candidate;
     state.workspace.project_metadata_dirty = true;
-    state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
+    if commit.affects_execution {
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+        state.ui.netlist.current_generation_input_digest = None;
+    }
     state.record_model_definition_transaction(ModelDefinitionRecord {
         description: description.into(),
         library: commit.library_name,

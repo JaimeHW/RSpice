@@ -8,6 +8,7 @@ use crate::common::RSpiceApp;
 use crate::common::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{ComponentType, Tool};
+use std::cell::RefCell;
 
 use super::state::{
     ModelsPage, ProjectLauncherFilter, ProjectPage, VerificationPage, WorkbenchState, Workspace,
@@ -17,6 +18,144 @@ mod registry;
 
 fn stop_simulation_enabled(is_running: bool) -> bool {
     is_running && crate::simulation::execution::execution_target_supports_cancellation()
+}
+
+/// Resolve the catalog's single selection only when it is an exact,
+/// authenticated project-owned revision accepted by the model editor.
+///
+/// Command enablement is deliberately fail-closed. A stale catalog selection,
+/// mismatched retained bytes, or a partial source closure must never expose an
+/// editor command that can only fail after navigation.
+fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
+    if !app.state.project_lifecycle.project_open {
+        return Err("open a project before editing a device model");
+    }
+    let library_name = app
+        .state
+        .model_library_manager
+        .selected_library
+        .as_deref()
+        .ok_or("select one model in Model & library catalog")?;
+    let model_name = app
+        .state
+        .workbench
+        .selected_model
+        .as_deref()
+        .ok_or("select one model in Model & library catalog")?;
+    let library = app
+        .state
+        .model_library_manager
+        .get_library(library_name)
+        .ok_or("the selected model library no longer exists")?;
+    match library.source_authority {
+        crate::state::model_library::ModelSourceAuthority::ProjectOwned { .. } => {}
+        crate::state::model_library::ModelSourceAuthority::BuiltIn => {
+            return Err("the selected model is built-in; create an editable project copy first");
+        }
+        crate::state::model_library::ModelSourceAuthority::External => {
+            return Err("the selected model is external; create an editable project copy first");
+        }
+    }
+    super::model_editor::resolve_project_model_for_editor(
+        &app.state.model_library_manager,
+        library_name,
+        model_name,
+    )
+    .map_err(
+        |_| "the selected project model retained source or typed definition is inconsistent",
+    )?;
+    Ok((library_name, model_name))
+}
+
+/// Model-editor toolbar commands open governed review surfaces before they
+/// perform an operation. This state is deliberately UI-local: the persisted
+/// model draft remains the sole source of engineering truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelEditorWorkflow {
+    SaveRevision,
+    ValidateCandidate,
+    RunQualification,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModelEditorWorkflowRequest {
+    pub(crate) workflow: ModelEditorWorkflow,
+    pub(crate) library_name: String,
+    pub(crate) model_name: String,
+    pub(crate) prepared: bool,
+    pub(crate) error: Option<String>,
+}
+
+thread_local! {
+    static MODEL_EDITOR_WORKFLOW: RefCell<Option<ModelEditorWorkflowRequest>> = const {
+        RefCell::new(None)
+    };
+}
+
+pub(crate) fn request_model_editor_workflow(
+    app: &RSpiceApp,
+    workflow: ModelEditorWorkflow,
+) -> bool {
+    let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+        return false;
+    };
+    MODEL_EDITOR_WORKFLOW.with(|state| {
+        *state.borrow_mut() = Some(ModelEditorWorkflowRequest {
+            workflow,
+            library_name: draft.library_name.clone(),
+            model_name: draft.model_name.clone(),
+            prepared: false,
+            error: None,
+        });
+    });
+    true
+}
+
+pub(crate) fn active_model_editor_workflow(app: &RSpiceApp) -> Option<ModelEditorWorkflowRequest> {
+    let identity = app
+        .state
+        .workbench
+        .model_editor
+        .draft
+        .as_ref()
+        .map(|draft| (draft.library_name.as_str(), draft.model_name.as_str()));
+    MODEL_EDITOR_WORKFLOW.with(|state| {
+        let mut state = state.borrow_mut();
+        let matches_open_candidate = state.as_ref().is_some_and(|request| {
+            identity.is_some_and(|(library, model)| {
+                request.library_name.eq_ignore_ascii_case(library)
+                    && request.model_name.eq_ignore_ascii_case(model)
+            })
+        });
+        if matches_open_candidate {
+            state.clone()
+        } else {
+            *state = None;
+            None
+        }
+    })
+}
+
+pub(crate) fn prepare_model_editor_workflow() {
+    MODEL_EDITOR_WORKFLOW.with(|state| {
+        if let Some(request) = state.borrow_mut().as_mut() {
+            request.prepared = true;
+        }
+    });
+}
+
+pub(crate) fn set_model_editor_workflow_error(error: impl Into<String>) {
+    MODEL_EDITOR_WORKFLOW.with(|state| {
+        if let Some(request) = state.borrow_mut().as_mut() {
+            request.error = Some(error.into());
+        }
+    });
+}
+
+pub(crate) fn close_model_editor_workflow() {
+    MODEL_EDITOR_WORKFLOW.with(|state| {
+        *state.borrow_mut() = None;
+    });
 }
 
 pub use registry::{
@@ -129,6 +268,11 @@ pub enum Command {
     ProjectPage(ProjectPage),
     ModelsPage(ModelsPage),
     ModelBrowser,
+    ModelEditor,
+    ModelSaveRevision,
+    ModelValidate,
+    ModelRunQualificationTests,
+    ModelCompareRelease,
     PdkSettings,
     CompileVerilogA,
     AutomationConsole,
@@ -469,6 +613,17 @@ impl Command {
                 spec("model-metadata-audit", "Metadata audit", "Models")
             }
             Self::ModelBrowser => spec("model-browser", "Model browser…", "Models"),
+            Self::ModelEditor => spec(
+                "model-editor",
+                "Device model and parameter editor…",
+                "Models",
+            ),
+            Self::ModelSaveRevision => spec("model-save-revision", "Save model revision", "Models"),
+            Self::ModelValidate => spec("model-validate", "Validate model", "Models"),
+            Self::ModelRunQualificationTests => {
+                spec("model-run-tests", "Run qualification tests", "Models")
+            }
+            Self::ModelCompareRelease => spec("model-compare", "Compare with release", "Models"),
             Self::PdkSettings => spec("pdk-settings", "PDK and model paths…", "Models"),
             Self::CompileVerilogA => spec("veriloga", "Verilog-A/AMS compiler", "Models"),
             Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
@@ -760,6 +915,78 @@ impl Command {
             }
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
+            }
+            Self::ModelEditor => selected_project_model_for_editor(app).is_ok(),
+            Self::ModelSaveRevision => {
+                state
+                    .workbench
+                    .model_editor
+                    .draft
+                    .as_ref()
+                    .is_some_and(|draft| {
+                        draft.is_dirty()
+                            && !state.workbench.safe_mode.project_read_only()
+                            && state.project_lifecycle.project_open
+                            && state
+                                .workbench
+                                .model_editor
+                                .qualification_execution
+                                .is_none()
+                    })
+            }
+            Self::ModelValidate => state.workbench.model_editor.draft.is_some(),
+            Self::ModelRunQualificationTests => state
+                .workbench
+                .model_editor
+                .draft
+                .as_ref()
+                .is_some_and(|draft| {
+                    state.project_lifecycle.project_open
+                        && !state.workbench.safe_mode.project_read_only()
+                        && !draft.definition_is_dirty()
+                        && draft
+                            .qualification
+                            .validate_for_model(&draft.model_name)
+                            .is_ok()
+                        && crate::state::model_library::ModelSourceEvidenceBinding::try_new_project_bound(
+                            &draft.model_name,
+                            draft.source_id,
+                            draft.base_source_digest,
+                            draft.base_source_revision,
+                        )
+                        .is_ok_and(|source| {
+                            draft
+                                .qualification
+                                .exact_suites_for_source(&source)
+                                .is_ok_and(|suites| !suites.is_empty())
+                        })
+                        && state.workbench.model_editor.validation.is_some()
+                        && state
+                            .workbench
+                            .model_editor
+                            .qualification_execution
+                            .is_none()
+                }),
+            Self::ModelCompareRelease => {
+                state
+                    .workbench
+                    .model_editor
+                    .draft
+                    .as_ref()
+                    .is_some_and(|draft| {
+                        !draft.definition_is_dirty()
+                            && !draft.qualification.candidates.is_empty()
+                            && !draft.qualification.releases.is_empty()
+                            && draft
+                                .qualification
+                                .validate_for_model(&draft.model_name)
+                                .is_ok()
+                            && state
+                                .workbench
+                                .model_editor
+                                .qualification_execution
+                                .is_none()
+                    })
             }
             Self::VisualizationStudio => state.project_lifecycle.project_open,
             // The source-authoring executor is intentionally dormant until
@@ -1389,6 +1616,54 @@ impl Command {
                 app.state.workbench.models_page = page;
             }
             Self::ModelBrowser => app.state.model_browser_state.open = true,
+            Self::ModelEditor => match selected_project_model_for_editor(app) {
+                Ok((library_name, model_name)) => {
+                    let library_name = library_name.to_owned();
+                    let model_name = model_name.to_owned();
+                    if let Err(error) =
+                        super::model_editor::open_project_model(app, &library_name, &model_name)
+                    {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                                format!("Cannot open device model editor: {error}"),
+                            ));
+                    }
+                }
+                Err(reason) => {
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                            "Cannot open device model editor: {reason}."
+                        )))
+                }
+            },
+            Self::ModelSaveRevision => {
+                if !request_model_editor_workflow(app, ModelEditorWorkflow::SaveRevision) {
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            "Model revision cannot be reviewed: no project-owned candidate is open",
+                        ));
+                }
+            }
+            Self::ModelValidate => {
+                if !request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate) {
+                    app.state.push_user_message(
+                        crate::common::app::ConsoleMessage::warning(
+                            "Model validation cannot be reviewed: no project-owned candidate is open",
+                        ),
+                    );
+                }
+            }
+            Self::ModelRunQualificationTests => {
+                if !request_model_editor_workflow(app, ModelEditorWorkflow::RunQualification) {
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            "Qualification cannot be reviewed: no project-owned candidate is open",
+                        ));
+                }
+            }
+            Self::ModelCompareRelease => {
+                app.state.workbench.model_editor.comparison_open = true;
+            }
             Self::PdkSettings => app
                 .state
                 .pdk_settings_dialog
@@ -1745,6 +2020,11 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
     Command::VerificationPage(VerificationPage::Yield),
     Command::ModelsPage(ModelsPage::Models),
+    Command::ModelEditor,
+    Command::ModelSaveRevision,
+    Command::ModelValidate,
+    Command::ModelRunQualificationTests,
+    Command::ModelCompareRelease,
     Command::ZoomIn,
     Command::ZoomOut,
     Command::ZoomFit,
@@ -2897,6 +3177,7 @@ mod tests {
             Command::ImportNetlist,
             Command::ImportVerilogA,
             Command::CheckAndSave,
+            Command::ModelEditor,
         ] {
             assert!(
                 command.blocked_by_project_operation(),
@@ -2955,6 +3236,249 @@ mod tests {
         app.state.dialogs.configuration_sets.open = false;
         app.state.project_lifecycle.project_open = false;
         assert!(!Command::ConfigurationSets.is_enabled(&app));
+    }
+
+    #[test]
+    fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority() {
+        use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+
+        assert_eq!(Command::ModelEditor.stable_id(), "model-editor");
+        assert_eq!(
+            Command::ModelEditor.spec().label,
+            "Device model and parameter editor\u{2026}"
+        );
+        assert_eq!(Command::ModelEditor.spec().group, "Models");
+        assert_eq!(
+            Command::from_stable_id("model-editor"),
+            Some(Command::ModelEditor)
+        );
+        assert!(Command::ModelEditor.shortcut_bindings().is_empty());
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::ModelEditor)
+            .expect("model editor command must be registered");
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index - 1],
+            Command::ModelsPage(ModelsPage::Models)
+        );
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.model_library_manager.selected_library = None;
+        app.state.workbench.selected_model = None;
+        assert_eq!(
+            Command::ModelEditor.availability(&app),
+            CommandAvailability::Disabled("select one model in Model & library catalog")
+        );
+
+        let mut built_in = ModelLibrary::new("command-editor-built-in");
+        built_in.add_model(DeviceModel::new("readonly_nch", ModelType::Nmos));
+        app.state.model_library_manager.add_library(built_in);
+        app.state
+            .model_library_manager
+            .select_library("command-editor-built-in");
+        app.state.workbench.selected_model = Some("readonly_nch".to_owned());
+        assert_eq!(
+            Command::ModelEditor.availability(&app),
+            CommandAvailability::Disabled(
+                "the selected model is built-in; create an editable project copy first"
+            )
+        );
+    }
+
+    #[test]
+    fn model_editor_command_accepts_one_coherent_project_owned_definition() {
+        use std::collections::BTreeMap;
+
+        use crate::state::model_library::ProjectModelDefinition;
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        let commit = app
+            .state
+            .model_library_manager
+            .create_project_model(
+                "command-editor-owned",
+                &ProjectModelDefinition {
+                    name: "command_nch".to_owned(),
+                    spice_type: "NMOS".to_owned(),
+                    description: "Command dispatch fixture".to_owned(),
+                    numeric_parameters: BTreeMap::from([
+                        ("level".to_owned(), 1.0),
+                        ("vth0".to_owned(), 0.48),
+                    ]),
+                    string_parameters: BTreeMap::new(),
+                },
+            )
+            .expect("create coherent project-owned model");
+        app.state
+            .model_library_manager
+            .select_library(&commit.library_name);
+        app.state.workbench.selected_model = Some(commit.model_name);
+
+        assert_eq!(
+            Command::ModelEditor.availability(&app),
+            CommandAvailability::Available
+        );
+        assert!(Command::ModelEditor.is_enabled(&app));
+
+        app.state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..crate::workbench::state::LocalSafeModeOptions::default()
+            },
+            "read-only model review".to_owned(),
+        );
+        assert_eq!(
+            Command::ModelEditor.availability(&app),
+            CommandAvailability::Available
+        );
+        Command::ModelEditor.execute(&mut app);
+        assert_eq!(
+            app.state.workbench.current_route().surface_id(),
+            crate::workbench::SurfaceId::ModelEditor
+        );
+        assert!(app.state.workbench.model_editor.draft.is_some());
+        assert_eq!(
+            Command::ModelSaveRevision.availability(&app),
+            CommandAvailability::Disabled("the project is open read-only")
+        );
+        assert_eq!(
+            Command::ModelRunQualificationTests.availability(&app),
+            CommandAvailability::Disabled(
+                "qualification cannot run while the project is read-only"
+            )
+        );
+        assert!(Command::ModelValidate.is_enabled(&app));
+        Command::ModelValidate.execute(&mut app);
+        assert_eq!(
+            active_model_editor_workflow(&app).map(|request| request.workflow),
+            Some(ModelEditorWorkflow::ValidateCandidate)
+        );
+        close_model_editor_workflow();
+    }
+
+    #[test]
+    fn model_editor_command_requires_an_open_project_even_with_a_retained_selection() {
+        use std::collections::BTreeMap;
+
+        use crate::state::model_library::ProjectModelDefinition;
+
+        let mut app = RSpiceApp::test_instance();
+        let commit = app
+            .state
+            .model_library_manager
+            .create_project_model(
+                "command-editor-closed-project",
+                &ProjectModelDefinition {
+                    name: "retained_nch".to_owned(),
+                    spice_type: "NMOS".to_owned(),
+                    description: "Retained selection without an open project".to_owned(),
+                    numeric_parameters: BTreeMap::from([("level".to_owned(), 1.0)]),
+                    string_parameters: BTreeMap::new(),
+                },
+            )
+            .expect("create retained project-owned model");
+        app.state
+            .model_library_manager
+            .select_library(&commit.library_name);
+        app.state.workbench.selected_model = Some(commit.model_name);
+        app.state.project_lifecycle.project_open = false;
+
+        assert_eq!(
+            Command::ModelEditor.availability(&app),
+            CommandAvailability::Disabled("no project is open")
+        );
+        assert!(!Command::ModelEditor.is_enabled(&app));
+        assert_eq!(
+            selected_project_model_for_editor(&app),
+            Err("open a project before editing a device model")
+        );
+    }
+
+    #[test]
+    fn qualification_command_requires_a_suite_for_the_exact_open_source() {
+        use std::collections::BTreeMap;
+
+        use crate::state::model_library::ProjectModelDefinition;
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state
+            .model_library_manager
+            .create_project_model(
+                "command-qualification-owned",
+                &ProjectModelDefinition {
+                    name: "qualification_nch".to_owned(),
+                    spice_type: "NMOS".to_owned(),
+                    description: "Qualification command fixture".to_owned(),
+                    numeric_parameters: BTreeMap::from([("level".to_owned(), 1.0)]),
+                    string_parameters: BTreeMap::new(),
+                },
+            )
+            .expect("create project model");
+        let project_revision = app.state.workspace.project.revision();
+        app.state
+            .workbench
+            .model_editor
+            .open(
+                &app.state.model_library_manager,
+                "command-qualification-owned",
+                "qualification_nch",
+                project_revision,
+            )
+            .expect("open editor");
+        app.state.workbench.model_editor.begin_qualification_suite();
+        let authoring = &mut app.state.workbench.model_editor.qualification_authoring;
+        authoring.suite_id = "dc-op".to_owned();
+        authoring.suite_name = "DC operating point".to_owned();
+        authoring.vector_id = "nominal".to_owned();
+        authoring.vector_name = "Nominal bias".to_owned();
+        authoring.executable_input =
+            "V1 out 0 1\nR1 out 0 1k\nMbind 0 0 0 0 qualification_nch\n.op\n.end\n".to_owned();
+        authoring.quantity = "v(out)".to_owned();
+        authoring.probe_target = "out".to_owned();
+        authoring.expected = "1".to_owned();
+        authoring.absolute_tolerance = "1e-9".to_owned();
+        authoring.relative_tolerance = "1e-9".to_owned();
+        assert!(
+            app.state
+                .workbench
+                .model_editor
+                .commit_qualification_suite()
+        );
+        assert!(
+            app.state
+                .workbench
+                .model_editor
+                .validate_candidate(&app.state.model_library_manager, project_revision)
+        );
+        assert!(Command::ModelRunQualificationTests.is_enabled(&app));
+
+        app.state
+            .workbench
+            .model_editor
+            .draft
+            .as_mut()
+            .expect("draft")
+            .qualification
+            .suites[0]
+            .vectors[0]
+            .source
+            .source_id = Some(crate::product::ModelSourceId::new());
+        assert!(
+            app.state
+                .workbench
+                .model_editor
+                .draft
+                .as_ref()
+                .expect("draft")
+                .qualification
+                .validate_for_model("qualification_nch")
+                .is_ok()
+        );
+        assert!(!Command::ModelRunQualificationTests.is_enabled(&app));
     }
 
     #[test]
@@ -3048,6 +3572,7 @@ mod tests {
             Command::VerificationPage(VerificationPage::Yield),
             Command::ModelsPage(ModelsPage::Models),
             Command::ModelBrowser,
+            Command::ModelEditor,
             Command::PdkSettings,
             Command::CompileVerilogA,
             Command::AutomationConsole,
