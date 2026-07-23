@@ -1584,7 +1584,27 @@ fn pspice_u_dig_model_params(
     model: &str,
     timing: Option<&crate::netlist::PspiceUTiming>,
 ) -> Vec<(String, crate::Value)> {
-    if !model.eq_ignore_ascii_case("xyce_d_tff") {
+    let is_xyce_dig_model = model.eq_ignore_ascii_case("xyce_d_tff")
+        || matches!(
+            model.to_ascii_lowercase().as_str(),
+            "d_and"
+                | "d_buffer"
+                | "d_inverter"
+                | "d_nand"
+                | "d_nor"
+                | "d_or"
+                | "d_xnor"
+                | "d_xor"
+                | "xyce_d_and"
+                | "xyce_d_buffer"
+                | "xyce_d_inverter"
+                | "xyce_d_nand"
+                | "xyce_d_nor"
+                | "xyce_d_or"
+                | "xyce_d_xnor"
+                | "xyce_d_xor"
+        );
+    if !is_xyce_dig_model {
         return Vec::new();
     }
 
@@ -1593,6 +1613,63 @@ fn pspice_u_dig_model_params(
         .filter(|model_def| model_def.model_type.eq_ignore_ascii_case("DIG"))
         .map(|model_def| model_def.params.clone())
         .unwrap_or_default()
+}
+
+fn pspice_u_dig_gate_model(
+    netlist: &Netlist,
+    model: &str,
+    timing: Option<&crate::netlist::PspiceUTiming>,
+) -> Option<&'static str> {
+    let timing = timing?;
+    timing.power_pins.as_ref()?;
+    let timing_model = find_model_def(netlist, &timing.timing_model)?;
+    if !timing_model.model_type.eq_ignore_ascii_case("DIG") {
+        return None;
+    }
+
+    match model.to_ascii_lowercase().as_str() {
+        "d_and" => Some("xyce_d_and"),
+        "d_buffer" => Some("xyce_d_buffer"),
+        "d_inverter" => Some("xyce_d_inverter"),
+        "d_nand" => Some("xyce_d_nand"),
+        "d_nor" => Some("xyce_d_nor"),
+        "d_or" => Some("xyce_d_or"),
+        "d_xnor" => Some("xyce_d_xnor"),
+        "d_xor" => Some("xyce_d_xor"),
+        _ => None,
+    }
+}
+
+fn pspice_u_dig_gate_ports(
+    ports: &[XspicePort],
+    timing: &crate::netlist::PspiceUTiming,
+) -> Option<Vec<XspicePort>> {
+    let (dpwr, dgnd) = timing.power_pins.as_ref()?;
+    let [inputs, output] = ports else {
+        return None;
+    };
+    let analog_inputs = match inputs {
+        XspicePort::Digital(node)
+        | XspicePort::ExplicitDigital(node)
+        | XspicePort::Analog(node) => XspicePort::Analog(node.clone()),
+        XspicePort::DigitalVector(nodes) | XspicePort::AnalogVector(nodes) => {
+            XspicePort::AnalogVector(nodes.clone())
+        }
+        _ => return None,
+    };
+    let analog_output = match output {
+        XspicePort::Digital(node)
+        | XspicePort::ExplicitDigital(node)
+        | XspicePort::Analog(node)
+        | XspicePort::Conductance(node) => XspicePort::Conductance(node.clone()),
+        _ => return None,
+    };
+    Some(vec![
+        XspicePort::Analog(dpwr.clone()),
+        XspicePort::Analog(dgnd.clone()),
+        analog_inputs,
+        analog_output,
+    ])
 }
 
 fn merge_pspice_u_numeric_params(
@@ -6917,14 +6994,27 @@ impl Engine {
                         }
                     }
 
-                    let dig_model_params =
-                        pspice_u_dig_model_params(netlist, model, pspice_u_timing.as_ref());
+                    let dig_gate_model =
+                        pspice_u_dig_gate_model(netlist, model, pspice_u_timing.as_ref());
+                    let effective_model = dig_gate_model.unwrap_or(model.as_str());
+                    let effective_ports = dig_gate_model
+                        .and_then(|_| {
+                            pspice_u_timing
+                                .as_ref()
+                                .and_then(|timing| pspice_u_dig_gate_ports(ports, timing))
+                        })
+                        .unwrap_or_else(|| ports.clone());
+                    let dig_model_params = pspice_u_dig_model_params(
+                        netlist,
+                        effective_model,
+                        pspice_u_timing.as_ref(),
+                    );
                     let xspice_instance_params =
                         merge_pspice_u_numeric_params(&dig_model_params, params);
                     let resolved_model = resolve_xspice_model_instance(
                         netlist,
                         &circuit.xspice_registry,
-                        model,
+                        effective_model,
                         &xspice_instance_params,
                         expr_params,
                         string_params,
@@ -6963,7 +7053,7 @@ impl Engine {
                     let connections = coerce_xspice_connections(
                         &mut circuit,
                         &ports_spec,
-                        ports,
+                        &effective_ports,
                         &element.name,
                         resolved_model.code_model.name(),
                     )?;
