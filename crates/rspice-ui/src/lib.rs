@@ -130,3 +130,10 @@ pub fn run_rspice_ui_veriloga_compile_request(
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     workbench::code_workspace::run_veriloga_worker_request_value(value)
 }
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_rspice_ui_hardcopy_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    common::app::run_hardcopy_worker_request_value(value)
+}

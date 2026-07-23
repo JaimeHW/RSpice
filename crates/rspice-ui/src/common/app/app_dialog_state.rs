@@ -1402,6 +1402,11 @@ pub struct DialogState {
     /// Preferences dialog open
     pub preferences_open: bool,
 
+    /// Unified Page Setup / Print / Export Active View transaction. Draft
+    /// controls and preview state are runtime-only; committed setups live in
+    /// `ProjectWorkspace::hardcopy_setups`.
+    pub(crate) hardcopy: super::HardcopyDialogState,
+
     /// Read-only resolved policy review owned by Preferences.
     pub(crate) managed_preference_policy_open: bool,
 
@@ -1517,6 +1522,7 @@ impl DialogState {
             || self.rename_cell_dialog
             || self.waveform_calculator_dialog
             || self.preferences_open
+            || self.hardcopy.open
             || self.managed_preference_policy_open
             || self.workspace_layout_manager.open
             || self.shortcut_portability.application_modal_open()

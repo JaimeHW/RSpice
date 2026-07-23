@@ -76,9 +76,13 @@ winit = "0.30"
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = "0.34.3"
 
-# SVG parsing for component symbols (lightweight, pure Rust)
-usvg = { version = "0.47", default-features = false }
+# SVG parsing and deterministic software rendering. System font discovery stays
+# disabled: hardcopy rendering loads only RSpice's pinned IBM Plex assets.
+usvg = { version = "0.47", default-features = false, features = ["text"] }
+resvg = { version = "0.47", default-features = false, features = ["text"] }
 svgtypes = "0.16"
+tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
+ttf-parser = "0.25.1"
 
 # Native file dialogs
 rfd = { version = "0.17", features = ["file-handle-inner"] }
@@ -114,10 +118,13 @@ rustix = { version = "1", features = ["fs"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
+    "Win32_Storage_Xps",
     "Win32_System_IO",
 ] }
 

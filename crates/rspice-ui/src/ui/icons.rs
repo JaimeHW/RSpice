@@ -97,6 +97,10 @@ pub enum Icon {
     ChevronUp,
     /// Chevron down.
     ChevronDown,
+    /// Chevron left.
+    ChevronLeft,
+    /// Chevron right.
+    ChevronRight,
     /// Close (×).
     Close,
     /// Application brand mark (the RSpice forward waveform).
@@ -142,6 +146,8 @@ impl Icon {
             Self::Trash => "Delete",
             Self::ChevronUp => "Move up",
             Self::ChevronDown => "Move down",
+            Self::ChevronLeft => "Previous",
+            Self::ChevronRight => "Next",
             Self::Close => "Close",
             Self::Brand => "RSpice",
         }
@@ -326,6 +332,8 @@ impl Icon {
             ],
             Icon::ChevronUp => &[Line(&[[6.0, 14.0], [12.0, 8.0], [18.0, 14.0]])],
             Icon::ChevronDown => &[Line(&[[6.0, 10.0], [12.0, 16.0], [18.0, 10.0]])],
+            Icon::ChevronLeft => &[Line(&[[14.0, 6.0], [8.0, 12.0], [14.0, 18.0]])],
+            Icon::ChevronRight => &[Line(&[[10.0, 6.0], [16.0, 12.0], [10.0, 18.0]])],
             Icon::Close => &[
                 Line(&[[6.0, 6.0], [18.0, 18.0]]),
                 Line(&[[18.0, 6.0], [6.0, 18.0]]),
@@ -428,6 +436,8 @@ mod tests {
             Icon::Trash,
             Icon::ChevronUp,
             Icon::ChevronDown,
+            Icon::ChevronLeft,
+            Icon::ChevronRight,
             Icon::Close,
             Icon::Brand,
         ];

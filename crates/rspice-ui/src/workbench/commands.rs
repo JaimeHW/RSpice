@@ -183,6 +183,9 @@ pub enum Command {
     ExportSchematicSvg,
     ExportWaveformsCsv,
     ExportNetlist(crate::io::NetlistFormat),
+    PageSetup,
+    PrintHardcopy,
+    ExportActiveView,
     Exit,
     Undo,
     Redo,
@@ -374,6 +377,9 @@ impl Command {
             Self::ExportNetlist(crate::io::NetlistFormat::Xyce) => {
                 spec("export-netlist-xyce", "Export Xyce netlist…", "File")
             }
+            Self::PageSetup => spec("page-setup", "Page setup…", "File"),
+            Self::PrintHardcopy => spec("print-hardcopy", "Print / hardcopy…", "File"),
+            Self::ExportActiveView => spec("export-active-view", "Export active view…", "File"),
             Self::Exit => spec("exit-rspice", "Exit RSpice…", "File"),
             Self::Undo => spec("undo", "Undo", "Edit"),
             Self::Redo => spec("redo", "Redo", "Edit"),
@@ -721,6 +727,15 @@ impl Command {
                 crate::common::project_lifecycle::can_close_active_document(state)
             }
             Self::CloseProject => state.project_lifecycle.project_open,
+            Self::PageSetup | Self::ExportActiveView => {
+                crate::workbench::hardcopy_sources::active_app_hardcopy_source_available(state)
+            }
+            Self::PrintHardcopy => {
+                cfg!(any(target_os = "windows", target_arch = "wasm32"))
+                    && crate::workbench::hardcopy_sources::active_app_hardcopy_source_available(
+                        state,
+                    )
+            }
             Self::Undo => {
                 if state.can_undo_project_design() {
                     true
@@ -1084,6 +1099,18 @@ impl Command {
                     );
                 }
             }
+            Self::PageSetup => crate::common::app::open_hardcopy_workflow(
+                app,
+                crate::common::app::HardcopyWorkflow::PageSetup,
+            ),
+            Self::PrintHardcopy => crate::common::app::open_hardcopy_workflow(
+                app,
+                crate::common::app::HardcopyWorkflow::Print,
+            ),
+            Self::ExportActiveView => crate::common::app::open_hardcopy_workflow(
+                app,
+                crate::common::app::HardcopyWorkflow::Export,
+            ),
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => app.action_edit_undo(),
             Self::Redo => app.action_edit_redo(),
@@ -1992,6 +2019,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice),
     Command::ExportNetlist(crate::io::NetlistFormat::Xyce),
+    Command::PageSetup,
+    Command::PrintHardcopy,
+    Command::ExportActiveView,
     Command::Exit,
     Command::Undo,
     Command::Redo,

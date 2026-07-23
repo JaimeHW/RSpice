@@ -1178,7 +1178,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::ImportVerilogA
         | Command::ExportSchematicSvg
         | Command::ExportWaveformsCsv
-        | Command::ExportNetlist(_) => WorkbenchIcon::Export,
+        | Command::ExportNetlist(_)
+        | Command::PrintHardcopy
+        | Command::ExportActiveView => WorkbenchIcon::Export,
+        Command::PageSetup => WorkbenchIcon::File,
         Command::Undo => WorkbenchIcon::Undo,
         Command::Redo => WorkbenchIcon::Redo,
         Command::Cut | Command::Copy | Command::Paste | Command::Duplicate => WorkbenchIcon::Copy,
@@ -1289,6 +1292,10 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     menu_separator(ui);
     command_item(ui, app, Command::CloseActiveDocument);
     command_item(ui, app, Command::CloseProject);
+    menu_separator(ui);
+    command_item(ui, app, Command::PageSetup);
+    command_item(ui, app, Command::PrintHardcopy);
+    command_item(ui, app, Command::ExportActiveView);
     let platform = crate::common::app::runtime_command_platform(ui.ctx());
     if file_menu_shows_exit(platform) {
         menu_separator(ui);

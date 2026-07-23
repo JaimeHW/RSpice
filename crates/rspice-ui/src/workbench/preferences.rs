@@ -15,6 +15,11 @@ use crate::results::plot_export_preset::{
     PlotExportPresetMutationReceipt, PlotExportPresetScope,
 };
 
+use super::hardcopy::PrintMappingTable;
+use super::hardcopy_mapping_store::{
+    PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
+    PrintMappingSaveReceipt,
+};
 use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary, ShortcutProfileLibraryError};
 
 /// Mockup-defined workspace composition applied by the workbench owner.
@@ -510,6 +515,54 @@ enum PersonalPlotExportPresetStorage {
     Future(Value),
 }
 
+/// Device/user-owned reusable hardcopy mappings. A future incompatible value
+/// is retained verbatim so one preference domain cannot invalidate session
+/// recovery for every other domain.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+enum PersonalPrintMappingPresetStorage {
+    Current(PrintMappingPresetCatalog),
+    Future(Value),
+}
+
+impl Default for PersonalPrintMappingPresetStorage {
+    fn default() -> Self {
+        Self::Current(PrintMappingPresetCatalog::new(
+            PrintMappingCatalogOwner::Personal,
+        ))
+    }
+}
+
+impl PersonalPrintMappingPresetStorage {
+    fn current(&self) -> Option<&PrintMappingPresetCatalog> {
+        match self {
+            Self::Current(catalog) if catalog.owner() == PrintMappingCatalogOwner::Personal => {
+                Some(catalog)
+            }
+            Self::Current(_) | Self::Future(_) => None,
+        }
+    }
+
+    fn current_mut(&mut self) -> Result<&mut PrintMappingPresetCatalog, &'static str> {
+        match self {
+            Self::Current(catalog) if catalog.owner() == PrintMappingCatalogOwner::Personal => {
+                Ok(catalog)
+            }
+            Self::Current(_) => Err("personal print mappings contain a non-personal owner"),
+            Self::Future(_) => Err("personal print mappings were written by an incompatible build"),
+        }
+    }
+
+    fn is_default(&self) -> bool {
+        matches!(
+            self,
+            Self::Current(catalog)
+                if catalog
+                    == &PrintMappingPresetCatalog::new(PrintMappingCatalogOwner::Personal)
+        )
+    }
+}
+
 impl Default for PersonalPlotExportPresetStorage {
     fn default() -> Self {
         Self::Current(PlotExportPresetCatalog::default())
@@ -924,6 +977,11 @@ pub struct UserPreferences {
         skip_serializing_if = "PersonalPlotExportPresetStorage::is_default"
     )]
     personal_plot_export_presets: PersonalPlotExportPresetStorage,
+    #[serde(
+        rename = "print-mapping-presets",
+        skip_serializing_if = "PersonalPrintMappingPresetStorage::is_default"
+    )]
+    personal_print_mapping_presets: PersonalPrintMappingPresetStorage,
     shortcuts: ShortcutProfileLibrary,
     /// Forward-compatible typed domains that this build does not understand.
     #[serde(flatten)]
@@ -997,6 +1055,37 @@ impl UserPreferences {
             definition,
             timestamp_unix_ms,
         )
+    }
+
+    /// Reusable hardcopy mappings owned by this personal profile. Document
+    /// and project mappings are rejected by the typed catalog.
+    #[must_use]
+    pub fn personal_print_mapping_presets(&self) -> Option<&PrintMappingPresetCatalog> {
+        self.personal_print_mapping_presets.current()
+    }
+
+    pub fn save_personal_print_mapping_preset(
+        &mut self,
+        table: PrintMappingTable,
+    ) -> Result<PrintMappingSaveReceipt, PrintMappingPersistenceError> {
+        let catalog = self
+            .personal_print_mapping_presets
+            .current_mut()
+            .map_err(|message| PrintMappingPersistenceError::InvalidMapping(message.to_owned()))?;
+        catalog.save(table)
+    }
+
+    pub(crate) fn replace_personal_print_mapping_presets(
+        &mut self,
+        catalog: PrintMappingPresetCatalog,
+    ) -> Result<(), PrintMappingPersistenceError> {
+        if catalog.owner() != PrintMappingCatalogOwner::Personal {
+            return Err(PrintMappingPersistenceError::InvalidMapping(
+                "replacement personal print-mapping catalog has non-personal ownership".to_owned(),
+            ));
+        }
+        self.personal_print_mapping_presets = PersonalPrintMappingPresetStorage::Current(catalog);
+        Ok(())
     }
 
     #[must_use]
@@ -1805,5 +1894,34 @@ mod tests {
             Err(ShortcutProfileLibraryError::IncompatibleLibrary)
         ));
         assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
+    }
+
+    #[test]
+    fn personal_print_mapping_presets_route_to_user_preferences() {
+        let mut preferences = UserPreferences::default();
+        let mapping = PrintMappingTable::try_new(
+            crate::workbench::hardcopy::PrintMappingSaveScope::PortablePersonalPreset(
+                "bench-printer".to_owned(),
+            ),
+            Vec::new(),
+        )
+        .unwrap();
+        let receipt = preferences
+            .save_personal_print_mapping_preset(mapping)
+            .unwrap();
+        assert_eq!(
+            receipt.disposition(),
+            crate::workbench::PrintMappingSaveDisposition::Created
+        );
+
+        let encoded = serde_json::to_string(&preferences).unwrap();
+        let restored: UserPreferences = serde_json::from_str(&encoded).unwrap();
+        assert!(
+            restored
+                .personal_print_mapping_presets()
+                .unwrap()
+                .get("bench-printer")
+                .is_some()
+        );
     }
 }

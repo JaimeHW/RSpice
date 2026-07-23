@@ -20,7 +20,7 @@ mod mos_symbols;
 mod passive_symbols;
 mod source_symbols;
 
-pub use self::config::SvgExportConfig;
+pub use self::config::{SvgColor, SvgColorParseError, SvgExportConfig};
 
 use self::bjt_diode_symbols::{write_diode_symbol, write_npn_symbol, write_pnp_symbol};
 use self::block_symbols::{write_cell_instance_symbol, write_port_symbol, write_xspice_symbol};
@@ -162,8 +162,7 @@ fn export_to_svg_with_resolved_symbol_entries(
   .design-note-anchor {{ fill: {text_color}; stroke: none; }}\n\
   .design-note-requirement-link .text {{ text-decoration: underline; }}\n\
   .documentation-shape {{ stroke: {text_color}; stroke-width: {comp_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
-</style>\n\
-<rect width=\"100%\" height=\"100%\" fill=\"#1a1a1a\"/>",
+</style>",
         vx = min_x - config.margin,
         vy = min_y - config.margin,
         wire_color = config.wire_color,
@@ -175,6 +174,15 @@ fn export_to_svg_with_resolved_symbol_entries(
         font_size = config.font_size,
         text_color = config.text_color
     );
+
+    if let Some(background_color) = config.background_color.as_ref() {
+        let _ = writeln!(
+            svg,
+            "<rect x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" fill=\"{background_color}\"/>",
+            x = min_x - config.margin,
+            y = min_y - config.margin,
+        );
+    }
 
     // Export wires
     for wire in &state.wires {
@@ -714,6 +722,31 @@ mod tests {
         assert!(svg.contains("1k &amp; 2k"));
         assert!(!svg.contains("R<&>"));
         assert!(!svg.contains("1k & 2k"));
+    }
+
+    #[test]
+    fn svg_export_background_is_explicit_and_can_be_transparent() {
+        let schematic = SchematicState::default();
+        let dark = export_to_svg(&schematic, &SvgExportConfig::default());
+        assert!(dark.contains("fill=\"#1A1A1A\""));
+
+        let transparent = export_to_svg(
+            &schematic,
+            &SvgExportConfig {
+                background_color: None,
+                ..SvgExportConfig::default()
+            },
+        );
+        assert!(!transparent.contains("<rect"));
+
+        let print_safe = export_to_svg(
+            &schematic,
+            &SvgExportConfig {
+                background_color: Some(SvgColor::rgb(0xFF, 0xFF, 0xFF)),
+                ..SvgExportConfig::default()
+            },
+        );
+        assert!(print_safe.contains("fill=\"#FFFFFF\""));
     }
 
     #[test]

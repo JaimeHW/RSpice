@@ -66,6 +66,13 @@ pub(crate) use app_create_model_bound_symbol_dialog::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
 };
 
+mod app_hardcopy_dialog;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use app_hardcopy_dialog::run_worker_request_value as run_hardcopy_worker_request_value;
+pub(crate) use app_hardcopy_dialog::{
+    HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow,
+};
+
 mod app_dialog_state;
 pub(crate) use app_dialog_state::{
     ArraySelectionDialogState, ArraySelectionPreviewCache, BusObjectPropertiesDraft,
@@ -946,6 +953,7 @@ impl RSpiceApp {
         self.render_create_model_bound_symbol_dialog(ctx);
         self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);
+        self.render_hardcopy_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
         self.render_about_dialog(ctx);

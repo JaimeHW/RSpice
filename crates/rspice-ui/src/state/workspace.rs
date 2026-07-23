@@ -2026,6 +2026,8 @@ pub enum SimulationConfigurationError {
     InvalidProjectSourceRegistry { message: String },
     #[error("project plot export preset catalog has invalid ownership: {message}")]
     InvalidPlotExportPresetOwnership { message: String },
+    #[error("project hardcopy source-set catalog is invalid: {message}")]
+    InvalidHardcopySourceSetCatalog { message: String },
     #[error("report_documents[{index}] is invalid: {message}")]
     InvalidReportDocument { index: usize, message: String },
     #[error("report document identity {document_id} is duplicated")]
@@ -2155,6 +2157,20 @@ pub enum ProjectConfigurationMutationError {
     ProjectRevision(#[from] RevisionError),
     #[error("configuration-set transaction has no semantic changes")]
     NoChanges,
+}
+
+pub const MAX_PROJECT_HARDCOPY_SOURCE_SETS: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum HardcopySourceSetPersistenceError {
+    #[error("hardcopy source set is invalid: {message}")]
+    Invalid { message: String },
+    #[error(
+        "project hardcopy source-set catalog is full ({MAX_PROJECT_HARDCOPY_SOURCE_SETS} sets)"
+    )]
+    CatalogFull,
+    #[error("hardcopy source-set name '{name}' is already owned by another retained set")]
+    DuplicateName { name: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2415,6 +2431,21 @@ pub struct ProjectWorkspace {
     /// organization profile requires a connected organization authority.
     #[serde(default)]
     pub plot_export_presets: crate::results::plot_export_preset::PlotExportPresetCatalog,
+    /// Versioned, per-document Page Setup contracts used by schematic,
+    /// symbol, result, and report hardcopy workflows. Publication artifacts
+    /// and transient preview state are intentionally not persisted here.
+    #[serde(default)]
+    pub hardcopy_setups: crate::workbench::hardcopy::HardcopySetupStore,
+    /// Reusable print-mapping sets owned by this project. Personal portable
+    /// presets are persisted by `UserPreferences`; document mappings remain
+    /// embedded in `hardcopy_setups` for reproducible publication.
+    #[serde(default)]
+    pub project_print_mappings: crate::workbench::PrintMappingPresetCatalog,
+    /// Ordered, exact source aggregates used by all-sheets/all-panes and
+    /// named print-set publication. Every member pins its document revision
+    /// and content digest; stale members fail closed when resolved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hardcopy_source_sets: Vec<crate::workbench::hardcopy_sources::HardcopySourceSet>,
     /// Project-owned, versioned engineering report sources. Rendered review
     /// artifacts are derived from these documents and are never represented
     /// here unless a publication writer has produced and verified them.
@@ -2465,6 +2496,15 @@ pub struct ProjectWorkspace {
     /// canonical save/revert authority.
     #[serde(default, skip)]
     pub report_documents_dirty: bool,
+    /// Runtime dirty projection for committed per-document page setups.
+    #[serde(default, skip)]
+    pub hardcopy_setups_dirty: bool,
+    /// Runtime dirty projection for reusable project-owned print mappings.
+    #[serde(default, skip)]
+    pub project_print_mappings_dirty: bool,
+    /// Runtime dirty projection for project-owned hardcopy source sets.
+    #[serde(default, skip)]
+    hardcopy_source_sets_dirty: bool,
 }
 
 impl Default for ProjectWorkspace {
@@ -2486,6 +2526,11 @@ impl Default for ProjectWorkspace {
             simulation_plan_payloads: Vec::new(),
             plot_export_presets:
                 crate::results::plot_export_preset::PlotExportPresetCatalog::default(),
+            hardcopy_setups: crate::workbench::hardcopy::HardcopySetupStore::default(),
+            project_print_mappings: crate::workbench::PrintMappingPresetCatalog::new(
+                crate::workbench::PrintMappingCatalogOwner::Project,
+            ),
+            hardcopy_source_sets: Vec::new(),
             report_documents: Vec::new(),
             netlist_source: None,
             netlist_document: None,
@@ -2496,8 +2541,39 @@ impl Default for ProjectWorkspace {
             project_sources_dirty: false,
             project_metadata_dirty: false,
             report_documents_dirty: false,
+            hardcopy_setups_dirty: false,
+            project_print_mappings_dirty: false,
+            hardcopy_source_sets_dirty: false,
         }
     }
+}
+
+fn validate_hardcopy_source_set_catalog(
+    source_sets: &[crate::workbench::hardcopy_sources::HardcopySourceSet],
+) -> Result<(), HardcopySourceSetPersistenceError> {
+    if source_sets.len() > MAX_PROJECT_HARDCOPY_SOURCE_SETS {
+        return Err(HardcopySourceSetPersistenceError::CatalogFull);
+    }
+    let mut source_keys = std::collections::HashSet::with_capacity(source_sets.len());
+    let mut folded_names = std::collections::HashSet::with_capacity(source_sets.len());
+    for source_set in source_sets {
+        source_set
+            .validate()
+            .map_err(|error| HardcopySourceSetPersistenceError::Invalid {
+                message: error.to_string(),
+            })?;
+        if !source_keys.insert(source_set.source_key()) {
+            return Err(HardcopySourceSetPersistenceError::Invalid {
+                message: format!("source identity {} is duplicated", source_set.source_key()),
+            });
+        }
+        if !folded_names.insert(source_set.name().to_lowercase()) {
+            return Err(HardcopySourceSetPersistenceError::DuplicateName {
+                name: source_set.name().to_owned(),
+            });
+        }
+    }
+    Ok(())
 }
 
 impl ProjectWorkspace {
@@ -2524,6 +2600,11 @@ impl ProjectWorkspace {
                     message: error.to_string(),
                 },
             )?;
+        validate_hardcopy_source_set_catalog(&self.hardcopy_source_sets).map_err(|error| {
+            SimulationConfigurationError::InvalidHardcopySourceSetCatalog {
+                message: error.to_string(),
+            }
+        })?;
         let mut report_document_ids = std::collections::HashSet::new();
         for (index, document) in self.report_documents.iter().enumerate() {
             document.validate().map_err(|error| {
@@ -5239,6 +5320,9 @@ impl ProjectWorkspace {
         self.project_sources_dirty = false;
         self.project_metadata_dirty = false;
         self.report_documents_dirty = false;
+        self.hardcopy_setups_dirty = false;
+        self.project_print_mappings_dirty = false;
+        self.hardcopy_source_sets_dirty = false;
     }
 
     pub fn any_dirty(&self) -> bool {
@@ -5251,6 +5335,103 @@ impl ProjectWorkspace {
             || self.project_sources_dirty
             || self.project_metadata_dirty
             || self.report_documents_dirty
+            || self.hardcopy_setups_dirty
+            || self.project_print_mappings_dirty
+            || self.hardcopy_source_sets_dirty
+    }
+
+    /// Commit a validated page setup through the project dirty lifecycle.
+    /// Re-saving byte-identical settings is a no-op and does not manufacture
+    /// an unsaved project change.
+    pub fn save_hardcopy_setup(
+        &mut self,
+        source: &crate::workbench::hardcopy::ActiveHardcopySource,
+        setup: crate::workbench::hardcopy::HardcopySetup,
+    ) -> Result<
+        crate::workbench::hardcopy::SetupSaveOutcome,
+        crate::workbench::hardcopy::HardcopyError,
+    > {
+        let outcome = self.hardcopy_setups.save(source, setup)?;
+        if outcome.disposition() != crate::workbench::hardcopy::SetupSaveDisposition::Unchanged {
+            self.hardcopy_setups_dirty = true;
+        }
+        Ok(outcome)
+    }
+
+    /// Persist a reusable project print-set mapping through the same project
+    /// dirty lifecycle as document page setups.
+    pub fn save_project_print_mapping(
+        &mut self,
+        table: crate::workbench::hardcopy::PrintMappingTable,
+    ) -> Result<
+        crate::workbench::PrintMappingSaveReceipt,
+        crate::workbench::PrintMappingPersistenceError,
+    > {
+        let outcome = self.project_print_mappings.save(table)?;
+        if outcome.disposition() != crate::workbench::PrintMappingSaveDisposition::Unchanged {
+            self.project_print_mappings_dirty = true;
+        }
+        Ok(outcome)
+    }
+
+    #[must_use]
+    pub fn hardcopy_source_sets(&self) -> &[crate::workbench::hardcopy_sources::HardcopySourceSet] {
+        &self.hardcopy_source_sets
+    }
+
+    #[must_use]
+    pub fn hardcopy_source_set(
+        &self,
+        source_key: &str,
+    ) -> Option<&crate::workbench::hardcopy_sources::HardcopySourceSet> {
+        self.hardcopy_source_sets
+            .iter()
+            .find(|source_set| source_set.source_key() == source_key)
+    }
+
+    /// Insert or replace one exact source-set definition as a small,
+    /// validated transaction. This never clones the rest of the project.
+    pub fn save_hardcopy_source_set(
+        &mut self,
+        source_set: crate::workbench::hardcopy_sources::HardcopySourceSet,
+    ) -> Result<bool, HardcopySourceSetPersistenceError> {
+        source_set
+            .validate()
+            .map_err(|error| HardcopySourceSetPersistenceError::Invalid {
+                message: error.to_string(),
+            })?;
+        let source_key = source_set.source_key();
+        if let Some(existing) = self
+            .hardcopy_source_sets
+            .iter()
+            .find(|existing| existing.source_key() == source_key)
+            && existing == &source_set
+        {
+            return Ok(false);
+        }
+        let mut candidate = self.hardcopy_source_sets.clone();
+        if let Some(index) = candidate
+            .iter()
+            .position(|existing| existing.source_key() == source_key)
+        {
+            candidate[index] = source_set;
+        } else {
+            candidate.push(source_set);
+        }
+        validate_hardcopy_source_set_catalog(&candidate)?;
+        self.hardcopy_source_sets = candidate;
+        self.hardcopy_source_sets_dirty = true;
+        Ok(true)
+    }
+
+    /// Remove one retained aggregate by its stable source identity.
+    pub fn remove_hardcopy_source_set(&mut self, source_key: &str) -> bool {
+        let before = self.hardcopy_source_sets.len();
+        self.hardcopy_source_sets
+            .retain(|source_set| source_set.source_key() != source_key);
+        let removed = self.hardcopy_source_sets.len() != before;
+        self.hardcopy_source_sets_dirty |= removed;
+        removed
     }
 
     pub fn attach_technology(
@@ -7369,6 +7550,174 @@ mod tests {
             .validate()
             .expect("restored binding validates");
         assert!(!restored.any_dirty());
+    }
+
+    #[test]
+    fn hardcopy_page_setup_persists_and_uses_project_dirty_lifecycle() {
+        use crate::workbench::hardcopy::{
+            ActiveHardcopySource, HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope,
+            HardcopySetup, SetupSaveDisposition,
+        };
+
+        let source = ActiveHardcopySource::try_new(
+            HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x4852_4450_5901))
+                .expect("stable fixture identity"),
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([0x48; 32]),
+            "top / schematic",
+            HardcopyDocumentKind::SchematicOrSymbol,
+            HardcopyScope::CurrentSheet,
+        )
+        .expect("valid hardcopy source");
+        let mut workspace = ProjectWorkspace::default();
+
+        let first = workspace
+            .save_hardcopy_setup(&source, HardcopySetup::default())
+            .expect("page setup commits");
+        assert_eq!(first.disposition(), SetupSaveDisposition::Inserted);
+        assert!(workspace.hardcopy_setups_dirty);
+        assert!(workspace.any_dirty());
+
+        let bytes = serde_json::to_vec(&workspace).expect("workspace serializes");
+        let mut restored: ProjectWorkspace =
+            serde_json::from_slice(&bytes).expect("workspace restores");
+        assert_eq!(restored.hardcopy_setups.len(), 1);
+        assert!(!restored.hardcopy_setups_dirty);
+        assert!(!restored.any_dirty());
+
+        let unchanged = restored
+            .save_hardcopy_setup(&source, HardcopySetup::default())
+            .expect("identical setup is accepted");
+        assert_eq!(unchanged.disposition(), SetupSaveDisposition::Unchanged);
+        assert!(!restored.hardcopy_setups_dirty);
+        assert!(!restored.any_dirty());
+    }
+
+    #[test]
+    fn project_print_mapping_routes_through_project_dirty_lifecycle() {
+        let mapping = crate::workbench::hardcopy::PrintMappingTable::try_new(
+            crate::workbench::hardcopy::PrintMappingSaveScope::ProjectPrintSet(
+                "documentation".to_owned(),
+            ),
+            Vec::new(),
+        )
+        .unwrap();
+        let mut workspace = ProjectWorkspace::default();
+        let receipt = workspace
+            .save_project_print_mapping(mapping.clone())
+            .unwrap();
+        assert_eq!(
+            receipt.disposition(),
+            crate::workbench::PrintMappingSaveDisposition::Created
+        );
+        assert!(workspace.project_print_mappings_dirty);
+        assert!(workspace.any_dirty());
+
+        let bytes = serde_json::to_vec(&workspace).unwrap();
+        let mut restored: ProjectWorkspace = serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            restored
+                .project_print_mappings
+                .get("documentation")
+                .is_some()
+        );
+        assert!(!restored.any_dirty());
+
+        let unchanged = restored.save_project_print_mapping(mapping).unwrap();
+        assert_eq!(
+            unchanged.disposition(),
+            crate::workbench::PrintMappingSaveDisposition::Unchanged
+        );
+        assert!(!restored.any_dirty());
+    }
+
+    #[test]
+    fn hardcopy_source_sets_persist_validate_and_use_project_dirty_lifecycle() {
+        use crate::workbench::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+        use crate::workbench::hardcopy_sources::{HardcopySourceSet, HardcopySourceSetMember};
+
+        let member_id =
+            HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x4853_4d45_4d42_4552))
+                .unwrap();
+        let set_id =
+            HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x4853_5345_5449_4431))
+                .unwrap();
+        let member = HardcopySourceSetMember::try_new(
+            "project:test:sheet:1",
+            "Sheet 1",
+            member_id,
+            crate::product::ObjectRevision::INITIAL,
+            crate::product::ContentDigest::from_bytes([0x51; 32]),
+            HardcopyScope::CurrentSheet,
+        )
+        .unwrap();
+        let source_set = HardcopySourceSet::try_new(
+            set_id,
+            crate::product::ObjectRevision::INITIAL,
+            "Review set",
+            HardcopyDocumentKind::SchematicOrSymbol,
+            HardcopyScope::NamedPrintSet("Review set".to_owned()),
+            vec![member],
+        )
+        .unwrap();
+        let source_key = source_set.source_key();
+        let mut workspace = ProjectWorkspace::default();
+
+        assert!(workspace.save_hardcopy_source_set(source_set).unwrap());
+        assert!(!workspace.hardcopy_source_sets().is_empty());
+        assert!(workspace.hardcopy_source_set(&source_key).is_some());
+        assert!(workspace.any_dirty());
+
+        let bytes = serde_json::to_vec(&workspace).unwrap();
+        let mut restored: ProjectWorkspace = serde_json::from_slice(&bytes).unwrap();
+        restored.validate_simulation_configuration().unwrap();
+        assert_eq!(restored.hardcopy_source_sets().len(), 1);
+        assert!(!restored.any_dirty());
+        assert!(restored.remove_hardcopy_source_set(&source_key));
+        assert!(restored.hardcopy_source_sets().is_empty());
+        assert!(restored.any_dirty());
+    }
+
+    #[test]
+    fn hardcopy_source_set_catalog_rejects_case_folded_duplicate_names() {
+        use crate::workbench::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+        use crate::workbench::hardcopy_sources::{HardcopySourceSet, HardcopySourceSetMember};
+
+        let build_set = |seed: u128, name: &str| {
+            let member_id = HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(seed)).unwrap();
+            let set_id =
+                HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(seed + 0x1000)).unwrap();
+            let member = HardcopySourceSetMember::try_new(
+                format!("project:test:sheet:{seed}"),
+                format!("Sheet {seed}"),
+                member_id,
+                crate::product::ObjectRevision::INITIAL,
+                crate::product::ContentDigest::from_bytes([(seed & 0xff) as u8; 32]),
+                HardcopyScope::CurrentSheet,
+            )
+            .unwrap();
+            HardcopySourceSet::try_new(
+                set_id,
+                crate::product::ObjectRevision::INITIAL,
+                name,
+                HardcopyDocumentKind::SchematicOrSymbol,
+                HardcopyScope::NamedPrintSet(name.to_owned()),
+                vec![member],
+            )
+            .unwrap()
+        };
+        let mut workspace = ProjectWorkspace::default();
+        workspace
+            .save_hardcopy_source_set(build_set(0x5100, "Tapeout"))
+            .unwrap();
+        let error = workspace
+            .save_hardcopy_source_set(build_set(0x5200, "tapeout"))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            HardcopySourceSetPersistenceError::DuplicateName { .. }
+        ));
+        assert_eq!(workspace.hardcopy_source_sets().len(), 1);
     }
 
     #[test]

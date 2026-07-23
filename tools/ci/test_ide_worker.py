@@ -16,6 +16,16 @@ WORKER_CONTRACT = (
 )
 MAIN = ROOT / "crates" / "rspice-ui" / "src" / "main.rs"
 APP = ROOT / "crates" / "rspice-ui" / "src" / "common" / "app" / "mod.rs"
+HARDCOPY_WORKER = (
+    ROOT
+    / "crates"
+    / "rspice-ui"
+    / "src"
+    / "common"
+    / "app"
+    / "app_hardcopy_dialog"
+    / "worker.rs"
+)
 BROWSER_ACCESSIBILITY = (
     ROOT
     / "crates"
@@ -96,6 +106,14 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 self.assertIn("view.buffer instanceof ArrayBuffer", worker)
                 self.assertIn("transferBuffers.add(view.buffer)", worker)
                 self.assertIn("responseTransferList(response)", worker)
+                self.assertIn("runRspiceUiHardcopyRequest", worker)
+                self.assertIn('message.type === "run-hardcopy"', worker)
+                self.assertIn('type: "hardcopy-result"', worker)
+                self.assertIn('type: "hardcopy-error"', worker)
+                self.assertIn(
+                    "hardcopyResponseTransferList(response)",
+                    worker,
+                )
                 self.assertNotIn("id: message.request.id", worker)
                 self.assertNotIn("id: message.request?.id", worker)
                 self.assertRegex(
@@ -134,6 +152,17 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 self.assertRegex(
                     worker,
                     re.compile(
+                        r"initializeWorkerModule\(\)\.catch\(\(error\) => \{"
+                        r".*runWorkerRequest\s*=\s*null;"
+                        r".*runVerilogACompileRequest\s*=\s*null;"
+                        r".*runHardcopyRequest\s*=\s*null;",
+                        re.S,
+                    ),
+                    "a failed module initialization must clear every cached wasm executor",
+                )
+                self.assertRegex(
+                    worker,
+                    re.compile(
                         r"async\s+function\s+ensureReady\s*\(\)\s*\{"
                         r".*if\s*\(!initPromise\)\s*\{"
                         r".*initPromise\s*=\s*initializeWorkerModule\(\)"
@@ -143,6 +172,25 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                     ),
                     "requests arriving before ready must share the eager init() promise",
                 )
+
+    def test_hardcopy_worker_transport_is_stale_bound_and_transferable(self) -> None:
+        worker = (IDE_DIRS[0] / "simulation-worker.js").read_text(encoding="utf-8")
+        bridge = HARDCOPY_WORKER.read_text(encoding="utf-8")
+
+        self.assertIn('message.type === "run-hardcopy"', worker)
+        self.assertIn('{ type: "hardcopy-result", id: message.id, response }', worker)
+        self.assertIn('type: "hardcopy-error"', worker)
+        self.assertIn("hardcopyResponseTransferList(response)", worker)
+        self.assertIn('"epoch"', bridge)
+        self.assertIn('"generation"', bridge)
+        self.assertIn('"operation"', bridge)
+        self.assertIn("stale outer response id", bridge)
+        self.assertIn("stale outer error id", bridge)
+        self.assertIn("stale response id", bridge)
+        self.assertIn("stale epoch", bridge)
+        self.assertIn("stale generation", bridge)
+        self.assertIn("returned the wrong operation", bridge)
+        self.assertIn("exceeded its bounded execution deadline", bridge)
 
     def test_browser_executable_assets_share_one_version_identity(self) -> None:
         for ide in IDE_DIRS:
