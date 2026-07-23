@@ -51958,6 +51958,25 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    /// Return whether an independent source is within the strict transient
+    /// source envelope used by the Release 7.10 integrated-RMS LEVEL=9
+    /// verifier. Xyce accepts an explicit DC operating value followed by a
+    /// PULSE waveform (`DC x PULSE(...)`); the transient solve uses the
+    /// waveform while the DC operating point uses `x`. Keep that combined
+    /// form separate from the ordinary relational-source helper so a
+    /// dedicated absolute oracle cannot silently broaden unrelated contracts.
+    fn source_spec_is_finite_dc_or_pulse_or_explicit_dc_transient(
+        spec: &crate::netlist::SourceSpec,
+    ) -> bool {
+        match spec {
+            crate::netlist::SourceSpec::DcTransient {
+                dc_value,
+                transient,
+            } => dc_value.is_finite() && Self::source_spec_is_finite_dc_or_pulse(transient),
+            _ => Self::source_spec_is_finite_dc_or_pulse(spec),
+        }
+    }
+
     fn validate_scoped_model_relational_source(
         source_name: &str,
         spec: &crate::netlist::SourceSpec,
@@ -56690,7 +56709,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         match &element.kind {
             ElementKind::Mosfet { .. } => true,
             ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                element.nodes.len() == 2 && Self::source_spec_is_finite_dc_or_pulse(spec)
+                element.nodes.len() == 2
+                    && Self::source_spec_is_finite_dc_or_pulse_or_explicit_dc_transient(spec)
             }
             ElementKind::Resistor {
                 value,
@@ -85726,6 +85746,38 @@ R1 in 0 1k
             .expect("behavioral companion mutation evaluates"),
             XyceStaticTranComparisonMode::Pointwise,
             "behavioral and other nonlinear companion elements must remain outside the strict LEVEL=9 envelope"
+        );
+    }
+
+    #[test]
+    fn level9_xyce_verify_accepts_explicit_dc_pulse_source() {
+        let source = absolute_level9_bsim3_test_source().replace(
+            "VIN in 0 PULSE(0 5 1n .1n .1n 5n 10n)",
+            "VIN in 0 DC 0 PULSE(0 5 1n .1n .1n 5n 10n)",
+        );
+        let netlist = Netlist::parse(&source).expect("explicit DC/PULSE fixture parses");
+        let vin = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("VIN"))
+            .expect("VIN exists");
+        assert!(
+            XyceTestRunner::netlist_element_is_native_level9_xyce_verify_supported(vin),
+            "the strict LEVEL=9 source envelope admits finite DC/PULSE sources"
+        );
+        let reference_path = std::env::current_exe().expect("test executable is an existing file");
+        let plan = absolute_level9_bsim3_selector_test_plan(&source, reference_path);
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("explicit DC/PULSE selector evaluates"),
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: 12
+            }
         );
     }
 
