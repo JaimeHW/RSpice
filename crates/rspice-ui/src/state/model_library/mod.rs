@@ -11,6 +11,7 @@
 
 mod authoring;
 mod corner;
+mod correlation;
 mod definition_metadata;
 mod library;
 mod manager;
@@ -21,6 +22,18 @@ mod types;
 
 pub use authoring::ProjectModelDefinition;
 pub use corner::ProcessCorner;
+pub use correlation::{
+    CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
+    CorrelationCalculation, CorrelationCoordinate, CorrelationDatasetClass,
+    CorrelationDatasetRevision, CorrelationError, CorrelationErrorCode, CorrelationEvaluation,
+    CorrelationEvidence, CorrelationExtrapolationPolicy, CorrelationMetricDefinition,
+    CorrelationMetricDomain, CorrelationMetricOutcome, CorrelationObservation,
+    CorrelationOutlierDecision, CorrelationOutlierDisposition, CorrelationReleaseRole,
+    CorrelationResidualPoint, CorrelationResult, CorrelationReviewDecision,
+    CorrelationSimulationProvenance, CorrelationSuite, MAX_CORRELATION_COLUMNS,
+    MAX_CORRELATION_ROWS, MAX_CORRELATION_SOURCE_BYTES, MAX_CORRELATION_TEXT_BYTES,
+    MODEL_CORRELATION_SCHEMA_VERSION, ModelCorrelationState,
+};
 pub use definition_metadata::{
     CorrelationMatrix, DefinitionMetadataError, DiscreteOutcome, FiniteBounds, FiniteF64,
     LookupInterpolation, MODEL_DEFINITION_METADATA_SCHEMA_VERSION, ModelDefinitionMetadata,

@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::{
-    DeviceModel, ModelDefinitionMetadata, ModelQualificationState, ModelType, ProcessCorner,
+    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata, ModelQualificationState,
+    ModelType, ProcessCorner,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
@@ -203,6 +204,10 @@ pub struct ModelLibrary {
     /// Versioned qualification and release records keyed by exact model name.
     #[serde(default)]
     pub model_qualification: HashMap<String, ModelQualificationState>,
+    /// Versioned measurement-correlation suites and immutable reviewer
+    /// evidence keyed by exact model name.
+    #[serde(default)]
+    pub model_correlation: HashMap<String, ModelCorrelationState>,
     /// Process corners
     pub corners: HashMap<String, ProcessCorner>,
     /// Currently selected corner

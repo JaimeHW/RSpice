@@ -19,6 +19,7 @@ pub mod hardcopy;
 pub mod hardcopy_mapping_store;
 pub mod hardcopy_render;
 pub mod hardcopy_sources;
+pub mod model_correlation;
 pub mod navigation;
 pub mod netlist_document;
 pub mod result_document;
@@ -58,6 +59,12 @@ pub use capability_workflow::{
 pub use hardcopy_mapping_store::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
     PrintMappingSaveDisposition, PrintMappingSaveReceipt,
+};
+pub use model_correlation::{
+    CorrelationAggregationDraft, CorrelationCalculationDraft, CorrelationDatasetClassDraft,
+    CorrelationDatasetDraft, CorrelationMetricDraft, CorrelationReleaseRoleDraft,
+    CorrelationReviewDraft, ModelCorrelationDialog, ModelCorrelationSection,
+    ModelCorrelationWorkspaceState,
 };
 pub use model_editor::{
     ModelDefinitionDelta, ModelEditorDraft, ModelEditorSection, ModelEditorState,

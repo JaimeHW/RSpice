@@ -128,6 +128,10 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui governed project-owned device-model definition editor",
             evidence_boundary: "A selected coherent project-owned single-card model can be opened, edited through typed parameter, section, statistical, temperature, and executable qualification contracts, parser-validated, compared with retained releases, and committed as guarded source or evidence-only revisions. Qualification runs execute on the current real Desktop or WebAssembly runtime and assemble parity evidence only from an exact retained pair. Promotion remains fail-closed behind complete source-bound evidence, declarations, compatibility, and independent approvals. Built-in and external sources remain read-only.",
         },
+        SurfaceId::ModelCorrelation => SurfaceExecutionAvailability::Available {
+            executor: "rspice-ui project-owned measurement-correlation workspace",
+            evidence_boundary: "Immutable CSV datasets, exact source and simulation provenance, unit-aware alignment and metrics, retained residuals, append-only outlier dispositions, independent review evidence, and qualification handoff are executable against project history. Correlation evidence never promotes a model or converts a failed qualification vector into a pass.",
+        },
         SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui retained notification and activity center",
             evidence_boundary: "Filtering, read state, retention disclosure, notification settings routing, and clearing retained read activity operate on the real device-local activity stream; no external approval or remote background service is inferred.",
@@ -183,6 +187,7 @@ mod tests {
                 SurfaceId::Netlist,
                 SurfaceId::VisualizationStudio,
                 SurfaceId::ModelEditor,
+                SurfaceId::ModelCorrelation,
                 SurfaceId::ProjectLauncher,
                 SurfaceId::Preferences,
                 SurfaceId::DesignManagement,

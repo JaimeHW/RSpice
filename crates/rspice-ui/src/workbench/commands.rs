@@ -272,6 +272,7 @@ pub enum Command {
     ModelsPage(ModelsPage),
     ModelBrowser,
     ModelEditor,
+    ModelCorrelation,
     ModelSaveRevision,
     ModelValidate,
     ModelRunQualificationTests,
@@ -631,6 +632,9 @@ impl Command {
                 "Device model and parameter editor…",
                 "Models",
             ),
+            Self::ModelCorrelation => {
+                spec("model-correlation", "Measurement correlation…", "Models")
+            }
             Self::ModelSaveRevision => spec("model-save-revision", "Save model revision", "Models"),
             Self::ModelValidate => spec("model-validate", "Validate model", "Models"),
             Self::ModelRunQualificationTests => {
@@ -946,7 +950,9 @@ impl Command {
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
             }
-            Self::ModelEditor => selected_project_model_for_editor(app).is_ok(),
+            Self::ModelEditor | Self::ModelCorrelation => {
+                selected_project_model_for_editor(app).is_ok()
+            }
             Self::ModelSaveRevision => {
                 state
                     .workbench
@@ -1691,6 +1697,25 @@ impl Command {
                         )))
                 }
             },
+            Self::ModelCorrelation => match selected_project_model_for_editor(app) {
+                Ok(_) => {
+                    if let Err(error) = app.state.workbench.navigate(
+                        super::SurfaceRoute::surface(super::SurfaceId::ModelCorrelation),
+                        super::RouteTransitionSource::User,
+                    ) {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                                format!("Cannot open measurement correlation: {error}"),
+                            ));
+                    }
+                }
+                Err(reason) => {
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                            "Cannot open measurement correlation: {reason}."
+                        )))
+                }
+            },
             Self::ModelSaveRevision => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::SaveRevision) {
                     app.state
@@ -2079,6 +2104,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::VerificationPage(VerificationPage::Yield),
     Command::ModelsPage(ModelsPage::Models),
     Command::ModelEditor,
+    Command::ModelCorrelation,
     Command::ModelSaveRevision,
     Command::ModelValidate,
     Command::ModelRunQualificationTests,

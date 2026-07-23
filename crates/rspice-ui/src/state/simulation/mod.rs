@@ -47,7 +47,8 @@ pub use run::{
     ExecutionTarget, SimulationExecutionIdentity, SimulationRun, SimulationRunLifecycle,
 };
 pub use run_receipt::{
-    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunProvenance,
+    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, SimulationRunProvenance,
 };
 pub use saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
 pub use state_model::{SimulationRunIntent, SimulationState};

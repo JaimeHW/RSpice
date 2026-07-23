@@ -11,8 +11,8 @@ use crate::simulation::output_contract::{
     PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,
 };
 use crate::state::{
-    AnalysisResultSourceDomain, Point, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, SimulationRunIntent,
+    AnalysisResultSourceDomain, Point, PreparedModelSourceIdentity, PreparedRunReceipt,
+    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunIntent,
 };
 
 use super::artifact::{
@@ -532,6 +532,7 @@ pub(in crate::simulation) struct AuthorizedRunDispatch {
     project_revision: u64,
     source_digest: ContentDigest,
     source_receipt: RunSourceReceipt,
+    project_model_sources: Vec<PreparedModelSourceIdentity>,
     tasks: VecDeque<AuthorizedTaskDispatch>,
     executable_netlist: Arc<str>,
     advisories: Vec<String>,
@@ -599,13 +600,14 @@ impl AuthorizedRunDispatch {
                 .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        PreparedRunReceipt::new(
+        PreparedRunReceipt::new_with_project_model_sources(
             source_domain,
             self.simulation_plan_id,
             project_revision,
             self.digest,
             self.source_digest,
             self.source_receipt.durable(),
+            self.project_model_sources.clone(),
             tasks,
         )
         .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
@@ -738,6 +740,7 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) executable_netlist: String,
     pub(in crate::simulation) save_policy: SavePolicy,
     pub(in crate::simulation) model_identities: Vec<ModelSourceIdentity>,
+    pub(in crate::simulation) project_model_sources: Vec<PreparedModelSourceIdentity>,
     pub(in crate::simulation) project_veriloga_runtimes:
         crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
@@ -767,6 +770,7 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     executable_netlist: String,
     save_policy: SavePolicy,
     model_identities: Vec<ModelSourceIdentity>,
+    project_model_sources: Vec<PreparedModelSourceIdentity>,
     project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
@@ -1111,6 +1115,30 @@ impl PreparedRunSnapshot {
                 runtime.artifact_digest(),
             ));
         }
+        parts.project_model_sources.sort_by(|left, right| {
+            left.source_id()
+                .as_uuid()
+                .cmp(&right.source_id().as_uuid())
+                .then_with(|| {
+                    left.model_name()
+                        .to_ascii_lowercase()
+                        .cmp(&right.model_name().to_ascii_lowercase())
+                })
+                .then_with(|| left.revision().cmp(&right.revision()))
+                .then_with(|| left.content_digest().cmp(&right.content_digest()))
+        });
+        parts.project_model_sources.dedup();
+        for model in &parts.project_model_sources {
+            parts.model_identities.push(ModelSourceIdentity::new(
+                format!(
+                    "project-model:{}:{}:{}",
+                    model.source_id(),
+                    model.model_name(),
+                    model.revision().get()
+                ),
+                model.content_digest(),
+            ));
+        }
         parts.model_identities.sort_unstable();
         parts.model_identities.dedup();
 
@@ -1142,6 +1170,7 @@ impl PreparedRunSnapshot {
             executable_netlist: parts.executable_netlist,
             save_policy: parts.save_policy,
             model_identities: parts.model_identities,
+            project_model_sources: parts.project_model_sources,
             project_veriloga_runtimes: parts.project_veriloga_runtimes,
             target: parts.target,
             receipt: parts.receipt,
@@ -1245,6 +1274,7 @@ impl PreparedRunSnapshot {
             project_revision: self.project_revision,
             source_digest: self.source_digest,
             source_receipt: self.receipt,
+            project_model_sources: self.project_model_sources,
             tasks,
             executable_netlist,
             advisories: self.advisories,
@@ -2160,6 +2190,7 @@ mod tests {
             executable_netlist: "deck\n.op\n.end\n".to_owned(),
             save_policy: SavePolicy::RetainEngineProducedResults,
             model_identities: Vec::new(),
+            project_model_sources: Vec::new(),
             project_veriloga_runtimes: Default::default(),
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([4; 32])),

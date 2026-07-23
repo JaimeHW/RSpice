@@ -211,7 +211,7 @@ macro_rules! define_surface_catalog {
                 match self {
                     Self::VisualizationStudio => Some(Workspace::Results),
                     Self::DesignManagement => Some(Workspace::Design),
-                    Self::ModelEditor => Some(Workspace::Models),
+                    Self::ModelEditor | Self::ModelCorrelation => Some(Workspace::Models),
                     _ => self.workspace(),
                 }
             }
@@ -270,7 +270,7 @@ define_surface_catalog! {
     ModelEditor => { id: "model-editor", label: "Device model and parameter editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
     PcellDesigner => { id: "pcell-designer", label: "Parameterized-cell designer", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=pcell-designer" },
     ModelExtraction => { id: "model-extraction", label: "Model extraction · BSIM4 candidate", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-extraction" },
-    ModelCorrelation => { id: "model-correlation", label: "Measurement correlation · OPA189_A", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-correlation" },
+    ModelCorrelation => { id: "model-correlation", label: "Measurement correlation", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-correlation" },
     JobDiagnostics => { id: "job-diagnostics", label: "Failure diagnostics · Run 40", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=job-diagnostics" },
     RegressionOrchestration => { id: "regression-orchestration", label: "Regression orchestration · main", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=regression-orchestration" },
     ApiBrowser => { id: "api-browser", label: "Automation API browser", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=api-browser" },

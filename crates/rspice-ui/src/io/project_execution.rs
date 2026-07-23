@@ -16,14 +16,14 @@ use crate::product::{ContentDigest, ProjectId};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
 use crate::state::model_library::{
-    DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
+    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata, ModelLibrary, ModelLibraryManager,
     ModelQualificationState, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
     ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ParameterDataType, ParameterValue,
     ProcessCorner as LibraryProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
     first_unreachable_source, is_portable_absolute_path,
 };
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 8;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 9;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
 const UNPINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 1;
 const PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION: u32 = 2;
@@ -32,6 +32,7 @@ const STABLE_ANALYSIS_PLAN_SCHEMA_VERSION: u32 = 4;
 const PLAN_CATALOG_SCHEMA_VERSION: u32 = 5;
 const RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION: u32 = 6;
 const MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION: u32 = 7;
+const MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION: u32 = 8;
 const RETIRED_SINGLETON_ANALYSIS_FIELDS: &[&str] = &[
     "enabled",
     "analysis_order",
@@ -150,6 +151,8 @@ pub struct ProjectModelLibrary {
     pub model_definition_metadata: HashMap<String, ModelDefinitionMetadata>,
     #[serde(default)]
     pub model_qualification: HashMap<String, ModelQualificationState>,
+    #[serde(default)]
+    pub model_correlation: HashMap<String, ModelCorrelationState>,
     pub corners: HashMap<String, LibraryProcessCorner>,
     pub selected_corner: Option<String>,
     pub version: String,
@@ -265,6 +268,15 @@ impl ProjectExecutionContext {
                 // typed model-authoring and qualification records. Serde
                 // defaults preserve those projects as honest empty metadata;
                 // no schema, test, or release facts are inferred.
+                self.schema_version = MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION;
+                self.migrate_to_current(project_id)
+            }
+            MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION => {
+                // Schema 8 introduced typed authoring and qualification but
+                // predated persisted measurement-correlation records. Serde
+                // defaults preserve those projects with an honest empty
+                // correlation ledger; no datasets, metrics, or review
+                // evidence are inferred during migration.
                 self.schema_version = PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
                 Ok(())
             }
@@ -350,6 +362,7 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             models: library.models.clone(),
             model_definition_metadata: library.model_definition_metadata.clone(),
             model_qualification: library.model_qualification.clone(),
+            model_correlation: library.model_correlation.clone(),
             corners: library.corners.clone(),
             selected_corner: library.selected_corner.clone(),
             version: library.version.clone(),
@@ -438,6 +451,7 @@ impl ProjectModelLibrary {
             models: self.models,
             model_definition_metadata: self.model_definition_metadata,
             model_qualification: self.model_qualification,
+            model_correlation: self.model_correlation,
             corners: self.corners,
             selected_corner: self.selected_corner,
             version: self.version,
@@ -1124,6 +1138,43 @@ fn validate_model_authoring_records(
             })?;
     }
 
+    let mut correlation_names = HashSet::with_capacity(library.model_correlation.len());
+    for (model_name, correlation) in &library.model_correlation {
+        if !correlation_names.insert(model_name.to_ascii_lowercase()) {
+            return Err(format!(
+                "{context}.model_correlation contains duplicate case-insensitive model names"
+            ));
+        }
+        if !library.models.contains_key(model_name) {
+            return Err(format!(
+                "{context}.model_correlation['{model_name}'] has no exact model projection"
+            ));
+        }
+        correlation
+            .validate_for_model(model_name)
+            .map_err(|error| {
+                format!("{context}.model_correlation['{model_name}'] is invalid: {error}")
+            })?;
+        let ModelSourceAuthority::ProjectOwned { source_id, .. } = library.source_authority else {
+            return Err(format!(
+                "{context}.model_correlation['{model_name}'] requires a project-owned source authority"
+            ));
+        };
+        if correlation
+            .suites
+            .iter()
+            .any(|suite| suite.source.source_id != Some(source_id))
+            || correlation
+                .evidence
+                .iter()
+                .any(|evidence| evidence.source.source_id != Some(source_id))
+        {
+            return Err(format!(
+                "{context}.model_correlation['{model_name}'] contains evidence from a different project source identity"
+            ));
+        }
+    }
+
     for (model_name, metadata) in &library.model_definition_metadata {
         if metadata.source_identity.is_none() && metadata.sections.is_empty() {
             continue;
@@ -1438,6 +1489,9 @@ fn model_source_warnings(libraries: &[ProjectModelLibrary]) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
+    use crate::state::model_library::{
+        CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSuite,
+    };
 
     fn project_id() -> ProjectId {
         ProjectId::from_namespace(
@@ -1669,6 +1723,10 @@ mod tests {
                 .as_object_mut()
                 .expect("library is an object")
                 .remove("model_qualification");
+            library
+                .as_object_mut()
+                .expect("library is an object")
+                .remove("model_correlation");
         }
 
         let mut restored: ProjectExecutionContext =
@@ -1682,8 +1740,47 @@ mod tests {
             PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
         );
         assert!(restored.model_libraries.iter().all(|library| {
-            library.model_definition_metadata.is_empty() && library.model_qualification.is_empty()
+            library.model_definition_metadata.is_empty()
+                && library.model_qualification.is_empty()
+                && library.model_correlation.is_empty()
         }));
+        restored.validate().expect("migrated context validates");
+    }
+
+    #[test]
+    fn schema_eight_migrates_without_inventing_correlation_records() {
+        let mut manager = ModelLibraryManager::new();
+        manager.add_library(ModelLibrary::new("legacy-qualified-catalog"));
+        let context = context_from_state(&SimSetupState::new(), &manager)
+            .expect("baseline context validates");
+        let mut value = serde_json::to_value(context).expect("context serializes");
+        value["schema_version"] = serde_json::json!(MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION);
+        for library in value["model_libraries"]
+            .as_array_mut()
+            .expect("libraries are an array")
+        {
+            library
+                .as_object_mut()
+                .expect("library is an object")
+                .remove("model_correlation");
+        }
+
+        let mut restored: ProjectExecutionContext =
+            serde_json::from_value(value).expect("schema eight remains readable");
+        restored
+            .migrate_to_current(project_id())
+            .expect("schema eight migrates");
+
+        assert_eq!(
+            restored.schema_version,
+            PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
+        );
+        assert!(
+            restored
+                .model_libraries
+                .iter()
+                .all(|library| library.model_correlation.is_empty())
+        );
         restored.validate().expect("migrated context validates");
     }
 
@@ -1708,8 +1805,81 @@ mod tests {
             .expect("create project model");
         let expected_bytes = committed.after.source_contents[0].bytes.clone();
         let expected_authority = committed.after.source_authority;
+        let ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision: _,
+            ..
+        } = expected_authority
+        else {
+            panic!("project model must be source-bound");
+        };
+        let model = &committed.after.models["owned_nch"];
+        let definition = ProjectModelRevisionDefinition::new(
+            ProjectModelDefinition::from_device_model(model),
+            committed.after.model_definition_metadata["owned_nch"].clone(),
+        );
+        let canonical = definition.canonical_source().unwrap();
+        let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
+        let model_revision = definition
+            .project_source_identity()
+            .unwrap()
+            .expect("project source identity")
+            .revision;
+        let source = ModelSourceEvidenceBinding::try_new_project_bound(
+            "owned_nch",
+            source_id,
+            model_digest,
+            model_revision,
+        )
+        .unwrap();
+        let reference = CorrelationDatasetRevision::try_from_csv(
+            "bench-reference",
+            crate::product::ObjectRevision::INITIAL,
+            "Bench reference",
+            CorrelationDatasetClass::BenchMeasurement,
+            "test lab",
+            "lot-1",
+            "fixture-1",
+            "calibration-1",
+            "bench.csv",
+            b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec(),
+            None,
+        )
+        .unwrap();
+        let suite = CorrelationSuite::try_new(
+            "owned-nch-correlation",
+            crate::product::ObjectRevision::INITIAL,
+            "Owned NCH correlation",
+            "model-owner",
+            source,
+            vec![reference],
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let expected_correlation = ModelCorrelationState::try_new(vec![suite], Vec::new()).unwrap();
+        manager
+            .get_library_mut("owned-models")
+            .unwrap()
+            .model_correlation
+            .insert("owned_nch".to_owned(), expected_correlation.clone());
         let context =
             context_from_state(&SimSetupState::new(), &manager).expect("context validates");
+        let mut foreign_evidence = context.clone();
+        foreign_evidence.model_libraries[0]
+            .model_correlation
+            .get_mut("owned_nch")
+            .unwrap()
+            .suites[0]
+            .source
+            .source_id = Some(crate::product::ModelSourceId::new());
+        let error = foreign_evidence
+            .validate()
+            .expect_err("foreign project source identity must be rejected");
+        assert!(
+            error.contains("different project source identity"),
+            "{error}"
+        );
         let json = serde_json::to_string(&context).expect("context serializes");
         let restored: ProjectExecutionContext =
             serde_json::from_str(&json).expect("context deserializes");
@@ -1718,6 +1888,14 @@ mod tests {
             .expect("project-owned model restores");
 
         assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            restored_manager
+                .get_library("owned-models")
+                .unwrap()
+                .model_correlation
+                .get("owned_nch"),
+            Some(&expected_correlation)
+        );
         let library = restored_manager
             .get_library("owned-models")
             .expect("library restored");
@@ -2441,6 +2619,7 @@ mod tests {
                 models: HashMap::new(),
                 model_definition_metadata: HashMap::new(),
                 model_qualification: HashMap::new(),
+                model_correlation: HashMap::new(),
                 corners: HashMap::new(),
                 selected_corner: None,
                 version: String::new(),
@@ -2515,6 +2694,7 @@ mod tests {
                 models: HashMap::new(),
                 model_definition_metadata: HashMap::new(),
                 model_qualification: HashMap::new(),
+                model_correlation: HashMap::new(),
                 corners: HashMap::new(),
                 selected_corner: None,
                 version: String::new(),

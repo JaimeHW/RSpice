@@ -14,17 +14,17 @@ use crate::state::model_library::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, CorrelationMatrix, DocumentReference, DocumentationDeclaration,
     DocumentationSet, FiniteBounds, FiniteF64, FiniteValue, LicenseDeclaration, LicenseScope,
-    ModelDefinitionMetadata, ModelFileIdentity, ModelLibraryManager, ModelQualificationState,
-    ModelReleaseCandidate, ModelReleaseIdentity, ModelSectionDefinition, ModelSectionQualification,
-    ModelSourceAuthority, ModelSourceEvidenceBinding, ParameterDataType, ParameterDefinition,
-    ParameterSource, ParameterValue, PlatformCompatibilityEvidence, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, PromotionApproval, PromotionApprovalRole,
-    QualificationAnalysis, QualificationErrorCode, QualificationExecutionProgress,
-    QualificationExecutionSession, QualificationExecutionStep, QualificationOutputDefinition,
-    QualificationPlatform, QualificationProbe, QualificationReference, QualificationSample,
-    QualificationSuite, QualificationVector, QualificationVectorDisposition,
-    QualificationVectorDispositionCause, QualificationVectorRequiredAction,
-    ReleaseCandidateIdentity, RequiredDocumentation,
+    ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity, ModelLibraryManager,
+    ModelQualificationState, ModelReleaseCandidate, ModelReleaseIdentity, ModelSectionDefinition,
+    ModelSectionQualification, ModelSourceAuthority, ModelSourceEvidenceBinding, ParameterDataType,
+    ParameterDefinition, ParameterSource, ParameterValue, PlatformCompatibilityEvidence,
+    ProjectModelDefinition, ProjectModelRevisionDefinition, PromotionApproval,
+    PromotionApprovalRole, QualificationAnalysis, QualificationErrorCode,
+    QualificationExecutionProgress, QualificationExecutionSession, QualificationExecutionStep,
+    QualificationOutputDefinition, QualificationPlatform, QualificationProbe,
+    QualificationReference, QualificationSample, QualificationSuite, QualificationVector,
+    QualificationVectorDisposition, QualificationVectorDispositionCause,
+    QualificationVectorRequiredAction, ReleaseCandidateIdentity, RequiredDocumentation,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -2455,7 +2455,11 @@ impl ModelEditorState {
     /// Promote the selected, fully qualified candidate through the domain's
     /// atomic release transaction. No release or audit record survives a
     /// failed gate, duplicate identity, or stale source binding.
-    pub fn commit_promotion(&mut self, candidate_id: &str) -> bool {
+    pub fn commit_promotion(
+        &mut self,
+        candidate_id: &str,
+        correlation: &ModelCorrelationState,
+    ) -> bool {
         if self.qualification_execution.is_some() {
             self.promotion_error = Some(
                 "Finish or cancel the active qualification run before promoting a model".to_owned(),
@@ -2470,6 +2474,26 @@ impl ModelEditorState {
             self.promotion_error = Some(
                 "Save the model definition before promoting a source-bound candidate".to_owned(),
             );
+            return false;
+        }
+        let source = match ModelSourceEvidenceBinding::try_new_project_bound(
+            &draft.model_name,
+            draft.source_id,
+            draft.base_source_digest,
+            draft.base_source_revision,
+        ) {
+            Ok(source) => source,
+            Err(error) => {
+                self.promotion_error = Some(format!(
+                    "Model promotion cannot authenticate its exact source binding: {error}"
+                ));
+                return false;
+            }
+        };
+        if let Err(error) = correlation.require_release_approval(&draft.model_name, &source) {
+            self.promotion_error = Some(format!(
+                "Model promotion is blocked by measurement correlation: {error}"
+            ));
             return false;
         }
         let identity = ModelReleaseIdentity {
@@ -3422,10 +3446,39 @@ pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
         );
         return false;
     }
+    let Some((library_name, model_name)) = app
+        .state
+        .workbench
+        .model_editor
+        .draft
+        .as_ref()
+        .map(|draft| (draft.library_name.clone(), draft.model_name.clone()))
+    else {
+        app.state.workbench.model_editor.promotion_error =
+            Some("No project-owned model candidate is open".to_owned());
+        return false;
+    };
+    let Some(library) = app
+        .state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .find(|library| library.name.eq_ignore_ascii_case(&library_name))
+    else {
+        app.state.workbench.model_editor.promotion_error = Some(format!(
+            "Model promotion cannot resolve project library '{library_name}'"
+        ));
+        return false;
+    };
+    let correlation = library
+        .model_correlation
+        .get(&model_name)
+        .cloned()
+        .unwrap_or_default();
     app.state
         .workbench
         .model_editor
-        .commit_promotion(candidate_id)
+        .commit_promotion(candidate_id, &correlation)
 }
 
 fn qualification_evidence_id(suite_id: &str, source: &ModelSourceEvidenceBinding) -> String {
@@ -5019,11 +5072,22 @@ mod tests {
             before_duplicate
         );
 
+        let invalid_correlation = ModelCorrelationState {
+            schema_version: u32::MAX,
+            ..ModelCorrelationState::default()
+        };
+        assert!(
+            !app.state
+                .workbench
+                .model_editor
+                .commit_promotion(&candidate.identity.id, &invalid_correlation),
+            "the authoritative promotion transaction must fail closed when retained correlation state is invalid"
+        );
         assert!(
             app.state
                 .workbench
                 .model_editor
-                .commit_promotion(&candidate.identity.id)
+                .commit_promotion(&candidate.identity.id, &ModelCorrelationState::default())
         );
         let qualification = &app
             .state
