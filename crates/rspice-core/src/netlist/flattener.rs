@@ -954,34 +954,44 @@ impl<'a> Flattener<'a> {
                 string_vector_expr_params,
                 real_vector_params,
                 real_vector_expr_params,
-            } => ElementKind::Xspice {
-                model: model.clone(),
-                pspice_u_timing: pspice_u_timing.clone(),
-                ports: ports
-                    .iter()
-                    .map(|port| self.remap_xspice_port(port, prefix, node_map))
-                    .collect(),
-                params: params.clone(),
-                expr_params: expr_params.clone(),
-                string_params: string_params
-                    .iter()
-                    .map(|(name, value)| {
-                        (
-                            name.clone(),
-                            super::normalize_model_string_path_value(
-                                name,
-                                value,
-                                self.source_base_dir.as_deref(),
-                            ),
-                        )
-                    })
-                    .collect(),
-                string_expr_params: string_expr_params.clone(),
-                string_vector_params: string_vector_params.clone(),
-                string_vector_expr_params: string_vector_expr_params.clone(),
-                real_vector_params: real_vector_params.clone(),
-                real_vector_expr_params: real_vector_expr_params.clone(),
-            },
+            } => {
+                let pspice_u_timing = pspice_u_timing.as_ref().map(|timing| {
+                    let mut timing = timing.clone();
+                    if let Some((dpwr, dgnd)) = timing.power_pins.as_mut() {
+                        *dpwr = self.remap_node(dpwr, prefix, node_map);
+                        *dgnd = self.remap_node(dgnd, prefix, node_map);
+                    }
+                    timing
+                });
+                ElementKind::Xspice {
+                    model: model.clone(),
+                    pspice_u_timing,
+                    ports: ports
+                        .iter()
+                        .map(|port| self.remap_xspice_port(port, prefix, node_map))
+                        .collect(),
+                    params: params.clone(),
+                    expr_params: expr_params.clone(),
+                    string_params: string_params
+                        .iter()
+                        .map(|(name, value)| {
+                            (
+                                name.clone(),
+                                super::normalize_model_string_path_value(
+                                    name,
+                                    value,
+                                    self.source_base_dir.as_deref(),
+                                ),
+                            )
+                        })
+                        .collect(),
+                    string_expr_params: string_expr_params.clone(),
+                    string_vector_params: string_vector_params.clone(),
+                    string_vector_expr_params: string_vector_expr_params.clone(),
+                    real_vector_params: real_vector_params.clone(),
+                    real_vector_expr_params: real_vector_expr_params.clone(),
+                }
+            }
             // All other kinds - clone as-is
             other => other.clone(),
         };

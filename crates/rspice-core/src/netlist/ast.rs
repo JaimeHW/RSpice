@@ -519,6 +519,14 @@ pub enum ElementKind {
 pub struct PspiceUTiming {
     pub timing_model: String,
     pub delay_mode: PspiceUTimingMode,
+    /// Digital power and ground nodes carried by a PSpice U-device.
+    ///
+    /// Xyce's `DIG` code model uses these pins as the analog reference rails
+    /// for its input loads and finite-impedance outputs.  They are retained
+    /// here instead of being folded into the typed XSPICE port list so the
+    /// historical parser representation remains compatible with ordinary
+    /// event-driven U-device lowerings.
+    pub power_pins: Option<(String, String)>,
 }
 
 /// PSpice min/typ/max timing selection carried by MNTYMXDLY.

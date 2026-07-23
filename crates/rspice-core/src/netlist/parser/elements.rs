@@ -1237,7 +1237,14 @@ fn parse_pspice_simple_u_gate_instance(
 
     let pspice_u_timing = pins
         .get(gate.input_count + 1)
-        .and_then(|token| pspice_u_timing_from_token(token, fields, params, line_num));
+        .and_then(|token| pspice_u_timing_from_token(token, fields, params, line_num))
+        .map(|mut timing| {
+            timing.power_pins = Some((
+                normalize_pspice_u_node(&fields[2]),
+                normalize_pspice_u_node(&fields[3]),
+            ));
+            timing
+        });
     push_pspice_u_xspice_element_with_timing(
         elements,
         name.to_string(),
@@ -3290,7 +3297,8 @@ fn parse_pspice_simple_u_gate(raw: &str) -> Option<PspiceSimpleUGate> {
     let (kind, count) = parse_pspice_u_kind_and_count(raw);
     let kind = kind.as_str();
     let default_count = match kind {
-        "BUF" | "INV" => 1,
+        "BUF" => 1,
+        "INV" | "NOT" => 1,
         "AND" | "NAND" | "OR" | "NOR" | "XOR" | "XNOR" | "NXOR" => 2,
         _ => return None,
     };
@@ -3310,7 +3318,7 @@ fn parse_pspice_simple_u_gate(raw: &str) -> Option<PspiceSimpleUGate> {
         "XOR" => "d_xor",
         "XNOR" | "NXOR" => "d_xnor",
         "BUF" => "d_buffer",
-        "INV" => "d_inverter",
+        "INV" | "NOT" => "d_inverter",
         _ => return None,
     };
 
@@ -3380,6 +3388,7 @@ fn pspice_u_timing_from_token(
     Some(PspiceUTiming {
         timing_model,
         delay_mode: pspice_u_delay_mode(fields, fields.len(), params, line_num),
+        power_pins: None,
     })
 }
 
@@ -4255,6 +4264,9 @@ pub(super) fn parse_lossy_tline(
     if name.eq_ignore_ascii_case("YMEMRISTOR") {
         return parse_xyce_memristor(stream, line_num, elements, params, defer_simple_param_refs);
     }
+    if name.eq_ignore_ascii_case("YNOT") {
+        return parse_xyce_y_not(stream, line_num, elements);
+    }
     if let Some(keyword) = xyce_ydevice_keyword(&name) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -4289,6 +4301,61 @@ pub(super) fn parse_lossy_tline(
         provenance: crate::netlist::ElementProvenance::Authored,
     });
 
+    Ok(())
+}
+
+/// Parse Xyce's legacy Y-device inverter keyword.
+///
+/// `YNOT instance vlow vhigh input output model` uses explicit low/high
+/// reference rails, while the referenced DIG card supplies the input
+/// reference and analog timing/output parameters.  Lower it to the same
+/// typed XSPICE representation used for a PSpice U inverter; the builder
+/// selects the analog Xyce DIG implementation from the retained metadata.
+fn parse_xyce_y_not(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let instance_name = expect_element_name(stream, line_num)?;
+    let dgnd = expect_node(stream, line_num)?;
+    let dpwr = expect_node(stream, line_num)?;
+    let input = expect_node(stream, line_num)?;
+    let output = expect_node(stream, line_num)?;
+    let timing_model = expect_ident(stream, line_num)?;
+
+    skip_commas(stream);
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Unexpected trailing token in YNOT inverter specification: {}",
+                stream.peek().kind
+            ),
+        });
+    }
+
+    elements.push(Element {
+        name: instance_name,
+        kind: ElementKind::Xspice {
+            model: "d_inverter".to_string(),
+            pspice_u_timing: Some(PspiceUTiming {
+                timing_model,
+                delay_mode: PspiceUTimingMode::Typ,
+                power_pins: Some((dpwr.clone(), dgnd.clone())),
+            }),
+            ports: vec![XspicePort::Digital(input), XspicePort::Digital(output)],
+            params: Vec::new(),
+            expr_params: Vec::new(),
+            string_params: Vec::new(),
+            string_expr_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            string_vector_expr_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: Vec::new(),
+        },
+        nodes: Vec::new(),
+        provenance: crate::netlist::ElementProvenance::Authored,
+    });
     Ok(())
 }
 
