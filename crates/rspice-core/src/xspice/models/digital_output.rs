@@ -1057,12 +1057,7 @@ impl XyceDGate {
             {
                 transition_from = q;
                 q = Some(target);
-                if !transition_start.is_finite()
-                    || transition_start <= 0.0
-                    || transition_start >= pending_time
-                {
-                    transition_start = pending_time;
-                }
+                transition_start = pending_time;
             }
 
             match desired {
