@@ -136,8 +136,18 @@ impl Engine {
     /// of that restart; preserve it by solving that interval with the same
     /// order-one companion.  The final interval is excluded because stopping
     /// exactly at TSTOP is an ordinary endpoint clip, not a rejected step.
+    /// An interval that lands on a source breakpoint is still the already
+    /// proposed Xyce step; the OneStep restart applies only after that point
+    /// has been accepted.
     #[inline]
-    fn locked_grid_requires_xyce_order_restart(grid: &[Value], cursor: usize) -> bool {
+    fn locked_grid_requires_xyce_order_restart(
+        grid: &[Value],
+        cursor: usize,
+        target_is_breakpoint: bool,
+    ) -> bool {
+        if target_is_breakpoint {
+            return false;
+        }
         if cursor < 2 || cursor + 1 >= grid.len() {
             return false;
         }
@@ -2369,7 +2379,11 @@ impl Engine {
                     || !circuit.coupled_tlines.is_empty();
             let locked_reference_order_restart = !xyce_one_step_stateful_topology
                 && locked_grid.as_ref().is_some_and(|grid| {
-                    Self::locked_grid_requires_xyce_order_restart(grid, locked_cursor)
+                    Self::locked_grid_requires_xyce_order_restart(
+                        grid,
+                        locked_cursor,
+                        breakpoints.at_breakpoint(step_time),
+                    )
                 });
             // Resume is a breakpoint-style integration restart. The checkpoint
             // supplies the accepted solution but deliberately omits nonlinear
@@ -5432,11 +5446,29 @@ mod tests {
     #[test]
     fn xyce_locked_grid_restart_detects_interior_interval_contraction() {
         let grid = [2.0, 6.0, 14.0, 24.0, 30.0, 40.0];
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 0));
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 1));
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 2));
-        assert!(Engine::locked_grid_requires_xyce_order_restart(&grid, 4));
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(&grid, 5));
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(
+            &grid, 0, false
+        ));
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(
+            &grid, 1, false
+        ));
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(
+            &grid, 2, false
+        ));
+        assert!(Engine::locked_grid_requires_xyce_order_restart(
+            &grid, 4, false
+        ));
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(
+            &grid, 5, false
+        ));
+    }
+
+    #[test]
+    fn xyce_locked_grid_preserves_order_when_target_is_source_breakpoint() {
+        let grid = [2.0, 6.0, 14.0, 24.0, 30.0, 40.0];
+        assert!(!Engine::locked_grid_requires_xyce_order_restart(
+            &grid, 4, true
+        ));
     }
 
     #[test]
