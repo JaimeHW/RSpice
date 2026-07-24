@@ -69700,6 +69700,7 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             let mut expected_params = vec![
                 ("r".to_string(), 50.0f64.to_bits()),
                 ("tc".to_string(), 0.0f64.to_bits()),
+                ("tc2".to_string(), 0.0f64.to_bits()),
             ];
             expected_params.sort();
             if resistor.nodes != nodes
