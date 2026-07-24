@@ -112,6 +112,8 @@ impl Mosfet {
     }
 
     fn mos3_forward_bias_scalar(&self, lvgs: Value, lvds: Value, lvbs: Value) -> Mos3State {
+        let xyce_semantics =
+            self.body_junction_model == super::MosBodyJunctionModel::XyceClassicLinearizedReverse;
         let effective_length = self.mos3_effective_length();
         let effective_width = self.mos3_effective_width();
         let one_over_l = 1.0 / effective_length;
@@ -236,10 +238,15 @@ impl Mosfet {
         let cd1 = beta * cdnorm;
         let mut cdrain = beta * fgate * cdnorm;
         let mut gm = beta * fgate * vdsx + dfgdvg * cd1;
-        let gds_seed = if lvds > vdsat {
-            -dvtdvd * vdsx
-        } else {
+        // Xyce's MOS3 equation uses the same channel-output derivative in
+        // both linear and velocity-saturated regions.  The velocity-
+        // saturation correction is applied below through `dfddvd`; replacing
+        // this with only the DIBL term in saturation drops the
+        // overdrive/body contribution from `dId/dVds`.
+        let gds_seed = if xyce_semantics || lvds <= vdsat {
             lvgs - vth - (1.0 + fbody + dvtdvd) * vdsx
+        } else {
+            -dvtdvd * vdsx
         };
         let mut gds = beta * fgate * gds_seed + dfgdvd * cd1;
         let mut gmb = beta * fgate * dcodvb * vdsx + dfgdvb * cd1;
@@ -253,10 +260,10 @@ impl Mosfet {
             let fd2 = fdrain * fdrain;
             let arga = fd2 * vdsx * onvdsc * onfg;
             dfddvg = -dfgdvg * arga;
-            dfddvd = if lvds > vdsat {
-                -dfgdvd * arga
-            } else {
+            dfddvd = if xyce_semantics || lvds <= vdsat {
                 -dfgdvd * arga - fd2 * onvdsc
+            } else {
+                -dfgdvd * arga
             };
             dfddvb = -dfgdvb * arga;
             gm = fdrain * gm + dfddvg * cdrain;
@@ -338,6 +345,8 @@ impl Mosfet {
         mut gmb: Value,
         params: Mos3ClmParams,
     ) -> (Value, Value, Value, Value, Value) {
+        let xyce_semantics =
+            self.body_junction_model == super::MosBodyJunctionModel::XyceClassicLinearizedReverse;
         let alpha = self.mos3_alpha();
         if alpha <= 0.0 || self.mos3_kappa <= 0.0 || params.vdsat <= 0.0 {
             return (cdrain, gm, gds, gmb, 0.0);
@@ -417,11 +426,24 @@ impl Mosfet {
         cdrain *= xlfact;
         let diddl = cdrain / (params.effective_length - delxl);
         gm = gm * xlfact + diddl * ddldvg;
+        // Keep the Xyce MOS3 derivative decomposition intact.  `gds0` is
+        // the post-CLM drain conductance before the saturation-voltage
+        // derivative is applied; it is also reused by the weak-inversion
+        // continuation below.  Omitting the scaled pre-CLM `gds` term here
+        // changes `dId/dVds` whenever VMAX/CLM is active.
+        let gds0 = if xyce_semantics {
+            gds * xlfact + diddl * ddldvd
+        } else {
+            diddl * ddldvd
+        };
         gmb = gmb * xlfact + diddl * ddldvb;
-        let gds0 = diddl * ddldvd;
         gm += gds0 * params.dvsdvg;
         gmb += gds0 * params.dvsdvb;
-        gds = gds * xlfact + diddl * dldvd + gds0 * params.dvsdvd;
+        gds = if xyce_semantics {
+            gds0 * params.dvsdvd + diddl * dldvd
+        } else {
+            gds * xlfact + diddl * dldvd + gds0 * params.dvsdvd
+        };
 
         (cdrain, gm, gds, gmb, gds0)
     }

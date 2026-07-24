@@ -669,6 +669,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn level3_xyce_clm_output_derivative_matches_current() {
+        let mut mos = mos3_alpha_nmos();
+        mos.set_body_junction_model(MosBodyJunctionModel::XyceClassicLinearizedReverse);
+        let (vgs, vds, vbs) = (1.8, 2.2, -0.4);
+        let state = mos.mos3_state(vgs, vds, vbs);
+        // This is the Xyce 7.10 MOS3 equation value for the fixture bias.
+        // The corresponding ngspice-compatible branch is intentionally
+        // different; the dialect selector must not collapse the two paths.
+        let expected_xyce_gds: Value = 1.544_363_540_890e-3;
+        let tolerance = 1.0e-12 * expected_xyce_gds.abs().max(1.0e-12);
+        assert!(
+            (state.gds - expected_xyce_gds).abs() <= tolerance,
+            "MOS3 Xyce CLM gds mismatch: actual={:.12e} expected={:.12e} tolerance={:.12e}",
+            state.gds,
+            expected_xyce_gds,
+            tolerance
+        );
+
+        let mut ngspice = mos3_alpha_nmos();
+        ngspice.set_body_junction_model(MosBodyJunctionModel::NgspiceReverseClamp);
+        let ngspice_gds = ngspice.mos3_state(vgs, vds, vbs).gds;
+        assert!(
+            (state.gds - ngspice_gds).abs() > 1.0e-6,
+            "Xyce and ngspice MOS3 CLM derivatives must remain distinct"
+        );
+    }
+
     /// The simplified short-channel path must report derivatives consistent
     /// with the current it stamps: gm = dId/dVgs, gds = dId/dVds, and
     /// gmb = dId/dVbs of `calculate_id`. The closed-form Level-1 expressions
