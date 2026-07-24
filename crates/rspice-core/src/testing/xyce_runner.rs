@@ -32,7 +32,7 @@ use crate::netlist::{
     validate_output_symbols,
 };
 use crate::{Complex64, Engine, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -72,6 +72,23 @@ const XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION: usize = 16;
 struct StatefulTranPrintExpression {
     program: CompiledExpr,
     vm: Vm,
+}
+
+/// Cached names used while validating a static DC print request.
+///
+/// A large Xyce `.PRINT DC` table can contain one probe per device.  Looking
+/// up every branch-current probe by scanning the complete element list turns
+/// validation into O(probes × elements), which is needlessly expensive for
+/// otherwise straightforward circuits. Keep the common top-level lookup
+/// eager and materialize the flattened fallback only if a probe actually
+/// needs it.
+#[derive(Debug, Default)]
+struct XyceDcProbeIndex {
+    diode_names: HashSet<String>,
+    recorded_branch_names: HashSet<String>,
+    flattened_diode_names: Option<HashSet<String>>,
+    flattened_recorded_branch_names: Option<HashSet<String>>,
+    flattened_lookup_attempted: bool,
 }
 const PRN_TIME_NEIGHBOR_HALF_ULPS: f64 = 4.0;
 const XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-2;
@@ -50558,8 +50575,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
 
+        let mut probe_index = Self::dc_probe_index(netlist);
         for probe in &print.probes {
-            Self::validate_dc_probe(probe, netlist)?;
+            Self::validate_dc_probe_with_index(probe, netlist, &mut probe_index)?;
         }
 
         Self::reject_unsupported_static_dc_model_observables(netlist, print)?;
@@ -50577,8 +50595,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Err(".DC DATA sweep produced no table rows".to_string());
         }
 
+        let mut probe_index = Self::dc_probe_index(netlist);
         for probe in &print.probes {
-            Self::validate_dc_probe(probe, netlist)?;
+            Self::validate_dc_probe_with_index(probe, netlist, &mut probe_index)?;
         }
         Self::reject_unsupported_static_dc_model_observables(netlist, print)?;
 
@@ -53128,17 +53147,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Ok(())
     }
 
+    #[cfg(test)]
     fn validate_dc_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
+        let mut probe_index = Self::dc_probe_index(netlist);
+        Self::validate_dc_probe_with_index(probe, netlist, &mut probe_index)
+    }
+
+    fn validate_dc_probe_with_index(
+        probe: &str,
+        netlist: &Netlist,
+        probe_index: &mut XyceDcProbeIndex,
+    ) -> Result<(), String> {
         if Self::probe_names_live_measurement(probe, netlist, "DC", "DC_CONT") {
             return Ok(());
         }
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
             if Self::braced_expression_is_atomic_real_probe(&normalized_expression, netlist) {
-                return Self::validate_atomic_dc_probe(&normalized_expression, expression, netlist);
+                return Self::validate_atomic_dc_probe_with_index(
+                    &normalized_expression,
+                    expression,
+                    netlist,
+                    probe_index,
+                );
             }
             if Self::print_expression_contains_probe_reference(expression) {
-                return Self::validate_dc_probe_expression(expression, netlist);
+                return Self::validate_dc_probe_expression_with_index(
+                    expression,
+                    netlist,
+                    probe_index,
+                );
             }
             let context = Self::print_eval_context(netlist, None, None);
             crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
@@ -53148,7 +53186,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         let normalized = Self::normalize_probe(probe);
-        Self::validate_atomic_dc_probe(&normalized, probe, netlist)
+        Self::validate_atomic_dc_probe_with_index(&normalized, probe, netlist, probe_index)
     }
 
     fn probe_names_live_measurement(
@@ -53179,6 +53217,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         normalized: &str,
         original: &str,
         netlist: &Netlist,
+    ) -> Result<(), String> {
+        let mut probe_index = Self::dc_probe_index(netlist);
+        Self::validate_atomic_dc_probe_with_index(normalized, original, netlist, &mut probe_index)
+    }
+
+    fn validate_atomic_dc_probe_with_index(
+        normalized: &str,
+        original: &str,
+        netlist: &Netlist,
+        probe_index: &mut XyceDcProbeIndex,
     ) -> Result<(), String> {
         if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
             if !voltage_probe.node_pos.is_empty()
@@ -53304,10 +53352,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Ok(());
         }
         if let Some(element_name) = Self::parse_current_probe(normalized) {
-            if Self::netlist_has_recorded_branch_current(netlist, &element_name) {
+            if Self::netlist_has_recorded_branch_current_with_index(
+                netlist,
+                &element_name,
+                probe_index,
+            ) {
                 return Ok(());
             }
-            if Self::netlist_has_diode_instance(netlist, &element_name) {
+            if Self::netlist_has_diode_instance_with_index(netlist, &element_name, probe_index) {
                 return Ok(());
             }
             if Self::source_is_current_source(netlist, &element_name) {
@@ -53547,9 +53599,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     }
 
     fn validate_dc_probe_expression(expression: &str, netlist: &Netlist) -> Result<(), String> {
+        let mut probe_index = Self::dc_probe_index(netlist);
+        Self::validate_dc_probe_expression_with_index(expression, netlist, &mut probe_index)
+    }
+
+    fn validate_dc_probe_expression_with_index(
+        expression: &str,
+        netlist: &Netlist,
+        probe_index: &mut XyceDcProbeIndex,
+    ) -> Result<(), String> {
         let mut call_value = |call: &str| {
             let normalized = Self::normalize_probe(call);
-            Self::validate_atomic_dc_probe(&normalized, call, netlist)?;
+            Self::validate_atomic_dc_probe_with_index(&normalized, call, netlist, probe_index)?;
             Ok(1.0)
         };
         let context = Self::print_eval_context(netlist, None, None);
@@ -53572,7 +53633,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 let mut probe_values = BTreeMap::<String, Value>::new();
                 let mut distinct_call_value = |call: &str| {
                     let normalized = Self::normalize_probe(call);
-                    Self::validate_atomic_dc_probe(&normalized, call, netlist)?;
+                    Self::validate_atomic_dc_probe_with_index(
+                        &normalized,
+                        call,
+                        netlist,
+                        probe_index,
+                    )?;
                     let candidate = 1.0 + probe_values.len() as Value;
                     let value = *probe_values.entry(normalized).or_insert(candidate);
                     Ok(value)
@@ -59471,6 +59537,20 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             })
     }
 
+    fn dc_probe_index(netlist: &Netlist) -> XyceDcProbeIndex {
+        let mut index = XyceDcProbeIndex::default();
+        for element in &netlist.elements {
+            let name = Self::normalize_device_instance_name(&element.name);
+            if matches!(element.kind, ElementKind::Diode { .. }) {
+                index.diode_names.insert(name.clone());
+            }
+            if Self::element_has_recorded_branch_current(&element.kind) {
+                index.recorded_branch_names.insert(name);
+            }
+        }
+        index
+    }
+
     fn semiconductor_model_and_instance_params(
         element: &crate::netlist::Element,
     ) -> Option<(&str, &[(String, Value)])> {
@@ -59504,20 +59584,67 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
-    fn netlist_has_diode_instance(netlist: &Netlist, source: &str) -> bool {
-        if netlist.elements.iter().any(|element| {
-            Self::device_instance_names_match(&element.name, source)
-                && matches!(element.kind, ElementKind::Diode { .. })
-        }) {
+    fn netlist_has_diode_instance_with_index(
+        netlist: &Netlist,
+        source: &str,
+        index: &mut XyceDcProbeIndex,
+    ) -> bool {
+        let normalized = Self::normalize_device_instance_name(source);
+        if index.diode_names.contains(&normalized) {
             return true;
         }
 
-        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
-            flattened.elements.iter().any(|element| {
-                Self::device_instance_names_match(&element.name, source)
-                    && matches!(element.kind, ElementKind::Diode { .. })
-            })
-        })
+        Self::populate_flattened_dc_probe_index(netlist, index);
+
+        index
+            .flattened_diode_names
+            .as_ref()
+            .is_some_and(|names| names.contains(&normalized))
+    }
+
+    fn netlist_has_recorded_branch_current_with_index(
+        netlist: &Netlist,
+        source: &str,
+        index: &mut XyceDcProbeIndex,
+    ) -> bool {
+        let normalized = Self::normalize_device_instance_name(source);
+        if index.recorded_branch_names.contains(&normalized) {
+            return true;
+        }
+
+        Self::populate_flattened_dc_probe_index(netlist, index);
+
+        index
+            .flattened_recorded_branch_names
+            .as_ref()
+            .is_some_and(|names| names.contains(&normalized))
+    }
+
+    fn populate_flattened_dc_probe_index(netlist: &Netlist, index: &mut XyceDcProbeIndex) {
+        if index.flattened_lookup_attempted {
+            return;
+        }
+        index.flattened_lookup_attempted = true;
+        if netlist.subcircuits.is_empty() {
+            return;
+        }
+        let Ok(flattened) = flatten_netlist_with_models(netlist) else {
+            return;
+        };
+
+        let mut diode_names = HashSet::new();
+        let mut recorded_branch_names = HashSet::new();
+        for element in flattened.elements {
+            let name = Self::normalize_device_instance_name(&element.name);
+            if matches!(element.kind, ElementKind::Diode { .. }) {
+                diode_names.insert(name.clone());
+            }
+            if Self::element_has_recorded_branch_current(&element.kind) {
+                recorded_branch_names.insert(name);
+            }
+        }
+        index.flattened_diode_names = Some(diode_names);
+        index.flattened_recorded_branch_names = Some(recorded_branch_names);
     }
 
     fn elements_have_recorded_branch_current(
@@ -89012,6 +89139,36 @@ R1 1 0 1
             error.contains("unknown") || error.contains("unsupported"),
             "unexpected validation error: {error}"
         );
+    }
+
+    #[test]
+    fn dc_probe_index_caches_top_level_branch_and_diode_names() {
+        let netlist = Netlist::parse(
+            "\
+indexed DC probe fixture
+V1 1 0 1
+R1 1 0 1
+D1 1 0 DMOD
+.MODEL DMOD D(IS=1e-14)
+.DC V1 0 1 1
+.PRINT DC I(D1) I(R1)
+.END
+",
+        )
+        .expect("indexed DC probe fixture parses");
+        let mut index = XyceTestRunner::dc_probe_index(&netlist);
+
+        assert!(XyceTestRunner::netlist_has_diode_instance_with_index(
+            &netlist, "d1", &mut index,
+        ));
+        assert!(
+            XyceTestRunner::netlist_has_recorded_branch_current_with_index(
+                &netlist, "r1", &mut index,
+            )
+        );
+        assert!(!XyceTestRunner::netlist_has_diode_instance_with_index(
+            &netlist, "unknown", &mut index,
+        ));
     }
 
     #[test]
