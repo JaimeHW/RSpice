@@ -128,6 +128,41 @@ pub(super) fn parse_resistor(
                                 value_expr = None;
                             }
                             instance_params.push((name_upper, param_value));
+
+                            // SPICE/Xyce allow the resistor temperature
+                            // coefficients in the compact form `TC=TC1,TC2`.
+                            // The second numeric token is the TC2 value, not
+                            // a second unnamed resistance override.  Consume
+                            // it here before the general tail parser sees it
+                            // as a replacement for the explicit resistance.
+                            if raw_name.eq_ignore_ascii_case("TC")
+                                && stream.consume(&TokenKind::Comma)
+                                && !matches!(
+                                    stream.peek().kind,
+                                    TokenKind::Newline | TokenKind::Eof
+                                )
+                                && !matches!(
+                                    (&stream.peek().kind, &stream.peek_n(1).kind),
+                                    (TokenKind::Ident(_), TokenKind::Equals)
+                                )
+                            {
+                                match take_deferrable_value(stream, params, defer_simple_param_refs)
+                                {
+                                    Some(DeferrableValue::Resolved(tc2)) => {
+                                        instance_params.push(("TC2".to_string(), tc2));
+                                    }
+                                    Some(DeferrableValue::Deferred(tc2)) => {
+                                        deferred_params.push(("TC2".to_string(), tc2));
+                                    }
+                                    None => {
+                                        return Err(ParseError::Syntax {
+                                            line: line_num,
+                                            message: "Expected value for resistor parameter 'TC2'"
+                                                .to_string(),
+                                        });
+                                    }
+                                }
+                            }
                         }
                         Some(DeferrableValue::Deferred(expr)) => {
                             if name_upper == "R" || name_upper == "VALUE" {
@@ -147,6 +182,35 @@ pub(super) fn parse_resistor(
                                 });
                             } else {
                                 deferred_params.push((name_upper, expr));
+                            }
+
+                            if raw_name.eq_ignore_ascii_case("TC")
+                                && stream.consume(&TokenKind::Comma)
+                                && !matches!(
+                                    stream.peek().kind,
+                                    TokenKind::Newline | TokenKind::Eof
+                                )
+                                && !matches!(
+                                    (&stream.peek().kind, &stream.peek_n(1).kind),
+                                    (TokenKind::Ident(_), TokenKind::Equals)
+                                )
+                            {
+                                match take_deferrable_value(stream, params, defer_simple_param_refs)
+                                {
+                                    Some(DeferrableValue::Resolved(tc2)) => {
+                                        instance_params.push(("TC2".to_string(), tc2));
+                                    }
+                                    Some(DeferrableValue::Deferred(tc2)) => {
+                                        deferred_params.push(("TC2".to_string(), tc2));
+                                    }
+                                    None => {
+                                        return Err(ParseError::Syntax {
+                                            line: line_num,
+                                            message: "Expected value for resistor parameter 'TC2'"
+                                                .to_string(),
+                                        });
+                                    }
+                                }
                             }
                         }
                         None => {
@@ -4425,6 +4489,9 @@ pub(super) fn parse_lossy_tline(
     if name.eq_ignore_ascii_case("YMEMRISTOR") {
         return parse_xyce_memristor(stream, line_num, elements, params, defer_simple_param_refs);
     }
+    if name.eq_ignore_ascii_case("YDFF") {
+        return parse_xyce_y_legacy_dff(stream, line_num, elements, params);
+    }
     if name.eq_ignore_ascii_case("YNOT") {
         if xyce_ydevice_remaining_fields(stream) < 6 {
             return parse_xyce_y_legacy_gate(stream, line_num, elements, params, "YNOT");
@@ -4553,6 +4620,84 @@ fn parse_xyce_y_legacy_gate(
                 power_pins: None,
             }),
             ports: vec![input_port, XspicePort::Digital(output)],
+            params: instance_params,
+            expr_params: Vec::new(),
+            string_params: Vec::new(),
+            string_expr_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            string_vector_expr_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: Vec::new(),
+        },
+        nodes: Vec::new(),
+        provenance: crate::netlist::ElementProvenance::Authored,
+    });
+    Ok(())
+}
+
+fn parse_xyce_y_legacy_dff(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let instance_name = expect_element_name(stream, line_num)?;
+    let mut inputs = Vec::with_capacity(4);
+    for _ in 0..4 {
+        inputs.push(expect_node(stream, line_num)?);
+    }
+    let q = expect_node(stream, line_num)?;
+    let qbar = expect_node(stream, line_num)?;
+    let timing_model = expect_ident(stream, line_num)?;
+    let mut instance_params = Vec::new();
+
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+        let parameter = expect_ident(stream, line_num)?.to_ascii_uppercase();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Legacy Xyce YDFF parameter '{parameter}' requires '='"),
+            });
+        }
+        let value_token = stream.peek().clone();
+        stream.advance();
+        let canonical = match parameter.as_str() {
+            "IC" | "IC1" => "ic1",
+            "IC2" => "ic2",
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unsupported legacy Xyce YDFF parameter '{parameter}'"),
+                });
+            }
+        };
+        let Some(value) = parse_xyce_y_ic_value(&value_token, params) else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Invalid value for legacy Xyce YDFF parameter '{parameter}'"),
+            });
+        };
+        instance_params.push((canonical.to_string(), value));
+    }
+
+    elements.push(Element {
+        name: instance_name,
+        kind: ElementKind::Xspice {
+            model: "xyce_legacy_d_dff".to_string(),
+            pspice_u_timing: Some(PspiceUTiming {
+                timing_model,
+                delay_mode: PspiceUTimingMode::Typ,
+                power_pins: None,
+            }),
+            ports: vec![
+                XspicePort::DigitalVector(inputs),
+                XspicePort::Digital(q),
+                XspicePort::Digital(qbar),
+            ],
             params: instance_params,
             expr_params: Vec::new(),
             string_params: Vec::new(),

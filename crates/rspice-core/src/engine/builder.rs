@@ -1612,6 +1612,7 @@ fn pspice_u_dig_model_params(
                 | "xyce_legacy_d_or"
                 | "xyce_legacy_d_xnor"
                 | "xyce_legacy_d_xor"
+                | "xyce_legacy_d_dff"
         );
     if !is_xyce_dig_model {
         return Vec::new();
@@ -1634,14 +1635,13 @@ fn pspice_u_dig_gate_model(
     if !timing_model.model_type.eq_ignore_ascii_case("DIG") {
         return None;
     }
-    let is_legacy = model
-        .to_ascii_lowercase()
-        .starts_with("xyce_legacy_d_");
+    let is_legacy = model.to_ascii_lowercase().starts_with("xyce_legacy_d_");
     if !is_legacy {
         timing.power_pins.as_ref()?;
     }
 
     match model.to_ascii_lowercase().as_str() {
+        "xyce_legacy_d_dff" => Some("xyce_legacy_d_dff"),
         "xyce_legacy_d_and" => Some("xyce_legacy_d_and"),
         "xyce_legacy_d_inverter" => Some("xyce_legacy_d_inverter"),
         "xyce_legacy_d_nand" => Some("xyce_legacy_d_nand"),
@@ -1667,10 +1667,15 @@ fn pspice_u_dig_gate_ports(
     timing: &crate::netlist::PspiceUTiming,
     model: &str,
 ) -> Option<Vec<XspicePort>> {
-    let is_legacy = model
-        .to_ascii_lowercase()
-        .starts_with("xyce_legacy_d_");
-    let (inputs, outputs) = if is_legacy {
+    let model_lower = model.to_ascii_lowercase();
+    let is_legacy = model_lower.starts_with("xyce_legacy_d_");
+    let is_legacy_dff = model_lower == "xyce_legacy_d_dff";
+    let (inputs, outputs) = if is_legacy_dff {
+        let [inputs, q, qbar] = ports else {
+            return None;
+        };
+        (inputs, vec![q, qbar])
+    } else if is_legacy {
         let [inputs, output] = ports else {
             return None;
         };
@@ -7103,7 +7108,6 @@ impl Engine {
                         &element.name,
                         resolved_model.code_model.name(),
                     )?;
-
                     let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
                         element.name.clone(),
                         resolved_model.code_model.clone(),

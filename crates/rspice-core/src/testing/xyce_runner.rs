@@ -50834,9 +50834,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 | ElementKind::Resistor { .. }
                 | ElementKind::Inductor { .. } => {}
                 ElementKind::Capacitor {
-                    value,
-                    value_expr,
-                    ..
+                    value, value_expr, ..
                 } if value_expr.is_some() && !value.is_finite() => {
                     return Err(format!(
                         "native static .PRINT AC comparison does not support solution-dependent capacitor value expression on element '{}'",
@@ -51610,10 +51608,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         )?;
                     }
                 }
-                ElementKind::Capacitor { .. } => Self::validate_static_step_capacitor_contract(
-                    netlist,
-                    &element.name,
-                )?,
+                ElementKind::Capacitor { .. } => {
+                    Self::validate_static_step_capacitor_contract(netlist, &element.name)?
+                }
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
                 }
@@ -51717,10 +51714,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         && Self::netlist_element_is_native_absolute_transient_level9_bsim3(
                             netlist, element,
                         ) => {}
-                ElementKind::Mosfet { .. }
-                    if has_qualified_bsim4_capacitor => {}
-                ElementKind::Mosfet { .. }
-                    if has_qualified_bsim3_capacitor => {}
+                ElementKind::Mosfet { .. } if has_qualified_bsim4_capacitor => {}
+                ElementKind::Mosfet { .. } if has_qualified_bsim3_capacitor => {}
                 ElementKind::Mosfet { .. }
                     if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
                 ElementKind::Mosfet { .. }
@@ -52250,9 +52245,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 Self::expression_depends_on_frequency(left)
                     || Self::expression_depends_on_frequency(right)
             }
-            Expr::Function { args, .. } => args
-                .iter()
-                .any(Self::expression_depends_on_frequency),
+            Expr::Function { args, .. } => args.iter().any(Self::expression_depends_on_frequency),
             Expr::Const(_)
             | Expr::StringLiteral(_)
             | Expr::LookupTable(_)
@@ -56143,6 +56136,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         ) && !matches!(
             model.as_str(),
             "xyce_legacy_d_and"
+                | "xyce_legacy_d_dff"
                 | "xyce_legacy_d_inverter"
                 | "xyce_legacy_d_nand"
                 | "xyce_legacy_d_nor"
@@ -56607,11 +56601,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if *compact_syntax
             || !deferred_params.is_empty()
             || !Self::native_transient_bsim4_capacitor_instance_params_are_valid(instance_params)
-            || !Self::find_unique_model_in(&netlist.models, model)
-                .is_some_and(|model| {
-                    model.model_type.eq_ignore_ascii_case("NMOS")
-                        && Self::model_is_native_ac_supported_bsim4(model)
-                })
+            || !Self::find_unique_model_in(&netlist.models, model).is_some_and(|model| {
+                model.model_type.eq_ignore_ascii_case("NMOS")
+                    && Self::model_is_native_ac_supported_bsim4(model)
+            })
         {
             return false;
         }
@@ -58050,9 +58043,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         // exact BF/IS contract.  Requiring one authored GP parameter beyond
         // LEVEL/IS/BF is the model-level discriminator that survives flattening.
         let mut parameter_names = BTreeSet::new();
-        if model.params.iter().any(|(name, _)| {
-            !parameter_names.insert(name.to_ascii_uppercase())
-        }) {
+        if model
+            .params
+            .iter()
+            .any(|(name, _)| !parameter_names.insert(name.to_ascii_uppercase()))
+        {
             return false;
         }
         let has_extended_gp_parameter = model
@@ -58323,9 +58318,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 return false;
             }
             match name.to_ascii_uppercase().as_str() {
-                "LEVEL" if level.is_none() && (*value - 9.0).abs() <= 1.0e-9 => {
-                    level = Some(())
-                }
+                "LEVEL" if level.is_none() && (*value - 9.0).abs() <= 1.0e-9 => level = Some(()),
                 _ => return false,
             }
         }
@@ -58797,10 +58790,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         | crate::expr::Function::Barycentric
                         | crate::expr::Function::BarycentricFile
                 ) && matches!(args.first(), Some(Expr::StringLiteral(_)));
-                file_function
-                    || args
-                        .iter()
-                        .any(Self::strict_expression_contains_file_table)
+                file_function || args.iter().any(Self::strict_expression_contains_file_table)
             }
             Expr::Unary { operand, .. } => Self::strict_expression_contains_file_table(operand),
             Expr::Binary { left, right, .. } => {
@@ -58862,7 +58852,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         context: &mut crate::netlist::ParamContext,
     ) {
         for element in &netlist.elements {
-            let (ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec)) = &element.kind
+            let (ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec)) =
+                &element.kind
             else {
                 continue;
             };
