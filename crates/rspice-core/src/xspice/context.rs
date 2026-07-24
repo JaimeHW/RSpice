@@ -4,6 +4,7 @@
 //! Handles port value access, parameter lookup, and state management.
 
 use super::{CmError, CmResult, DigitalValue, PortType};
+use crate::analysis::CompanionCoefficients;
 use crate::{Complex64, Value};
 use std::any::Any;
 use std::borrow::Cow;
@@ -86,6 +87,23 @@ pub struct AnalogValue {
     pub prev_value: Value,
     /// Partial derivative contribution to matrix
     pub partial: Value,
+}
+
+/// Logical transition metadata carried by finite-impedance analog code-model
+/// outputs.  A downstream analog code model may use the metadata to reproduce
+/// the event timing of an upstream XSPICE device without treating an ordinary
+/// continuous analog source as a digital event.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnalogTransition {
+    /// Logical state represented by the output after this transition.
+    pub state: bool,
+    /// Causal event time used by the upstream model's delayed truth table.
+    pub event_time: Value,
+    /// Physical output transition start, before the receiving device's
+    /// propagation delay.
+    pub transition_start: Value,
+    /// Time at which the finite-output transition reaches its target state.
+    pub transition_end: Value,
 }
 
 impl AnalogValue {
@@ -446,6 +464,14 @@ pub struct CmContext {
     pub time_prev: Value,
     /// Current timestep
     pub timestep: Value,
+    /// Companion-model coefficients selected by the transient integrator.
+    ///
+    /// Code models that own reactive state use these coefficients to assemble
+    /// the same capacitor/inductor companions as native devices.  Direct
+    /// (non-transient) evaluations use backward Euler as a harmless default.
+    transient_companion: CompanionCoefficients,
+    /// Xyce OneStep order-2 static residual weighting is active.
+    xyce_one_step_order2: bool,
     /// Transient print-step/max-step hint for code models that need run context.
     transient_step_hint: Option<Value>,
     /// Final transient stop time for code models that need circuit run context.
@@ -532,6 +558,10 @@ pub struct CmContext {
     int_state: Vec<i64>,
     /// Per-instance transient sample histories keyed by model-defined names.
     transient_histories: HashMap<String, Vec<TransientHistorySample>>,
+    /// Logical transition metadata for analog input vectors.
+    input_analog_vector_transitions: HashMap<String, Vec<Option<AnalogTransition>>>,
+    /// Logical transition metadata emitted by analog outputs.
+    output_analog_transitions: HashMap<String, AnalogTransition>,
     /// Host/runtime resources owned by the model instance.
     resources: ContextResources,
 
@@ -554,6 +584,10 @@ pub struct CmContext {
     stamps: Vec<(usize, usize, Value)>,
     /// RHS contributions (node, value)
     rhs: Vec<(usize, Value)>,
+    /// Static-only conductance stamps retained for Xyce OneStep history.
+    static_stamps: Vec<(usize, usize, Value)>,
+    /// Static-only RHS contributions retained for Xyce OneStep history.
+    static_rhs: Vec<(usize, Value)>,
 }
 
 /// Serializable code-model context state captured in transient checkpoints.
@@ -593,6 +627,8 @@ impl CmContext {
             time: 0.0,
             time_prev: 0.0,
             timestep: 1e-9,
+            transient_companion: CompanionCoefficients::backward_euler(),
+            xyce_one_step_order2: false,
             transient_step_hint: None,
             transient_stop_time: None,
             temperature: 300.15, // 27°C
@@ -630,6 +666,8 @@ impl CmContext {
             state_prev: Vec::new(),
             int_state: Vec::new(),
             transient_histories: HashMap::new(),
+            input_analog_vector_transitions: HashMap::new(),
+            output_analog_transitions: HashMap::new(),
             resources: ContextResources::default(),
             pending_events: Vec::new(),
             pending_real_events: Vec::new(),
@@ -637,6 +675,8 @@ impl CmContext {
             requested_breakpoints: Vec::new(),
             stamps: Vec::new(),
             rhs: Vec::new(),
+            static_stamps: Vec::new(),
+            static_rhs: Vec::new(),
         }
     }
 
@@ -796,6 +836,41 @@ impl CmContext {
             .and_then(InputValue::try_analog_vector)
     }
 
+    /// Companion coefficients selected for the current transient trial.
+    #[inline]
+    pub fn transient_companion_coefficients(&self) -> CompanionCoefficients {
+        self.transient_companion
+    }
+
+    /// Whether the Xyce OneStep order-2 residual is active for this trial.
+    #[inline]
+    pub fn xyce_one_step_order2(&self) -> bool {
+        self.xyce_one_step_order2
+    }
+
+    /// Set the companion coefficients used by the next model evaluation.
+    pub(crate) fn set_transient_companion_coefficients(
+        &mut self,
+        coefficients: CompanionCoefficients,
+    ) {
+        self.transient_companion = coefficients;
+    }
+
+    pub(crate) fn set_xyce_one_step_order2(&mut self, enabled: bool) {
+        self.xyce_one_step_order2 = enabled;
+    }
+
+    /// Return logical transition metadata for one analog input-vector element.
+    pub fn input_analog_vector_transition(
+        &self,
+        name: &str,
+        index: usize,
+    ) -> Option<AnalogTransition> {
+        self.input_analog_vector_transitions
+            .get(name)
+            .and_then(|transitions| transitions.get(index).copied().flatten())
+    }
+
     /// Get digital input vector
     pub fn input_digital_vector(&self, name: &str) -> Vec<DigitalValue> {
         self.inputs
@@ -942,6 +1017,16 @@ impl CmContext {
             }
         }
         Ok(())
+    }
+
+    /// Set logical transition metadata for an analog input vector.
+    pub(crate) fn set_input_analog_vector_transitions(
+        &mut self,
+        name: &str,
+        transitions: Vec<Option<AnalogTransition>>,
+    ) {
+        self.input_analog_vector_transitions
+            .insert(name.to_string(), transitions);
     }
 
     /// Set digital vector input values while reusing an existing vector buffer.
@@ -1233,6 +1318,20 @@ impl CmContext {
             a.value = value;
             a.partial = partial;
         }
+    }
+
+    /// Publish logical transition metadata for a finite-impedance analog
+    /// output.  Metadata is cleared before every model evaluation.
+    pub fn set_output_analog_transition(&mut self, name: &str, transition: AnalogTransition) {
+        if transition.event_time.is_finite() {
+            self.output_analog_transitions
+                .insert(name.to_string(), transition);
+        }
+    }
+
+    /// Return logical transition metadata emitted for an analog output.
+    pub(crate) fn output_analog_transition(&self, name: &str) -> Option<AnalogTransition> {
+        self.output_analog_transitions.get(name).copied()
     }
 
     /// Set analog vector output values with zero direct partials.
@@ -2225,6 +2324,17 @@ impl CmContext {
         self.rhs.push((node, value));
     }
 
+    /// Add a conductance stamp to the static residual history queue as well
+    /// as the ordinary trial queue.
+    pub(crate) fn stamp_static_conductance(&mut self, row: usize, col: usize, value: Value) {
+        self.static_stamps.push((row, col, value));
+    }
+
+    /// Add an RHS contribution to the static residual history queue.
+    pub(crate) fn stamp_static_rhs(&mut self, node: usize, value: Value) {
+        self.static_rhs.push((node, value));
+    }
+
     /// Get all conductance stamps and clear
     pub fn take_stamps(&mut self) -> Vec<(usize, usize, Value)> {
         std::mem::take(&mut self.stamps)
@@ -2245,10 +2355,23 @@ impl CmContext {
         self.rhs.drain(..)
     }
 
+    /// Drain static-only conductance stamps while preserving allocation.
+    pub(crate) fn drain_static_stamps(&mut self) -> Drain<'_, (usize, usize, Value)> {
+        self.static_stamps.drain(..)
+    }
+
+    /// Drain static-only RHS contributions while preserving allocation.
+    pub(crate) fn drain_static_rhs(&mut self) -> Drain<'_, (usize, Value)> {
+        self.static_rhs.drain(..)
+    }
+
     /// Clear queued matrix and RHS contributions.
     pub fn clear_stamps(&mut self) {
         self.stamps.clear();
         self.rhs.clear();
+        self.static_stamps.clear();
+        self.static_rhs.clear();
+        self.output_analog_transitions.clear();
     }
 
     //-------------------------------------------------------------------------

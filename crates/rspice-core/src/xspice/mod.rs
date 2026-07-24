@@ -69,7 +69,9 @@ pub(crate) fn checkpoint_virtual_data_file_contents(path: &str) -> Option<std::s
 
 // Re-export primary types
 pub(crate) use context::CmContextCheckpoint;
-pub use context::{AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase};
+pub use context::{
+    AnalogTransition, AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase,
+};
 pub(crate) use data_file::read_to_string as read_data_file_to_string;
 pub(crate) use data_file::read_to_string_limited as read_data_file_to_string_limited;
 pub use data_file::{

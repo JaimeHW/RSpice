@@ -3740,7 +3740,13 @@ impl Engine {
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
                     if circuit.has_xspice_devices() {
-                        circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                        circuit.accept_xspice_transient_timestep_with_coefficients(
+                            t,
+                            dt,
+                            &new_solution,
+                            &coeff,
+                            xyce_one_step_order2,
+                        );
                         circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
@@ -4647,7 +4653,13 @@ impl Engine {
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
                     if circuit.has_xspice_devices() {
-                        circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                        circuit.accept_xspice_transient_timestep_with_coefficients(
+                            t,
+                            dt,
+                            &new_solution,
+                            &coeff,
+                            xyce_one_step_order2,
+                        );
                         circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
@@ -4888,7 +4900,13 @@ impl Engine {
             let tail_phase_start = crate::time_compat::Instant::now();
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
-                circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                circuit.accept_xspice_transient_timestep_with_coefficients(
+                    t,
+                    dt,
+                    &new_solution,
+                    &coeff,
+                    xyce_one_step_order2,
+                );
                 circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop);
             }
@@ -4914,9 +4932,7 @@ impl Engine {
             }
 
             solution.clone_from(&new_solution);
-            if self.config.spice_dialect == SpiceDialect::Xyce
-                && !xyce_one_step_stateful_topology
-            {
+            if self.config.spice_dialect == SpiceDialect::Xyce && !xyce_one_step_stateful_topology {
                 xyce_static_history = Some(self.capture_xyce_static_residual(
                     &mut circuit,
                     &mut matrix,

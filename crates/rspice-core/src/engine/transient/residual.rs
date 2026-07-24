@@ -388,7 +388,15 @@ impl Engine {
         }
 
         if circuit.has_xspice_devices() {
-            circuit.stamp_xspice_transient_trial(matrix, rhs, time, dt, solution);
+            circuit.stamp_xspice_transient_trial_with_coefficients(
+                matrix,
+                rhs,
+                time,
+                dt,
+                solution,
+                &companion_coeff,
+                ctx.xyce_one_step_order2,
+            );
         }
         if ctx.xyce_one_step_order2 {
             if let Some(history) = ctx.xyce_static_history {
@@ -444,6 +452,14 @@ impl Engine {
                 );
             } else {
                 circuit.stamp_behavioral_sources(probe, probe_rhs, solution, time);
+            }
+            if circuit.has_xspice_devices() {
+                // OneStep's order-2 history term applies to the complete
+                // static residual, including finite-impedance XSPICE output
+                // conductances.  The accepted evaluation has already queued
+                // a static-only stamp set, so consume it without reevaluating
+                // event-driven models at the breakpoint.
+                circuit.stamp_xspice_static_residual(solution, probe_rhs);
             }
             probe
                 .residual_vector(solution, probe_rhs)

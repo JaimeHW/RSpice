@@ -391,6 +391,27 @@ impl CircuitData {
         analysis: crate::xspice::AnalysisType,
         phase: crate::xspice::EvaluationPhase,
     ) -> crate::xspice::CmResult<()> {
+        self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
+            time,
+            timestep,
+            solution,
+            analysis,
+            phase,
+            crate::analysis::CompanionCoefficients::backward_euler(),
+            false,
+        )
+    }
+
+    fn try_evaluate_xspice_with_analysis_phase_and_coefficients(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        solution: &[Value],
+        analysis: crate::xspice::AnalysisType,
+        phase: crate::xspice::EvaluationPhase,
+        companion_coefficients: crate::analysis::CompanionCoefficients,
+        xyce_one_step_order2: bool,
+    ) -> crate::xspice::CmResult<()> {
         let current_source_values = self.current_sources.values_at_time(time);
         let max_event_passes = if self.has_xspice_event_driven_devices() {
             xspice_event_output_count(&self.xspice_instances)
@@ -403,6 +424,8 @@ impl CircuitData {
         let event_loads = &self.xspice_event_loads;
         let mut dispatch_digital_nodes = Vec::new();
         let mut dispatch_real_nodes = Vec::new();
+        let mut analog_transitions =
+            HashMap::<(NodeId, NodeId), crate::xspice::AnalogTransition>::new();
 
         for pass in 0..max_event_passes {
             let digital_values = &mut self.xspice_digital_values;
@@ -442,7 +465,9 @@ impl CircuitData {
                     continue;
                 }
 
-                if let Err(e) = instance.update_inputs(
+                instance.set_transient_companion_coefficients(companion_coefficients);
+                instance.set_xyce_one_step_order2(xyce_one_step_order2);
+                if let Err(e) = instance.update_inputs_with_analog_transitions(
                     solution,
                     num_nodes,
                     digital_values,
@@ -451,6 +476,7 @@ impl CircuitData {
                     real_values,
                     real_event_times,
                     &current_source_values,
+                    &analog_transitions,
                 ) {
                     let message = format!("{}: {}", instance.name, e);
                     if self.xspice_evaluation_error.is_none() {
@@ -465,6 +491,9 @@ impl CircuitData {
                         self.xspice_evaluation_error = Some(message.clone());
                     }
                     return Err(crate::xspice::CmError::EvaluationError(message));
+                }
+                for (key, transition) in instance.analog_output_transitions() {
+                    analog_transitions.insert(key, transition);
                 }
 
                 instance.schedule_events(event_queue, time);
@@ -589,13 +618,38 @@ impl CircuitData {
         timestep: Value,
         voltages: &[Value],
     ) {
+        self.stamp_xspice_transient_trial_with_coefficients(
+            matrix,
+            rhs,
+            time,
+            timestep,
+            voltages,
+            &crate::analysis::CompanionCoefficients::backward_euler(),
+            false,
+        );
+    }
+
+    /// Evaluate and stamp a transient trial using the engine's companion
+    /// coefficients.  Trial state is still restored before returning.
+    pub(crate) fn stamp_xspice_transient_trial_with_coefficients(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        timestep: Value,
+        voltages: &[Value],
+        coefficients: &crate::analysis::CompanionCoefficients,
+        xyce_one_step_order2: bool,
+    ) {
         let snapshot = self.nonlinear_state_snapshot();
-        if let Err(e) = self.try_evaluate_xspice_with_analysis_phase(
+        if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
             time,
             timestep,
             voltages,
             crate::xspice::AnalysisType::Transient,
             crate::xspice::EvaluationPhase::RollbackableProbe,
+            *coefficients,
+            xyce_one_step_order2,
         ) {
             log::warn!("XSPICE evaluation error: {e}");
         }
@@ -603,19 +657,42 @@ impl CircuitData {
         self.restore_nonlinear_state(snapshot);
     }
 
-    /// Commit XSPICE state for an accepted transient timepoint.
+    /// Commit an XSPICE transient timestep using the legacy backward-Euler
+    /// defaults.  Kept for callers that do not select an engine integrator.
+    #[allow(dead_code)]
     pub(crate) fn accept_xspice_transient_timestep(
         &mut self,
         time: Value,
         timestep: Value,
         voltages: &[Value],
     ) {
-        if let Err(e) = self.try_evaluate_xspice_with_analysis_phase(
+        self.accept_xspice_transient_timestep_with_coefficients(
+            time,
+            timestep,
+            voltages,
+            &crate::analysis::CompanionCoefficients::backward_euler(),
+            false,
+        );
+    }
+
+    /// Commit XSPICE state for an accepted transient timepoint using the
+    /// integrator's selected companion coefficients.
+    pub(crate) fn accept_xspice_transient_timestep_with_coefficients(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        voltages: &[Value],
+        coefficients: &crate::analysis::CompanionCoefficients,
+        xyce_one_step_order2: bool,
+    ) {
+        if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
             time,
             timestep,
             voltages,
             crate::xspice::AnalysisType::Transient,
             crate::xspice::EvaluationPhase::AcceptedStep,
+            *coefficients,
+            xyce_one_step_order2,
         ) {
             log::warn!("XSPICE evaluation error: {e}");
         }
@@ -1499,6 +1576,28 @@ impl CircuitData {
             }
             for (node, value) in instance.take_deferred_rhs() {
                 add_rhs_if_present(rhs, node, value);
+            }
+        }
+    }
+
+    /// Add the static-only residual retained by the last accepted XSPICE
+    /// evaluation to a probe RHS.  Applying queued stamps directly to the
+    /// residual avoids rebuilding matrix topology for every accepted step.
+    pub(crate) fn stamp_xspice_static_residual(&mut self, solution: &[Value], rhs: &mut [Value]) {
+        for instance in &mut self.xspice_instances {
+            for (row, col, value) in instance.take_static_deferred_stamps() {
+                if let (Some(rhs_value), Some(solution_value)) =
+                    (rhs.get_mut(row), solution.get(col))
+                {
+                    // The probe residual is A*x-b.  Subtracting the static
+                    // contribution from b therefore adds it to the residual.
+                    *rhs_value -= value * solution_value;
+                }
+            }
+            for (node, value) in instance.take_static_deferred_rhs() {
+                if let Some(entry) = rhs.get_mut(node) {
+                    *entry += value;
+                }
             }
         }
     }

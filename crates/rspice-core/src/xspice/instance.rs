@@ -3,7 +3,9 @@
 //! Represents an instantiated code model in a circuit.
 //! Handles port connections, parameter binding, and matrix stamping.
 
-use super::context::{AnalogValue, CmContextCheckpoint, PendingDigitalEvent, PendingRealEvent};
+use super::context::{
+    AnalogTransition, AnalogValue, CmContextCheckpoint, PendingDigitalEvent, PendingRealEvent,
+};
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
     EventQueue, ParamSpec, ParamType, PortSpec, PortType, XspiceCheckpointSupport,
@@ -1391,6 +1393,19 @@ impl XspiceInstance {
         self.context.set_transient_run_context(tstep, tstop);
     }
 
+    /// Set the transient companion coefficients supplied by the owning engine.
+    pub(crate) fn set_transient_companion_coefficients(
+        &mut self,
+        coefficients: crate::analysis::CompanionCoefficients,
+    ) {
+        self.context
+            .set_transient_companion_coefficients(coefficients);
+    }
+
+    pub(crate) fn set_xyce_one_step_order2(&mut self, enabled: bool) {
+        self.context.set_xyce_one_step_order2(enabled);
+    }
+
     /// Apply the owning engine's resource policy before model initialization.
     pub(crate) fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
         self.context.set_resource_limits(resource_limits);
@@ -1438,6 +1453,33 @@ impl XspiceInstance {
         real_values: &HashMap<usize, Value>,
         real_event_times: &HashMap<usize, Value>,
         current_source_values: &[Value],
+    ) -> CmResult<()> {
+        self.update_inputs_with_analog_transitions(
+            solution,
+            num_nodes,
+            digital_values,
+            digital_event_times,
+            event_total_loads,
+            real_values,
+            real_event_times,
+            current_source_values,
+            &HashMap::new(),
+        )
+    }
+
+    /// Update inputs and attach finite-output analog transition metadata from
+    /// upstream XSPICE instances.
+    pub(crate) fn update_inputs_with_analog_transitions(
+        &mut self,
+        solution: &[Value],
+        num_nodes: usize,
+        digital_values: &HashMap<usize, DigitalValue>,
+        digital_event_times: &HashMap<usize, Value>,
+        event_total_loads: &HashMap<usize, Value>,
+        real_values: &HashMap<usize, Value>,
+        real_event_times: &HashMap<usize, Value>,
+        current_source_values: &[Value],
+        analog_transitions: &HashMap<(usize, usize), AnalogTransition>,
     ) -> CmResult<()> {
         if self.solution_num_nodes != num_nodes {
             self.port_context_solution_num_nodes = None;
@@ -1556,6 +1598,13 @@ impl XspiceInstance {
                         nodes.len(),
                         |index| AnalogValue::new(node_voltage(solution, nodes[index])),
                     )?;
+                    self.context.set_input_analog_vector_transitions(
+                        &port.name,
+                        nodes
+                            .iter()
+                            .map(|node| analog_transitions.get(&(*node, 0)).copied())
+                            .collect(),
+                    );
                 }
                 PortConnection::TypedAnalogVector(elements) => {
                     self.context.set_input_analog_vector_from_fn(
@@ -1569,6 +1618,17 @@ impl XspiceInstance {
                             ))
                         },
                     )?;
+                    self.context.set_input_analog_vector_transitions(
+                        &port.name,
+                        elements
+                            .iter()
+                            .map(|element| {
+                                element
+                                    .primary_node()
+                                    .and_then(|node| analog_transitions.get(&(node, 0)).copied())
+                            })
+                            .collect(),
+                    );
                 }
                 PortConnection::DigitalVector(nodes) => {
                     self.context.set_input_digital_vector_from_fn(
@@ -2352,6 +2412,37 @@ impl XspiceInstance {
         &self.connections
     }
 
+    /// Return finite-output analog transition metadata keyed by the connected
+    /// differential node pair.  The circuit evaluator uses this ephemeral
+    /// map to make upstream legacy Y-device transitions visible to downstream
+    /// analog code models during the same nonlinear evaluation.
+    pub(crate) fn analog_output_transitions(&self) -> Vec<((usize, usize), AnalogTransition)> {
+        let mut transitions = Vec::new();
+        for (index, port) in self.ports.iter().enumerate() {
+            if port.direction != super::PortDirection::Out
+                && port.direction != super::PortDirection::InOut
+            {
+                continue;
+            }
+            let Some(transition) = self.context.output_analog_transition(&port.name) else {
+                continue;
+            };
+            let Some(connection) = self.connections.get(index) else {
+                continue;
+            };
+            match connection {
+                PortConnection::Analog(node) => transitions.push(((*node, 0), transition)),
+                PortConnection::Differential(pos, neg)
+                | PortConnection::CurrentOutput { pos, neg }
+                | PortConnection::Hybrid { pos, neg, .. } => {
+                    transitions.push(((*pos, *neg), transition));
+                }
+                _ => {}
+            }
+        }
+        transitions
+    }
+
     /// Zero-volt probe branches that must be stamped so current input ports
     /// expose branch current to the code model.
     pub fn current_probe_branches(&self) -> Vec<(usize, usize, usize)> {
@@ -2732,6 +2823,16 @@ impl XspiceInstance {
     /// Drain deferred RHS contributions queued by the code model.
     pub fn take_deferred_rhs(&mut self) -> Vec<(usize, Value)> {
         self.context.take_rhs()
+    }
+
+    /// Drain static-only matrix stamps queued by the code model.
+    pub(crate) fn take_static_deferred_stamps(&mut self) -> Vec<(usize, usize, Value)> {
+        self.context.drain_static_stamps().collect()
+    }
+
+    /// Drain static-only RHS contributions queued by the code model.
+    pub(crate) fn take_static_deferred_rhs(&mut self) -> Vec<(usize, Value)> {
+        self.context.drain_static_rhs().collect()
     }
 
     /// Accept the current timestep
