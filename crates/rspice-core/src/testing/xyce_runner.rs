@@ -57354,7 +57354,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("RS"));
         if !has_ideality || !has_series_resistance {
-            return false;
+            // A bare `.MODEL name D` card is the canonical Xyce diode model:
+            // all scalar parameters retain the documented SPICE defaults
+            // (IS=1e-14, N=1, RS=0, CJO=0, TT=0, ...).  Keep this separate
+            // from the parameterized rectifier envelope above so an
+            // incomplete or ambiguous model cannot enter the absolute
+            // transient contract merely by omitting N or RS.
+            return model.params.is_empty() && model.expr_params.is_empty();
         }
 
         // The handwritten legacy evaluator consumes only this scalar subset.
@@ -85738,6 +85744,36 @@ D1 out 0 DMOD
             XyceTestRunner::validate_native_transient_contract(&ambiguous).is_err(),
             "ambiguous diode model definitions must fail closed"
         );
+    }
+
+    #[test]
+    fn absolute_transient_contract_accepts_bare_default_diode_model() {
+        let source = "\
+validated native default-D diode transient subset
+VIN in 0 PULSE(0 5 1n .1n .1n 2n 4n)
+R1 in out 2k
+D1 out 0 DMOD
+.MODEL DMOD D
+.TRAN .1n 8n
+.PRINT TRAN V(out)
+.END
+";
+        let netlist = Netlist::parse(source).expect("bare default-D diode deck parses");
+
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("bare default-D model uses canonical Xyce diode defaults");
+
+        for mutation in [
+            source.replace(".MODEL DMOD D\n", ".MODEL DMOD D (LEVEL=0)\n"),
+            source.replace(".MODEL DMOD D\n", ".MODEL DMOD D (BOGOPARAM={1+2})\n"),
+            source.replace(".MODEL DMOD D\n", ".MODEL DMOD D (N=1)\n"),
+        ] {
+            let mutated = Netlist::parse(&mutation).expect("default-D mutation parses");
+            assert!(
+                XyceTestRunner::validate_native_transient_contract(&mutated).is_err(),
+                "non-default model fields must leave the bare default-D envelope: {mutation}"
+            );
+        }
     }
 
     #[test]
