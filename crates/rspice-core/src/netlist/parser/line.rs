@@ -636,7 +636,7 @@ pub(super) fn parse_line(
                 defer_simple_param_refs,
             )
         }
-        'U' => parse_pspice_u_device(line, line_num, elements, params),
+        'U' => parse_pspice_u_device(line, line_num, elements, params, defer_simple_param_refs),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!("Unknown element type: {}", first_char),

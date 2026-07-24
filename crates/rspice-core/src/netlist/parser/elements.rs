@@ -897,6 +897,7 @@ pub(super) fn parse_pspice_u_device(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let mut fields = split_spice_fields(line);
     join_split_pspice_u_type_dimensions(&mut fields);
@@ -911,7 +912,13 @@ pub(super) fn parse_pspice_u_device(
 
     if let Some(gate) = parse_pspice_simple_u_gate(&fields[1]) {
         return parse_pspice_simple_u_gate_instance(
-            &name, &fields, gate, line_num, elements, params,
+            &name,
+            &fields,
+            gate,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
         );
     }
 
@@ -1430,6 +1437,7 @@ fn parse_pspice_simple_u_gate_instance(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let pins = &fields[4..]; // fields[2] and fields[3] are DPWR/DGND pins.
     if pins.len() < gate.input_count + 1 {
@@ -1470,15 +1478,105 @@ fn parse_pspice_simple_u_gate_instance(
             ));
             timing
         });
-    push_pspice_u_xspice_element_with_timing(
-        elements,
-        name.to_string(),
-        gate.xspice_model,
-        ports,
-        pspice_u_timing,
-    );
+
+    // Xyce's generic U-gates accept a scalar IC/IC1 instance parameter.  U
+    // devices are also valid inside subcircuits, so a formal such as
+    // `ic=valx` must survive parsing until the subcircuit instance scope is
+    // available.  Preserve unresolved values as XSPICE expression parameters
+    // instead of silently dropping them.
+    let timing_field = gate.input_count + 1;
+    let parameter_start = if pins
+        .get(timing_field)
+        .and_then(|token| pspice_u_timing_model_token(token))
+        .is_some()
+    {
+        timing_field + 1
+    } else {
+        timing_field
+    };
+    let mut instance_params = Vec::new();
+    let mut expr_params = Vec::new();
+    for field in pins.iter().skip(parameter_start) {
+        let Some((raw_name, raw_value)) = field.split_once('=') else {
+            continue;
+        };
+        if !matches!(raw_name.trim().to_ascii_uppercase().as_str(), "IC" | "IC1") {
+            continue;
+        }
+        let (resolved, deferred) = parse_pspice_u_gate_ic_value(
+            raw_value,
+            params,
+            defer_simple_param_refs,
+            name,
+            line_num,
+        )?;
+        if let Some(value) = resolved {
+            instance_params.push(("ic".to_string(), value));
+        }
+        if let Some(expression) = deferred {
+            expr_params.push(("ic".to_string(), expression));
+        }
+    }
+
+    elements.push(Element {
+        name: name.to_string(),
+        kind: ElementKind::Xspice {
+            model: gate.xspice_model.to_string(),
+            pspice_u_timing,
+            ports,
+            params: instance_params,
+            expr_params,
+            string_params: Vec::new(),
+            string_expr_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            string_vector_expr_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: Vec::new(),
+        },
+        nodes: Vec::new(),
+        provenance: crate::netlist::ElementProvenance::Authored,
+    });
 
     Ok(())
+}
+
+fn parse_pspice_u_gate_ic_value(
+    raw_value: &str,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    name: &str,
+    line_num: usize,
+) -> Result<(Option<Value>, Option<String>), ParseError> {
+    let expression = strip_wrapping_expression_delimiters(raw_value).trim();
+    let upper = expression.to_ascii_uppercase();
+    if matches!(upper.as_str(), "FALSE" | "LOW") {
+        return Ok((Some(0.0), None));
+    }
+    if matches!(upper.as_str(), "TRUE" | "HIGH") {
+        return Ok((Some(1.0), None));
+    }
+
+    if !defer_simple_param_refs {
+        if let Some(value) = params.get(expression) {
+            return Ok((Some(value), None));
+        }
+    }
+
+    match parse_parametric_field_value(expression, params) {
+        // A resolved literal is independent of the subcircuit scope and
+        // remains safe to materialize at parse time.
+        ParametricValue::Resolved(value) => Ok((Some(value), None)),
+        ParametricValue::Expression(expression) => Ok((None, Some(expression))),
+        ParametricValue::String(_) | ParametricValue::StringExpression(_) => {
+            Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "PSpice U-device '{}' IC parameter requires a numeric or logic-state value",
+                    name
+                ),
+            })
+        }
+    }
 }
 
 fn parse_pspice_u_constraint(
