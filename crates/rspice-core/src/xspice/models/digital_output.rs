@@ -1137,7 +1137,16 @@ impl XyceDGate {
     }
 
     fn gate_parameters() -> &'static [ParamSpec] {
-        q_parameters()
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            let mut params = q_parameters().to_vec();
+            // Xyce's generic U-gates accept a scalar IC instance parameter
+            // that seeds the output state during the DC operating point.  It
+            // is intentionally separate from the DIG model card parameters.
+            params.push(ParamSpec::real("ic", f64::NAN));
+            params
+        })
     }
 }
 
@@ -1197,6 +1206,11 @@ impl CodeModel for XyceDGate {
         let (inputs, _transition_times, last_input_transition_time) =
             self.sample_inputs(ctx, params);
         let desired = self.logic(&inputs);
+        let desired = if ctx.is_dc() {
+            q_state(ctx.param("ic")).or(desired)
+        } else {
+            desired
+        };
         let (output_state, transition_start, transition_from) =
             self.update_output(ctx, desired, last_input_transition_time, params);
         for index in 0..ctx.port_width("in") {
