@@ -51573,6 +51573,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_mosfet(netlist, element)
             });
+        let has_qualified_level1_cmos_chain = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_transient_level1_cmos_chain(netlist);
         let has_qualified_ekv26 = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_ekv26_pair(netlist);
         let has_qualified_diode = purpose.validates_absolute_device_contract()
@@ -51605,6 +51607,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_irb_bjt
             || has_qualified_vbic
             || has_qualified_level1_mos
+            || has_qualified_level1_cmos_chain
             || has_qualified_ekv26
             || has_qualified_diode
             || has_qualified_tbv_diode
@@ -51796,6 +51799,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Mosfet { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_transient_level1_mosfet(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Mosfet { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && has_qualified_level1_cmos_chain
+                        && Self::netlist_element_is_native_transient_level1_mosfet_unbounded(
                             netlist, element,
                         ) => {}
                 ElementKind::Mosfet { .. }
@@ -57745,9 +57754,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         element: &crate::netlist::Element,
     ) -> bool {
-        // The absolute transient oracle currently validates one complementary
-        // Level-1 pair.  Hierarchical chains need a separate topology and
-        // propagation envelope; fail closed until that envelope is qualified.
+        // The original absolute transient envelope validates one complementary
+        // Level-1 pair.  Larger networks use the separately qualified CMOS
+        // inverter-chain topology below; arbitrary multi-device networks stay
+        // fail-closed until they have their own propagation oracle.
         if netlist
             .elements
             .iter()
@@ -57757,6 +57767,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         {
             return false;
         }
+        Self::netlist_element_is_native_transient_level1_mosfet_unbounded(netlist, element)
+    }
+
+    fn netlist_element_is_native_transient_level1_mosfet_unbounded(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
         let ElementKind::Mosfet {
             model,
             compact_syntax,
@@ -57776,6 +57793,130 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         Self::find_unique_model_in(&netlist.models, model)
             .is_some_and(Self::model_is_native_transient_level1_mosfet)
+    }
+
+    /// Validate a strictly linear CMOS inverter chain built from the native
+    /// Level-1 evaluator.  Every stage is one NMOS/PMOS pair sharing a drain
+    /// and gate, with all NMOS source/bulk terminals at ground and all PMOS
+    /// source/bulk terminals on one common non-ground rail.  The stage graph
+    /// must be one acyclic path: exactly one input gate is not a prior output,
+    /// exactly one final output is not consumed by a later gate, and every
+    /// other stage output is consumed exactly once.
+    fn netlist_is_native_transient_level1_cmos_chain(netlist: &Netlist) -> bool {
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.len() < 4 || mosfets.len() % 2 != 0 {
+            return false;
+        }
+
+        let mut pairs = BTreeMap::<(String, String), (bool, bool)>::new();
+        let mut nmos_models = BTreeSet::new();
+        let mut pmos_models = BTreeSet::new();
+        let mut pmos_rail = None::<String>;
+        for element in &mosfets {
+            if !Self::netlist_element_is_native_transient_level1_mosfet_unbounded(netlist, element)
+            {
+                return false;
+            }
+            let ElementKind::Mosfet { model, .. } = &element.kind else {
+                return false;
+            };
+            let Some(model_def) = Self::find_unique_model_in(&netlist.models, model) else {
+                return false;
+            };
+            let normalized_model = model_def.name.to_ascii_uppercase();
+            let [drain, gate, source, bulk] = element.nodes.as_slice() else {
+                return false;
+            };
+            let drain = drain.to_ascii_uppercase();
+            let gate = gate.to_ascii_uppercase();
+            let source = source.to_ascii_uppercase();
+            let bulk = bulk.to_ascii_uppercase();
+            let is_nmos = model_def.model_type.eq_ignore_ascii_case("NMOS");
+            let is_pmos = model_def.model_type.eq_ignore_ascii_case("PMOS");
+            if is_nmos == is_pmos {
+                return false;
+            }
+            if is_nmos {
+                if !Self::node_name_is_ground(&source) || !Self::node_name_is_ground(&bulk) {
+                    return false;
+                }
+                nmos_models.insert(normalized_model);
+            } else {
+                if Self::node_name_is_ground(&source)
+                    || source != bulk
+                    || pmos_rail.as_ref().is_some_and(|rail| rail != &source)
+                {
+                    return false;
+                }
+                pmos_rail = Some(source);
+                pmos_models.insert(normalized_model);
+            }
+            let pair = pairs.entry((drain, gate)).or_default();
+            let slot = if is_nmos { &mut pair.0 } else { &mut pair.1 };
+            if *slot {
+                return false;
+            }
+            *slot = true;
+        }
+
+        let Some(pmos_rail) = pmos_rail else {
+            return false;
+        };
+        if nmos_models.len() != 1 || pmos_models.len() != 1 {
+            return false;
+        }
+        if !netlist.elements.iter().any(|element| {
+            if !matches!(element.kind, ElementKind::VoltageSource(_)) || element.nodes.len() != 2 {
+                return false;
+            }
+            let first = element.nodes[0].to_ascii_uppercase();
+            let second = element.nodes[1].to_ascii_uppercase();
+            (first == pmos_rail && Self::node_name_is_ground(&second))
+                || (second == pmos_rail && Self::node_name_is_ground(&first))
+        }) {
+            return false;
+        }
+        if pairs
+            .values()
+            .any(|(has_nmos, has_pmos)| !has_nmos || !has_pmos)
+        {
+            return false;
+        }
+
+        let mut next_by_gate = BTreeMap::new();
+        let mut gates = BTreeSet::new();
+        let mut drains = BTreeSet::new();
+        for (drain_gate, (has_nmos, has_pmos)) in pairs {
+            debug_assert!(has_nmos && has_pmos);
+            let (drain, gate) = drain_gate;
+            if drain == gate || gates.contains(&gate) || !drains.insert(drain.clone()) {
+                return false;
+            }
+            gates.insert(gate.clone());
+            next_by_gate.insert(gate, drain);
+        }
+
+        let roots = gates.difference(&drains).cloned().collect::<Vec<_>>();
+        let terminals = drains.difference(&gates).cloned().collect::<Vec<_>>();
+        if roots.len() != 1 || terminals.len() != 1 {
+            return false;
+        }
+        let mut visited = BTreeSet::new();
+        let mut gate = roots[0].clone();
+        loop {
+            let Some(drain) = next_by_gate.get(&gate) else {
+                return visited.len() == mosfets.len() / 2
+                    && gate.eq_ignore_ascii_case(&terminals[0]);
+            };
+            if !visited.insert(gate.clone()) {
+                return false;
+            }
+            gate = drain.clone();
+        }
     }
 
     fn model_is_native_transient_level1_mosfet(model: &crate::netlist::ModelDef) -> bool {
@@ -86996,6 +87137,44 @@ MP1 d g VDD VDD PM L=5u W=10u
         assert!(
             XyceTestRunner::validate_native_transient_contract(&extra_pair_device).is_err(),
             "unvalidated multi-device Level-1 MOS propagation remains fail-closed"
+        );
+    }
+
+    #[test]
+    fn absolute_classic_level1_cmos_chain_contract_requires_linear_complementary_stages() {
+        let source = "\
+validated classic MOS Level-1 CMOS chain transient subset
+VDD VDD 0 5
+VIN IN 0 PULSE(0 5 1n 1n 1n 10n 20n)
+RLOAD OUT2 0 10k
+CLOAD OUT2 0 0.1p
+MN1 OUT1 IN 0 0 NM L=5u W=10u
+MP1 OUT1 IN VDD VDD PM L=5u W=10u
+MN2 OUT2 OUT1 0 0 NM L=5u W=10u
+MP2 OUT2 OUT1 VDD VDD PM L=5u W=10u
+.MODEL NM NMOS (LEVEL=1 KP=2m VTO=1 TOX=60n)
+.MODEL PM PMOS (LEVEL=1 KP=2m VTO=-1 TOX=60n)
+.TRAN 1n 20n
+.PRINT TRAN V(OUT2)
+.END
+";
+        let netlist = Netlist::parse(source).expect("classic MOS chain fixture parses");
+        assert!(
+            XyceTestRunner::netlist_is_native_transient_level1_cmos_chain(&netlist),
+            "linear complementary Level-1 chain must be recognized"
+        );
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("linear complementary Level-1 chain is eligible");
+
+        let broken_gate = source.replacen("MP2 OUT2 OUT1 VDD VDD PM", "MP2 OUT2 IN VDD VDD PM", 1);
+        let broken_gate = Netlist::parse(&broken_gate).expect("broken chain fixture parses");
+        assert!(
+            !XyceTestRunner::netlist_is_native_transient_level1_cmos_chain(&broken_gate),
+            "a duplicated gate stage must remain outside the chain envelope"
+        );
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&broken_gate).is_err(),
+            "a non-linear Level-1 network must fail closed"
         );
     }
 
