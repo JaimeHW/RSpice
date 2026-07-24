@@ -19664,15 +19664,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         };
         plan.comparison_mode =
             Self::select_static_tran_comparison_mode(&plan, &netlist, purpose, requires_wrapper)?;
-        let validation_purpose = if plan.steps.is_empty()
-            && matches!(
-                plan.comparison_mode,
-                XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
-            ) {
-            XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle
-        } else {
-            purpose
-        };
+        let validation_purpose =
+            if plan.steps.is_empty() && plan.comparison_mode.uses_integrated_rms_verifier() {
+                XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle
+            } else {
+                purpose
+            };
         if validation_purpose.validates_absolute_device_contract()
             || matches!(
                 validation_purpose,
@@ -19897,7 +19894,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || !plan.steps.is_empty()
             || plan.wrapper_tolerance.is_some()
             || !plan.reference_path.is_file()
-            || Self::source_has_comp_directive(&plan.source)
+            || (Self::source_has_comp_directive(&plan.source)
+                && !Self::netlist_is_native_level9_xyce_verify_envelope(netlist))
             || !Self::native_transient_uses_standard_startup(netlist)
             || !netlist.diagnostics.is_empty()
             || !netlist.subcircuits.is_empty()
@@ -19915,43 +19913,50 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             });
         }
 
-        let mosfets = netlist
-            .elements
-            .iter()
-            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
-            .collect::<Vec<_>>();
-        if mosfets.is_empty()
-            || mosfets.iter().any(|element| {
-                !Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
-            })
-            || netlist.elements.iter().any(|element| {
-                !Self::netlist_element_is_native_level9_xyce_verify_supported(element)
-            })
-        {
+        if !Self::netlist_is_native_level9_xyce_verify_envelope(netlist) {
             return Ok(pointwise);
         }
 
-        let referenced_models = mosfets
-            .iter()
-            .filter_map(|element| match &element.kind {
-                ElementKind::Mosfet { model, .. } => Some(model.to_ascii_lowercase()),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-        if netlist.models.len() != referenced_models.len()
-            || netlist.models.iter().any(|model| {
-                !referenced_models.contains(&model.name.to_ascii_lowercase())
-                    || !Self::model_is_native_absolute_transient_level9_bsim3(model)
-            })
-        {
-            return Ok(pointwise);
-        }
-
-        let Some(scientific_precision) =
-            Self::strict_level9_xyce_verify_source_precision(&plan.source, netlist.models.len())?
-        else {
-            return Ok(pointwise);
+        let scientific_precision = match Self::strict_level9_xyce_verify_source_precision(
+            &plan.source,
+            netlist.models.len(),
+        ) {
+            Ok(Some(precision)) => precision,
+            Ok(None) => return Ok(pointwise),
+            Err(_error)
+                if Self::level9_xyce_verify_default_output(&plan.source, netlist.models.len()) =>
+            {
+                XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION
+            }
+            Err(error) => return Err(error),
         };
+        if Self::source_has_comp_directive(&plan.source) {
+            if !Self::logical_comp_directives(&plan.source)
+                .iter()
+                .filter_map(|line| Self::comp_directive_body(line))
+                .filter_map(Self::split_comp_directive)
+                .any(|(_, options)| !options.trim().is_empty())
+            {
+                return Ok(pointwise);
+            }
+            match Self::xyce_verify_comp_tolerances(&plan.source, &plan.print.probes) {
+                Ok(tolerances) => {
+                    return Ok(XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                        scientific_precision,
+                        error_bounds: if tolerances
+                            .into_iter()
+                            .any(XyceVerifyTransientTolerance::has_nondefault_error_bounds)
+                        {
+                            XyceVerifyCompErrorBounds::DeckOverrides
+                        } else {
+                            XyceVerifyCompErrorBounds::Release710Default
+                        },
+                    });
+                }
+                Err(error) if error == XYCE_VERIFY_COMP_NO_PRINTED_PROBE => {}
+                Err(_) => return Ok(pointwise),
+            }
+        }
         Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
             scientific_precision,
         })
@@ -20189,6 +20194,90 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Ok(None);
         }
         Ok(scientific_precision)
+    }
+
+    /// Return whether an ordinary, precisionless `.PRINT TRAN` card is safe
+    /// to compare with the default Release 7.10 integrated-RMS verifier for
+    /// a structurally qualified LEVEL=9 deck.  Xyce serializes this form at
+    /// the default scientific precision; the stricter helper above remains
+    /// responsible for authored `PRECISION=12` cards and all option/error
+    /// validation.
+    fn level9_xyce_verify_default_output(source: &str, expected_model_count: usize) -> bool {
+        let lines = Self::logical_netlist_lines(source);
+        if lines.is_empty() {
+            return false;
+        }
+
+        let mut model_count = 0usize;
+        let mut tran_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        let mut saw_probe = false;
+        let mut saw_end = false;
+
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            if stripped.is_empty() {
+                continue;
+            }
+            if saw_end {
+                return false;
+            }
+            let Ok(fields) = Self::split_print_fields(stripped) else {
+                return false;
+            };
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".model" => model_count += 1,
+                ".tran" if fields.len() == 3 => tran_count += 1,
+                ".tran" => return false,
+                ".print" => {
+                    if fields.len() < 3 || !fields[1].eq_ignore_ascii_case("tran") {
+                        return false;
+                    }
+                    let field_refs = fields.iter().map(String::as_str).collect::<Vec<_>>();
+                    if fields[2..].iter().enumerate().any(|(offset, field)| {
+                        let index = offset + 2;
+                        Self::print_option_assignment(&field_refs, index).is_some()
+                            || Self::is_print_option_token(&field.to_ascii_lowercase())
+                            || matches!(
+                                field.to_ascii_lowercase().as_str(),
+                                "file"
+                                    | "format"
+                                    | "width"
+                                    | "precision"
+                                    | "delimiter"
+                                    | "noindex"
+                                    | "index"
+                                    | "filter"
+                                    | "timescalefactor"
+                            )
+                    }) {
+                        return false;
+                    }
+                    print_count += 1;
+                    saw_probe = true;
+                }
+                ".end" if fields.len() == 1 => {
+                    end_count += 1;
+                    saw_end = true;
+                }
+                ".end" => return false,
+                _ => return false,
+            }
+        }
+
+        model_count == expected_model_count
+            && tran_count == 1
+            && print_count == 1
+            && end_count == 1
+            && saw_probe
+            && saw_end
     }
 
     fn strict_level9_xyce_verify_print_precision(fields: &[String]) -> Result<usize, String> {
@@ -56850,6 +56939,37 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
     }
 
+    fn netlist_is_native_level9_xyce_verify_envelope(netlist: &Netlist) -> bool {
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.is_empty()
+            || mosfets.iter().any(|element| {
+                !Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
+            })
+            || netlist.elements.iter().any(|element| {
+                !Self::netlist_element_is_native_level9_xyce_verify_supported(element)
+            })
+        {
+            return false;
+        }
+
+        let referenced_models = mosfets
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Mosfet { model, .. } => Some(model.to_ascii_lowercase()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        netlist.models.len() == referenced_models.len()
+            && netlist.models.iter().all(|model| {
+                referenced_models.contains(&model.name.to_ascii_lowercase())
+                    && Self::model_is_native_absolute_transient_level9_bsim3(model)
+            })
+    }
+
     fn native_absolute_transient_w_l_instance_params(params: &[(String, Value)]) -> bool {
         if params.len() != 2
             || !params.iter().all(|(name, value)| {
@@ -85847,6 +85967,63 @@ R1 out 0 1k
         assert!(!XyceTestRunner::source_has_comp_directive(
             &source.replace(".END", "*Comparator documentation\n.END")
         ));
+    }
+
+    #[test]
+    fn level9_default_output_accepts_plain_precisionless_print() {
+        let source = absolute_level9_bsim3_test_source().replace("PRECISION=12 WIDTH=21 ", "");
+        assert!(XyceTestRunner::level9_xyce_verify_default_output(
+            &source, 2
+        ));
+        let netlist = Netlist::parse(&source).expect("precisionless LEVEL=9 fixture parses");
+        let reference_path = std::env::current_exe().expect("test executable is an existing file");
+        let plan = absolute_level9_bsim3_selector_test_plan(&source, reference_path);
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("precisionless LEVEL=9 selector evaluates"),
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            }
+        );
+    }
+
+    #[test]
+    fn level9_default_output_executes_checked_in_oneshot_oracle() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let deck_path = root.join("Netlists/ONESHOT/one-shot.cir");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = runner
+            .static_tran_plan_for_path_with_purpose(
+                &deck_path,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+            )
+            .expect("checked-in LEVEL=9 one-shot plan qualifies");
+        assert_eq!(
+            plan.comparison_mode,
+            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
+            }
+        );
+        let result = runner.run_test(&deck_path);
+        assert!(
+            result.passed,
+            "checked-in LEVEL=9 one-shot failed: {result:?}"
+        );
+        assert!(!result.expected_unsupported);
+        assert!(
+            result.mismatches.is_empty(),
+            "unexpected mismatches: {result:?}"
+        );
     }
 
     #[test]
