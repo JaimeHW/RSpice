@@ -27591,10 +27591,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 }
             };
         // The reference table supplies mandatory comparison boundaries, not
-        // the solver's internal DELMAX.  Locked candidates therefore use the
-        // Xyce solver ceiling so the engine can resolve each output interval
-        // with bounded internal accepted steps.
-        let locked_max_step = Self::transient_oracle_solver_max_step(&tran).max(max_step);
+        // the solver's internal DELMAX.  Native MOS3 candidates retain
+        // Xyce's DELMAX because their charge history is path-sensitive;
+        // other candidates use the bounded oracle ceiling for precision.
+        let locked_solver_max_step = if Self::netlist_requires_xyce_locked_solver_ceiling(&netlist)
+        {
+            Self::xyce_transient_solver_max_step(&tran)
+        } else {
+            Self::transient_oracle_solver_max_step(&tran)
+        };
+        let locked_max_step = locked_solver_max_step.max(max_step);
 
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
         // The reference-backed EKV26 envelope is qualified at the Xyce
@@ -34652,6 +34658,29 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     fn xyce_transient_solver_max_step(tran: &XyceTranAnalysis) -> Value {
         tran.max_step
             .unwrap_or_else(|| Self::xyce_default_transient_max_step(tran))
+    }
+
+    /// Preserve Xyce's authored DELMAX for native MOS3 locked candidates.
+    /// Their nonlinear charge companions make the accepted-step history
+    /// path-sensitive; replacing Xyce's ceiling with the harness sampling cap
+    /// changes the waveform even when every requested output time is identical.
+    fn netlist_requires_xyce_locked_solver_ceiling(netlist: &Netlist) -> bool {
+        if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            let Ok(flattened) = flatten_netlist_with_models(netlist) else {
+                return false;
+            };
+            let mut flat_netlist = netlist.clone();
+            flat_netlist.elements = flattened.elements;
+            flat_netlist.models.extend(flattened.scoped_models);
+            flat_netlist.subcircuits.clear();
+            return Self::netlist_requires_xyce_locked_solver_ceiling(&flat_netlist);
+        }
+
+        Self::netlist_is_native_transient_level3_mosfet_network(netlist)
     }
 
     /// The production solver may choose any step below Xyce's true ceiling,
@@ -51604,6 +51633,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             });
         let has_qualified_level2_mos = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_level2_mosfet_network(netlist);
+        let has_qualified_level3_mos = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_transient_level3_mosfet_network(netlist);
         let has_qualified_level1_cmos_chain = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_level1_cmos_chain(netlist);
         let has_qualified_ekv26 = purpose.validates_absolute_device_contract()
@@ -51639,6 +51670,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_vbic
             || has_qualified_level1_mos
             || has_qualified_level2_mos
+            || has_qualified_level3_mos
             || has_qualified_level1_cmos_chain
             || has_qualified_ekv26
             || has_qualified_diode
@@ -51841,6 +51873,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         ) => {}
                 ElementKind::Mosfet { .. }
                     if purpose.validates_absolute_device_contract()
+                        && has_qualified_level3_mos
+                        && Self::netlist_element_is_native_transient_level3_mosfet(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Mosfet { .. }
+                    if purpose.validates_absolute_device_contract()
                         && has_qualified_level1_cmos_chain
                         && Self::netlist_element_is_native_transient_level1_mosfet_unbounded(
                             netlist, element,
@@ -51915,7 +51953,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
                         | XyceStaticTranPlanPurpose::AnalyticOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and extended Level-1 NPN IRB/RBM, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, and classic MOSFET models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN and extended Level-1 NPN IRB/RBM, EKV26, validated native VDMOS LEVEL=18 integrated-RMS, bounded native classic MOSFET LEVEL=1/2/3 models, exact IS-only, validated legacy, Level=2 TBV, and validated MINRES/MINCAP legacy-diode models, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
@@ -57976,6 +58014,49 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             "TNOM" => value > -273.15,
             _ => false,
         }
+    }
+
+    /// Validate the bounded native LEVEL=3 MOSFET envelope used by the
+    /// absolute transient oracle.  MOS3 shares the classic evaluator with
+    /// the already validated relational MOS3 family; this route admits only
+    /// four-terminal, scalar-parameter devices and at most four flattened
+    /// instances so the absolute waveform contract remains independently
+    /// bounded.
+    fn netlist_is_native_transient_level3_mosfet_network(netlist: &Netlist) -> bool {
+        if netlist.options.abstol.is_some() || netlist.options.timeint_abstol.is_some() {
+            return false;
+        }
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.is_empty() || mosfets.len() > 4 {
+            return false;
+        }
+        mosfets.iter().all(|element| {
+            Self::netlist_element_is_native_transient_level3_mosfet(netlist, element)
+        })
+    }
+
+    fn netlist_element_is_native_transient_level3_mosfet(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 4
+            && !compact_syntax
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model).is_some()
+            && Self::netlist_device_is_native_relational_mos3(netlist, &element.name)
     }
 
     /// Validate a strictly linear CMOS inverter chain built from the native
