@@ -57803,6 +57803,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     /// exactly one final output is not consumed by a later gate, and every
     /// other stage output is consumed exactly once.
     fn netlist_is_native_transient_level1_cmos_chain(netlist: &Netlist) -> bool {
+        // The checked-in chain oracle is stable with the default convergence
+        // policy and TIMEINT RELTOL-only overrides.  Absolute convergence
+        // floors change switching-edge acceptance; keep those decks outside
+        // this propagation envelope until they have their own oracle.
+        if netlist.options.abstol.is_some() || netlist.options.timeint_abstol.is_some() {
+            return false;
+        }
         let mosfets = netlist
             .elements
             .iter()
@@ -87175,6 +87182,18 @@ MP2 OUT2 OUT1 VDD VDD PM L=5u W=10u
         assert!(
             XyceTestRunner::validate_native_transient_contract(&broken_gate).is_err(),
             "a non-linear Level-1 network must fail closed"
+        );
+
+        let absolute_lte_floor = source.replacen(
+            ".PRINT TRAN V(OUT2)",
+            ".OPTIONS TIMEINT ABSTOL=1e-3\n.PRINT TRAN V(OUT2)",
+            1,
+        );
+        let absolute_lte_floor =
+            Netlist::parse(&absolute_lte_floor).expect("absolute LTE floor fixture parses");
+        assert!(
+            !XyceTestRunner::netlist_is_native_transient_level1_cmos_chain(&absolute_lte_floor),
+            "an explicit TIMEINT absolute floor must remain outside the chain envelope"
         );
     }
 
