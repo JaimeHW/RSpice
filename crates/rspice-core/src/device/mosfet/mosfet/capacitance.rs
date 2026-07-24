@@ -121,6 +121,50 @@ impl Mosfet {
         }
     }
 
+    /// Xyce's classic MOS `qmeyer` charge partition used by native MOS3.
+    ///
+    /// The weak-inversion branch deliberately keeps `Cgd` at zero and does
+    /// not partition it by `Vds/Vdsat`; that is the canonical Xyce MOS3
+    /// equation.  Keep this separate from the legacy generic Meyer helper so
+    /// the established Level-1/2 compatibility path is not changed without
+    /// its own oracle qualification.
+    pub(in crate::device::mosfet::mosfet) fn xyce_meyer_intrinsic_capacitances(
+        vgs: Value,
+        vgd: Value,
+        _vgb: Value,
+        von: Value,
+        vdsat: Value,
+        phi: Value,
+        oxide_cap: Value,
+    ) -> (Value, Value, Value) {
+        let vgst = vgs - von;
+        if vgst <= -phi {
+            (0.0, 0.0, oxide_cap / 2.0)
+        } else if vgst <= -phi / 2.0 {
+            (0.0, 0.0, -vgst * oxide_cap / (2.0 * phi))
+        } else if vgst <= 0.0 {
+            (
+                vgst * oxide_cap / (1.5 * phi) + oxide_cap / 3.0,
+                0.0,
+                -vgst * oxide_cap / (2.0 * phi),
+            )
+        } else {
+            let vds = vgs - vgd;
+            if vdsat <= vds {
+                (oxide_cap / 3.0, 0.0, 0.0)
+            } else {
+                let vddif = 2.0 * vdsat - vds;
+                let vddif1 = vdsat - vds;
+                let vddif2 = vddif * vddif;
+                (
+                    oxide_cap * (1.0 - vddif1 * vddif1 / vddif2) / 3.0,
+                    oxide_cap * (1.0 - vdsat * vdsat / vddif2) / 3.0,
+                    0.0,
+                )
+            }
+        }
+    }
+
     pub(in crate::device::mosfet::mosfet) fn level6_meyer_state(
         &self,
         vgs: Value,
@@ -194,10 +238,25 @@ impl Mosfet {
         };
 
         let (cgs_int, cgd_int, cgb_int) = if mode > 0.0 {
-            Self::meyer_intrinsic_capacitances(vgs_m, vgd_m, vgb_m, von, vdsat, phi, oxide_cap)
+            if self.uses_mos3_core()
+                && self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
+            {
+                Self::xyce_meyer_intrinsic_capacitances(
+                    vgs_m, vgd_m, vgb_m, von, vdsat, phi, oxide_cap,
+                )
+            } else {
+                Self::meyer_intrinsic_capacitances(vgs_m, vgd_m, vgb_m, von, vdsat, phi, oxide_cap)
+            }
         } else {
-            let (capgd_int, capgs_int, capgb_int) =
-                Self::meyer_intrinsic_capacitances(vgd_m, vgs_m, vgb_m, von, vdsat, phi, oxide_cap);
+            let (capgd_int, capgs_int, capgb_int) = if self.uses_mos3_core()
+                && self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
+            {
+                Self::xyce_meyer_intrinsic_capacitances(
+                    vgd_m, vgs_m, vgb_m, von, vdsat, phi, oxide_cap,
+                )
+            } else {
+                Self::meyer_intrinsic_capacitances(vgd_m, vgs_m, vgb_m, von, vdsat, phi, oxide_cap)
+            };
             (capgs_int, capgd_int, capgb_int)
         };
 
@@ -534,6 +593,29 @@ mod tests {
                 + (expected.2 - old_fallback.2).abs()
                 > 1.0e-16,
             "MOS3 fixture must reject the old vth/Vgs-vth Meyer inputs"
+        );
+
+        assert_caps_close(
+            mos.transient_capacitance_halves_at(vgs, vds, vbs),
+            expected,
+            1.0e-12,
+            1.0e-24,
+        );
+    }
+
+    #[test]
+    fn level3_transient_meyer_uses_xyce_weak_inversion_partition() {
+        let mut mos = mos3_capacitance_fixture();
+        mos.body_junction_model = MosBodyJunctionModel::XyceClassicLinearizedReverse;
+        let vbs = -0.6;
+        let von = mos.mos3_state(0.0, 0.2, vbs).von;
+        let vgs = von - 0.05;
+        let vds = 0.2;
+        let oxide_cap = mos.oxide_capacitance_total();
+        let expected = (
+            (vgs - von) * oxide_cap / (1.5 * mos.phi) + oxide_cap / 3.0,
+            0.0,
+            -(vgs - von) * oxide_cap / (2.0 * mos.phi),
         );
 
         assert_caps_close(
