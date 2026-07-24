@@ -27590,6 +27590,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     );
                 }
             };
+        // The reference table supplies mandatory comparison boundaries, not
+        // the solver's internal DELMAX.  Locked candidates therefore use the
+        // Xyce solver ceiling so the engine can resolve each output interval
+        // with bounded internal accepted steps.
+        let locked_max_step = Self::transient_oracle_solver_max_step(&tran).max(max_step);
 
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
         // The reference-backed EKV26 envelope is qualified at the Xyce
@@ -27713,7 +27718,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         let locked_engine =
             self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
-        match locked_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
+        match locked_engine.run_tran_with_abort(&netlist, tran.stop, locked_max_step, &abort) {
             Ok(locked_result) => {
                 match self.compare_tran_prn_reference(
                     &reference,
@@ -27787,7 +27792,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     crate::analysis::IntegrationMethod::BackwardEuler,
                     initial_step,
                 );
-            match backward_euler_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
+            match backward_euler_engine.run_tran_with_abort(
+                &netlist,
+                tran.stop,
+                locked_max_step,
+                &abort,
+            ) {
                 Ok(backward_euler_result) => {
                     match self.compare_tran_prn_reference(
                         &reference,
@@ -27860,7 +27870,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 crate::analysis::IntegrationMethod::Gear2,
                 initial_step,
             );
-            match gear12_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
+            match gear12_engine.run_tran_with_abort(&netlist, tran.stop, locked_max_step, &abort) {
                 Ok(gear12_result) => {
                     match self.compare_tran_prn_reference(
                         &reference,
@@ -51592,6 +51602,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_mosfet(netlist, element)
             });
+        let has_qualified_level2_mos = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_transient_level2_mosfet_network(netlist);
         let has_qualified_level1_cmos_chain = purpose.validates_absolute_device_contract()
             && Self::netlist_is_native_transient_level1_cmos_chain(netlist);
         let has_qualified_ekv26 = purpose.validates_absolute_device_contract()
@@ -51626,6 +51638,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_irb_bjt
             || has_qualified_vbic
             || has_qualified_level1_mos
+            || has_qualified_level2_mos
             || has_qualified_level1_cmos_chain
             || has_qualified_ekv26
             || has_qualified_diode
@@ -51818,6 +51831,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Mosfet { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_transient_level1_mosfet(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Mosfet { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && has_qualified_level2_mos
+                        && Self::netlist_element_is_native_transient_level2_mosfet(
                             netlist, element,
                         ) => {}
                 ElementKind::Mosfet { .. }
@@ -57859,6 +57878,104 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
         Self::find_unique_model_in(&netlist.models, model)
             .is_some_and(Self::model_is_native_transient_level1_mosfet)
+    }
+
+    /// Validate the bounded native LEVEL=2 MOSFET envelope used by the
+    /// absolute transient oracle.  The native evaluator follows Berkeley's
+    /// MOS2 equations, including the VMAX/NEFF short-channel path, but the
+    /// absolute corpus contract remains deliberately bounded until a larger
+    /// multi-device propagation family has its own checked-in oracle.
+    fn netlist_is_native_transient_level2_mosfet_network(netlist: &Netlist) -> bool {
+        if netlist.options.abstol.is_some() || netlist.options.timeint_abstol.is_some() {
+            return false;
+        }
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.is_empty() || mosfets.len() > 4 {
+            return false;
+        }
+        mosfets.iter().all(|element| {
+            Self::netlist_element_is_native_transient_level2_mosfet(netlist, element)
+        })
+    }
+
+    fn netlist_element_is_native_transient_level2_mosfet(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        if element.nodes.len() != 4
+            || *compact_syntax
+            || !deferred_params.is_empty()
+            || !Self::native_transient_level1_mos_instance_params_are_valid(instance_params)
+        {
+            return false;
+        }
+        Self::find_unique_model_in(&netlist.models, model)
+            .is_some_and(Self::model_is_native_transient_level2_mosfet)
+    }
+
+    fn model_is_native_transient_level2_mosfet(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || !Self::numeric_param_value(&model.params, "LEVEL")
+            .is_some_and(|level| level.is_finite() && level.to_bits() == 2.0f64.to_bits())
+        {
+            return false;
+        }
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+        let mut names = BTreeSet::new();
+        model.params.iter().all(|(name, value)| {
+            let normalized = name.to_ascii_uppercase();
+            names.insert(normalized.clone())
+                && Self::native_transient_level2_mosfet_model_param(&normalized, *value)
+        })
+    }
+
+    fn native_transient_level2_mosfet_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match name {
+            "LEVEL" => value.to_bits() == 2.0f64.to_bits(),
+            "VTO" | "VT0" | "VTH0" | "LAMBDA" | "XTI" | "EG" => true,
+            "KP" | "PHI" | "U0" | "UO" | "TOX" | "NSUB" | "L" | "W" | "PB" | "NEFF" | "UCRIT" => {
+                value > 0.0
+            }
+            "GAMMA" | "NSS" | "NFS" | "IS" | "JS" | "LD" | "RD" | "RS" | "RSH" | "CBD"
+            | "CAPBD" | "CBS" | "CAPBS" | "CJ" | "CJ0" | "CJSW" | "CGSO" | "CGDO" | "CGBO"
+            | "DELTA" | "UEXP" | "VMAX" | "XJ" => value >= 0.0,
+            "TPG" | "GATE" => matches!(value, -1.0 | 0.0 | 1.0),
+            // Berkeley/Xyce MOS2 permits exponents above one (for example
+            // MOSRECT's NMOS MJ=1.067); the evaluator consumes the numeric
+            // value directly, so the structural contract only rejects
+            // negative junction grading exponents.
+            "MJ" | "MJSW" => value >= 0.0,
+            "FC" => (0.0..1.0).contains(&value),
+            "TNOM" => value > -273.15,
+            _ => false,
+        }
     }
 
     /// Validate a strictly linear CMOS inverter chain built from the native
