@@ -596,10 +596,15 @@ impl Mosfet {
             1.0
         };
 
-        let gammad = gamasd / eta;
+        // Xyce uses the normalized body coefficient while solving the
+        // Grove--Frohman VDSAT equation.  The channel-length-shortening
+        // branch below switches back to the physical short-channel gamma;
+        // keep the two quantities distinct so the VMAX path cannot
+        // accidentally reuse the normalized value.
+        let gammad_vdsat = gamasd / eta;
         let vgsx = if fast_surface { lvgs.max(von) } else { lvgs };
-        if gammad > 0.0 {
-            let gammd2 = gammad * gammad;
+        if gammad_vdsat > 0.0 {
+            let gammd2 = gammad_vdsat * gammad_vdsat;
             let argv = (vgsx - vbin) / eta + phi_min_vbs;
             if argv > 0.0 {
                 let arg1 = (1.0 + 4.0 * argv / gammd2).sqrt();
@@ -616,7 +621,7 @@ impl Mosfet {
             if ueff > 0.0 && effective_length > 0.0 {
                 let xv = self.mos2_max_drift_vel * effective_length / ueff;
                 if let Some(sat) =
-                    Self::level2_vmax_vdsat(vgsx, vbin, eta, gammad, phi_min_vbs, sarg3, xv)
+                    Self::level2_vmax_vdsat(vgsx, vbin, eta, gammad_vdsat, phi_min_vbs, sarg3, xv)
                 {
                     vdsat = sat;
                 }
@@ -634,11 +639,30 @@ impl Mosfet {
             };
             bodys = bsarg * bsarg * bsarg - sarg3;
 
-            if self.mos2_max_drift_vel <= 0.0 && self.mos2_substrate_doping > 0.0 && xlamda <= 0.0 {
-                let argv = (lvds - vdsat) / 4.0;
-                let sargv = (1.0 + argv * argv).sqrt();
-                let arg1 = (argv + sargv).max(0.0).sqrt();
-                xlamda = xd * arg1 / (effective_length * lvds);
+            if self.mos2_substrate_doping > 0.0 && xlamda <= 0.0 {
+                if self.mos2_max_drift_vel <= 0.0 {
+                    let argv = (lvds - vdsat) / 4.0;
+                    let sargv = (1.0 + argv * argv).sqrt();
+                    let arg1 = (argv + sargv).max(0.0).sqrt();
+                    xlamda = xd * arg1 / (effective_length * lvds);
+                } else {
+                    // Xyce/ngspice's VMAX path models the carrier-density
+                    // dependent channel shortening with NEFF.  Omitting
+                    // this branch leaves short-channel MOS2 devices with
+                    // the wrong effective beta even when their explicit
+                    // LAMBDA is zero.
+                    let channel_charge = self.mos2_channel_charge.max(1.0e-18);
+                    let xdv = xd / channel_charge.sqrt();
+                    let ueff = self.u0_card * 1.0e-4 * ufact;
+                    if xdv.is_finite() && ueff.is_finite() && ueff > 0.0 {
+                        let xlv = self.mos2_max_drift_vel * xdv / (2.0 * ueff);
+                        let argv = (lvds - vdsat).max(0.0);
+                        let xls = (xlv * xlv + argv).sqrt();
+                        if xls.is_finite() && xls > 0.0 {
+                            xlamda = xdv / (effective_length * lvds) * (xls - xlv);
+                        }
+                    }
+                }
             }
         }
 
@@ -780,10 +804,12 @@ impl Mosfet {
             Dual3::constant(1.0)
         };
 
-        let gammad = gamasd / eta;
+        // Keep the VDSAT-normalized gamma separate from the physical gamma
+        // used by Xyce's VMAX channel-shortening sensitivities below.
+        let gammad_vdsat = gamasd / eta;
         let vgsx = if fast_surface { lvgs.max(von) } else { lvgs };
-        if gammad.value > 0.0 {
-            let gammd2 = gammad * gammad;
+        if gammad_vdsat.value > 0.0 {
+            let gammd2 = gammad_vdsat * gammad_vdsat;
             let argv = (vgsx - vbin) / eta + phi_min_vbs;
             if argv.value > 0.0 {
                 let arg1 = (1.0 + 4.0 * argv / gammd2).sqrt();
@@ -792,6 +818,7 @@ impl Mosfet {
         } else {
             vdsat = ((vgsx - vbin) / eta).max_const(0.0);
         }
+        let mut vmax_vdsat_derivatives = (vdsat.derivative[0], vdsat.derivative[2]);
         if self.mos2_max_drift_vel > 0.0 {
             // VMAX given: velocity saturation lowers vdsat (Baum quartic).
             // The root is found at value level; ngspice's analytic
@@ -805,7 +832,7 @@ impl Mosfet {
                     vgsx.value,
                     vbin.value,
                     eta,
-                    gammad.value,
+                    gammad_vdsat.value,
                     phi_min_vbs.value,
                     sarg3.value,
                     xv,
@@ -815,7 +842,10 @@ impl Mosfet {
                         vgsx.value,
                         vbin.value,
                         eta,
-                        gammad.value,
+                        // Xyce resets gammad=gamasd before evaluating the
+                        // VMAX channel-length derivative block.  The
+                        // normalized value is only used by the VDSAT root.
+                        gamasd.value,
                         lvbs.value,
                         phi,
                         sqrt_phi,
@@ -827,6 +857,7 @@ impl Mosfet {
                         factor,
                         ueff,
                     );
+                    vmax_vdsat_derivatives = (dsdvgs, dsdvbs);
                     vdsat = Dual3 {
                         value: sat,
                         derivative: [dsdvgs, 0.0, dsdvbs],
@@ -836,6 +867,7 @@ impl Mosfet {
         }
 
         let mut xlamda = Dual3::constant(self.lambda);
+        let mut channel_length_derivatives = None;
         let mut bodys = body;
         if lvds.value != 0.0 {
             let bsarg_input = (vdsat + phi_min_vbs).max_const(1.0e-18);
@@ -846,18 +878,49 @@ impl Mosfet {
             };
             bodys = bsarg * bsarg * bsarg - sarg3;
 
-            if self.mos2_max_drift_vel <= 0.0
-                && self.mos2_substrate_doping > 0.0
-                && xlamda.value <= 0.0
-            {
-                let argv = (lvds - vdsat) / 4.0;
-                let sargv = (1.0 + argv * argv).sqrt();
-                let arg1 = (argv + sargv).max_const(0.0).sqrt();
-                xlamda = xd * arg1 / (effective_length * lvds);
+            if self.mos2_substrate_doping > 0.0 && xlamda.value <= 0.0 {
+                if self.mos2_max_drift_vel <= 0.0 {
+                    let argv = (lvds - vdsat) / 4.0;
+                    let sargv = (1.0 + argv * argv).sqrt();
+                    let arg1 = (argv + sargv).max_const(0.0).sqrt();
+                    xlamda = xd * arg1 / (effective_length * lvds);
+                } else {
+                    let channel_charge = self.mos2_channel_charge.max(1.0e-18);
+                    let xdv = xd / channel_charge.sqrt();
+                    let ueff = ufact.value * (self.u0_card * 1.0e-4);
+                    if ueff.is_finite() && ueff > 0.0 {
+                        let xlv = self.mos2_max_drift_vel * xdv / (2.0 * ueff);
+                        let argv = (lvds - vdsat).max_const(0.0);
+                        let xls = (xlv * xlv + argv).sqrt();
+                        if xls.value.is_finite() && xls.value > 0.0 {
+                            xlamda = Dual3::constant(
+                                xdv / (effective_length * lvds.value) * (xls.value - xlv),
+                            );
+                            // Xyce's MOS2 Jacobian treats the mobility
+                            // factor xlv as frozen in this channel-shortening
+                            // derivative block.  Its dld* sensitivities are
+                            // the derivatives of clfact, not the exact dual
+                            // derivative of the scalar xlamda expression.
+                            let dldsat = xdv / (2.0 * xls.value) / effective_length;
+                            channel_length_derivatives = Some([
+                                dldsat * vmax_vdsat_derivatives.0,
+                                -dldsat,
+                                dldsat * vmax_vdsat_derivatives.1,
+                            ]);
+                        }
+                    }
+                }
             }
         }
 
-        let mut clfact = 1.0 - xlamda * lvds;
+        let mut clfact = if let Some(derivative) = channel_length_derivatives {
+            Dual3 {
+                value: 1.0 - xlamda.value * lvds.value,
+                derivative,
+            }
+        } else {
+            1.0 - xlamda * lvds
+        };
         if !clfact.value.is_finite() || clfact.value <= 1.0e-12 {
             clfact = Dual3::constant(1.0e-12);
         }
@@ -872,6 +935,12 @@ impl Mosfet {
             let denom = 1.0 + (deltal - xld) / punch_through_width;
             if denom.value.is_finite() && denom.value > 1.0e-12 {
                 clfact = punch_through_width / denom / effective_length;
+                if let Some(derivative) = &mut channel_length_derivatives {
+                    let dfact =
+                        xleff.value * xleff.value / (punch_through_width * punch_through_width);
+                    derivative.iter_mut().for_each(|value| *value *= dfact);
+                    clfact.derivative = *derivative;
+                }
             }
         }
 
