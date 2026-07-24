@@ -1880,18 +1880,19 @@ impl Engine {
         xyce_lte_excluded_indices.sort_unstable();
         xyce_lte_excluded_indices.dedup();
 
-        // Grid-locked stepping: the accepted times are exactly the
-        // configured grid (filtered to points after the start), the dt
-        // sequence is the successive deltas, and the run ends at the last
-        // grid point. Source-activity biasing, LTE rejection, and every
-        // timestep-controller proposal are bypassed while locked; Newton
-        // (with its dt-preserving rescue) is the sole acceptance authority.
-        // Accepted-reference modes still restart integration history at
-        // source breakpoints and compute LTE for Xyce's order-selection trial;
-        // the estimate cannot reject a prescribed step or alter the grid. A
-        // step that cannot converge on its imposed dt fails instead of
-        // sub-stepping, because history-coupled devices sample accepted points
-        // and internal sub-steps would perturb the trajectory under validation.
+        // Grid-locked stepping: the configured grid (filtered to points after
+        // the start) is the mandatory target-sample sequence, and the run
+        // ends at its last point.  The solver may accept bounded internal
+        // points between targets when the requested interval exceeds the
+        // resolved maximum step; those points preserve history-coupled device
+        // dynamics while the target itself is still landed on exactly.  The
+        // engine records both target and internal points so consumers can
+        // interpolate the requested grid. Source-activity biasing, LTE
+        // rejection, and every timestep-controller proposal are bypassed while
+        // locked; Newton (with its dt-preserving rescue) is the sole acceptance
+        // authority. Accepted-reference modes still restart integration
+        // history at source breakpoints and compute LTE for Xyce's order-
+        // selection trial; the estimate cannot reject a prescribed target.
         let locked_grid: Option<Vec<Value>> = self
             .config
             .locked_time_grid
@@ -2284,6 +2285,9 @@ impl Engine {
                         .filter(|breakpoint| *breakpoint < target - tolerance)
                     {
                         step_target = step_target.min(breakpoint);
+                    }
+                    if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
+                        step_target = step_target.min(t + hinted_max_step);
                     }
                     locked_step_lands_on_grid = (step_target - target).abs() <= tolerance;
                     (step_target - t, false)
@@ -5755,6 +5759,44 @@ mod tests {
             1,
             "ulp-scale duplicates should still be folded: {normalized:?}"
         );
+    }
+
+    #[test]
+    fn locked_time_grid_uses_internal_steps_between_targets() {
+        let deck = "Xyce locked-grid internal-step RC\n\
+                    V1 1 0 1\n\
+                    R1 1 2 1K\n\
+                    C1 2 0 1U\n\
+                    .TRAN 1U 4U\n\
+                    .END\n";
+        let netlist = crate::Netlist::parse(deck).expect("deck parses");
+        let grid = vec![0.0, 2.0e-6, 4.0e-6];
+        let engine = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            locked_time_grid: Some(std::sync::Arc::new(grid.clone())),
+            ..Default::default()
+        });
+
+        let result = engine
+            .run_tran(&netlist, 4.0e-6, 0.5e-6)
+            .expect("transient runs");
+
+        assert!(
+            result.time.len() > grid.len(),
+            "locked targets should retain bounded internal points: {:?}",
+            result.time
+        );
+        for &target in &grid[1..] {
+            assert!(
+                result
+                    .time
+                    .iter()
+                    .any(|&time| (time - target).abs() <= 1.0e-18),
+                "missing locked target {target:.12e}: {:?}",
+                result.time
+            );
+        }
+        assert!(result.time.windows(2).all(|pair| pair[1] > pair[0]));
     }
 
     #[test]
