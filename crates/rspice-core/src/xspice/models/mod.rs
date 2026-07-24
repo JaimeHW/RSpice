@@ -142,7 +142,7 @@ pub use analog::{
 
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
 
-pub use digital_output::{XyceDAdd, XyceDGate, XyceDLegacyGate, XyceDTff};
+pub use digital_output::{XyceDAdd, XyceDGate, XyceDLegacyDff, XyceDLegacyGate, XyceDTff};
 
 pub use digital::{
     DFlipFlop, DLatch, DigitalAnd, DigitalBuffer, DigitalCosim, DigitalFrequencyDivider,
