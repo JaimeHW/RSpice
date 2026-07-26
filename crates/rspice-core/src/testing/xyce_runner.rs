@@ -52962,6 +52962,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         && Self::netlist_element_is_native_transient_level1_npn(
                             netlist, element,
                         ) => {}
+                ElementKind::Bjt { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_is_native_transient_level1_gp_bjt_network(netlist)
+                        && Self::netlist_element_is_native_transient_level1_gp_bjt(
+                            netlist, element,
+                        ) => {}
                 ElementKind::Mosfet { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_is_native_transient_ekv26_pair(netlist)
@@ -58961,6 +58967,84 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && deferred_params.is_empty()
             && Self::find_model(&netlist.models, model)
                 .is_some_and(Self::model_is_native_transient_level1_npn)
+    }
+
+    fn netlist_element_is_native_transient_level1_gp_bjt(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        let topology_is_qualified = match element.nodes.as_slice() {
+            [_, _, _] => true,
+            [_, _, _, substrate] => Self::node_name_is_ground(substrate),
+            _ => false,
+        };
+        topology_is_qualified
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_model(&netlist.models, model)
+                .is_some_and(Self::model_is_native_transient_level1_gp_bjt)
+    }
+
+    fn netlist_is_native_transient_level1_gp_bjt_network(netlist: &Netlist) -> bool {
+        let bjt_elements: Vec<_> = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .collect();
+        // The absolute transient envelope is deliberately bounded: the
+        // native legacy GP equations are validated here only through the
+        // four-device amplifier topology. Larger arbitrary BJT networks
+        // remain fail-closed until their own transient oracle is qualified.
+        !bjt_elements.is_empty()
+            && bjt_elements.len() <= 4
+            && bjt_elements.iter().all(|element| {
+                Self::netlist_element_is_native_transient_level1_gp_bjt(netlist, element)
+            })
+    }
+
+    fn model_is_native_transient_level1_gp_bjt(model: &crate::netlist::ModelDef) -> bool {
+        if !(model.model_type.eq_ignore_ascii_case("NPN")
+            || model.model_type.eq_ignore_ascii_case("PNP"))
+            || Self::numeric_param_value(&model.params, "LEVEL")
+                .is_some_and(|level| !level.is_finite() || (level - 1.0).abs() > 1.0e-9)
+        {
+            return false;
+        }
+        model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model
+                .params
+                .iter()
+                .all(|(name, value)| Self::native_transient_level1_gp_model_param(name, *value))
+    }
+
+    fn native_transient_level1_gp_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match name.to_ascii_uppercase().as_str() {
+            "LEVEL" => (value - 1.0).abs() <= 1.0e-9,
+            "BF" | "BR" | "IS" | "NF" | "NR" | "NE" | "NC" | "VJE" | "VJC" | "VAF" | "VAR"
+            | "EG" | "XTI" => value > 0.0,
+            "IKF" | "ISE" | "IKR" | "ISC" | "RB" | "RBM" | "RC" | "RE" | "CJS" | "CJE" | "CJC"
+            | "TF" | "TR" => value >= 0.0,
+            "MJE" | "MJC" | "FC" => (0.0..1.0).contains(&value),
+            "XTB" | "TNOM" => true,
+            _ => false,
+        }
     }
 
     fn model_is_native_transient_level1_npn(model: &crate::netlist::ModelDef) -> bool {
@@ -88514,6 +88598,41 @@ q1 c b 0 dt vbicmodel
                 "mutated VBIC source must remain outside the absolute envelope"
             );
         }
+    }
+
+    #[test]
+    fn absolute_level1_gp_bjt_network_accepts_complementary_four_device_envelope_only() {
+        let source = "\
+bounded legacy GP BJT network
+VCC c 0 5
+VBB b 0 0.7
+Q1 c b 0 N1
+Q2 c b 0 P1
+Q3 c b 0 N1
+Q4 c b 0 P1
+.MODEL N1 NPN (LEVEL=1 IS=1e-15 BF=100 NF=1 NE=1 VAF=100 VAR=20 IKF=1e-3 ISE=1e-16 IKR=1e-3 ISC=1e-16 BR=1 NR=1 NC=1 RB=1 RBM=0 RC=1 RE=1 CJE=1p CJC=1p VJE=.7 VJC=.5 MJE=.33 MJC=.33 TF=1p TR=1p XTB=1 EG=1.1)
+.MODEL P1 PNP (LEVEL=1 IS=1e-15 BF=100 NF=1 NE=1 VAF=100 VAR=20 IKF=1e-3 ISE=1e-16 IKR=1e-3 ISC=1e-16 BR=1 NR=1 NC=1 RB=1 RBM=0 RC=1 RE=1 CJE=1p CJC=1p VJE=.7 VJC=.5 MJE=.33 MJC=.33 TF=1p TR=1p XTB=1 EG=1.1)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+";
+        let netlist = Netlist::parse(source).expect("bounded GP BJT deck parses");
+        assert!(XyceTestRunner::netlist_is_native_transient_level1_gp_bjt_network(&netlist));
+
+        let fifth_device = source.replace(".TRAN 1n 10n", "Q5 c b 0 N1\n.TRAN 1n 10n");
+        let netlist = Netlist::parse(&fifth_device).expect("five-device GP BJT deck parses");
+        assert!(!XyceTestRunner::netlist_is_native_transient_level1_gp_bjt_network(&netlist));
+
+        let mut unsupported = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("N1"))
+            .expect("N1 model exists")
+            .clone();
+        unsupported.params.push(("RTH".to_string(), 1.0));
+        assert!(!XyceTestRunner::model_is_native_transient_level1_gp_bjt(
+            &unsupported
+        ));
     }
 
     #[test]
