@@ -52784,6 +52784,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_cmc_diode(netlist, element)
             });
+        let has_qualified_juncap_diode = purpose.validates_absolute_device_contract()
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_native_absolute_transient_juncap_diode(netlist, element)
+            });
         let has_qualified_level9_bsim3 = purpose.admits_default_level9_bsim3()
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
@@ -52806,6 +52810,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             || has_qualified_minimum_diode
             || has_qualified_legacy_diode
             || has_qualified_cmc_diode
+            || has_qualified_juncap_diode
             || has_qualified_level9_bsim3
             || has_qualified_bsim4_capacitor
             || has_qualified_bsim3_capacitor)
@@ -53077,6 +53082,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Diode { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_absolute_transient_cmc_diode(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Diode { .. }
+                    if purpose.validates_absolute_device_contract()
+                        && Self::netlist_element_is_native_absolute_transient_juncap_diode(
                             netlist, element,
                         ) => {}
                 ElementKind::Diode { .. }
@@ -58700,6 +58710,46 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 name.eq_ignore_ascii_case("LEVEL")
                     && value.is_finite()
                     && (*value - 2002.0).abs() <= 1.0e-9
+            })
+            && model.params.len() == 1
+    }
+
+    fn netlist_element_is_native_absolute_transient_juncap_diode(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        if netlist.options.gmin.is_some() {
+            return false;
+        }
+        let ElementKind::Diode {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 2
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_juncap_diode)
+    }
+
+    fn model_is_native_juncap_diode(model: &crate::netlist::ModelDef) -> bool {
+        matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "D" | "DIODE"
+        ) && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model.params.iter().all(|(name, value)| {
+                name.eq_ignore_ascii_case("LEVEL")
+                    && value.is_finite()
+                    && (*value - 200.0).abs() <= 1.0e-9
             })
             && model.params.len() == 1
     }
