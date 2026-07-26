@@ -46,6 +46,7 @@ use self::resolved_symbol_render::resolved_symbol_world_bounds;
 use self::scene::draw_scene;
 
 pub(crate) use self::interaction::toggle_probe_with_feedback;
+pub(crate) use self::scene::wrapped_signal_name;
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet;
 
@@ -615,6 +616,84 @@ fn schematic_accessibility_label(
     )
 }
 
+/// Why a result signal could not be located on the schematic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LocateSignalError {
+    /// The signal is an expression or a device current, not a node voltage,
+    /// so no single conductor carries it.
+    NotANet,
+    /// No retained cross-probe map matches the drawing as it stands, so the
+    /// net's geometry is unknown.
+    NoCurrentMap,
+    /// The map is current but knows no conductor by that name.
+    UnknownNet(String),
+}
+
+impl LocateSignalError {
+    pub(crate) fn message(&self, signal: &str) -> String {
+        match self {
+            Self::NotANet => format!(
+                "{signal} is derived, not a node voltage — no single conductor carries it."
+            ),
+            Self::NoCurrentMap => {
+                "The schematic changed since this result was produced; run again to cross-probe it."
+                    .to_owned()
+            }
+            Self::UnknownNet(net) => {
+                format!("The open sheet has no conductor named {net}.")
+            }
+        }
+    }
+}
+
+/// Select the conductor a result signal names, closing the probe loop from
+/// the results workspace back to the drawing.
+///
+/// Fails closed rather than guessing: the retained cross-probe map must
+/// belong to the open cell at its current topology, or the geometry it
+/// holds describes a different drawing.
+pub(crate) fn select_signal_conductor(
+    state: &mut AppState,
+    signal: &str,
+) -> Result<String, LocateSignalError> {
+    let net = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
+    if !state.simulation.cross_probe.is_current_for(
+        &state.workspace.active_view,
+        state.schematic.topology_version(),
+    ) {
+        return Err(LocateSignalError::NoCurrentMap);
+    }
+    // Report the net as the design spells it, not as the trace happened to.
+    let Some((net, points)) = state
+        .simulation
+        .cross_probe
+        .net_to_points
+        .iter()
+        .find(|(name, points)| name.eq_ignore_ascii_case(net) && !points.is_empty())
+        .map(|(name, points)| (name.clone(), points.clone()))
+    else {
+        return Err(LocateSignalError::UnknownNet(net.to_owned()));
+    };
+
+    let wires: Vec<u64> = state
+        .schematic
+        .wires
+        .iter()
+        .filter(|wire| points.iter().any(|point| wire.contains_point(*point)))
+        .map(|wire| wire.id)
+        .collect();
+    state.schematic.selection.clear();
+    for wire in &wires {
+        state.schematic.selection.select_wire(*wire);
+    }
+    state
+        .schematic
+        .net_highlight
+        .highlight_wires(wires.into_iter().collect());
+    state.schematic.center_request = points.iter().copied().min_by_key(|point| (point.y, point.x));
+    Ok(net)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +707,69 @@ mod tests {
             name: name.to_owned(),
             direction,
         }
+    }
+
+    fn state_with_probed_wire() -> AppState {
+        let mut state = AppState::default();
+        let a = Point::new(0, 0);
+        let b = Point::new(40, 0);
+        state.schematic.wires.push(crate::state::Wire::new(1, vec![a, b]));
+        state.simulation.cross_probe.update(
+            state.workspace.active_view.clone(),
+            std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
+            std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
+            std::collections::HashMap::new(),
+            state.schematic.topology_version(),
+        );
+        state
+    }
+
+    #[test]
+    fn locating_a_node_voltage_selects_and_highlights_its_conductor() {
+        let mut state = state_with_probed_wire();
+
+        let net = select_signal_conductor(&mut state, "V(out)").expect("net resolves");
+
+        assert_eq!(net, "OUT");
+        assert!(state.schematic.selection.wires.contains(&1));
+        assert!(state.schematic.net_highlight.is_wire_highlighted(1));
+        assert_eq!(state.schematic.center_request, Some(Point::new(0, 0)));
+    }
+
+    #[test]
+    fn a_derived_signal_explains_itself_instead_of_selecting_geometry() {
+        let mut state = state_with_probed_wire();
+
+        let error = select_signal_conductor(&mut state, "V(out)-V(in)")
+            .expect_err("an expression is not a net");
+
+        assert_eq!(error, LocateSignalError::NotANet);
+        assert!(error.message("V(out)-V(in)").contains("derived"));
+        assert!(state.schematic.selection.is_empty());
+    }
+
+    #[test]
+    fn a_result_from_a_different_drawing_never_selects_stale_geometry() {
+        let mut state = state_with_probed_wire();
+        // Any structural edit invalidates the retained point map.
+        state.schematic.bump_topology_version();
+
+        let error =
+            select_signal_conductor(&mut state, "V(out)").expect_err("the map is no longer current");
+
+        assert_eq!(error, LocateSignalError::NoCurrentMap);
+        assert!(state.schematic.selection.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_net_is_reported_by_name() {
+        let mut state = state_with_probed_wire();
+
+        let error = select_signal_conductor(&mut state, "V(missing)")
+            .expect_err("no conductor carries this net");
+
+        assert_eq!(error, LocateSignalError::UnknownNet("missing".to_owned()));
+        assert!(error.message("V(missing)").contains("missing"));
     }
 
     #[test]

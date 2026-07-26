@@ -15,6 +15,7 @@ use crate::workbench::code_workspace::{NetlistOutline, OutlineEntry, OutlineEntr
 use super::super::design_system::{
     PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
 };
+use super::super::commands::Command;
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
@@ -646,19 +647,21 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 &signal.color,
                                 t.color.traces[signal.waveform_index % t.color.traces.len()],
                             );
-                            if signal_row(
+                            let response = signal_row(
                                 ui,
                                 &signal.name,
                                 signal.value.as_deref(),
                                 color,
                                 signal.visible,
-                            ) {
+                            );
+                            if response.clicked() {
                                 super::super::result_document::toggle_visibility(
                                     &mut app.state,
                                     analysis.analysis_index,
                                     signal.waveform_index,
                                 );
                             }
+                            locate_on_schematic_menu(&response, app, &signal.name);
                         }
                     }
                 }
@@ -682,15 +685,17 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     continue;
                 }
                 let t = Tokens::get(ui.ctx());
-                if signal_row(
+                let response = signal_row(
                     ui,
                     &expression.text,
                     Some("expression"),
                     t.color.traces[expression_index % t.color.traces.len()],
                     expression.visible,
-                ) {
+                );
+                if response.clicked() {
                     toggled_expression = Some(expression_index);
                 }
+                locate_on_schematic_menu(&response, app, &expression.text);
             }
             if let Some(expression_index) = toggled_expression
                 && let Some(expression) = app
@@ -792,7 +797,7 @@ fn signal_row(
     value: Option<&str>,
     color: egui::Color32,
     visible: bool,
-) -> bool {
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let row_height = responsive_result_control_height(SIGNAL_ROW_HEIGHT, t.metrics.ctl_h);
     let (rect, response) = ui.allocate_exact_size(
@@ -848,9 +853,41 @@ fn signal_row(
         );
     }
     theme::paint_focus_ring_outset(ui, &response, rect);
-    response
-        .on_hover_text(if visible { "Hide trace" } else { "Show trace" })
-        .clicked()
+    response.on_hover_text(if visible { "Hide trace" } else { "Show trace" })
+}
+
+/// The other direction of the probe loop: from a trace back to the conductor
+/// that produced it.
+///
+/// A derived signal explains itself rather than pretending to be a net, and
+/// a result whose drawing has since changed says so instead of selecting
+/// geometry that no longer means the same thing.
+fn locate_on_schematic_menu(response: &egui::Response, app: &mut RSpiceApp, signal: &str) {
+    let signal = signal.to_owned();
+    response.context_menu(|ui| {
+        if ui.button("Show on schematic").clicked() {
+            match crate::schematic::view::select_signal_conductor(&mut app.state, &signal) {
+                Ok(net) => {
+                    Command::OpenWorkspace(Workspace::Design).execute(app);
+                    app.state
+                        .push_user_message(crate::common::ConsoleMessage::info(format!(
+                            "Selected conductor {net} from {signal}."
+                        )));
+                }
+                Err(error) => {
+                    let message = error.message(&signal);
+                    app.state.ui.toasts.warn_with_title(
+                        ui.ctx(),
+                        "Cannot cross-probe",
+                        message.clone(),
+                    );
+                    app.state
+                        .push_user_message(crate::common::ConsoleMessage::warning(message));
+                }
+            }
+            ui.close();
+        }
+    });
 }
 
 fn verify(ui: &mut Ui, app: &mut RSpiceApp) {

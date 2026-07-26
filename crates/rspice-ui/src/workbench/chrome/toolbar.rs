@@ -405,9 +405,26 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Mirror,
         layout,
     );
+    toolbar_icon_command(ui, app, Command::Duplicate, WorkbenchIcon::Copy, layout);
+    toolbar_icon_command(ui, app, Command::Delete, WorkbenchIcon::Trash, layout);
     context_separator(ui, layout);
     toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
     toolbar_icon_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
+    context_separator(ui, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::DescendHierarchy,
+        WorkbenchIcon::Layers,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::AscendHierarchy,
+        WorkbenchIcon::ArrowUp,
+        layout,
+    );
     context_separator(ui, layout);
     toolbar_icon_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
     toolbar_icon_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);

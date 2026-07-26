@@ -66,6 +66,8 @@ pub enum WorkbenchIcon {
     Copy,
     Trash,
     ArrowLeft,
+    ArrowUp,
+    Layers,
     Component,
     Code,
     Terminal,
@@ -442,6 +444,16 @@ impl WorkbenchIcon {
             Self::ArrowLeft => {
                 line(&[(15.0, 5.0), (8.0, 12.0), (15.0, 19.0)]);
                 line(&[(8.0, 12.0), (21.0, 12.0)]);
+            }
+            Self::ArrowUp => {
+                line(&[(5.0, 11.0), (12.0, 4.0), (19.0, 11.0)]);
+                line(&[(12.0, 4.0), (12.0, 20.0)]);
+            }
+            // Descending into an instance opens the sheet beneath it.
+            Self::Layers => {
+                closed(&[(12.0, 3.0), (21.0, 8.0), (12.0, 13.0), (3.0, 8.0)]);
+                line(&[(3.0, 13.0), (12.0, 18.0), (21.0, 13.0)]);
+                line(&[(3.0, 17.0), (12.0, 22.0), (21.0, 17.0)]);
             }
             Self::Component => {
                 line(&[(2.0, 12.0), (6.0, 12.0)]);

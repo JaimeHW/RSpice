@@ -385,14 +385,20 @@ fn device_op_annotation_label(entry: &rspice_core::circuit::DeviceOpEntry) -> St
     }
 }
 
-fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
+/// The name inside a `V(...)` or `I(...)` wrapper, or `None` when the text
+/// is anything else.
+///
+/// An expression such as `V(out)-V(in)` is deliberately rejected: it wraps
+/// two signals, not one, and treating its interior as a net name would name
+/// a conductor that does not exist.
+pub(crate) fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
     let name = name.trim();
     let (head, tail) = name.split_once('(')?;
     if !head.eq_ignore_ascii_case(&prefix.to_string()) || !tail.ends_with(')') {
         return None;
     }
     let inner = tail[..tail.len() - 1].trim();
-    (!inner.is_empty()).then_some(inner)
+    (!inner.is_empty() && !inner.contains(['(', ')'])).then_some(inner)
 }
 
 /// Produce annotations only from the explicitly selected analysis. The
