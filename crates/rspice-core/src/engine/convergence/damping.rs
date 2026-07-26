@@ -96,7 +96,12 @@ impl Engine {
             .zip(proposal.iter())
             .enumerate()
             .map(|(index, (&old_v, &new_v))| {
-                if non_electrical_state_mask
+                // The mask spans the nodal prefix only. Unknowns after that
+                // prefix are MNA branch currents, not voltages; applying a
+                // voltage-delta limit to them corrupts otherwise exact KCL
+                // solutions for large current-driven networks.
+                if index >= non_electrical_state_mask.len()
+                    || non_electrical_state_mask
                     .get(index)
                     .copied()
                     .unwrap_or(false)
@@ -201,7 +206,8 @@ impl Engine {
     /// callers use a progress-forcing line-search policy instead of this raw
     /// full-step bypass.
     pub(in crate::engine) fn junction_limiting_owns_newton_steps(circuit: &CircuitData) -> bool {
-        !circuit.mosfets.is_empty()
+        !circuit.diodes.is_empty()
+            || !circuit.mosfets.is_empty()
             || circuit
                 .bjts
                 .devices
@@ -487,6 +493,22 @@ mod tests {
     }
 
     #[test]
+    fn voltage_step_limit_does_not_clamp_mna_branch_currents() {
+        let old = [0.0, 0.0, 0.0];
+        let proposal = [4.0, -4.0, 3.06486];
+        let non_electrical_state_mask = [false, false];
+
+        let limited = Engine::limit_step_delta_with_state_mask(
+            &non_electrical_state_mask,
+            &old,
+            &proposal,
+            2.0,
+        );
+
+        assert_eq!(limited, vec![2.0, -2.0, 3.06486]);
+    }
+
+    #[test]
     fn classic_mos_local_limiting_owns_newton_steps() {
         let mut circuit = CircuitData::new();
         let drain = circuit.get_or_create_node("d");
@@ -500,6 +522,21 @@ mod tests {
             source,
             bulk,
         ));
+
+        assert!(Engine::junction_limiting_owns_newton_steps(&circuit));
+    }
+
+    #[test]
+    fn diode_pnjlim_owns_newton_steps() {
+        let mut circuit = CircuitData::new();
+        let anode = circuit.get_or_create_node("a");
+        circuit
+            .diodes
+            .add(crate::device::Diode::spice_defaults(
+                "d1".to_string(),
+                anode,
+                0,
+            ));
 
         assert!(Engine::junction_limiting_owns_newton_steps(&circuit));
     }

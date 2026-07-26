@@ -807,6 +807,12 @@ fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
 /// existence are independent diagnostics.
 pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDependency> {
     let bytes = source.as_bytes();
+    // Determine expression membership once for the whole source. The previous
+    // implementation rescanned `source[..operator_start]` for every accessor,
+    // making a long `.PRINT` list quadratic. Real Xyce certification decks can
+    // request tens of thousands of node voltages and device currents on one
+    // line, so that repeated prefix scan looked like an indefinite hang.
+    let expression_context = output_expression_context_by_byte(source);
     let mut dependencies = Vec::new();
     let mut index = 0usize;
     while index < bytes.len() {
@@ -863,7 +869,7 @@ pub(crate) fn extract_output_dependencies(source: &str) -> Vec<OutputSymbolDepen
             }
             _ => {}
         }
-        let expression = inside_output_expression(source, operator_start);
+        let expression = expression_context[operator_start];
         for dependency in &mut dependencies[first_new_dependency..] {
             dependency.expression = expression;
         }
@@ -906,20 +912,23 @@ fn push_dependency(
     }
 }
 
-fn inside_output_expression(source: &str, byte_index: usize) -> bool {
+fn output_expression_context_by_byte(source: &str) -> Vec<bool> {
+    let mut context = vec![false; source.len() + 1];
     let mut braces = 0usize;
     let mut single_quote = false;
     let mut double_quote = false;
-    for ch in source[..byte_index].chars() {
-        match ch {
-            '{' if !single_quote && !double_quote => braces += 1,
-            '}' if !single_quote && !double_quote => braces = braces.saturating_sub(1),
-            '\'' if !double_quote => single_quote = !single_quote,
-            '"' if !single_quote => double_quote = !double_quote,
+    for (index, byte) in source.bytes().enumerate() {
+        context[index] = braces != 0 || single_quote || double_quote;
+        match byte {
+            b'{' if !single_quote && !double_quote => braces += 1,
+            b'}' if !single_quote && !double_quote => braces = braces.saturating_sub(1),
+            b'\'' if !double_quote => single_quote = !single_quote,
+            b'"' if !single_quote => double_quote = !double_quote,
             _ => {}
         }
     }
-    braces != 0 || single_quote || double_quote
+    context[source.len()] = braces != 0 || single_quote || double_quote;
+    context
 }
 
 fn matching_parenthesis(bytes: &[u8], open: usize) -> Option<usize> {
@@ -1096,6 +1105,46 @@ mod tests {
                 ("VP", "bogo9", OutputSymbolKind::Node),
                 ("VM", "bogo9", OutputSymbolKind::Node),
                 ("N", "x2:m2:id", OutputSymbolKind::Node),
+            ]
+        );
+    }
+
+    #[test]
+    fn dependency_extraction_scales_to_certification_sized_probe_lists() {
+        let source = (0..20_000)
+            .map(|index| {
+                if index % 2 == 0 {
+                    format!("V(n{index})")
+                } else {
+                    format!("I(d{index})")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let dependencies = extract_output_dependencies(&source);
+
+        assert_eq!(dependencies.len(), 20_000);
+        assert!(dependencies.iter().all(|dependency| !dependency.expression));
+        assert_eq!(dependencies[0].symbol, "n0");
+        assert_eq!(dependencies[19_999].symbol, "d19999");
+    }
+
+    #[test]
+    fn expression_context_is_preserved_by_linear_dependency_scan() {
+        let dependencies =
+            extract_output_dependencies("V(out) {V(expr)} 'I(quoted)' \"V(double_quoted)\"");
+
+        assert_eq!(
+            dependencies
+                .iter()
+                .map(|dependency| (dependency.symbol.as_str(), dependency.expression))
+                .collect::<Vec<_>>(),
+            vec![
+                ("out", false),
+                ("expr", true),
+                ("quoted", true),
+                ("double_quoted", true),
             ]
         );
     }

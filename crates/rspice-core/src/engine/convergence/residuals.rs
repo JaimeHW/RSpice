@@ -391,7 +391,23 @@ impl Engine {
                 return None;
             }
 
-            self.residual_inf_norm(circuit, probe, solution, rhs)
+            if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce {
+                // NOX globalization compares the physical residual norm.
+                // A tolerance-normalized residual asymptotes to 1/RELTOL for
+                // every large disequilibrium, which makes substantially better
+                // trial steps appear tied and can pin line search at its old
+                // iterate on large current-driven networks.
+                // NOX's line-search merit is Group::getNormF(), the
+                // Euclidean residual norm. Its convergence status separately
+                // applies the unscaled infinity norm checked above.
+                probe
+                    .raw_residual_norms(solution, rhs)
+                    .ok()
+                    .map(|(_, l2_norm)| l2_norm)
+                    .filter(|norm| norm.is_finite())
+            } else {
+                self.residual_inf_norm(circuit, probe, solution, rhs)
+            }
         });
         circuit.restore_nonlinear_state(snapshot);
         merit
