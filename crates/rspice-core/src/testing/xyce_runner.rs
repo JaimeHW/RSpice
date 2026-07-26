@@ -52225,6 +52225,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         ) => {}
                 ElementKind::Diode { .. }
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
+                ElementKind::Diode { .. }
+                    if Self::netlist_element_is_native_generated_cmc_diode(
+                        netlist, element,
+                    ) => {}
+                ElementKind::Diode { .. }
+                    if Self::netlist_element_is_native_generated_juncap_diode(
+                        netlist, element,
+                    ) => {}
                 _ => {
                     return Err(format!(
                         "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, validated single-device BSIMSOI LEVEL=10 cards with explicit SOIMOD=1, validated single-device BSIM4 LEVEL=14/54 cards, and validated native legacy level-1 NPN Gummel-Poon sweeps through 10 GHz; element '{}' requires a broader AC oracle contract",
@@ -52782,11 +52790,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             });
         let has_qualified_cmc_diode = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
-                Self::netlist_element_is_native_absolute_transient_cmc_diode(netlist, element)
+                Self::netlist_element_is_native_generated_cmc_diode(netlist, element)
             });
         let has_qualified_juncap_diode = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
-                Self::netlist_element_is_native_absolute_transient_juncap_diode(netlist, element)
+                Self::netlist_element_is_native_generated_juncap_diode(netlist, element)
             });
         let has_qualified_level9_bsim3 = purpose.admits_default_level9_bsim3()
             && elements.iter().any(|element| {
@@ -53081,12 +53089,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         ) => {}
                 ElementKind::Diode { .. }
                     if purpose.validates_absolute_device_contract()
-                        && Self::netlist_element_is_native_absolute_transient_cmc_diode(
+                        && Self::netlist_element_is_native_generated_cmc_diode(
                             netlist, element,
                         ) => {}
                 ElementKind::Diode { .. }
                     if purpose.validates_absolute_device_contract()
-                        && Self::netlist_element_is_native_absolute_transient_juncap_diode(
+                        && Self::netlist_element_is_native_generated_juncap_diode(
                             netlist, element,
                         ) => {}
                 ElementKind::Diode { .. }
@@ -58674,7 +58682,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 .is_some_and(Self::model_is_native_absolute_transient_legacy_diode)
     }
 
-    fn netlist_element_is_native_absolute_transient_cmc_diode(
+    fn netlist_element_is_native_generated_cmc_diode(
         netlist: &Netlist,
         element: &crate::netlist::Element,
     ) -> bool {
@@ -58714,7 +58722,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             && model.params.len() == 1
     }
 
-    fn netlist_element_is_native_absolute_transient_juncap_diode(
+    fn netlist_element_is_native_generated_juncap_diode(
         netlist: &Netlist,
         element: &crate::netlist::Element,
     ) -> bool {
