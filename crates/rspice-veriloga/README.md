@@ -250,23 +250,52 @@ from the fastest backend tier gets caught.
 cargo build -p rspice-veriloga
 cargo test  -p rspice-veriloga                      # interpreter paths
 cargo test  -p rspice-veriloga --features native    # + native JIT contract
-cargo test  -p rspice-veriloga --test rust_backend   # generated-Rust backend
+cargo test  -p rspice-veriloga --test rust_backend  # generated-Rust backend
 ```
 
-The integration test files under `tests/` cover end-to-end compilation
-(`compile_models.rs`), runtime evaluation and Jacobians
-(`device_eval.rs`), array variables, `aliasparam`, indirect contributions,
-`zi_*` filters, timestep control, `$mfactor` scaling, multi-module
-selection, native no-fallback contract coverage (`native_contract.rs`),
-canonical IR validation, the Rust backend (`rust_backend.rs`), and real production
-models: EKV 2.6 physics, PSP 103, and CMC model frontier tests, plus optional
-BSIM4 coverage when `RSPICE_BSIM4_VA` points at an externally supplied clean
-source file. The broad shipped-CMC compile-frontier tests are ignored by
-default because they are qualification evidence, not a normal fast check; run
-them explicitly when working on generated built-ins:
+The integration tests under `tests/` group into five bands.
+
+**Compilation and language semantics** — end-to-end compilation
+(`compile_models.rs`), multi-module selection (`module_selection.rs`),
+parameter constraints and `aliasparam` (`parameter_validation.rs`,
+`aliasparam.rs`), array variables (`array_vars.rs`), expression truth and
+equality rules (`expression_semantics.rs`), `analysis()` queries
+(`analysis_queries.rs`), and `syntax_integrity.rs`, which pins that
+unsupported constructs are rejected rather than silently dropped.
+
+**Runtime numerics** — evaluation and Jacobians against hand-derived
+companion-model values (`device_eval.rs`), indirect contributions
+(`indirect_contributions.rs`), `$mfactor` scaling (`mfactor.rs`), solver
+companion coefficients (`integration_methods.rs`), state installation
+(`runtime_configuration.rs`), and `numeric_integrity.rs`, which pins that
+non-finite values are reported rather than zeroed away.
+
+**Stateful operators** — `zi_*` filters (`zi_filters.rs`), events
+(`event_semantics.rs`), timers (`timer_semantics.rs`), `last_crossing`
+(`last_crossing_semantics.rs`), `$bound_step`/`$discontinuity`
+(`timestep_control.rs`), and `stateful_operator_idempotence.rs`, which
+pins that Newton re-evaluation never consumes accepted history.
+
+**Artifacts and backends** — canonical IR validation (`canonical_ir.rs`),
+runtime reports and cross-artifact digest drift
+(`runtime_compile_report.rs`), sealed bundles (`virtual_source.rs`), the
+native no-fallback contract (`native_contract.rs`), and the Rust backend
+(`rust_backend.rs`, plus `generated_output_audit.rs` auditing the
+checked-in generated devices).
+
+**Production-model frontiers** — PSP 103.6 via the IHP SG13G2 open PDK
+(`psp103_frontier.rs`) and the shipped CMC r3_cmc and JUNCAP200 models
+(`cmc_frontier.rs`). `bsim4_frontier.rs` is optional and activates only
+when `RSPICE_BSIM4_VA` points at an externally supplied clean BSIM4.8
+source.
+
+Two whole-corpus gates are `#[ignore]`d, because they are qualification
+evidence rather than a fast check. Run them explicitly when working on the
+compiler frontier or on generated built-ins:
 
 ```bash
 cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture
+cargo test -p rspice-veriloga --test rust_backend_frontier shipped_rust_backend_frontier -- --ignored --nocapture
 ```
 
 Engine-level oracle tests that compare compiled models against reference results live in
