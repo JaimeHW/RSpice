@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Current-controlled switch (W): pivot dots, angled blade, sense-current
-     arrow beneath the path. The controlling current is a named V source.
-     Box 40x20, pins 1(0,10), 2(40,10). -->
-<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+<!-- Current-controlled switch (W), relay idiom: contact path on top,
+     sense coil below, dashed mechanical link between them. The coil is
+     wired in series with the sensed branch; the netlister synthesizes a
+     0 V sense source across it. Box 40x40, pins 1(0,10), 2(40,10),
+     c+(0,30), c-(40,30). -->
+<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
   <path d="M 0,10 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 28,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 12,10 L 29,2.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 12,8.6 l 1.4,1.4 -1.4,1.4 -1.4,-1.4 Z" fill="#000000" stroke="none"/>
   <path d="M 28,8.6 l 1.4,1.4 -1.4,1.4 -1.4,-1.4 Z" fill="#000000" stroke="none"/>
-  <path d="M 14,16 H 23.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 26.5,16 l -3.4,-1.7 v 3.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 0,30 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 28,30 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,30 A 2,2 0 0 1 16,30 A 2,2 0 0 1 20,30 A 2,2 0 0 1 24,30 A 2,2 0 0 1 28,30" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,26.5 V 24" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,21.5 V 19" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,16.5 V 14" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,11.5 V 8.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
 </svg>

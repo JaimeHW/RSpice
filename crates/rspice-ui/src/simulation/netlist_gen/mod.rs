@@ -1503,33 +1503,30 @@ mod tests {
         assert!(netlist.contains(".MODEL pmf_Z2 PMF"), "{netlist}");
     }
 
-    /// The current-controlled switch names its sensing V source and emits
-    /// a CSW card; a missing control reference is a hard error.
+    /// The current-controlled switch's sense-coil pins become a
+    /// synthesized 0 V sense source, referenced by name on the W line.
     #[test]
-    fn iswitch_emits_w_element_with_named_control() {
+    fn iswitch_synthesizes_its_sense_source() {
         let mut switch =
             Component::new(1, ComponentType::ISwitch, Point::origin()).with_name_value("W1", "");
-        switch.params = "control=VSENSE it=2m".to_owned();
+        switch.params = "it=2m".to_owned();
         let netlist = netlist_for(vec![switch]);
         let line = netlist
             .lines()
             .find(|l| l.starts_with("W1 "))
             .expect("switch line");
-        assert!(line.contains(" VSENSE isw_W1"), "{netlist}");
+        assert!(line.contains(" VSENSE_W1 isw_W1"), "{netlist}");
+        // name + 2 nodes + control source + model: the core rejects tails.
+        assert_eq!(line.split_whitespace().count(), 5, "{netlist}");
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("VSENSE_W1 ") && l.ends_with(" 0")),
+            "{netlist}"
+        );
         assert!(
             netlist.contains(".MODEL isw_W1 CSW (IT=2m IH=0 RON=1 ROFF=1meg)"),
             "{netlist}"
-        );
-
-        let mut state = SchematicState::default();
-        state.components =
-            vec![Component::new(1, ComponentType::ISwitch, Point::origin())
-                .with_name_value("W2", "")];
-        let result = generate_netlist(&state);
-        assert!(
-            result.errors.iter().any(|e| e.contains("W2")),
-            "missing control must be a hard error: {:?}",
-            result.errors
         );
     }
 

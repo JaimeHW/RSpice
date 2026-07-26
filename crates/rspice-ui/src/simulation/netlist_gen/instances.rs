@@ -306,32 +306,33 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             // Current-controlled switch: W name n+ n- <vsrc> model [ON|OFF].
-            // The sensed current flows through a named V source elsewhere
-            // in the design; the core rejects any other trailing token.
+            // The schematic's sense-coil pins become a synthesized 0 V
+            // sense source wired in series with the monitored branch —
+            // the same pattern as the CCVS/CCCS control terminals.
             ComponentType::ISwitch => {
-                let nodes = self.format_nodes(&node_names, 2);
-                let params = crate::properties::parse_params_string(&component.params);
-                let Some(control) = params
-                    .get("control")
-                    .map(|value| value.trim())
-                    .filter(|value| !value.is_empty())
-                else {
+                if node_names.len() < 4 {
                     self.errors.push(format!(
-                        "I-Switch '{}' needs the name of the current-sensing V source (control property)",
+                        "I-Switch '{}' is missing its sense-coil terminals",
                         component.name
                     ));
                     return None;
-                };
+                }
+                let sense_name = format!("VSENSE_{}", instance_name);
+                self.lines.push(format!(
+                    "{} {} {} 0",
+                    sense_name, node_names[2], node_names[3]
+                ));
                 let (explicit_model, _) = Self::extract_model_override(component);
                 let model = self.get_iswitch_model(component, explicit_model.as_deref());
+                let params = crate::properties::parse_params_string(&component.params);
                 let state = match params.get("state").map(String::as_str) {
                     Some("on") => " ON",
                     Some("off") => " OFF",
                     _ => "",
                 };
                 Some(format!(
-                    "{} {} {} {}{}",
-                    instance_name, nodes, control, model, state
+                    "{} {} {} {} {}{}",
+                    instance_name, node_names[0], node_names[1], sense_name, model, state
                 ))
             }
 

@@ -27,6 +27,7 @@ impl ComponentType {
             | ComponentType::Ccvs
             | ComponentType::Cccs => 4,
             ComponentType::VSwitch
+            | ComponentType::ISwitch
             | ComponentType::TransmissionLine
             | ComponentType::LossyTransmissionLine => 4,
             ComponentType::CoupledTransmissionLine => 6,
@@ -153,11 +154,16 @@ impl ComponentType {
             ComponentType::SaturableInductor | ComponentType::Memristor => {
                 &[("+", Point { x: -20, y: 0 }), ("-", Point { x: 20, y: 0 })]
             }
-            // (40, 20): switch path left/right; the sensed current is a
-            // named V source, so there are no control pins.
-            ComponentType::ISwitch => {
-                &[("1", Point { x: -20, y: 0 }), ("2", Point { x: 20, y: 0 })]
-            }
+            // (40, 40): contact path on top, sense-coil path below (relay
+            // idiom) — the coil pins are wired in series with the branch
+            // whose current actuates the switch, and the netlister
+            // synthesizes the 0 V sense source across them.
+            ComponentType::ISwitch => &[
+                ("1", Point { x: -20, y: -10 }),
+                ("2", Point { x: 20, y: -10 }),
+                ("c+", Point { x: -20, y: 10 }),
+                ("c-", Point { x: 20, y: 10 }),
+            ],
             // (28, 40): vertical two-pin port like a source.
             ComponentType::RfPort => {
                 &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })]
@@ -314,7 +320,7 @@ impl ComponentType {
             | ComponentType::NmosSoi
             | ComponentType::PmosSoi => (40, 80),
             ComponentType::SaturableInductor | ComponentType::Memristor => (40, 20),
-            ComponentType::ISwitch => (40, 20),
+            ComponentType::ISwitch => (40, 40),
             ComponentType::RfPort => (28, 40),
             ComponentType::Vcvs
             | ComponentType::Vccs

@@ -220,16 +220,18 @@ fn saturable_inductor_bench_solves_op() {
 fn iswitch_bench_solves_op() {
     let mut bench = Bench::new();
     let vmain = bench.place(ComponentType::VoltageSource, 0, 0, "VMAIN", "5", "");
-    let w = bench.place(ComponentType::ISwitch, 200, 0, "W1", "", "control=VCTRL");
+    let w = bench.place(ComponentType::ISwitch, 200, 0, "W1", "", "");
     let rload = bench.place(ComponentType::Resistor, 400, 0, "RLOAD", "100", "");
-    let vctrl = bench.place(ComponentType::VoltageSource, 0, 300, "VCTRL", "0", "");
-    let rctrl = bench.place(ComponentType::Resistor, 200, 300, "RCTRL", "1k", "");
+    // Control loop: drive a current through the sense-coil pins.
+    let vctrl = bench.place(ComponentType::VoltageSource, 0, 300, "VCTRL", "1", "");
+    let rctrl = bench.place(ComponentType::Resistor, 400, 300, "RCTRL", "100", "");
     bench.connect((vmain, 0), (w, 0));
     bench.connect((w, 1), (rload, 0));
     bench.ground((rload, 1));
     bench.ground((vmain, 1));
-    bench.connect((vctrl, 0), (rctrl, 0));
-    bench.connect((rctrl, 1), (vctrl, 1));
+    bench.connect((vctrl, 0), (w, 2)); // coil c+
+    bench.connect((w, 3), (rctrl, 0)); // coil c- -> return resistor
+    bench.ground((rctrl, 1));
     bench.ground((vctrl, 1));
     solve_op(&bench.netlist());
 }

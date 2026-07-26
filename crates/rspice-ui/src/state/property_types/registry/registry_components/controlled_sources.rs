@@ -13,8 +13,8 @@ impl PropertyRegistry {
     }
 
     /// Register the current-controlled switch (W element + CSW model card).
-    /// The sensed current flows through a named V source elsewhere in the
-    /// design — a 0 V source is the canonical ammeter.
+    /// The sense-coil pins are wired in series with the monitored branch;
+    /// the netlister synthesizes the 0 V sense source across them.
     pub(in super::super) fn register_iswitch(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -25,19 +25,6 @@ impl PropertyRegistry {
                 .with_default(PropertyValue::string("W1"))
                 .with_order(0)
                 .with_category("Instance")
-                .required(),
-        );
-        sheet.add(
-            PropertyDefinition::new("control")
-                .with_display_name("Sense V Source")
-                .with_description(
-                    "Name of the voltage source whose current controls the switch \
-                     (a 0 V source works as an ammeter)",
-                )
-                .with_type(PropertyType::String)
-                .with_default(PropertyValue::string(""))
-                .with_order(10)
-                .with_category("Control")
                 .required(),
         );
         sheet.add(
