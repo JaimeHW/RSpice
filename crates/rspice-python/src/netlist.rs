@@ -409,6 +409,7 @@ impl PyNetlist {
     ///
     /// Args:
     ///     content: Raw SPICE deck text
+    ///     resource_limits: Optional resource policy for untrusted input
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
@@ -435,6 +436,7 @@ impl PyNetlist {
     ///
     /// Args:
     ///     path: Path to the netlist file (str or os.PathLike)
+    ///     resource_limits: Optional resource policy for untrusted input
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
@@ -466,7 +468,9 @@ impl PyNetlist {
     ///
     /// Args:
     ///     content: SPICE circuit statements
-    ///     base_path: Base path for resolving include directives
+    ///     base_path: Directory, or a file whose parent directory anchors
+    ///                include resolution (str or os.PathLike)
+    ///     resource_limits: Optional resource policy for untrusted input
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
