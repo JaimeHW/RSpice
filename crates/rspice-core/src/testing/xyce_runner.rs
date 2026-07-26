@@ -8188,7 +8188,7 @@ impl XyceTestRunner {
             },
         };
         let result = self
-            .run_transient_family_netlist(&plan, &netlist, start, None)
+            .run_transient_family_netlist(&plan, &netlist, start, None, None)
             .map_err(|error| match error {
                 SimulationError::Aborted => format!(
                     "MEASURE_CONT native execution exceeded timeout ({}ms)",
@@ -9041,6 +9041,7 @@ impl XyceTestRunner {
         };
         Ok(TransientResult {
             time,
+            step_sizes: vec![0.0; result.time.len()],
             voltages: serialize_waveforms("voltage", &source_voltages, source_time.len())?,
             branch_currents,
             num_nodes: result.num_nodes,
@@ -9624,7 +9625,7 @@ impl XyceTestRunner {
         self.check_abm_transient_deadline(start, "parse and exact topology")?;
 
         let (netlist, result) =
-            self.run_transient_family_plan(&plan, start, None)
+            self.run_transient_family_plan(&plan, start, None, None)
                 .map_err(|error| match error {
                     SimulationError::Aborted => format!(
                         "ABM transient native execution exceeded shared timeout ({}ms)",
@@ -12128,7 +12129,7 @@ impl XyceTestRunner {
         Self::validate_addresistors_flattened_topology(original, kind, false)?;
 
         let original_result = self
-            .run_transient_family_netlist(&plan, original, start, None)
+            .run_transient_family_netlist(&plan, original, start, None, None)
             .map_err(|error| match error {
                 SimulationError::Aborted => format!(
                     "ADDRESISTORS original transient exceeded shared timeout ({}ms)",
@@ -12154,7 +12155,7 @@ impl XyceTestRunner {
         self.check_addresistors_deadline(start, "materialization and generated topology")?;
 
         let generated_result = self
-            .run_transient_family_netlist(&plan, &replayed, start, None)
+            .run_transient_family_netlist(&plan, &replayed, start, None, None)
             .map_err(|error| match error {
                 SimulationError::Aborted => format!(
                     "ADDRESISTORS generated transient exceeded shared timeout ({}ms)",
@@ -15729,7 +15730,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 }
             };
         let result =
-            match self.run_transient_family_netlist(&contract.plan, &contract.netlist, start, None)
+            match self.run_transient_family_netlist(
+                &contract.plan,
+                &contract.netlist,
+                start,
+                None,
+                None,
+            )
             {
                 Ok(result) => result,
                 Err(error) => {
@@ -28030,7 +28037,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         // The authoritative wrapper still requires a successful simulator run,
         // but deliberately ignores every numeric output row.
-        match self.run_transient_family_plan(plan, start, None) {
+        match self.run_transient_family_plan(plan, start, None, None) {
             Ok((_netlist, _result)) => {}
             Err(SimulationError::Aborted) => {
                 return self.failure_result(
@@ -31475,7 +31482,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         role: &str,
     ) -> Result<XycePrnTable, String> {
         let (netlist, result) = self
-            .run_transient_family_plan(plan, start, None)
+            .run_transient_family_plan(plan, start, None, None)
             .map_err(|err| format!("{role} parse/simulation failed: {err}"))?;
         Self::transient_family_result_to_prn_table(plan, &netlist, &result)
             .map_err(|err| format!("{role} default PRN generation failed: {err}"))
@@ -31657,7 +31664,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         role: &str,
     ) -> Result<XycePrnTable, String> {
         let (netlist, result) = self
-            .run_transient_family_plan(plan, start, None)
+            .run_transient_family_plan(plan, start, None, None)
             .map_err(|err| format!("{role} parse/simulation failed: {err}"))?;
         Self::transient_family_result_to_prn_table(plan, &netlist, &result)
             .map_err(|err| format!("{role} default PRN generation failed: {err}"))
@@ -31924,7 +31931,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         start: Instant,
     ) -> XyceTestResult {
         const RESULT_CONTRACT: &str = "analytic_first_order_rc_tran_wrapper";
-        let (netlist, result) = match self.run_transient_family_plan(&contract.plan, start, None) {
+        let (netlist, result) = match self.run_transient_family_plan(&contract.plan, start, None, None) {
             Ok(result) => result,
             Err(SimulationError::Aborted) => {
                 return self.failure_result(
@@ -32173,7 +32180,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         start: Instant,
     ) -> XyceTestResult {
         const RESULT_CONTRACT: &str = "analytic_sinusoidal_first_order_rc_tran_wrapper";
-        let (netlist, result) = match self.run_transient_family_plan(&contract.plan, start, None) {
+        let (netlist, result) = match self.run_transient_family_plan(&contract.plan, start, None, None) {
             Ok(result) => result,
             Err(SimulationError::Aborted) => {
                 return self.failure_result(
@@ -32488,6 +32495,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 member_netlist,
                 start,
                 None,
+                None,
             ) {
                 Ok(result) => result,
                 Err(SimulationError::Aborted) => {
@@ -32526,6 +32534,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 &owner_plan,
                 &step_run.netlist,
                 start,
+                None,
                 None,
             ) {
                 Ok(result) => result,
@@ -34473,6 +34482,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             &baseline_plan,
             start,
             None,
+            None,
         ) {
             Ok(result) => result,
             Err(SimulationError::Aborted) => {
@@ -34920,10 +34930,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 .comparison
                 .compares_waveforms_exactly()
                 .then(|| baseline_result.time.clone());
+            let target_locked_step_sizes = contract
+                .comparison
+                .compares_waveforms_exactly()
+                .then(|| baseline_result.step_sizes.clone());
             let (target_netlist, target_result) = match self.run_transient_family_plan(
                 &target_plan,
                 start,
                 target_locked_time_grid,
+                target_locked_step_sizes,
             ) {
                 Ok(result) => result,
                 Err(SimulationError::Aborted) => {
@@ -35120,6 +35135,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     &target_plan,
                     start,
                     Some(baseline_result.time.clone()),
+                    Some(baseline_result.step_sizes.clone()),
                 );
                 if let Ok((locked_netlist, locked_result)) = locked_run
                     && let Ok(locked_mismatches) = self.compare_tran_prn_reference(
@@ -35168,10 +35184,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         plan: &XyceStaticTranPlan,
         start: Instant,
         locked_time_grid: Option<Vec<Value>>,
+        locked_time_step_sizes: Option<Vec<Value>>,
     ) -> Result<(Netlist, TransientResult), SimulationError> {
         let netlist = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
             .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
-        let result = self.run_transient_family_netlist(plan, &netlist, start, locked_time_grid)?;
+        let result = self.run_transient_family_netlist(
+            plan,
+            &netlist,
+            start,
+            locked_time_grid,
+            locked_time_step_sizes,
+        )?;
         Ok((netlist, result))
     }
 
@@ -35181,11 +35204,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         start: Instant,
         locked_time_grid: Option<Vec<Value>>,
+        locked_time_step_sizes: Option<Vec<Value>>,
     ) -> Result<TransientResult, SimulationError> {
         let max_step = Self::transient_family_max_step(netlist, &plan.tran)
             .map_err(SimulationError::Netlist)?;
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
-        let engine = self.create_xyce_static_tran_engine(locked_time_grid, initial_step);
+        let engine = self.create_xyce_static_tran_engine_with_step_sizes(
+            locked_time_grid,
+            locked_time_step_sizes,
+            initial_step,
+        );
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         engine.run_tran_with_abort(netlist, plan.tran.stop, max_step, &abort)
     }
@@ -46566,6 +46594,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Engine::new(config)
     }
 
+    fn create_xyce_static_tran_engine_with_step_sizes(
+        &self,
+        locked_time_grid: Option<Vec<Value>>,
+        locked_time_step_sizes: Option<Vec<Value>>,
+        initial_timestep: Option<Value>,
+    ) -> Engine {
+        let mut config = self.xyce_engine_config(locked_time_grid);
+        config.locked_time_step_sizes = locked_time_step_sizes.map(Arc::new);
+        config.transient_initial_timestep = initial_timestep;
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        Engine::new(config)
+    }
+
     fn create_xyce_static_tran_engine_with_integration_method(
         &self,
         locked_time_grid: Option<Vec<Value>>,
@@ -54942,6 +54983,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             .collect::<Vec<_>>();
         TransientResult {
             time,
+            step_sizes: vec![0.0; voltages.first().map_or(0, Vec::len)],
             voltages,
             branch_currents: Vec::new(),
             num_nodes: result.spectral_voltages.len(),
@@ -73620,6 +73662,7 @@ mod tests {
 
         let transient = TransientResult {
             time: vec![0.0, 1.0],
+            step_sizes: vec![0.0; 2],
             voltages: Vec::new(),
             branch_currents: Vec::new(),
             num_nodes: 0,
@@ -77236,6 +77279,7 @@ M1 d g s b nmod W=1u L=0.18u
         .expect("deck parses");
         let result = TransientResult {
             time: vec![0.0, 1.0e-3],
+            step_sizes: vec![0.0; 2],
             voltages: vec![vec![0.0, -10.0]],
             branch_currents: Vec::new(),
             num_nodes: 1,
@@ -77267,6 +77311,7 @@ M1 d g s b nmod W=1u L=0.18u
         .expect("deck parses");
         let result = TransientResult {
             time: vec![0.0, 1.0e-3],
+            step_sizes: vec![0.0; 2],
             voltages: vec![vec![1.0, 3.0]],
             branch_currents: vec![vec![0.01, 0.03]],
             num_nodes: 1,
@@ -77297,6 +77342,7 @@ M1 d g s b nmod W=1u L=0.18u
         .expect("deck parses");
         let result = TransientResult {
             time: vec![0.0, 1.0e-3],
+            step_sizes: vec![0.0; 2],
             voltages: vec![vec![2.0, 3.0]],
             branch_currents: vec![vec![0.5, -0.25]],
             num_nodes: 1,
@@ -77542,6 +77588,7 @@ M1 d g s b nmod W=1u L=0.18u
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
         let result = TransientResult {
             time: vec![2.99999996, 3.0],
+            step_sizes: vec![0.0; 2],
             voltages: vec![vec![1.7336955179822779e-3, 0.0]],
             branch_currents: Vec::new(),
             num_nodes: 1,
@@ -77578,6 +77625,7 @@ M1 d g s b nmod W=1u L=0.18u
         let time = 2.96913385e-6;
         let result = TransientResult {
             time: vec![time, 2.96913387e-6],
+            step_sizes: vec![0.0; 2],
             voltages: vec![vec![3.984804681e-4, 0.0]],
             branch_currents: Vec::new(),
             num_nodes: 1,
@@ -77859,6 +77907,7 @@ default output
         };
         let result = TransientResult {
             time: vec![0.0, 0.25, 0.5, 0.75, 1.0],
+            step_sizes: vec![0.0; 5],
             voltages: vec![vec![1.0, 0.75, 0.5, 0.25, 0.0]],
             branch_currents: Vec::new(),
             num_nodes: 1,
@@ -84483,6 +84532,7 @@ VBIAS bias 0 0\n\
         };
         let result = TransientResult {
             time: vec![0.0, 0.5, 1.0],
+            step_sizes: vec![0.0; 3],
             voltages: vec![vec![0.0, 1.0, 0.0]],
             branch_currents: Vec::new(),
             num_nodes: 1,
@@ -90334,6 +90384,7 @@ R1 1 0 1
         .expect("global temperature probe fixture parses");
         let result = TransientResult {
             time: vec![0.0],
+            step_sizes: vec![0.0],
             voltages: vec![vec![1.0]],
             branch_currents: Vec::new(),
             num_nodes: 1,

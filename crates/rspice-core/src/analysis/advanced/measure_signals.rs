@@ -1800,6 +1800,7 @@ mod tests {
     fn tran_result() -> TransientResult {
         TransientResult {
             time: vec![0.0, 1.0, 2.0, 3.0],
+            step_sizes: vec![0.0; 4],
             voltages: vec![vec![0.0, 1.0, 2.0, 3.0]],
             branch_currents: vec![vec![0.0, -1.0, -2.0, -3.0]],
             num_nodes: 1,
