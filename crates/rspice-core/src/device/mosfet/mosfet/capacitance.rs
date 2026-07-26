@@ -85,30 +85,21 @@ impl Mosfet {
         oxide_cap: Value,
     ) -> (Value, Value, Value) {
         let _ = vgb;
-        const MAGIC_VDS: Value = 0.025;
 
         let vgst = vgs - von;
         let vds = vgs - vgd;
-        let vdsat = vdsat.max(MAGIC_VDS);
 
         if vgst <= -phi {
             (0.0, 0.0, oxide_cap / 2.0)
         } else if vgst <= -phi / 2.0 {
             (0.0, 0.0, -vgst * oxide_cap / (2.0 * phi))
         } else if vgst <= 0.0 {
-            let mut capgs = vgst * oxide_cap / (1.5 * phi) + oxide_cap / 3.0;
-            let capgd = if vds >= vdsat {
-                0.0
-            } else {
-                let vddif = 2.0 * vdsat - vds;
-                let vddif1 = vdsat - vds;
-                let vddif2 = vddif * vddif;
-                let capgd = capgs * (1.0 - vdsat * vdsat / vddif2);
-                capgs *= 1.0 - vddif1 * vddif1 / vddif2;
-                capgd
-            };
+            // Xyce's DeviceSupport::qmeyer does not partition Cgd in the
+            // weak-inversion branch.  It also deliberately uses the raw
+            // VDSAT supplied by the Level-1/2 load (without a floor).
+            let capgs = vgst * oxide_cap / (1.5 * phi) + oxide_cap / 3.0;
             let capgb = -vgst * oxide_cap / (2.0 * phi);
-            (capgs.max(0.0), capgd.max(0.0), capgb.max(0.0))
+            (capgs, 0.0, capgb)
         } else if vdsat <= vds {
             (oxide_cap / 3.0, 0.0, 0.0)
         } else {
@@ -117,7 +108,7 @@ impl Mosfet {
             let vddif2 = vddif * vddif;
             let capgd = oxide_cap * (1.0 - vdsat * vdsat / vddif2) / 3.0;
             let capgs = oxide_cap * (1.0 - vddif1 * vddif1 / vddif2) / 3.0;
-            (capgs.max(0.0), capgd.max(0.0), 0.0)
+            (capgs, capgd, 0.0)
         }
     }
 
