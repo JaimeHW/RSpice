@@ -18,6 +18,7 @@ mod pz;
 mod sensitivity;
 mod smith;
 mod specs;
+mod table;
 mod transfer_function;
 
 pub(crate) fn open_specification_editor(state: &mut AppState) {
@@ -75,6 +76,8 @@ pub enum ResultViewer {
     TransferFunction,
     /// Measurements × runs matrix against spec bounds.
     Specs,
+    /// The retained samples of one analysis, as rows.
+    Table,
     /// Legacy Nyquist surface (pre-redesign chrome).
     Nyquist,
     /// Legacy Smith chart surface.
@@ -97,6 +100,7 @@ impl ResultViewer {
             ResultViewer::Contribution => "SENS",
             ResultViewer::TransferFunction => "XF",
             ResultViewer::Specs => "SPECS",
+            ResultViewer::Table => "TABLE",
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
             ResultViewer::PoleZero => "PZ",
@@ -116,13 +120,14 @@ impl ResultViewer {
             ResultViewer::Contribution => "sensitivity contributions",
             ResultViewer::TransferFunction => "transfer function",
             ResultViewer::Specs => "specs matrix",
+            ResultViewer::Table => "sample table",
             ResultViewer::Nyquist => "nyquist",
             ResultViewer::Smith => "smith",
             ResultViewer::PoleZero => "pole-zero",
         }
     }
 
-    const PRIMARY: [ResultViewer; 10] = [
+    const PRIMARY: [ResultViewer; 11] = [
         ResultViewer::Waves,
         ResultViewer::Bode,
         ResultViewer::Fft,
@@ -133,6 +138,7 @@ impl ResultViewer {
         ResultViewer::Contribution,
         ResultViewer::TransferFunction,
         ResultViewer::Specs,
+        ResultViewer::Table,
     ];
     const LEGACY: [ResultViewer; 3] = [
         ResultViewer::Nyquist,
@@ -379,6 +385,12 @@ pub struct ResultsState {
     pub op_sort: Option<(String, bool)>,
     /// Open spec-editor rows (None = matrix view). Transient.
     pub spec_drafts: Option<Vec<specs::SpecDraft>>,
+    /// Row/column selection for the TABLE viewer.
+    pub table: table::TableView,
+    /// Last row count the table rendered, as its footer states it. Written
+    /// by the viewer so the docbar reports what is actually on screen
+    /// rather than recomputing a second, possibly different, answer.
+    pub table_status: Option<String>,
 }
 
 /// One user expression trace on a waves strip.
@@ -1067,6 +1079,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
         ResultViewer::Contribution => sensitivity::show(ui, &mut app.state),
         ResultViewer::TransferFunction => transfer_function::show(ui, &mut app.state),
         ResultViewer::Specs => specs::show(ui, &mut app.state),
+        ResultViewer::Table => table::show(ui, &mut app.state),
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
@@ -1150,6 +1163,7 @@ fn result_trailing_width(local_width: f32, viewer: ResultViewer) -> f32 {
         ResultViewer::Waves => 390.0,
         ResultViewer::Op => 300.0,
         ResultViewer::Specs => 230.0,
+        ResultViewer::Table => 420.0,
         ResultViewer::Eye => 150.0,
         ResultViewer::Fft => 230.0,
         _ => 90.0,
@@ -1293,6 +1307,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
                 specs::open_editor(state);
             }
         }
+        ResultViewer::Table => table::inline_actions(ui, state),
         _ => {}
     }
 }
@@ -1677,6 +1692,19 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 ViewerAvailability::unavailable("Requires specifications or measured results")
             }
         }
+        ResultViewer::Table => {
+            // The table reads whatever the WAVES stage can plot: if a strip
+            // exists, its retained samples can be listed.
+            if state
+                .simulation
+                .active_run()
+                .is_some_and(|run| run.analyses.iter().any(|a| !a.waveforms.is_empty()))
+            {
+                ViewerAvailability::available("Retained samples are available to list")
+            } else {
+                ViewerAvailability::unavailable("Requires an analysis with retained samples")
+            }
+        }
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
         ResultViewer::Smith => specialized_availability(state, ActiveViewer::SmithChart),
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
@@ -1847,6 +1875,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Contribution => sensitivity::right_panel(ui, state),
         ResultViewer::TransferFunction => transfer_function::right_panel(ui, state),
         ResultViewer::Specs => specs::right_panel(ui, state),
+        ResultViewer::Table => table::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::PoleZero => pz::right_panel(ui, state),

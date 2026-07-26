@@ -324,6 +324,91 @@ impl StripModel {
             }
         }
     }
+
+    // -- accessors for the TABLE viewer ------------------------------------
+    //
+    // The table renders this same model, so its columns cannot name a trace
+    // the plot does not draw or report a value in a different unit than the
+    // curve. These are the only reads it needs.
+
+    /// Index of the analysis this strip renders.
+    pub(super) fn analysis_index(&self) -> usize {
+        self.analysis_index
+    }
+
+    /// Total trace count, including overlay runs.
+    pub(super) fn trace_count(&self) -> usize {
+        self.traces.len()
+    }
+
+    /// Indices of the visible active-run signal traces, in legend order.
+    pub(super) fn visible_signal_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.traces
+            .iter()
+            .take(self.signal_trace_count)
+            .enumerate()
+            .filter(|(_, trace)| trace.visible)
+            .map(|(index, _)| index)
+    }
+
+    /// The analysis' retained sample grid — the X array every trace on this
+    /// strip was solved against.
+    pub(super) fn sample_grid(&self) -> Option<&[f64]> {
+        self.traces.first().map(|trace| trace.x.as_slice())
+    }
+
+    /// Column heading for the X axis ("t · s").
+    pub(super) fn x_axis_heading(&self) -> String {
+        if self.x_unit.is_empty() {
+            self.x_label.clone()
+        } else {
+            format!("{} · {}", self.x_label, self.x_unit)
+        }
+    }
+
+    /// The X value at one grid index, formatted.
+    pub(super) fn format_x_at(
+        &self,
+        index: usize,
+        significant_digits: usize,
+        quantity_policy: crate::quantity::QuantityPresentationPolicy,
+    ) -> String {
+        self.sample_grid()
+            .and_then(|grid| grid.get(index).copied())
+            .map_or_else(
+                || "—".to_owned(),
+                |x| self.format_x(x, significant_digits, quantity_policy),
+            )
+    }
+
+    /// One trace's retained value at a grid index, formatted in that
+    /// trace's own unit.
+    ///
+    /// `None` when the trace is shorter than the grid: a table reporting
+    /// exact samples must say it has none rather than borrow a neighbour's.
+    pub(super) fn format_sample(
+        &self,
+        trace_index: usize,
+        sample: usize,
+        significant_digits: usize,
+        quantity_policy: crate::quantity::QuantityPresentationPolicy,
+    ) -> Option<String> {
+        let trace = self.traces.get(trace_index)?;
+        let value = trace.y.as_slice().get(sample).copied()?;
+        Some(self.format_trace_value(trace, value, significant_digits, quantity_policy))
+    }
+
+    /// Display name of one trace, for a column heading.
+    pub(super) fn trace_heading(&self, index: usize) -> Option<(&str, egui::Color32)> {
+        self.traces
+            .get(index)
+            .map(|trace| (trace.name.as_str(), trace.color))
+    }
+
+    /// Analysis label for the table's analysis picker.
+    pub(super) fn table_label(&self) -> String {
+        format!("{} · {}", self.kind_tag, self.subtitle)
+    }
 }
 
 fn selected_series_pair(
