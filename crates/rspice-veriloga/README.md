@@ -14,15 +14,21 @@ the GUI's Verilog-A dialog, and the generated-Rust built-in path used by
 ## Compilation pipeline and module map
 
 ```
-source text ──▶ preprocessor ──▶ lexer ──▶ parser ──▶ semantic ──▶ IR (+ autodiff) ──▶ canonical IR ──▶ backend
-                `include/`define   tokens     AST      symbol/type    device equations    bytecode
-                                                       resolution     + derivatives       / generated Rust
-                                                                                              │
-                                            runtime:  vm (interpreter)  ◀─────────────────────┤
-                                                      native/ (RSpice native JIT contract, feature "native")
-                                                      rust_backend (feature-gated built-ins)
-                                                      device (VerilogADevice instance)
+source text ─▶ preprocessor ─▶ lexer ─▶ parser ─▶ semantic ─▶ IR (+ autodiff) ─▶ canonical IR
+               `include/`define  tokens    AST     symbol/type  device equations   HIR/MIR/OptIR
+                                                   resolution   + derivatives            │
+                        ┌──────────────────────────────────────────────────────┬─────────┤
+                        ▼                                                      ▼         ▼
+              codegen: bytecode CompiledModel                          native/ (JIT)  rust_backend
+                        │                                              feature        offline
+                        ├──▶ vm (interpreter)                          "native"       Rust emitter
+                        └──▶ device (VerilogADevice instance) ◀────────────┘
 ```
+
+The three backends are not interchangeable at run time. `vm` and `native/`
+are both driven through `VerilogADevice` in this process; `rust_backend`
+runs offline, ahead of the build, and its output is compiled into
+`rspice-core` as ordinary Rust with this crate absent from the link.
 
 | Module | Contents |
 | :--- | :--- |
@@ -38,21 +44,60 @@ source text ──▶ preprocessor ──▶ lexer ──▶ parser ──▶ se
 | `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
 | `laplace` / `zfilter` | State-space runtime for the `laplace_*` (s-domain) and `zi_*` (sampled-data) filter operators |
 | `device` | `VerilogADevice`: the per-instance object the simulator drives — see below |
-| `native/` | RSpice-owned native JIT backend foundation (feature `native`): full native JIT or typed construction error; no bytecode fallback |
+| `native/` | RSpice-owned native JIT backend (feature `native`): full native JIT or typed construction error, no bytecode fallback. x86-64 only — the AArch64 arm of the target dispatch returns `JitError::UnsupportedTarget` |
+| `virtual_source` | Sealed, file-system-free source bundles: portable logical paths, include resolution restricted to the bundle plus the built-in headers, and BLAKE3 identities for the source, dependency closure, compiler contract, and runtime contract. The transport boundary for browser workers and retained run snapshots |
+| `runtime_report` | In-memory compilation reports: the simulator ABI a compiled artifact exposes, its user-facing diagnostics with source positions, and which runtime targets have actually qualified for it. Performs no file-system access |
 | `disciplines` / `stdlib` / `types` | Discipline database, the built-in `disciplines.vams`/`constants.vams` headers (LRM 2.4 physical constants), the type system, function registry, and parameter-range types |
 | `source` / `error` | Source maps/spans and the `CompileError`/`CompileResult` types |
 
 ## Public API
 
+Every entry point hangs off `VerilogACompiler`, and they differ along two
+axes: which artifact you get back, and where the source comes from.
+
 ```rust
 use rspice_veriloga::{VerilogACompiler, CompilerOptions};
 
 let compiler = VerilogACompiler::new(CompilerOptions::default());
+
+// Bytecode CompiledModel
 let model = compiler.compile(source)?;                       // exactly one module
 let model = compiler.compile_module(source, Some("nmos"))?;  // pick one of several
 let model = compiler.compile_file(path)?;                    // from disk, with includes
+let model = compiler.compile_file_module(path, Some("nmos"))?;
 let file  = compiler.compile_file_with_metadata(path)?;      // + include dependency list
+let file  = compiler.compile_file_module_with_metadata(path, Some("nmos"))?;
+
+// Canonical HIR/MIR/OptIR artifact
+let ir = compiler.compile_canonical_ir(source)?;
+let ir = compiler.compile_canonical_ir_module(source, Some("nmos"))?;
+let ir = compiler.compile_file_canonical_ir_with_metadata(path, Some("nmos"))?;
+
+// Both at once, from one parse/analysis pass
+let report = compiler.compile_runtime(source, Some("nmos"))?;
+let both   = compiler.compile_file_runtime_with_metadata(path, Some("nmos"))?;
+
+// Sealed bundle, no file-system access at all
+let built = compiler.compile_virtual_runtime(&bundle, "nmos", limits)?;
+let built = compiler.compile_virtual_runtime_diagnosed(&bundle, "nmos", limits)?;
 ```
+
+The `*_runtime` family is the one to reach for when a caller needs both
+artifacts: preprocessing, lexing, parsing, and semantic analysis run once
+and the bytecode model and canonical IR are emitted from the same analyzed
+module, then cross-validated. `compile_runtime` and the virtual-bundle
+APIs are sealed — they consult the built-in standard headers but never the
+configured `include_paths` or the disk — so a caller that needs includes
+resolves its own graph into a `VirtualSourceBundle` first.
+`compile_virtual_runtime_diagnosed` differs from `compile_virtual_runtime`
+only in failure: it keeps source-authentic diagnostics mapped back to
+bundle paths instead of collapsing to a bare `CompileError`.
+
+Two environment variables affect compilation, both diagnostic only:
+`RSPICE_DEBUG_PP=1` writes the preprocessed source beside the input file
+as `*.pp.va`, and `RSPICE_VERILOGA_PHASE_TRACE=1` (or the narrower
+`RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE=1`) prints per-phase timings to
+stderr.
 
 `CompilerOptions` carries three fields that change what the compiler
 produces, all of them preprocessor inputs: `include_paths` (searched by
@@ -138,12 +183,15 @@ then do nothing, so a model cannot print from the analog block.
 
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
-| `native` | off | RSpice-owned native JIT contract for Verilog-A devices; requested native mode is full native JIT or typed construction error, with no bytecode fallback |
+| `native` | off | RSpice-owned native JIT for Verilog-A devices; requested native mode is full native JIT or typed construction error, with no bytecode fallback. Pulls in the platform APIs for executable memory (`windows-sys` / `libc`) |
+| `native-bytecode-contract-tests` | off | Internal. Implies `native` and exposes `compile_native`, which JITs straight from the bytecode model without a canonical IR artifact. Backend contract tests only — production native users must supply canonical IR and must not enable it |
 | `ams` | off | Declared for Verilog-AMS mixed-signal support; currently gates no code in the crate |
 
 `rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
-(RSpice-owned native JIT contract) and adds a blake3-keyed on-disk cache for
-compiled models on top.
+(native JIT) and adds a blake3-keyed on-disk cache for compiled models on
+top. Its `veriloga-builtins` feature is a different path entirely: it
+compiles the pre-generated Rust in `rspice-core/src/device/veriloga_generated/`
+and does not link this compiler at all.
 
 ## Building and testing
 
