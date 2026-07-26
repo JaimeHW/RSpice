@@ -39,20 +39,45 @@ impl<'a> NetlistGenerator<'a> {
         match component.kind {
             // Two-terminal passive components: X name node+ node- value [params]
             // Spectre format: R1 net1 net2 1k m=2 tc1=0.01
-            ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Diode => {
+            ComponentType::Resistor | ComponentType::Capacitor => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let value_with_params =
                     self.format_value_with_params(&component.value, &component.params);
                 Some(format!("{} {} {}", instance_name, nodes, value_with_params))
             }
 
-            ComponentType::Inductor | ComponentType::SaturableInductor => {
+            // Diode: D name A K model [params], with a default junction model
+            // when the user has not bound one.
+            ComponentType::Diode => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_diode_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
+            }
+
+            ComponentType::Inductor => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let filtered_params = self
                     .filter_component_params(&component.params, &["coupled_to", "coupling_factor"]);
                 let value_with_params =
                     self.format_value_with_params(&component.value, &filtered_params);
                 Some(format!("{} {} {}", instance_name, nodes, value_with_params))
+            }
+
+            // Saturable inductor: L name node+ node- value model, where the
+            // model card carries the Jiles-Atherton magnetic-core parameters.
+            // The inductance value is mandatory on the core-model path.
+            ComponentType::SaturableInductor => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let value = if component.value.trim().is_empty() {
+                    "1m"
+                } else {
+                    component.value.trim()
+                };
+                let model = self.get_saturable_core_model(component);
+                Some(format!("{} {} {} {}", instance_name, nodes, value, model))
             }
 
             // Two-terminal voltage sources: V name node+ node- value [params]
@@ -128,8 +153,22 @@ impl<'a> NetlistGenerator<'a> {
             // Spectre format: M1 drain gate source bulk nmos_M1 w=1u l=180n as=1p ad=1p
             ComponentType::Nmos | ComponentType::Pmos => {
                 let nodes = self.format_nodes(&node_names, 4);
-                let model = self.get_mosfet_model(component);
-                let params = self.format_params(&component.params);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_mosfet_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
+            }
+
+            // Vertical power DMOS: M name D G S B model [params], with a
+            // VDMOS model card (the body diode and drift resistance live on
+            // the card, not the instance line).
+            ComponentType::NVdmos | ComponentType::PVdmos => {
+                let nodes = self.format_nodes(&node_names, 4);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_vdmos_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
@@ -137,8 +176,10 @@ impl<'a> NetlistGenerator<'a> {
             // Spectre format: J1 drain gate source njf_J1 area=1 m=1
             ComponentType::Njfet | ComponentType::Pjfet => {
                 let nodes = self.format_nodes(&node_names, 3);
-                let model = self.get_jfet_model(component);
-                let params = self.format_params(&component.params);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_jfet_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
@@ -175,18 +216,30 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
             }
 
-            ComponentType::Ccvs => {
-                let nodes = self.format_nodes(&node_names, 4);
-                let gain_with_params =
-                    self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
-            }
-
-            ComponentType::Cccs => {
-                let nodes = self.format_nodes(&node_names, 4);
-                let gain_with_params =
-                    self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
+            // Current-controlled sources: SPICE H/F take a controlling
+            // V-source NAME, not a node pair. The schematic's control pins
+            // stay wired as a current path through a synthesized 0 V sense
+            // source, exactly like the current-sensing terminals on
+            // commercial CCVS/CCCS symbols.
+            ComponentType::Ccvs | ComponentType::Cccs => {
+                if node_names.len() < 4 {
+                    self.errors.push(format!(
+                        "{} '{}' is missing control terminals",
+                        component.kind.display_name(),
+                        component.name
+                    ));
+                    return None;
+                }
+                let sense_name = format!("VSENSE_{}", instance_name);
+                self.lines.push(format!(
+                    "{} {} {} 0",
+                    sense_name, node_names[2], node_names[3]
+                ));
+                let gain = self.format_value(&component.value);
+                Some(format!(
+                    "{} {} {} {} {}",
+                    instance_name, node_names[0], node_names[1], sense_name, gain
+                ))
             }
 
             // Voltage-controlled switch (4 terminals: 1 2 c+ c-):
@@ -355,12 +408,11 @@ impl<'a> NetlistGenerator<'a> {
                 }
             }
 
-            // XSPICE components: A name nodes model [params]
+            // XSPICE components: A name <shaped ports> model, plus the
+            // code-model .MODEL card. Port shaping and card emission live
+            // in netlist_gen::xspice.
             _ if component.kind.is_xspice() => {
-                let nodes = node_names.join(" ");
-                let model = format!("{}_model", instance_name.to_lowercase());
-                let params = self.format_params(&component.params);
-                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
+                self.generate_xspice_instance(component, &node_names, &instance_name)
             }
 
             // Catch-all for unhandled types

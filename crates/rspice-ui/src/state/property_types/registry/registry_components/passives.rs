@@ -3,6 +3,7 @@ use super::*;
 mod capacitor;
 mod inductor;
 mod resistor;
+mod saturable_inductor;
 mod transformer;
 
 impl PropertyRegistry {
@@ -10,6 +11,7 @@ impl PropertyRegistry {
         self.register_resistor();
         self.register_capacitor();
         self.register_inductor();
+        self.register_saturable_inductor();
         self.register_transformer();
         self.register_coupled_inductor();
         self.register_transmission_line();

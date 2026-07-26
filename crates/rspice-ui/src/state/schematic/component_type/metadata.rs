@@ -170,6 +170,8 @@ impl ComponentType {
             ComponentType::Resistor => "1k",
             ComponentType::Capacitor => "1u",
             ComponentType::Inductor => "1m",
+            // The Jiles-Atherton path requires a positive inductance target.
+            ComponentType::SaturableInductor => "1m",
             ComponentType::Transformer => "1m",
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc

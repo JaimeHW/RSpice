@@ -8,6 +8,89 @@ impl PropertyRegistry {
 
         let pmos = self.create_mosfet_sheet("M1", "pmos");
         self.sheets.insert(ComponentType::Pmos, pmos);
+
+        self.register_vdmos();
+    }
+
+    /// Register the vertical power DMOS pair. The device physics (body
+    /// diode, drift resistance, thermal network) live on the VDMOS model
+    /// card, so the instance sheet stays lean.
+    fn register_vdmos(&mut self) {
+        for (kind, default_model) in [
+            (ComponentType::NVdmos, "nvdmos"),
+            (ComponentType::PVdmos, "pvdmos"),
+        ] {
+            let mut sheet = PropertySheet::new();
+
+            sheet.add(
+                PropertyDefinition::new("name")
+                    .with_display_name("Instance Name")
+                    .with_description("Unique identifier for this power MOSFET instance")
+                    .with_type(PropertyType::String)
+                    .with_default(PropertyValue::string("M1"))
+                    .with_order(0)
+                    .with_category("Instance")
+                    .required(),
+            );
+            sheet.add(
+                PropertyDefinition::new("model")
+                    .with_display_name("Model")
+                    .with_description("VDMOS model name from device library")
+                    .with_type(PropertyType::String)
+                    .with_default(PropertyValue::string(default_model))
+                    .with_order(10)
+                    .with_category("Model"),
+            );
+            sheet.add(
+                PropertyDefinition::new("w")
+                    .with_display_name("Width Scale")
+                    .with_description("Channel width scale factor")
+                    .with_type(PropertyType::Expression)
+                    .with_default(PropertyValue::expression("1"))
+                    .with_order(20)
+                    .with_category("Geometry"),
+            );
+            sheet.add(
+                PropertyDefinition::new("l")
+                    .with_display_name("Length Scale")
+                    .with_description("Channel length scale factor")
+                    .with_type(PropertyType::Expression)
+                    .with_default(PropertyValue::expression("1u"))
+                    .with_order(21)
+                    .with_category("Geometry"),
+            );
+            sheet.add(
+                PropertyDefinition::new("m")
+                    .with_display_name("Multiplier")
+                    .with_description("Number of parallel devices")
+                    .with_type(PropertyType::Number)
+                    .with_default(PropertyValue::number(1.0))
+                    .with_range(1.0, 10000.0)
+                    .with_order(22)
+                    .with_category("Geometry"),
+            );
+            sheet.add(
+                PropertyDefinition::new("dtemp")
+                    .with_display_name("Temp Rise")
+                    .with_description("Instance temperature rise above ambient")
+                    .with_type(PropertyType::Number)
+                    .with_default(PropertyValue::number(0.0))
+                    .with_unit("°C")
+                    .with_order(30)
+                    .with_category("Temperature"),
+            );
+            sheet.add(
+                PropertyDefinition::new("off")
+                    .with_display_name("Initially Off")
+                    .with_description("Start in off state for DC operating point analysis")
+                    .with_type(PropertyType::Boolean)
+                    .with_default(PropertyValue::boolean(false))
+                    .with_order(40)
+                    .with_category("Initial Conditions"),
+            );
+
+            self.sheets.insert(kind, sheet);
+        }
     }
 
     /// Create a MOSFET property sheet with commercial-grade parameters

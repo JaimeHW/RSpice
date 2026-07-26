@@ -31,8 +31,8 @@ impl ComponentType {
             | ComponentType::XspiceNorGate
             | ComponentType::XspiceXorGate
             | ComponentType::XspiceTristate => 3,
-            ComponentType::XspiceDFlipFlop | ComponentType::XspiceSrLatch => 4,
-            ComponentType::XspiceJkFlipFlop => 5,
+            ComponentType::XspiceDFlipFlop => 4,
+            ComponentType::XspiceJkFlipFlop | ComponentType::XspiceSrLatch => 5,
             _ => 2,
         }
     }
@@ -193,9 +193,12 @@ impl ComponentType {
                 ("q", Point { x: 20, y: -10 }),
                 ("qbar", Point { x: 20, y: 10 }),
             ],
+            // The d_srlatch code model has a mandatory enable port; it
+            // enters at the top edge like the tri-state enable.
             ComponentType::XspiceSrLatch => &[
                 ("s", Point { x: -20, y: -10 }),
                 ("r", Point { x: -20, y: 10 }),
+                ("en", Point { x: 0, y: -20 }),
                 ("q", Point { x: 20, y: -10 }),
                 ("qbar", Point { x: 20, y: 10 }),
             ],

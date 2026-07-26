@@ -287,19 +287,6 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
         };
     }
 
-    if matches!(
-        component.kind,
-        ComponentType::NVdmos | ComponentType::PVdmos
-    ) {
-        return ComponentModelEvidence {
-            status: "no executable model binding · review".to_owned(),
-            model: "Unresolved".to_owned(),
-            source: "No supported netlist binding".to_owned(),
-            section: "Unavailable".to_owned(),
-            tone: ModelEvidenceTone::Error,
-        };
-    }
-
     ComponentModelEvidence {
         status: "native device · no catalog model".to_owned(),
         model: "Not applicable".to_owned(),
@@ -317,10 +304,21 @@ fn explicit_component_model(component: &Component) -> Option<String> {
         .filter(|model| !model.is_empty());
     let value_model = component.value.trim();
     match component.kind {
-        ComponentType::NpnBjt | ComponentType::PnpBjt | ComponentType::VSwitch => param_model
+        ComponentType::NpnBjt
+        | ComponentType::PnpBjt
+        | ComponentType::VSwitch
+        | ComponentType::Diode
+        | ComponentType::Nmos
+        | ComponentType::Pmos
+        | ComponentType::NVdmos
+        | ComponentType::PVdmos
+        | ComponentType::Njfet
+        | ComponentType::Pjfet => param_model
             .or((!value_model.is_empty()).then_some(value_model))
             .map(str::to_owned),
-        ComponentType::Diode => (!value_model.is_empty()).then(|| value_model.to_owned()),
+        // The saturable inductor's value field is the inductance, so only
+        // an explicit model= parameter names a library core model.
+        ComponentType::SaturableInductor => param_model.map(str::to_owned),
         _ => None,
     }
 }
@@ -329,11 +327,15 @@ fn generated_inline_model(component: &Component) -> Option<String> {
     let prefix = match component.kind {
         ComponentType::Nmos => "nmos",
         ComponentType::Pmos => "pmos",
+        ComponentType::NVdmos => "nvdmos",
+        ComponentType::PVdmos => "pvdmos",
         ComponentType::NpnBjt => "npn",
         ComponentType::PnpBjt => "pnp",
         ComponentType::Njfet => "njf",
         ComponentType::Pjfet => "pjf",
         ComponentType::VSwitch => "sw",
+        ComponentType::Diode => "d",
+        ComponentType::SaturableInductor => "core",
         kind if kind.spice_prefix() == "A" => return Some(format!("{}_model", component.name)),
         _ => return None,
     };

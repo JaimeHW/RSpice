@@ -57,5 +57,6 @@ impl PropertyRegistry {
         self.register_semiconductors();
         self.register_controlled_sources();
         self.register_interface_components();
+        self.register_xspice_components();
     }
 }

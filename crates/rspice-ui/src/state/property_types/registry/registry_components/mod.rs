@@ -5,3 +5,4 @@ mod interface;
 mod passives;
 mod semiconductors;
 mod sources;
+mod xspice;

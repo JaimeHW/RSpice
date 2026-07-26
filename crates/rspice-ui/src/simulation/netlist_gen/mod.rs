@@ -43,6 +43,7 @@ mod instances;
 mod magnetics;
 mod models;
 mod subcircuits;
+mod xspice;
 
 pub use subcircuits::HierarchySource;
 
@@ -1269,6 +1270,220 @@ mod tests {
             generator.net_at(Point::new(20, 0)).map(|n| n.spice_name()),
             Some("0".to_string())
         );
+    }
+
+    fn netlist_for(components: Vec<Component>) -> String {
+        let mut state = SchematicState::default();
+        state.components = components;
+        generate_netlist(&state).netlist
+    }
+
+    /// A bare diode placement must produce an executable deck: a generated
+    /// junction model card, referenced from the instance line.
+    #[test]
+    fn bare_diode_gets_a_default_junction_model_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::Diode, Point::origin()).with_name_value("D1", ""),
+        ]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("D1 ") && l.ends_with(" d_D1")),
+            "diode line should reference the generated model:\n{netlist}"
+        );
+        assert!(netlist.contains(".MODEL d_D1 D"), "{netlist}");
+    }
+
+    /// An explicit diode model binding is trusted verbatim with no card.
+    #[test]
+    fn explicit_diode_model_is_trusted_without_a_generated_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::Diode, Point::origin()).with_name_value("D1", "BAV99"),
+        ]);
+        assert!(
+            netlist.lines().any(|l| l.starts_with("D1 ") && l.ends_with(" BAV99")),
+            "{netlist}"
+        );
+        assert!(!netlist.contains(".MODEL"), "{netlist}");
+    }
+
+    /// MOSFET model overrides must reach the deck instead of being replaced
+    /// by the generated LEVEL=1 card — the model-driven path for advanced
+    /// compact models depends on this.
+    #[test]
+    fn mosfet_explicit_model_override_is_honored() {
+        let mut mos =
+            Component::new(1, ComponentType::Nmos, Point::origin()).with_name_value("M1", "");
+        mos.params = "model=psp_nch w=1u l=100n".to_owned();
+        let netlist = netlist_for(vec![mos]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("M1 "))
+            .expect("mosfet line");
+        assert!(line.contains(" psp_nch"), "{netlist}");
+        assert!(line.contains("w=1u"), "{netlist}");
+        assert!(!line.contains("model="), "{netlist}");
+        assert!(!netlist.contains(".MODEL nmos_M1"), "{netlist}");
+    }
+
+    /// JFET model overrides are honored the same way.
+    #[test]
+    fn jfet_explicit_model_override_is_honored() {
+        let mut jfet =
+            Component::new(1, ComponentType::Njfet, Point::origin()).with_name_value("J1", "");
+        jfet.params = "model=J2N5484".to_owned();
+        let netlist = netlist_for(vec![jfet]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("J1 ") && l.ends_with(" J2N5484")),
+            "{netlist}"
+        );
+        assert!(!netlist.contains(".MODEL njf_J1"), "{netlist}");
+    }
+
+    /// VDMOS placements emit a real power-MOSFET model card (they used to
+    /// fall through the catch-all with no card at all).
+    #[test]
+    fn vdmos_emits_instance_and_model_card() {
+        let netlist = netlist_for(vec![
+        Component::new(1, ComponentType::NVdmos, Point::origin()).with_name_value("M1", ""),
+        Component::new(2, ComponentType::PVdmos, Point::new(200, 0)).with_name_value("M2", ""),
+        ]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("M1 ") && l.ends_with(" nvdmos_M1")),
+            "{netlist}"
+        );
+        assert!(netlist.contains(".MODEL nvdmos_M1 NVDMOS (VTO=3"), "{netlist}");
+        assert!(netlist.contains(".MODEL pvdmos_M2 PVDMOS (VTO=-3"), "{netlist}");
+    }
+
+    /// H/F elements reference a controlling V source by name; the schematic's
+    /// control pins become a synthesized 0 V sense source.
+    #[test]
+    fn current_controlled_sources_synthesize_a_sense_source() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::Ccvs, Point::origin()).with_name_value("H1", "100"),
+            Component::new(2, ComponentType::Cccs, Point::new(200, 0)).with_name_value("F1", "2.5"),
+        ]);
+        let h_line = netlist
+            .lines()
+            .find(|l| l.starts_with("H1 "))
+            .expect("ccvs line");
+        assert!(h_line.contains(" VSENSE_H1 100"), "{netlist}");
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("VSENSE_H1 ") && l.ends_with(" 0")),
+            "{netlist}"
+        );
+        let f_line = netlist
+            .lines()
+            .find(|l| l.starts_with("F1 "))
+            .expect("cccs line");
+        assert!(f_line.contains(" VSENSE_F1 2.5"), "{netlist}");
+        // Exactly name + 2 nodes + control + gain: no trailing tokens, the
+        // core rejects any tail after the gain.
+        assert_eq!(h_line.split_whitespace().count(), 5, "{netlist}");
+    }
+
+    /// The noise source emits a TRNOISE spec, not a bare DC value.
+    #[test]
+    fn noise_current_source_emits_trnoise() {
+        let mut noise = Component::new(1, ComponentType::CurrentSourceNoise, Point::origin())
+            .with_name_value("I1", "2n");
+        noise.params = "nt=0.5u".to_owned();
+        let netlist = netlist_for(vec![noise]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("I1 ") && l.ends_with("DC 0 TRNOISE(2n 0.5u 0 0)")),
+            "{netlist}"
+        );
+    }
+
+    /// The saturable inductor binds a generated Jiles-Atherton CORE card.
+    #[test]
+    fn saturable_inductor_emits_core_model_card() {
+        let mut sat = Component::new(1, ComponentType::SaturableInductor, Point::origin())
+            .with_name_value("L1", "2m");
+        sat.params = "ms=1.6 n=50".to_owned();
+        let netlist = netlist_for(vec![sat]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("L1 ") && l.ends_with(" 2m core_L1")),
+            "{netlist}"
+        );
+        let card = netlist
+            .lines()
+            .find(|l| l.starts_with(".MODEL core_L1 CORE"))
+            .expect("core card");
+        assert!(card.contains("MS=1.6"), "{netlist}");
+        assert!(card.contains("N=50"), "{netlist}");
+    }
+
+    /// XSPICE blocks emit shaped ports plus a .MODEL card whose type is the
+    /// registered code-model name (the cards used to be missing entirely).
+    #[test]
+    fn xspice_gate_emits_vector_ports_and_model_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::XspiceAndGate, Point::origin())
+                .with_name_value("A1", ""),
+        ]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("A1 "))
+            .expect("gate line");
+        assert!(line.starts_with("A1 ["), "{netlist}");
+        assert!(line.contains("] ["), "{netlist}");
+        assert!(line.ends_with(" a1_model"), "{netlist}");
+        assert!(
+            netlist.contains(".MODEL a1_model d_and (rise_delay=1n fall_delay=1n)"),
+            "{netlist}"
+        );
+    }
+
+    /// The limiter's required output limits always reach its card.
+    #[test]
+    fn xspice_limiter_card_carries_required_limits() {
+        let mut limiter = Component::new(1, ComponentType::XspiceLimiter, Point::origin())
+            .with_name_value("A1", "");
+        limiter.params = "out_upper_limit=5".to_owned();
+        let netlist = netlist_for(vec![limiter]);
+        assert!(
+            netlist.contains(
+                ".MODEL a1_model limit (gain=1 out_lower_limit=-1 out_upper_limit=5 limit_range=1e-6)"
+            ),
+            "{netlist}"
+        );
+    }
+
+    /// Sequential blocks null their unconnected optional set/reset ports and
+    /// the SR latch carries its mandatory enable terminal.
+    #[test]
+    fn xspice_sequential_blocks_null_optional_ports() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::XspiceDFlipFlop, Point::origin())
+                .with_name_value("A1", ""),
+            Component::new(2, ComponentType::XspiceSrLatch, Point::new(200, 0))
+                .with_name_value("A2", ""),
+        ]);
+        let dff = netlist
+            .lines()
+            .find(|l| l.starts_with("A1 "))
+            .expect("dff line");
+        assert!(dff.contains(" null null "), "{netlist}");
+        assert!(netlist.contains(".MODEL a1_model d_dff"), "{netlist}");
+        let latch = netlist
+            .lines()
+            .find(|l| l.starts_with("A2 "))
+            .expect("latch line");
+        // s r en null null q qbar model = 8 tokens + name
+        assert_eq!(latch.split_whitespace().count(), 9, "{netlist}");
+        assert!(netlist.contains(".MODEL a2_model d_srlatch"), "{netlist}");
     }
 
     /// A floating label warns instead of silently vanishing.

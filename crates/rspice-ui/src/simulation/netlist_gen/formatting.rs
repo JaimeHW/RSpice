@@ -229,6 +229,24 @@ impl<'a> NetlistGenerator<'a> {
                 let tau2 = Self::get_param_owned(&params, "tau2", "", "1u");
                 format!("EXP({} {} {} {} {} {})", i1, i2, td1, tau1, td2, tau2)
             }
+            ComponentType::CurrentSourceNoise => {
+                // DC <offset> TRNOISE(NA NT NALPHA NAMP): white noise via
+                // NA/NT, optional 1/f via NALPHA/NAMP. The core requires
+                // NT > 0 whenever NA or NAMP is nonzero, and 0 < NALPHA < 2
+                // when NAMP is nonzero.
+                let params = crate::properties::parse_params_string(&component.params);
+                if params.is_empty()
+                    && let Some(literal) = Self::legacy_waveform_literal(value, "TRNOISE")
+                {
+                    return literal;
+                }
+                let na = Self::get_param_owned(&params, "na", value, "1n");
+                let nt = Self::get_param_owned(&params, "nt", "", "1u");
+                let nalpha = Self::get_param_owned(&params, "nalpha", "", "0");
+                let namp = Self::get_param_owned(&params, "namp", "", "0");
+                let dc = Self::get_param_owned(&params, "dc", "", "0");
+                format!("DC {} TRNOISE({} {} {} {})", dc, na, nt, nalpha, namp)
+            }
             ComponentType::VoltageSourceSffm => {
                 // SFFM(VO VA FC MDI FS)
                 let params = crate::properties::parse_params_string(&component.params);
