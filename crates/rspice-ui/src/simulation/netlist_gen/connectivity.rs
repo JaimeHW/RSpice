@@ -379,19 +379,21 @@ impl<'a> NetlistGenerator<'a> {
 
     /// Identify ground net from Ground components
     pub(super) fn identify_ground(&mut self) {
+        // EVERY ground symbol binds its net to node 0 — standard schematic
+        // semantics where separate ground symbols are the same electrical
+        // node even without a drawn wire between them.
         for component in &self.schematic.components {
             if component.kind == ComponentType::Ground {
-                // Find the net connected to this ground symbol
                 let terminals = self.component_terminal_positions(component);
                 if let Some((_, terminal_pos)) = terminals.first()
                     && let Some(&net_id) = self.point_to_net.get(terminal_pos)
                 {
-                    self.ground_net = Some(net_id);
-                    // Update the net's label
+                    if self.ground_net.is_none() {
+                        self.ground_net = Some(net_id);
+                    }
                     if let Some(net) = self.nets.iter_mut().find(|n| n.id == net_id) {
                         net.label = Some("0".to_string());
                     }
-                    return;
                 }
             }
         }

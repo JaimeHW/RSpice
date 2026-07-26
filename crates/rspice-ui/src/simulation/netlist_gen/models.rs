@@ -206,10 +206,12 @@ impl<'a> NetlistGenerator<'a> {
         if !self.models.contains_key(&model_name) {
             let params = crate::properties::parse_params_string(&component.params);
             let entry = |key: &str, default: &str| Self::get_param_owned(&params, key, "", default);
+            // The CPL card body is re-read from raw source text by a
+            // line-oriented parser: one matrix key per `+` continuation.
             self.models.insert(
                 model_name.clone(),
                 format!(
-                    ".MODEL {} CPL R=({} {} {}) L=({} {} {}) C=({} {} {}) G=({} {} {}) LENGTH={}",
+                    ".MODEL {} CPL\n+ R = ({} {} {})\n+ L = ({} {} {})\n+ C = ({} {} {})\n+ G = ({} {} {})\n+ LENGTH = {}",
                     model_name,
                     entry("r11", "0.1"),
                     entry("r12", "0"),

@@ -1577,7 +1577,7 @@ mod tests {
         assert!(line.ends_with(" cpl_P1"), "{netlist}");
         assert!(
             netlist.contains(
-                ".MODEL cpl_P1 CPL R=(0.1 0 0.1) L=(380n 60n 380n) C=(120p -12p 120p) G=(0 0 0) LENGTH=0.1"
+                ".MODEL cpl_P1 CPL\n+ R = (0.1 0 0.1)\n+ L = (380n 60n 380n)\n+ C = (120p -12p 120p)\n+ G = (0 0 0)\n+ LENGTH = 0.1"
             ),
             "{netlist}"
         );
@@ -1649,7 +1649,9 @@ mod tests {
         );
     }
 
-    /// SOI MOSFETs emit five nodes with a partially-depleted BSIMSOI card.
+    /// SOI MOSFETs emit five nodes with a partially-depleted BSIMSOI card,
+    /// and W/L always reach the instance line (the BSIMSOI internal
+    /// geometry defaults do not converge on a bare card).
     #[test]
     fn soi_mosfet_emits_five_nodes_and_bsimsoi_card() {
         let netlist = netlist_for(vec![
@@ -1659,8 +1661,11 @@ mod tests {
             .lines()
             .find(|l| l.starts_with("M1 "))
             .expect("soi line");
-        assert_eq!(line.split_whitespace().count(), 7, "{netlist}");
-        assert!(line.ends_with(" nmossoi_M1"), "{netlist}");
+        // name + 5 nodes + model + w= + l=
+        assert_eq!(line.split_whitespace().count(), 9, "{netlist}");
+        assert!(line.contains(" nmossoi_M1 "), "{netlist}");
+        assert!(line.contains("w=1u"), "{netlist}");
+        assert!(line.contains("l=180n"), "{netlist}");
         assert!(
             netlist.contains(".MODEL nmossoi_M1 NMOS (LEVEL=57 RBODY=1)"),
             "{netlist}"

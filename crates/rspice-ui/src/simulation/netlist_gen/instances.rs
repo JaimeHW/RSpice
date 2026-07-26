@@ -217,13 +217,23 @@ impl<'a> NetlistGenerator<'a> {
 
             // Five-terminal SOI MOSFET: M name D G S E P model [params],
             // bound to a partially-depleted BSIMSOI card with a resistive
-            // body tie by default.
+            // body tie by default. W/L always reach the deck — the BSIMSOI
+            // internal geometry defaults do not converge on a bare card.
             ComponentType::NmosSoi | ComponentType::PmosSoi => {
                 let nodes = self.format_nodes(&node_names, 5);
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
                 let model = self.get_soi_mosfet_model(component, explicit_model.as_deref());
-                let params = self.format_params(&params_without_model);
+                let mut params_map = crate::properties::parse_params_string(&params_without_model);
+                params_map
+                    .entry("w".to_owned())
+                    .or_insert_with(|| "1u".to_owned());
+                params_map
+                    .entry("l".to_owned())
+                    .or_insert_with(|| "180n".to_owned());
+                let params = self.format_params(
+                    &crate::properties::property_bridge::format_params_string(&params_map),
+                );
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 

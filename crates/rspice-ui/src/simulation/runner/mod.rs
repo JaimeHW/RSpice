@@ -19,6 +19,8 @@ use super::multi_run::AnalysisSpec;
 use super::results::SimulationResult;
 use super::status::{SimulationProgress, SimulationStatus};
 
+#[cfg(test)]
+mod device_e2e_tests;
 mod spec;
 #[cfg(any(target_arch = "wasm32", test))]
 mod wasm_worker;
