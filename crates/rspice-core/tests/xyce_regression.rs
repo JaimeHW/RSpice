@@ -4,12 +4,315 @@
 //! Rust-native RSpice adapter, not the upstream Perl/Bash harness. Upstream
 //! platform scripts are intentionally trimmed from this corpus.
 
-use rspice_core::testing::{XyceDeckSection, XyceRunnerConfig, XyceTestRunner};
-use std::collections::BTreeSet;
+use rspice_core::testing::{
+    XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner, XyceValueMismatch,
+};
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const XYCE_CASE_RUNNER_EXE: &str = env!("CARGO_BIN_EXE_rspice-xyce-case-runner");
+const XYCE_AGGREGATE_HARD_CASE_TIMEOUT_MS: u128 = 30_000;
+const XYCE_CASE_RUNNER_RESULT_GRACE_MS: u128 = 1_000;
+const XYCE_PROGRESS_INITIAL_DELAY: Duration = Duration::from_secs(2);
+const XYCE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+
+fn run_xyce_case_with_watchdog(
+    test_dir: &Path,
+    config: &XyceRunnerConfig,
+    deck: &XyceDeck,
+    index: usize,
+    total: usize,
+) -> XyceTestResult {
+    let start = Instant::now();
+    let hard_timeout_ms = xyce_hard_case_timeout_ms(config);
+    let child_timeout_ms = hard_timeout_ms
+        .saturating_sub(XYCE_CASE_RUNNER_RESULT_GRACE_MS)
+        .max(1);
+    let result_path = unique_xyce_case_result_path(&deck.path);
+    let mut child = match Command::new(XYCE_CASE_RUNNER_EXE)
+        .arg("--test-dir")
+        .arg(test_dir)
+        .arg("--circuit")
+        .arg(&deck.path)
+        .arg("--result")
+        .arg(&result_path)
+        .arg("--relative-tolerance")
+        .arg(config.relative_tolerance.to_string())
+        .arg("--absolute-tolerance")
+        .arg(config.absolute_tolerance.to_string())
+        .arg("--voltage-absolute-tolerance")
+        .arg(config.voltage_absolute_tolerance.to_string())
+        .arg("--power-absolute-tolerance")
+        .arg(config.power_absolute_tolerance.to_string())
+        .arg("--max-mismatches")
+        .arg(config.max_mismatches.to_string())
+        .arg("--max-time-per-test-ms")
+        .arg(child_timeout_ms.to_string())
+        .arg("--verbose")
+        .arg(config.verbose.to_string())
+        .stdout(if config.verbose {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        })
+        .stderr(Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            return xyce_watchdog_error_result(
+                deck,
+                start.elapsed().as_millis(),
+                "case_runner_spawn_failure",
+                format!("Failed to spawn Xyce case runner: {err}"),
+            );
+        }
+    };
+
+    let timeout = Duration::from_millis(hard_timeout_ms.min(u64::MAX as u128) as u64);
+    let mut next_progress = XYCE_PROGRESS_INITIAL_DELAY;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let decoded = match fs::read_to_string(&result_path) {
+                    Ok(content) => decode_xyce_test_result(&content)
+                        .map_err(|err| format!("Case runner wrote an unreadable result: {err}")),
+                    Err(err) => Err(format!(
+                        "Case runner exited with status {status}, but wrote no result: {err}"
+                    )),
+                };
+                let _ = fs::remove_file(&result_path);
+                return match decoded {
+                    Ok(result) => result,
+                    Err(err) => xyce_watchdog_error_result(
+                        deck,
+                        start.elapsed().as_millis(),
+                        "case_runner_result_failure",
+                        err,
+                    ),
+                };
+            }
+            Ok(None) if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&result_path);
+                println!(
+                    "Xyce progress {index}/{total}: {} exceeded hard timeout ({}ms)",
+                    deck.relative_path, hard_timeout_ms
+                );
+                let _ = io::stdout().flush();
+                return xyce_watchdog_error_result(
+                    deck,
+                    start.elapsed().as_millis(),
+                    "hard_process_timeout",
+                    format!("Deck exceeded hard process timeout ({}ms)", hard_timeout_ms),
+                );
+            }
+            Ok(None) => {
+                let elapsed = start.elapsed();
+                if elapsed >= next_progress {
+                    println!(
+                        "Xyce progress {index}/{total}: {} still running after {:.1}s",
+                        deck.relative_path,
+                        elapsed.as_secs_f64()
+                    );
+                    let _ = io::stdout().flush();
+                    next_progress += XYCE_PROGRESS_INTERVAL;
+                }
+                let remaining = timeout.saturating_sub(elapsed);
+                thread::sleep(remaining.min(Duration::from_millis(50)));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&result_path);
+                return xyce_watchdog_error_result(
+                    deck,
+                    start.elapsed().as_millis(),
+                    "case_runner_poll_failure",
+                    format!("Failed to poll Xyce case runner: {err}"),
+                );
+            }
+        }
+    }
+}
+
+fn xyce_hard_case_timeout_ms(config: &XyceRunnerConfig) -> u128 {
+    let hard_cap_ms = std::env::var("RSPICE_XYCE_HARD_CASE_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(XYCE_AGGREGATE_HARD_CASE_TIMEOUT_MS);
+    config.max_time_per_test_ms.max(1).min(hard_cap_ms)
+}
+
+fn xyce_watchdog_error_result(
+    deck: &XyceDeck,
+    duration_ms: u128,
+    contract: &str,
+    error: String,
+) -> XyceTestResult {
+    XyceTestResult {
+        name: deck
+            .path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        relative_path: deck.relative_path.clone(),
+        passed: false,
+        expected_unsupported: false,
+        error: Some(error),
+        mismatches: Vec::new(),
+        duration_ms,
+        contract: contract.to_string(),
+    }
+}
+
+fn unique_xyce_case_result_path(circuit_path: &Path) -> PathBuf {
+    static RESULT_ID: AtomicU64 = AtomicU64::new(0);
+    let stem = circuit_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_nanos();
+    let id = RESULT_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "rspice-xyce-{stem}-{}-{timestamp}-{id}.result",
+        std::process::id()
+    ))
+}
+
+fn decode_xyce_test_result(encoded: &str) -> Result<XyceTestResult, String> {
+    let mut fields = HashMap::new();
+    for line in encoded.lines() {
+        let (name, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("Malformed result field: {line:?}"))?;
+        fields.insert(name.to_string(), unescape_xyce_result_field(value)?);
+    }
+
+    let name = take_xyce_result_field(&mut fields, "name")?;
+    let relative_path = take_xyce_result_field(&mut fields, "relative_path")?;
+    let contract = take_xyce_result_field(&mut fields, "contract")?;
+    let passed = parse_xyce_result_field::<bool>(&mut fields, "passed")?;
+    let expected_unsupported =
+        parse_xyce_result_field::<bool>(&mut fields, "expected_unsupported")?;
+    let duration_ms = parse_xyce_result_field::<u128>(&mut fields, "duration_ms")?;
+    let error = match take_xyce_result_field(&mut fields, "error")? {
+        value if value.is_empty() => None,
+        value => Some(value),
+    };
+    let mismatch_count = parse_xyce_result_field::<usize>(&mut fields, "mismatch_count")?;
+    let mut mismatches = Vec::with_capacity(mismatch_count);
+    for index in 0..mismatch_count {
+        let value = take_xyce_result_field(&mut fields, &format!("mismatch.{index}"))?;
+        mismatches.push(decode_xyce_value_mismatch(&value)?);
+    }
+
+    Ok(XyceTestResult {
+        name,
+        relative_path,
+        passed,
+        expected_unsupported,
+        error,
+        mismatches,
+        duration_ms,
+        contract,
+    })
+}
+
+fn decode_xyce_value_mismatch(encoded: &str) -> Result<XyceValueMismatch, String> {
+    let encoded = encoded
+        .strip_prefix("row=")
+        .ok_or_else(|| format!("Malformed mismatch row: {encoded:?}"))?;
+    let (row, encoded) = encoded
+        .split_once(" probe=")
+        .ok_or_else(|| format!("Malformed mismatch probe: {encoded:?}"))?;
+    let (probe, encoded) = encoded
+        .split_once(" expected=")
+        .ok_or_else(|| format!("Malformed mismatch expected value: {encoded:?}"))?;
+    let (expected, encoded) = encoded
+        .split_once(" actual=")
+        .ok_or_else(|| format!("Malformed mismatch actual value: {encoded:?}"))?;
+    let (actual, relative_error) = encoded
+        .split_once(" relative_error=")
+        .ok_or_else(|| format!("Malformed mismatch relative error: {encoded:?}"))?;
+
+    Ok(XyceValueMismatch {
+        row: row
+            .parse()
+            .map_err(|err| format!("Invalid mismatch row {row:?}: {err}"))?,
+        probe: unescape_xyce_result_field(probe)?,
+        expected: expected
+            .parse()
+            .map_err(|err| format!("Invalid mismatch expected value {expected:?}: {err}"))?,
+        actual: actual
+            .parse()
+            .map_err(|err| format!("Invalid mismatch actual value {actual:?}: {err}"))?,
+        relative_error: relative_error
+            .parse()
+            .map_err(|err| format!("Invalid mismatch relative error {relative_error:?}: {err}"))?,
+    })
+}
+
+fn take_xyce_result_field(
+    fields: &mut HashMap<String, String>,
+    name: &str,
+) -> Result<String, String> {
+    fields
+        .remove(name)
+        .ok_or_else(|| format!("Missing result field {name:?}"))
+}
+
+fn parse_xyce_result_field<T>(fields: &mut HashMap<String, String>, name: &str) -> Result<T, String>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    let value = take_xyce_result_field(fields, name)?;
+    value
+        .parse()
+        .map_err(|err| format!("Invalid result field {name}={value:?}: {err}"))
+}
+
+fn unescape_xyce_result_field(value: &str) -> Result<String, String> {
+    let mut output = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            output.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => output.push('\\'),
+            Some('r') => output.push('\r'),
+            Some('n') => output.push('\n'),
+            Some(other) => return Err(format!("Unknown result escape \\\\{other}")),
+            None => return Err("Trailing backslash in result field".to_string()),
+        }
+    }
+    Ok(output)
+}
 
 fn xyce_runner_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -8651,14 +8954,20 @@ fn test_xyce_startup_diagnostic_wrappers_run_with_exact_typed_contracts() {
 fn test_full_xyce_suite_summary_accounts_for_every_deck() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let config = XyceRunnerConfig::default();
+    let runner = XyceTestRunner::new(&root, config.clone());
 
     let discovered = runner.discover_tests();
     let netlist_count = discovered
         .iter()
         .filter(|deck| deck.section == XyceDeckSection::Netlists)
         .count();
-    let results = runner.run_all();
+    let total = discovered.len();
+    let results = discovered
+        .iter()
+        .enumerate()
+        .map(|(index, deck)| run_xyce_case_with_watchdog(&root, &config, deck, index + 1, total))
+        .collect::<Vec<_>>();
     XyceTestRunner::print_summary(&results);
     let stats = XyceTestRunner::statistics(&results);
 

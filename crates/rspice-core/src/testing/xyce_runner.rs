@@ -46763,6 +46763,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             has_index_column,
         )?;
         let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
+        let print_precisions = Self::dc_print_precisions(source)?;
 
         let mut mismatches = Vec::new();
         for (row_index, point) in points.iter().enumerate() {
@@ -46814,6 +46815,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 primary: point.point.sweep_value,
                 secondary: None,
             };
+            let node_voltages = Self::dc_node_voltage_index(&point.point.result);
             for (column_index, column) in data_columns.iter().enumerate() {
                 let expected = row[column_index + data_column_offset];
                 let (probe, actual) = match column {
@@ -46822,17 +46824,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     }
                     XyceReferenceColumn::Probe { name } => (
                         name.as_str(),
-                        Self::evaluate_dc_probe(
+                        Self::evaluate_dc_probe_with_node_voltage_index(
                             name,
                             &point.netlist,
                             dc,
                             sweep_point,
                             &point.point.result,
                             &point.point.device_op_report,
+                            &node_voltages,
                         )?,
                     ),
                 };
-                let actual = Self::quantize_dc_print_value(source, probe, actual)?;
+                let actual =
+                    Self::quantize_dc_print_value_with_precisions(&print_precisions, probe, actual)?;
                 let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
                     .get(&normalized_probe)
@@ -46904,6 +46908,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             has_index_column,
         )?;
         let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
+        let print_precisions = Self::dc_print_precisions(source)?;
         let primary_points = dc.primary_spec().points();
         if primary_points.is_empty() {
             return Err("primary DC sweep has no points".to_string());
@@ -47016,6 +47021,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 };
                 let point_netlist = Self::dc_sweep_point_netlist(&batch.netlist, dc, sweep_point)?;
                 let probe_netlist = point_netlist.as_ref().unwrap_or(&batch.netlist);
+                let node_voltages = Self::dc_node_voltage_index(&point.result);
                 for (column_index, column) in data_columns.iter().enumerate() {
                     let expected = row[column_index + value_offset];
                     let (probe, actual) = match column {
@@ -47046,18 +47052,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                                     .next_back()
                                     .unwrap_or(0.0)
                             } else {
-                                Self::evaluate_dc_probe(
+                                Self::evaluate_dc_probe_with_node_voltage_index(
                                     name,
                                     probe_netlist,
                                     dc,
                                     sweep_point,
                                     &point.result,
                                     &point.device_op_report,
+                                    &node_voltages,
                                 )?
                             },
                         ),
                     };
-                    let actual = Self::quantize_dc_print_value(source, probe, actual)?;
+                    let actual = Self::quantize_dc_print_value_with_precisions(
+                        &print_precisions,
+                        probe,
+                        actual,
+                    )?;
                     let normalized_probe = Self::normalize_probe(probe);
                     let tolerance = comp_tolerances
                         .get(&normalized_probe)
@@ -54651,6 +54662,63 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         let normalized = Self::normalize_probe(probe);
         Self::evaluate_atomic_dc_probe(&normalized, netlist, dc, sweep_point, result, op_report)
+    }
+
+    fn dc_node_voltage_index(
+        result: &crate::SimulationResult,
+    ) -> HashMap<String, Value> {
+        result
+            .node_names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                result
+                    .try_voltage(index)
+                    .map(|voltage| (name.to_ascii_lowercase(), voltage))
+            })
+            .collect()
+    }
+
+    fn indexed_dc_voltage_named(
+        node_voltages: &HashMap<String, Value>,
+        netlist: &Netlist,
+        node_name: &str,
+    ) -> Option<Value> {
+        if netlist.ground_policy().is_ground(node_name) {
+            return Some(0.0);
+        }
+        Self::node_lookup_candidates(netlist, node_name)
+            .into_iter()
+            .find_map(|candidate| node_voltages.get(&candidate.to_ascii_lowercase()).copied())
+    }
+
+    fn evaluate_dc_probe_with_node_voltage_index(
+        probe: &str,
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+        result: &crate::SimulationResult,
+        op_report: &crate::circuit::DeviceOpReport,
+        node_voltages: &HashMap<String, Value>,
+    ) -> Result<Value, String> {
+        let atomic_probe = Self::print_expression_inner(probe).unwrap_or(probe);
+        let normalized = Self::normalize_probe(atomic_probe);
+        if let Some(voltage_probe) = Self::parse_voltage_probe(&normalized)
+            && Self::probe_call_covers_entire_expression(&normalized)
+        {
+            let pos =
+                Self::indexed_dc_voltage_named(node_voltages, netlist, &voltage_probe.node_pos)
+                    .ok_or_else(|| {
+                        format!("node '{}' not found in DC result", voltage_probe.node_pos)
+                    })?;
+            let neg = match voltage_probe.node_neg {
+                Some(node) => Self::indexed_dc_voltage_named(node_voltages, netlist, &node)
+                    .ok_or_else(|| format!("node '{}' not found in DC result", node))?,
+                None => 0.0,
+            };
+            return Ok(voltage_probe.accessor.evaluate_dc(pos - neg));
+        }
+        Self::evaluate_dc_probe(probe, netlist, dc, sweep_point, result, op_report)
     }
 
     fn evaluate_atomic_dc_probe(
@@ -62462,9 +62530,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Self::print_output_requests(source, "DC")
     }
 
-    fn dc_print_precision_for_probe(source: &str, probe: &str) -> Result<Option<usize>, String> {
-        let target = Self::normalize_probe(probe);
-        let mut matched_precision = None;
+    fn dc_print_precisions(source: &str) -> Result<HashMap<String, usize>, String> {
+        let mut precisions = HashMap::new();
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
             if trimmed.is_empty() {
@@ -62521,29 +62588,42 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 index += 1;
             }
 
-            if probes
-                .iter()
-                .any(|candidate| Self::normalize_probe(candidate) == target)
-            {
-                let effective = precision.unwrap_or(XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION);
-                if let Some(existing) = matched_precision
+            let effective = precision.unwrap_or(XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION);
+            for probe in probes {
+                let normalized = Self::normalize_probe(&probe);
+                if let Some(existing) = precisions.insert(normalized, effective)
                     && existing != effective
                 {
                     return Err(format!(
                         ".PRINT DC probe '{probe}' has conflicting PRECISION values {existing} and {effective}"
                     ));
                 }
-                matched_precision = Some(effective);
             }
         }
-        Ok(matched_precision)
+        Ok(precisions)
     }
 
-    fn quantize_dc_print_value(source: &str, probe: &str, value: Value) -> Result<Value, String> {
-        match Self::dc_print_precision_for_probe(source, probe)? {
+    #[cfg(test)]
+    fn dc_print_precision_for_probe(source: &str, probe: &str) -> Result<Option<usize>, String> {
+        Ok(Self::dc_print_precisions(source)?
+            .get(&Self::normalize_probe(probe))
+            .copied())
+    }
+
+    fn quantize_dc_print_value_with_precisions(
+        precisions: &HashMap<String, usize>,
+        probe: &str,
+        value: Value,
+    ) -> Result<Value, String> {
+        match precisions.get(&Self::normalize_probe(probe)).copied() {
             Some(precision) => Self::xyce_prn_scientific_roundtrip(value, precision),
             None => Ok(value),
         }
+    }
+
+    fn quantize_dc_print_value(source: &str, probe: &str, value: Value) -> Result<Value, String> {
+        let precisions = Self::dc_print_precisions(source)?;
+        Self::quantize_dc_print_value_with_precisions(&precisions, probe, value)
     }
 
     fn deck_has_print_analysis(&self, deck: &XyceDeck, analysis: &str) -> bool {
@@ -76667,6 +76747,35 @@ R3 1 0 {RVAL}
                 .expect("unmatched DC probe has no local precision"),
             None
         );
+    }
+
+    #[test]
+    fn dc_print_precisions_scale_to_certification_sized_probe_tables() {
+        let probes = (1..=50_000)
+            .map(|index| format!("V({index})"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let source = format!(".PRINT DC {probes}\n");
+
+        let precisions =
+            XyceTestRunner::dc_print_precisions(&source).expect("large precision map parses");
+
+        assert_eq!(precisions.len(), 50_000);
+        assert_eq!(
+            precisions.get(&XyceTestRunner::normalize_probe("V(50000)")),
+            Some(&XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION)
+        );
+    }
+
+    #[test]
+    fn dc_voltage_fast_path_requires_one_complete_probe_call() {
+        assert!(XyceTestRunner::probe_call_covers_entire_expression("v(3)"));
+        assert!(!XyceTestRunner::probe_call_covers_entire_expression(
+            "v(3)-v(2)"
+        ));
+        assert!(!XyceTestRunner::probe_call_covers_entire_expression(
+            "v(2)/(1.0+scalar*v(cntl))"
+        ));
     }
 
     #[test]

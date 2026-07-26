@@ -125,6 +125,9 @@ impl Args {
                 "--voltage-absolute-tolerance" => {
                     config.voltage_absolute_tolerance = next_parse(&mut args, &flag)?
                 }
+                "--power-absolute-tolerance" => {
+                    config.power_absolute_tolerance = next_parse(&mut args, &flag)?
+                }
                 "--max-mismatches" => config.max_mismatches = next_parse(&mut args, &flag)?,
                 "--max-time-per-test-ms" => {
                     config.max_time_per_test_ms = next_parse(&mut args, &flag)?
