@@ -14,6 +14,29 @@
 //! deliberately does not clamp `x`: limiting a Newton iterate would change the
 //! equations and invalidate their analytic Jacobian.
 //!
+//! # Operating point
+//!
+//! Setting `dx/dt = 0` gives the DC state row directly, and it is the physical
+//! equation whenever it has a nondegenerate root, so that is what this kernel
+//! solves by default.  The active branch of `f_team` is `(i/I* - 1)^ALPHA*`,
+//! whose root at the threshold current has multiplicity `ALPHA*`.  Only a unit
+//! exponent leaves a nonzero derivative there; for any larger exponent both the
+//! residual and its Jacobian vanish as the iterate approaches the root, so
+//! Newton cannot converge on it.  The row is likewise identically zero
+//! throughout the `[ION, IOFF]` deadband, where no bias-determined state exists
+//! at all.
+//!
+//! Xyce 7.10 loads the dynamic row unconditionally at its operating point and
+//! inherits both failures, aborting such decks with "Numerically singular
+//! matrix found by Amesos".  Because a memristor's state is programmed by
+//! history rather than by bias, this kernel instead gauges those rank-deficient
+//! cases to the device's initial state with the well-posed row `x - XON`,
+//! matching how the PEM family and commercial simulators treat an internal
+//! state that only appears in `Q`.  That reproduces Xyce's own converged TEAM
+//! operating point (`x = 0`, `R = RON`) on the decks it can start, whose `XON`
+//! is the default zero, and additionally solves the constant-bias decks Xyce
+//! cannot start without `UIC`.
+//!
 //! Compatibility policy: model metadata, residuals, charges, and observable
 //! outputs follow Xyce 7.10. The Newton Jacobian is the exact derivative of
 //! those equations with respect to RSpice's scaled solver coordinate. It does
@@ -234,6 +257,28 @@ impl fmt::Display for XyceTeamMemristorError {
 
 impl Error for XyceTeamMemristorError {}
 
+/// Which form of the state row an evaluation should build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XyceTeamEvaluationMode {
+    /// Steady state `f_team * window = 0` where that root is nondegenerate,
+    /// otherwise the `x - XON` gauge. See the module docs.
+    DcOperatingPoint,
+    /// `f_team(i, x) * window(i, x)`, the integrated kinetic law.
+    Dynamic,
+}
+
+/// Kinetic state-row data, absent for the DC `x - XON` gauge equation.
+///
+/// The gauge does not reference the kinetics, so the DC path never evaluates
+/// them.  That also keeps the operating point defined for window types whose
+/// fractional powers are only real-valued over part of the state range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XyceTeamStateDrive {
+    pub window: Value,
+    /// Kinetic term before multiplication by the window.
+    pub drive: Value,
+}
+
 /// Complete equation cache for one Newton evaluation.
 ///
 /// Rows and columns of `jacobian` are ordered `(v_pos, v_neg, x_scaled)`.
@@ -245,9 +290,8 @@ pub struct XyceTeamMemristorCache {
     pub resistance_derivative: Value,
     pub conductance: Value,
     pub current: Value,
-    pub window: Value,
-    /// Kinetic term before multiplication by the window.
-    pub state_drive: Value,
+    /// Kinetics behind the state row, `None` at the DC operating point.
+    pub state_drive: Option<XyceTeamStateDrive>,
     pub residual: [Value; 3],
     pub charge: [Value; 3],
     pub jacobian: [[Value; 3]; 3],
@@ -370,12 +414,41 @@ impl XyceTeamMemristor {
         Ok((value, derivative))
     }
 
-    /// Evaluate `F`, `Q`, and their exact analytic Jacobians.
+    /// State the operating point gauges `x` to, in the scaled coordinate.
+    #[inline]
+    pub fn dc_state_target(&self) -> Value {
+        self.model.scaled_x_on()
+    }
+
+    /// Whether the steady-state row `f_team * window = 0` has a root Newton can
+    /// converge on.
+    ///
+    /// The active branch is `(i/I* - 1)^ALPHA*`, so its threshold root carries
+    /// multiplicity `ALPHA*` and only a unit exponent leaves a nonzero
+    /// derivative there. Both branches must qualify because the branch that
+    /// ends up active depends on the solved bias.
+    #[inline]
+    pub fn has_nondegenerate_dc_state_root(&self) -> bool {
+        self.model.alpha_on == 1.0 && self.model.alpha_off == 1.0
+    }
+
+    /// Evaluate the transient `F`, `Q`, and their exact analytic Jacobians.
     pub fn evaluate(
         &self,
         v_pos: Value,
         v_neg: Value,
         x_scaled: Value,
+    ) -> Result<XyceTeamMemristorCache, XyceTeamMemristorError> {
+        self.evaluate_with_mode(v_pos, v_neg, x_scaled, XyceTeamEvaluationMode::Dynamic)
+    }
+
+    /// Evaluate `F`, `Q`, and their exact analytic Jacobians for one mode.
+    pub fn evaluate_with_mode(
+        &self,
+        v_pos: Value,
+        v_neg: Value,
+        x_scaled: Value,
+        mode: XyceTeamEvaluationMode,
     ) -> Result<XyceTeamMemristorCache, XyceTeamMemristorError> {
         finite_input("v_pos", v_pos)?;
         finite_input("v_neg", v_neg)?;
@@ -389,21 +462,47 @@ impl XyceTeamMemristor {
         let dcurrent_dv_neg = -conductance;
         let dcurrent_dx = -voltage * dresistance_dx / (resistance * resistance);
 
-        let (state_drive, dstate_drive_di) = self.state_drive(current);
-        let (window, dwindow_dx) = self.window(x_scaled, current)?;
-        let state_residual = state_drive * window;
-        let dstate_di = dstate_drive_di * window;
-        let dstate_dx = dstate_di * dcurrent_dx + state_drive * dwindow_dx;
+        let gauge = (None, x_scaled - self.dc_state_target(), [0.0, 0.0, 1.0]);
+        let kinetic_row = || -> Result<_, XyceTeamMemristorError> {
+            let (drive, ddrive_di) = self.state_drive(current);
+            let (window, dwindow_dx) = self.window(x_scaled, current)?;
+            let dstate_di = ddrive_di * window;
+            Ok((
+                Some(XyceTeamStateDrive { window, drive }),
+                drive * window,
+                [
+                    dstate_di * dcurrent_dv_pos,
+                    dstate_di * dcurrent_dv_neg,
+                    dstate_di * dcurrent_dx + drive * dwindow_dx,
+                ],
+            ))
+        };
+
+        let (state_drive, state_residual, state_jacobian) = match mode {
+            XyceTeamEvaluationMode::DcOperatingPoint => {
+                if self.has_nondegenerate_dc_state_root() {
+                    let (drive, residual, jacobian) = kinetic_row()?;
+                    // A unit exponent still leaves the row identically zero
+                    // inside the threshold deadband, and a saturated window can
+                    // annihilate it anywhere. Gauge those iterates too rather
+                    // than hand the solver an empty equation.
+                    if residual == 0.0 && jacobian.iter().all(|derivative| *derivative == 0.0) {
+                        gauge
+                    } else {
+                        (drive, residual, jacobian)
+                    }
+                } else {
+                    gauge
+                }
+            }
+            XyceTeamEvaluationMode::Dynamic => kinetic_row()?,
+        };
 
         let residual = [current, -current, state_residual];
         let jacobian = [
             [dcurrent_dv_pos, dcurrent_dv_neg, dcurrent_dx],
             [-dcurrent_dv_pos, -dcurrent_dv_neg, -dcurrent_dx],
-            [
-                dstate_di * dcurrent_dv_pos,
-                dstate_di * dcurrent_dv_neg,
-                dstate_dx,
-            ],
+            state_jacobian,
         ];
         let charge = [0.0, 0.0, x_scaled];
         let charge_jacobian = [[0.0; 3], [0.0; 3], [0.0, 0.0, 1.0]];
@@ -421,7 +520,6 @@ impl XyceTeamMemristor {
             resistance_derivative: dresistance_dx,
             conductance,
             current,
-            window,
             state_drive,
             residual,
             charge,
@@ -661,7 +759,151 @@ mod tests {
         let base = cache.current / device.model().i_off - 1.0;
         let expected =
             -device.model().k_off * device.model().x_scaling * base.powf(device.model().alpha_off);
-        assert_close(cache.state_drive, expected, 1e-14, 1e-14);
+        assert_close(
+            cache
+                .state_drive
+                .expect("dynamic mode reports kinetics")
+                .drive,
+            expected,
+            1e-14,
+            1e-14,
+        );
+    }
+
+    #[test]
+    fn dc_operating_point_gauges_the_state_to_scaled_xon() {
+        // Every bias below is singular under the kinetic row: the first sits in
+        // the threshold deadband, the second is driven well past IOFF.
+        for (v_pos, x) in [(0.0, 1.2), (0.20, 1.15), (-0.20, 0.4)] {
+            for iv_relation in 0..=1 {
+                for window_type in 0..=4 {
+                    let device = test_model(iv_relation, window_type);
+                    let cache = device
+                        .evaluate_with_mode(v_pos, 0.0, x, XyceTeamEvaluationMode::DcOperatingPoint)
+                        .unwrap();
+                    assert_eq!(cache.state_drive, None);
+                    assert_eq!(cache.jacobian[2], [0.0, 0.0, 1.0]);
+                    assert_close(
+                        cache.residual[2],
+                        x - device.dc_state_target(),
+                        1e-14,
+                        1e-14,
+                    );
+                    // The gauge row is exactly satisfied at the target, so one
+                    // Newton step from any iterate lands on it.
+                    let solved = x - cache.residual[2] / cache.jacobian[2][2];
+                    assert_close(solved, device.model().scaled_x_on(), 1e-14, 1e-14);
+                    // Terminal rows keep the physical resistive law.
+                    assert_eq!(cache.residual[0], -cache.residual[1]);
+                    assert_close(
+                        cache.residual[0],
+                        v_pos / device.resistance(x).unwrap().0,
+                        1e-14,
+                        1e-14,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dc_gauge_target_tracks_a_nonzero_xon() {
+        let mut model = XyceTeamModelParams::default();
+        model.x_on = 0.5e-9;
+        model.x_scaling = 1.0e9;
+        let device = XyceTeamMemristor::new(model, XyceTeamInstanceParams::default()).unwrap();
+        assert_close(device.dc_state_target(), 0.5, 1e-14, 1e-14);
+        let cache = device
+            .evaluate_with_mode(0.2, 0.0, 2.0, XyceTeamEvaluationMode::DcOperatingPoint)
+            .unwrap();
+        assert_close(cache.residual[2], 1.5, 1e-14, 1e-14);
+        // Gauging to XON puts the operating point at RON, as Xyce's own
+        // converged TEAM operating point does.
+        let (resistance, _) = device.resistance(device.dc_state_target()).unwrap();
+        assert_close(resistance, device.model().r_on, 1e-12, 1e-12);
+    }
+
+    #[test]
+    fn unit_exponents_keep_the_physical_dc_state_root() {
+        // ALPHA*=1 makes the threshold root simple, so the operating point must
+        // solve the physical steady state rather than gauge it away.
+        let mut model = XyceTeamModelParams::default();
+        model.r_on = 50.0;
+        model.r_off = 150.0;
+        model.x_on = 0.0;
+        model.x_off = 1.0;
+        model.i_on = -1.0e-3;
+        model.i_off = 1.0e-3;
+        model.k_on = -1.0;
+        model.k_off = 1.0;
+        model.alpha_on = 1.0;
+        model.alpha_off = 1.0;
+        let device = XyceTeamMemristor::new(model, XyceTeamInstanceParams::default()).unwrap();
+        assert!(device.has_nondegenerate_dc_state_root());
+
+        // R=100 puts the current exactly at IOFF, which is the steady state.
+        let cache = device
+            .evaluate_with_mode(0.1, 0.0, 0.5, XyceTeamEvaluationMode::DcOperatingPoint)
+            .unwrap();
+        assert!(cache.state_drive.is_some(), "physical row must be retained");
+        assert_close(cache.resistance, 100.0, 1e-12, 1e-12);
+        assert_close(cache.current, 1.0e-3, 1e-12, 1e-15);
+        assert_close(cache.residual[2], 0.0, 1e-12, 1e-18);
+        // The root is simple, so the state derivative is usable.
+        assert!(
+            cache.jacobian[2][2].abs() > 1.0e-6,
+            "simple root must expose a nonzero state derivative, got {:.6e}",
+            cache.jacobian[2][2]
+        );
+
+        // The deadband still has no bias-determined state, so it gauges.
+        let deadband = device
+            .evaluate_with_mode(0.0, 0.0, 0.5, XyceTeamEvaluationMode::DcOperatingPoint)
+            .unwrap();
+        assert_eq!(deadband.state_drive, None);
+        assert_eq!(deadband.jacobian[2], [0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn dc_state_root_is_degenerate_for_every_exponent_above_one() {
+        for alpha in [2.0, 3.0, 4.0, 10.0] {
+            let mut model = XyceTeamModelParams::default();
+            model.alpha_on = alpha;
+            model.alpha_off = alpha;
+            let device = XyceTeamMemristor::new(model, XyceTeamInstanceParams::default()).unwrap();
+            assert!(
+                !device.has_nondegenerate_dc_state_root(),
+                "ALPHA={alpha} root has multiplicity {alpha}"
+            );
+        }
+    }
+
+    #[test]
+    fn degenerate_dynamic_state_row_is_singular_at_every_dc_bias() {
+        // This is the property that makes the gauge necessary rather than a
+        // convenience: Xyce loads the row below at its operating point and
+        // reports a numerically singular matrix for the same decks.
+        let device = test_model(1, 0);
+        assert!(!device.has_nondegenerate_dc_state_root());
+        // Inside the threshold deadband the row vanishes identically.
+        let deadband = device.evaluate(0.0, 0.0, 1.2).unwrap();
+        assert_eq!(deadband.residual[2], 0.0);
+        assert_eq!(deadband.jacobian[2], [0.0; 3]);
+
+        // Outside it, the only root of the row is the threshold itself, where
+        // the derivative vanishes because ALPHAOFF >= 1.
+        let model = device.model();
+        let x_at_threshold = {
+            let slope =
+                (model.r_off / model.r_on).ln() / (model.scaled_x_off() - model.scaled_x_on());
+            model.scaled_x_on() + (0.20 / model.i_off / model.r_on).ln() / slope
+        };
+        let root = device.evaluate(0.20, 0.0, x_at_threshold).unwrap();
+        assert_close(root.current, model.i_off, 1e-12, 1e-15);
+        assert_close(root.residual[2], 0.0, 1e-12, 1e-18);
+        for derivative in root.jacobian[2] {
+            assert_close(derivative, 0.0, 1e-12, 1e-12);
+        }
     }
 
     #[test]
@@ -707,7 +949,13 @@ mod tests {
         let device = test_model(0, 4);
         let cache = device.evaluate(0.0, 0.0, 1.2).unwrap();
         assert_eq!(cache.current, 0.0);
-        assert_eq!(cache.state_drive, 0.0);
+        assert_eq!(
+            cache
+                .state_drive
+                .expect("dynamic mode reports kinetics")
+                .drive,
+            0.0
+        );
         assert_eq!(cache.residual[2], 0.0);
         assert_eq!(cache.jacobian[2], [0.0; 3]);
     }

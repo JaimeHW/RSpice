@@ -685,3 +685,164 @@ fn xyce_team_memristor_pss_analysis_fails_closed() {
         "error must identify the unsupported TEAM PSS contract: {message}"
     );
 }
+
+#[test]
+fn xyce_team_memristor_transient_solves_from_a_dc_operating_point() {
+    // A constant bias drives the TEAM state row far past IOFF, where its only
+    // root has a vanishing derivative. Xyce 7.10 aborts this deck with
+    // "Numerically singular matrix found by Amesos"; RSpice gauges the hidden
+    // state to XON at the operating point instead, so no UIC is required.
+    let deck = "team memristor probe\n\
+                .model mrm1 memristor level=2 ron=50 roff=1k\n\
+                ymemristor mr1 in 0 mrm1 ivrelation=1\n\
+                V1 in 0 DC 0.2\n\
+                .tran 1n 100n\n\
+                .end\n";
+    let netlist = Netlist::parse_validated(deck).expect("TEAM probe deck validates");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 100.0e-9, 1.0e-9)
+        .expect("TEAM transient starts from a DC operating point without UIC");
+
+    assert!(
+        result.time.len() > 50,
+        "TEAM transient should advance a full time grid, got {} points",
+        result.time.len()
+    );
+    let state = result
+        .try_voltage_waveform_named("YMEMRISTOR!MR1_X")
+        .expect("TEAM state waveform exists");
+
+    // XON defaults to zero, so the gauged operating point is x=0 and R=RON.
+    // That is exactly the operating point Xyce reaches on the decks it can
+    // start, and the kinetics move x by only ~3e-15 over 100 ns here.
+    assert!(
+        state[0].abs() <= 1.0e-9,
+        "gauged operating-point state should be XON=0, got {:.12e}",
+        state[0]
+    );
+    let bias = result
+        .try_voltage_waveform_named("IN")
+        .expect("bias node waveform exists");
+    for (index, time) in result.time.iter().enumerate() {
+        assert!(
+            (bias[index] - 0.2).abs() <= 1.0e-9,
+            "bias should hold 0.2 V at t={time:.12e}, got {:.12e}",
+            bias[index]
+        );
+        assert!(
+            state[index].abs() <= 1.0e-9,
+            "state should stay near XON at t={time:.12e}, got {:.12e}",
+            state[index]
+        );
+    }
+}
+
+#[test]
+fn xyce_team_memristor_operating_point_reports_ron_at_xon() {
+    let deck = "team memristor operating point\n\
+                .model mrm1 memristor level=2 ron=50 roff=1k\n\
+                ymemristor mr1 in 0 mrm1 ivrelation=1\n\
+                V1 in 0 DC 0.2\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse_validated(deck).expect("TEAM .op deck validates");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("TEAM DC operating point is well posed without UIC");
+    let state = result
+        .try_voltage_named("YMEMRISTOR!MR1_X")
+        .expect("TEAM state node is solved at the operating point");
+    assert!(
+        state.abs() <= 1.0e-9,
+        "operating point should gauge the state to XON=0, got {state:.12e}"
+    );
+    let bias = result
+        .try_voltage_named("IN")
+        .expect("bias node is solved at the operating point");
+    assert!(
+        (bias - 0.2).abs() <= 1.0e-9,
+        "bias node should hold 0.2 V, got {bias:.12e}"
+    );
+
+    // Gauging to XON puts the device at RON, so the reported store and lead
+    // current are the pristine-state values rather than an arbitrary root.
+    let resistance = result
+        .try_dc_observable_named("N(YMEMRISTOR!MR1:R)")
+        .expect("TEAM DC resistance store is available");
+    assert!(
+        (resistance - 50.0).abs() <= 1.0e-6,
+        "operating point should report RON=50, got {resistance:.12e}"
+    );
+    let current = result
+        .try_dc_observable_named("I(YMEMRISTOR!MR1)")
+        .expect("TEAM DC lead current is available");
+    assert!(
+        (current - 4.0e-3).abs() <= 1.0e-12,
+        "operating point current should be 0.2V/RON=4mA, got {current:.12e}"
+    );
+}
+
+#[test]
+fn xyce_team_memristor_runs_the_native_canonical_oracle() {
+    // Xyce's own TEAM deck has no UIC and starts from a zero-current operating
+    // point, which the gauge must reproduce bit-for-bit against the vendored
+    // baseline rather than merely converge on.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests")
+        .join("xyce")
+        .canonicalize()
+        .expect("vendored Xyce regression root exists");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEMRISTOR/memristorTEAM_test.cir";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} must run as a native TEAM numeric oracle, got {result:?}"
+    );
+    assert_ne!(result.contract, "unsupported_xyce_contract");
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn xyce_pem_memristor_transient_solves_from_a_dc_operating_point() {
+    // PEM's operating point is the `x - XO` gauge with a unit diagonal, so it
+    // never shares the TEAM state row's DC degeneracy. Pin that under the same
+    // constant bias that TEAM needed the gauge for.
+    let table_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/xyce/Netlists/MEMRISTOR")
+        .canonicalize()
+        .expect("vendored PEM tables exist");
+    let positive = table_dir.join("fxp_table.csv");
+    let negative = table_dir.join("fxm_table.csv");
+    let deck = format!(
+        "PEM memristor DC operating point\n\
+         .model mrm1 memristor level=4\n\
+         + fxpdata={} fxmdata={}\n\
+         + I1=85.37e-6 I2=90.16e-6 V1=0.265 V2=0.265 G0=130.72e-6\n\
+         + VP=0.7 VN=1.0 d1=9.87 d2=-4.82 C1=1000 C2=1000\n\
+         YMEMRISTOR mr1 in 0 mrm1 xo=0.25\n\
+         V1 in 0 DC 0.2\n\
+         .tran 1u 100u\n\
+         .end\n",
+        positive.display(),
+        negative.display()
+    );
+    let netlist = Netlist::parse_validated(&deck).expect("PEM constant-bias deck validates");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 100.0e-6, 1.0e-6)
+        .expect("PEM transient starts from a DC operating point without UIC");
+    let state = result
+        .try_voltage_waveform_named("YMEMRISTOR!MR1_X")
+        .expect("PEM state waveform exists");
+    assert!(
+        (state[0] - 0.25).abs() <= 1.0e-8,
+        "PEM operating point should gauge the state to XO=0.25, got {:.12e}",
+        state[0]
+    );
+    assert!(
+        state.iter().all(|value| value.is_finite()),
+        "PEM state trajectory must stay finite"
+    );
+}

@@ -73,8 +73,8 @@ pub(crate) use memristor_pem::{
     parse_xyce_7_10_legacy_two_column_table_bounded,
 };
 pub use memristor_team::{
-    XYCE_TEAM_MEMRISTOR_LEVEL, XyceTeamInstanceParams, XyceTeamMemristor, XyceTeamMemristorCache,
-    XyceTeamMemristorError, XyceTeamModelParams,
+    XYCE_TEAM_MEMRISTOR_LEVEL, XyceTeamEvaluationMode, XyceTeamInstanceParams, XyceTeamMemristor,
+    XyceTeamMemristorCache, XyceTeamMemristorError, XyceTeamModelParams, XyceTeamStateDrive,
 };
 pub use sources::{CurrentSource, VoltageSource};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
@@ -126,26 +126,23 @@ impl XyceMemristor {
     ) -> Result<XyceMemristorCache, String> {
         match self {
             Self::Team(device) => {
+                // TEAM's steady-state row is degenerate unless both threshold
+                // exponents are unity, so the kernel solves it where that root
+                // is reachable and gauges the state to XON otherwise. See
+                // `memristor_team`'s module docs.
+                let mode = if operating_point {
+                    XyceTeamEvaluationMode::DcOperatingPoint
+                } else {
+                    XyceTeamEvaluationMode::Dynamic
+                };
                 let cache = device
-                    .evaluate(v_pos, v_neg, x)
+                    .evaluate_with_mode(v_pos, v_neg, x, mode)
                     .map_err(|error| error.to_string())?;
-                let mut residual = cache.residual;
-                let mut jacobian = cache.jacobian;
-                if operating_point
-                    && residual[2] == 0.0
-                    && jacobian[2].iter().all(|derivative| *derivative == 0.0)
-                {
-                    // TEAM's threshold deadband has no physical DC equation.
-                    // Select x=0 only for that rank-deficient operating-point
-                    // row; transient always retains the dynamic equation.
-                    residual[2] = x;
-                    jacobian[2] = [0.0, 0.0, 1.0];
-                }
                 Ok(XyceMemristorCache {
                     current: cache.current,
                     resistance: Some(cache.resistance),
-                    residual,
-                    jacobian,
+                    residual: cache.residual,
+                    jacobian: cache.jacobian,
                 })
             }
             Self::Pem(device) => {
