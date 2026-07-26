@@ -313,15 +313,11 @@ impl WorkbenchIcon {
                 painter.circle_stroke(p(10.0, 10.0), 5.5 * scale, stroke);
                 line(&[(14.5, 14.5), (20.0, 20.0)]);
             }
-            Self::Rotate => {
-                painter.circle_stroke(p(12.0, 12.0), 7.0 * scale, stroke);
-                line(&[(17.0, 5.0), (21.0, 5.0), (21.0, 9.0)]);
-            }
-            Self::Mirror => {
-                line(&[(12.0, 3.0), (12.0, 21.0)]);
-                closed(&[(4.0, 7.0), (10.0, 12.0), (4.0, 17.0)]);
-                closed(&[(20.0, 7.0), (14.0, 12.0), (20.0, 17.0)]);
-            }
+            // Selection transforms share their art with the design-system
+            // icon set so the toolbar, the inspector action stack, and the
+            // context menu can never drift apart.
+            Self::Rotate => crate::ui::icons::Icon::Rotate.paint(painter, rect, color),
+            Self::Mirror => crate::ui::icons::Icon::Mirror.paint(painter, rect, color),
             Self::Undo => {
                 line(&[(8.0, 5.0), (3.0, 10.0), (8.0, 15.0)]);
                 line(&[(3.0, 10.0), (14.0, 10.0), (19.0, 14.0), (19.0, 19.0)]);

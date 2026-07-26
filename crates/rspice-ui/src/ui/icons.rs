@@ -93,6 +93,10 @@ pub enum Icon {
     Supply,
     /// Trash / clear.
     Trash,
+    /// Rotate the selection 90° clockwise.
+    Rotate,
+    /// Mirror the selection about an axis.
+    Mirror,
     /// Chevron up.
     ChevronUp,
     /// Chevron down.
@@ -135,6 +139,8 @@ impl Icon {
             Self::Folder => "Browse",
             Self::Add => "Add",
             Self::Copy => "Copy",
+            Self::Rotate => "Rotate",
+            Self::Mirror => "Mirror",
             Self::Stop => "Stop",
             Self::Run => "Run",
             Self::Library => "Library workspace",
@@ -329,6 +335,15 @@ impl Icon {
                 Line(&[[5.0, 7.0], [19.0, 7.0]]),
                 Line(&[[9.0, 7.0], [9.0, 5.0], [15.0, 5.0], [15.0, 7.0]]),
                 Line(&[[7.0, 7.0], [8.0, 20.0], [16.0, 20.0], [17.0, 7.0]]),
+            ],
+            Icon::Rotate => &[
+                Circle([12.0, 12.0], 7.0),
+                Line(&[[17.0, 5.0], [21.0, 5.0], [21.0, 9.0]]),
+            ],
+            Icon::Mirror => &[
+                Line(&[[12.0, 3.0], [12.0, 21.0]]),
+                Poly(&[[4.0, 7.0], [10.0, 12.0], [4.0, 17.0]]),
+                Poly(&[[20.0, 7.0], [14.0, 12.0], [20.0, 17.0]]),
             ],
             Icon::ChevronUp => &[Line(&[[6.0, 14.0], [12.0, 8.0], [18.0, 14.0]])],
             Icon::ChevronDown => &[Line(&[[6.0, 10.0], [12.0, 16.0], [18.0, 10.0]])],
