@@ -452,6 +452,7 @@ mod tests {
     fn transient_conversion_observes_counter_abort() {
         let result = TransientResult {
             time: vec![0.0, 1.0],
+            step_sizes: vec![0.0, 1.0],
             voltages: vec![vec![1.0, 1.0], vec![0.5, 0.5]],
             branch_currents: Vec::new(),
             num_nodes: 2,

@@ -1,7 +1,14 @@
 use std::fmt;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RustBackendErrorKind {
+    Unsupported,
+    Internal,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustBackendError {
+    pub kind: RustBackendErrorKind,
     pub source: String,
     pub module: String,
     pub message: String,
@@ -14,6 +21,7 @@ impl RustBackendError {
         feature: impl Into<String>,
     ) -> Self {
         Self {
+            kind: RustBackendErrorKind::Unsupported,
             source: source.into(),
             module: module.into(),
             message: format!(
@@ -29,6 +37,7 @@ impl RustBackendError {
         message: impl Into<String>,
     ) -> Self {
         Self {
+            kind: RustBackendErrorKind::Internal,
             source: source.into(),
             module: module.into(),
             message: message.into(),
@@ -36,8 +45,7 @@ impl RustBackendError {
     }
 
     pub fn is_unsupported(&self) -> bool {
-        self.message
-            .starts_with("unsupported Verilog-A construct for Rust backend:")
+        self.kind == RustBackendErrorKind::Unsupported
     }
 }
 
@@ -52,3 +60,31 @@ impl fmt::Display for RustBackendError {
 }
 
 impl std::error::Error for RustBackendError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_classification_does_not_depend_on_display_text() {
+        let error = RustBackendError {
+            kind: RustBackendErrorKind::Unsupported,
+            source: "model.va".to_string(),
+            module: "model".to_string(),
+            message: "typed unsupported error with deliberately different wording".to_string(),
+        };
+
+        assert!(error.is_unsupported());
+    }
+
+    #[test]
+    fn internal_error_is_not_a_backend_fallback_signal() {
+        let error = RustBackendError::internal(
+            "model.va",
+            "model",
+            "unsupported Verilog-A construct for Rust backend: misleading text",
+        );
+
+        assert!(!error.is_unsupported());
+    }
+}

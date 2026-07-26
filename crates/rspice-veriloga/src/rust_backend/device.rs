@@ -547,7 +547,6 @@ fn generate_device_with_scalar_hybrid_plan(
         )?,
         &derivative_activity,
     );
-    let state_scratch_usage = StateScratchUsage::from_stamp_files(&stamp_files);
     let state = if let Some(plan) = scalar_hybrid_plan
         .filter(|plan| !plan.static_cache.is_empty() || !scalar_limit_slots.is_empty())
     {
@@ -564,7 +563,6 @@ fn generate_device_with_scalar_hybrid_plan(
             ddt_slots.len(),
             ddt_slots.idt_len(),
             potential_branch_slots.len(),
-            state_scratch_usage,
             &extensions,
         )?
     } else {
@@ -575,7 +573,6 @@ fn generate_device_with_scalar_hybrid_plan(
             ddt_slots.len(),
             ddt_slots.idt_len(),
             potential_branch_slots.len(),
-            state_scratch_usage,
         )?
     };
     let mut files = vec![
@@ -629,8 +626,60 @@ fn compact_stamp_files(
     }
     files.stamp = prune_unused_root_scratch_allocations(files.stamp);
     files.stamp = prune_unused_root_stamp_support_aliases(files.stamp, &files.helpers);
+    files.stamp = inject_workspace_pool_support(files.stamp);
     files.stamp = compact_generated_temporary_identifiers(files.stamp);
     files
+}
+
+fn inject_workspace_pool_support(source: String) -> String {
+    let uses_transient = source.contains("&TRANSIENT_SCRATCH_POOL");
+    let uses_reactive = source.contains("&REACTIVE_SCRATCH_POOL");
+    if !uses_transient && !uses_reactive {
+        return source;
+    }
+
+    let mut support = String::from(
+        "use std::cell::RefCell;\nuse std::thread::LocalKey;\n\n\
+         struct ScratchLease<T: 'static> {\n\
+         \x20   value: Option<Box<T>>,\n\
+         \x20   pool: &'static LocalKey<RefCell<Vec<Box<T>>>>,\n\
+         }\n\n\
+         impl<T: 'static> ScratchLease<T> {\n\
+         \x20   #[inline]\n\
+         \x20   fn acquire(\n\
+         \x20       pool: &'static LocalKey<RefCell<Vec<Box<T>>>>,\n\
+         \x20       allocate: impl FnOnce() -> Box<T>,\n\
+         \x20   ) -> Self {\n\
+         \x20       let value = pool.with_borrow_mut(|available| available.pop()).unwrap_or_else(allocate);\n\
+         \x20       Self { value: Some(value), pool }\n\
+         \x20   }\n\n\
+         \x20   #[inline]\n\
+         \x20   fn get_mut(&mut self) -> &mut T {\n\
+         \x20       self.value.as_deref_mut().expect(\"scratch lease must own a workspace\")\n\
+         \x20   }\n\
+         }\n\n\
+         impl<T: 'static> Drop for ScratchLease<T> {\n\
+         \x20   #[inline]\n\
+         \x20   fn drop(&mut self) {\n\
+         \x20       if let Some(value) = self.value.take() {\n\
+         \x20           self.pool.with_borrow_mut(|available| available.push(value));\n\
+         \x20       }\n\
+         \x20   }\n\
+         }\n\n\
+         thread_local! {\n",
+    );
+    if uses_transient {
+        support.push_str(
+            "    static TRANSIENT_SCRATCH_POOL: RefCell<Vec<Box<Scratch>>> = const { RefCell::new(Vec::new()) };\n",
+        );
+    }
+    if uses_reactive {
+        support.push_str(
+            "    static REACTIVE_SCRATCH_POOL: RefCell<Vec<Box<ReactiveScratch>>> = const { RefCell::new(Vec::new()) };\n",
+        );
+    }
+    support.push_str("}\n\n");
+    source.replacen("const LIMEXP_MAX", &format!("{support}const LIMEXP_MAX"), 1)
 }
 
 fn compact_generated_temporary_identifiers(source: String) -> String {
@@ -861,8 +910,20 @@ fn root_stamp_function_ranges(lines: &[&str]) -> Vec<(usize, usize)> {
 fn root_scratch_allocation_ranges(lines: &[&str]) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let mut index = 0usize;
-    while index + 3 < lines.len() {
+    while index < lines.len() {
+        if index + 1 < lines.len()
+            && lines[index]
+                .trim()
+                .starts_with("let mut scratch_lease = ScratchLease::acquire(")
+            && lines[index].trim_end().ends_with(");")
+            && lines[index + 1].trim() == "let s = scratch_lease.get_mut();"
+        {
+            ranges.push((index, index + 2));
+            index += 2;
+            continue;
+        }
         if is_root_scratch_allocation_start(lines[index])
+            && index + 3 < lines.len()
             && lines[index + 1].trim() == "Some(buf) => buf.as_mut(),"
             && lines[index + 2]
                 .trim_start()
@@ -15476,6 +15537,7 @@ pub(super) fn generate_mod_file() -> String {
 #[derive(Debug, Clone)]
 pub(super) struct StateFileExtensions {
     pub params_visibility: &'static str,
+    pub support_types: String,
     pub instance_fields: String,
     pub clone_fields: String,
     pub new_initializers: String,
@@ -15494,6 +15556,7 @@ impl Default for StateFileExtensions {
     fn default() -> Self {
         Self {
             params_visibility: "pub",
+            support_types: String::new(),
             instance_fields: String::new(),
             clone_fields: String::new(),
             new_initializers: String::new(),
@@ -15512,36 +15575,6 @@ impl Default for StateFileExtensions {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct StateScratchUsage {
-    uses_transient: bool,
-    uses_reactive: bool,
-}
-
-impl StateScratchUsage {
-    fn from_stamp_files(files: &StampFiles) -> Self {
-        let mut usage = Self::default();
-        usage.add_source(files.stamp.as_str());
-        for helper in &files.helpers {
-            usage.add_source(helper.contents.as_str());
-        }
-        usage
-    }
-
-    fn add_source(&mut self, source: &str) {
-        self.uses_transient |= source.contains("self.scratch")
-            || source.contains("&mut Scratch")
-            || source.contains("Scratch::new_box()");
-        self.uses_reactive |= source.contains("self.reactive_scratch")
-            || source.contains("&mut ReactiveScratch")
-            || source.contains("ReactiveScratch::new_box()");
-    }
-
-    fn is_empty(self) -> bool {
-        !self.uses_transient && !self.uses_reactive
-    }
-}
-
 pub(super) fn generate_state_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
@@ -15549,7 +15582,6 @@ pub(super) fn generate_state_file(
     ddt_state_count: usize,
     idt_state_count: usize,
     branch_count: usize,
-    scratch_usage: StateScratchUsage,
 ) -> Result<String, RustBackendError> {
     generate_state_file_with_extensions(
         artifact,
@@ -15558,7 +15590,6 @@ pub(super) fn generate_state_file(
         ddt_state_count,
         idt_state_count,
         branch_count,
-        scratch_usage,
         &StateFileExtensions::default(),
     )
 }
@@ -15570,7 +15601,6 @@ pub(super) fn generate_state_file_with_extensions(
     ddt_state_count: usize,
     idt_state_count: usize,
     branch_count: usize,
-    scratch_usage: StateScratchUsage,
     extensions: &StateFileExtensions,
 ) -> Result<String, RustBackendError> {
     let checkpoint_model_identity = CHECKPOINT_IDENTITY_PLACEHOLDER;
@@ -15580,22 +15610,7 @@ pub(super) fn generate_state_file_with_extensions(
         "use {}::{{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState}};\n",
         options.runtime_path
     ));
-    if scratch_usage.is_empty() {
-        out.push('\n');
-    } else {
-        let mut support_imports = Vec::new();
-        if scratch_usage.uses_reactive {
-            support_imports.push("ReactiveScratch as KernelReactiveScratch");
-        }
-        if scratch_usage.uses_transient {
-            support_imports.push("Scratch as KernelScratch");
-        }
-        out.push_str(&format!(
-            "use {}::kernel_runtime::{{{}}};\n\n",
-            options.runtime_path,
-            support_imports.join(", ")
-        ));
-    }
+    out.push('\n');
     out.push_str("#[repr(C)]\n");
     out.push_str("#[derive(Copy, Clone)]\n");
     out.push_str("pub struct Parameters {\n");
@@ -15652,6 +15667,30 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n");
     out.push_str("}\n\n");
 
+    out.push_str("#[derive(Clone)]\n");
+    out.push_str("pub(crate) struct StampState<const DDT: usize, const IDT: usize> {\n");
+    out.push_str("    pub(crate) ddt_current: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_previous: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_older: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_derivative_current: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_derivative_previous: [f64; DDT],\n");
+    out.push_str("    pub(crate) idt_current: [f64; IDT],\n");
+    out.push_str("    pub(crate) idt_previous: [f64; IDT],\n");
+    out.push_str("    pub(crate) ddt_initialized: [bool; DDT],\n");
+    out.push_str("    pub(crate) idt_initialized: [bool; IDT],\n");
+    out.push_str("}\n\n");
+    out.push_str("impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {\n");
+    out.push_str("    fn new_box() -> Box<Self> {\n");
+    out.push_str("        let mut boxed = Box::<Self>::new_uninit();\n");
+    out.push_str("        unsafe {\n");
+    out.push_str("            // SAFETY: every field is an array of f64 or bool; all-zero bytes are valid values for both.\n");
+    out.push_str("            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n");
+    out.push_str("            boxed.assume_init()\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str(&extensions.support_types);
+
     let node_count = artifact.mir.nodes.len();
     let terminal_count = artifact
         .mir
@@ -15681,46 +15720,12 @@ pub(super) fn generate_state_file_with_extensions(
     ));
     out.push_str("    pub(crate) multiplicity: f64,\n");
     out.push_str(&format!(
-        "    pub(crate) ddt_state_current: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_state_previous: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_state_older: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_state_initialized: Box<[bool; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_derivative_current: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_derivative_previous: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) idt_state_current: Box<[f64; {idt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) idt_state_previous: Box<[f64; {idt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) idt_state_initialized: Box<[bool; {idt_state_count}]>,\n"
+        "    pub(crate) stamp_state: Box<StampState<{ddt_state_count}, {idt_state_count}>>,\n"
     ));
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
     out.push_str("    pub(crate) ddt_coefficients: GeneratedDdtCoefficients,\n");
     out.push_str(&extensions.instance_fields);
-    if scratch_usage.uses_transient {
-        out.push_str(&format!(
-            "    pub(crate) scratch: Option<Box<KernelScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
-        ));
-    }
-    if scratch_usage.uses_reactive {
-        out.push_str(&format!(
-            "    pub(crate) reactive_scratch: Option<Box<KernelReactiveScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
-        ));
-    }
     out.push_str("}\n\n");
     out.push_str("impl Clone for Instance {\n");
     out.push_str("    #[inline]\n");
@@ -15731,25 +15736,11 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            params: self.params.clone(),\n");
     out.push_str("            param_given: self.param_given.clone(),\n");
     out.push_str("            multiplicity: self.multiplicity,\n");
-    out.push_str("            ddt_state_current: self.ddt_state_current.clone(),\n");
-    out.push_str("            ddt_state_previous: self.ddt_state_previous.clone(),\n");
-    out.push_str("            ddt_state_older: self.ddt_state_older.clone(),\n");
-    out.push_str("            ddt_state_initialized: self.ddt_state_initialized.clone(),\n");
-    out.push_str("            ddt_derivative_current: self.ddt_derivative_current.clone(),\n");
-    out.push_str("            ddt_derivative_previous: self.ddt_derivative_previous.clone(),\n");
-    out.push_str("            idt_state_current: self.idt_state_current.clone(),\n");
-    out.push_str("            idt_state_previous: self.idt_state_previous.clone(),\n");
-    out.push_str("            idt_state_initialized: self.idt_state_initialized.clone(),\n");
+    out.push_str("            stamp_state: self.stamp_state.clone(),\n");
     out.push_str("            time: self.time,\n");
     out.push_str("            timestep: self.timestep,\n");
     out.push_str("            ddt_coefficients: self.ddt_coefficients,\n");
     out.push_str(&extensions.clone_fields);
-    if scratch_usage.uses_transient {
-        out.push_str("            scratch: None,\n");
-    }
-    if scratch_usage.uses_reactive {
-        out.push_str("            reactive_scratch: None,\n");
-    }
     out.push_str("        }\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
@@ -15809,39 +15800,11 @@ pub(super) fn generate_state_file_with_extensions(
         "            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),\n",
     );
     out.push_str("            multiplicity: 1.0,\n");
-    out.push_str(
-        "            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            ddt_state_older: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str("            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),\n");
-    out.push_str(
-        "            ddt_derivative_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            ddt_derivative_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str("            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),\n");
+    out.push_str("            stamp_state: StampState::new_box(),\n");
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
     out.push_str("            ddt_coefficients: GeneratedDdtCoefficients::inactive(),\n");
     out.push_str(&extensions.new_initializers);
-    if scratch_usage.uses_transient {
-        out.push_str("            scratch: None,\n");
-    }
-    if scratch_usage.uses_reactive {
-        out.push_str("            reactive_scratch: None,\n");
-    }
     if extensions.after_new.is_empty() {
         out.push_str("        }\n");
     } else {
@@ -15852,37 +15815,17 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str("    pub fn restore_from_snapshot(&mut self, snapshot: Self) {\n");
-    if scratch_usage.uses_transient {
-        out.push_str("        let scratch = self.scratch.take();\n");
-    }
-    if scratch_usage.uses_reactive {
-        out.push_str("        let reactive_scratch = self.reactive_scratch.take();\n");
-    }
     out.push_str("        let Self {\n");
     out.push_str("            nodes,\n");
     out.push_str("            branches,\n");
     out.push_str("            params,\n");
     out.push_str("            param_given,\n");
     out.push_str("            multiplicity,\n");
-    out.push_str("            ddt_state_current,\n");
-    out.push_str("            ddt_state_previous,\n");
-    out.push_str("            ddt_state_older,\n");
-    out.push_str("            ddt_state_initialized,\n");
-    out.push_str("            ddt_derivative_current,\n");
-    out.push_str("            ddt_derivative_previous,\n");
-    out.push_str("            idt_state_current,\n");
-    out.push_str("            idt_state_previous,\n");
-    out.push_str("            idt_state_initialized,\n");
+    out.push_str("            stamp_state,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
     out.push_str("            ddt_coefficients,\n");
     out.push_str(&extensions.restore_destructure_fields);
-    if scratch_usage.uses_transient {
-        out.push_str("            scratch: _,\n");
-    }
-    if scratch_usage.uses_reactive {
-        out.push_str("            reactive_scratch: _,\n");
-    }
     out.push_str("        } = snapshot;\n");
     out.push_str("        *self = Self {\n");
     out.push_str("            nodes,\n");
@@ -15890,37 +15833,25 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            params,\n");
     out.push_str("            param_given,\n");
     out.push_str("            multiplicity,\n");
-    out.push_str("            ddt_state_current,\n");
-    out.push_str("            ddt_state_previous,\n");
-    out.push_str("            ddt_state_older,\n");
-    out.push_str("            ddt_state_initialized,\n");
-    out.push_str("            ddt_derivative_current,\n");
-    out.push_str("            ddt_derivative_previous,\n");
-    out.push_str("            idt_state_current,\n");
-    out.push_str("            idt_state_previous,\n");
-    out.push_str("            idt_state_initialized,\n");
+    out.push_str("            stamp_state,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
     out.push_str("            ddt_coefficients,\n");
     out.push_str(&extensions.restore_initializers);
-    if scratch_usage.uses_transient {
-        out.push_str("            scratch,\n");
-    }
-    if scratch_usage.uses_reactive {
-        out.push_str("            reactive_scratch,\n");
-    }
     out.push_str("        };\n");
     out.push_str("    }\n\n");
     out.push_str(
         "    pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
     );
     out.push_str("        GeneratedVerilogAPersistentState {\n");
-    out.push_str("            ddt_previous: self.ddt_state_previous.to_vec(),\n");
-    out.push_str("            ddt_older: self.ddt_state_older.to_vec(),\n");
-    out.push_str("            ddt_derivative_previous: self.ddt_derivative_previous.to_vec(),\n");
-    out.push_str("            ddt_initialized: self.ddt_state_initialized.to_vec(),\n");
-    out.push_str("            idt_previous: self.idt_state_previous.to_vec(),\n");
-    out.push_str("            idt_initialized: self.idt_state_initialized.to_vec(),\n");
+    out.push_str("            ddt_previous: self.stamp_state.ddt_previous.to_vec(),\n");
+    out.push_str("            ddt_older: self.stamp_state.ddt_older.to_vec(),\n");
+    out.push_str(
+        "            ddt_derivative_previous: self.stamp_state.ddt_derivative_previous.to_vec(),\n",
+    );
+    out.push_str("            ddt_initialized: self.stamp_state.ddt_initialized.to_vec(),\n");
+    out.push_str("            idt_previous: self.stamp_state.idt_previous.to_vec(),\n");
+    out.push_str("            idt_initialized: self.stamp_state.idt_initialized.to_vec(),\n");
     out.push_str(&extensions.checkpoint_capture_fields);
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -15939,26 +15870,24 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
     out.push_str("    pub(crate) fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        self.validate_persistent_state_shape(state)?;\n");
-    out.push_str("        self.ddt_state_previous.copy_from_slice(&state.ddt_previous);\n");
-    out.push_str("        self.ddt_state_current.copy_from_slice(&state.ddt_previous);\n");
-    out.push_str("        self.ddt_state_older.copy_from_slice(&state.ddt_older);\n");
+    out.push_str("        self.stamp_state.ddt_previous.copy_from_slice(&state.ddt_previous);\n");
+    out.push_str("        self.stamp_state.ddt_current.copy_from_slice(&state.ddt_previous);\n");
+    out.push_str("        self.stamp_state.ddt_older.copy_from_slice(&state.ddt_older);\n");
     out.push_str(
-        "        self.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);\n",
+        "        self.stamp_state.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);\n",
     );
     out.push_str(
-        "        self.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);\n",
+        "        self.stamp_state.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);\n",
     );
-    out.push_str("        self.ddt_state_initialized.copy_from_slice(&state.ddt_initialized);\n");
-    out.push_str("        self.idt_state_previous.copy_from_slice(&state.idt_previous);\n");
-    out.push_str("        self.idt_state_current.copy_from_slice(&state.idt_previous);\n");
-    out.push_str("        self.idt_state_initialized.copy_from_slice(&state.idt_initialized);\n");
+    out.push_str(
+        "        self.stamp_state.ddt_initialized.copy_from_slice(&state.ddt_initialized);\n",
+    );
+    out.push_str("        self.stamp_state.idt_previous.copy_from_slice(&state.idt_previous);\n");
+    out.push_str("        self.stamp_state.idt_current.copy_from_slice(&state.idt_previous);\n");
+    out.push_str(
+        "        self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);\n",
+    );
     out.push_str(&extensions.checkpoint_restore_fields);
-    if scratch_usage.uses_transient {
-        out.push_str("        self.scratch = None;\n");
-    }
-    if scratch_usage.uses_reactive {
-        out.push_str("        self.reactive_scratch = None;\n");
-    }
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
@@ -15984,8 +15913,9 @@ pub(super) fn generate_state_file_with_extensions(
         ));
         out.push_str("        };\n");
         out.push_str("        validate_parameter_scalar_metadata(index, value)?;\n");
-        out.push_str("        self.write_parameter_slot(index, value);\n");
-        out.push_str("        self.finish_set_parameter(index);\n");
+        out.push_str("        let was_given = self.param_given[index];\n");
+        out.push_str("        let value_changed = self.write_parameter_slot(index, value);\n");
+        out.push_str("        self.finish_set_parameter(index, value_changed || !was_given);\n");
         out.push_str("        Ok(())\n");
     }
     out.push_str("    }\n");
@@ -16007,25 +15937,33 @@ pub(super) fn generate_state_file_with_extensions(
     }
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
-    out.push_str("    fn write_parameter_slot(&mut self, index: usize, value: f64) {\n");
+    out.push_str("    fn write_parameter_slot(&mut self, index: usize, value: f64) -> bool {\n");
     out.push_str("        debug_assert!(index < Self::PARAMETER_COUNT, \"generated parameter index out of range\");\n");
     out.push_str("        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.\n");
     out.push_str("        unsafe {\n");
     out.push_str("            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;\n");
+    out.push_str("            let changed = (*ptr.add(index)).to_bits() != value.to_bits();\n");
     out.push_str("            *ptr.add(index) = value;\n");
+    out.push_str("            changed\n");
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
-    out.push_str("    fn finish_set_parameter(&mut self, index: usize) {\n");
+    out.push_str(
+        "    fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {\n",
+    );
     out.push_str("        self.mark_param_given(index);\n");
     if !extensions.set_parameter_hook.is_empty() {
+        out.push_str("        if invalidates_caches {\n");
         for line in extensions.set_parameter_hook.lines() {
             if !line.trim().is_empty() {
-                out.push_str("        ");
+                out.push_str("            ");
                 out.push_str(line.trim_end());
                 out.push('\n');
             }
         }
+        out.push_str("        }\n");
+    } else {
+        out.push_str("        let _ = invalidates_caches;\n");
     }
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
@@ -16034,9 +15972,16 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        self.param_given[index] = true;\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
-    out.push_str("    pub fn set_multiplicity(&mut self, multiplicity: f64) {\n");
+    out.push_str(
+        "    pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {\n",
+    );
     out.push_str("        if multiplicity.is_finite() && multiplicity > 0.0 {\n");
     out.push_str("            self.multiplicity = multiplicity;\n");
+    out.push_str("            Ok(())\n");
+    out.push_str("        } else {\n");
+    out.push_str(
+        "            Err(format!(\"instance multiplicity 'm' must be finite and > 0.0, got {}\", multiplicity))\n",
+    );
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
@@ -16051,18 +15996,24 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    pub fn accept_timestep(&mut self) {\n");
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
-    out.push_str("            self.ddt_state_older[index] = self.ddt_state_previous[index];\n");
-    out.push_str("            self.ddt_state_previous[index] = self.ddt_state_current[index];\n");
     out.push_str(
-        "            self.ddt_derivative_previous[index] = self.ddt_derivative_current[index];\n",
+        "            self.stamp_state.ddt_older[index] = self.stamp_state.ddt_previous[index];\n",
     );
-    out.push_str("            self.ddt_state_initialized[index] = true;\n");
+    out.push_str(
+        "            self.stamp_state.ddt_previous[index] = self.stamp_state.ddt_current[index];\n",
+    );
+    out.push_str(
+        "            self.stamp_state.ddt_derivative_previous[index] = self.stamp_state.ddt_derivative_current[index];\n",
+    );
+    out.push_str("            self.stamp_state.ddt_initialized[index] = true;\n");
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::IDT_STATE_COUNT {\n");
-    out.push_str("            self.idt_state_previous[index] = self.idt_state_current[index];\n");
-    out.push_str("            self.idt_state_initialized[index] = true;\n");
+    out.push_str(
+        "            self.stamp_state.idt_previous[index] = self.stamp_state.idt_current[index];\n",
+    );
+    out.push_str("            self.stamp_state.idt_initialized[index] = true;\n");
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -16070,31 +16021,31 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("    #[inline]\n");
         out.push_str("    pub(crate) fn eval_ddt(&mut self, slot: usize, value: f64) -> f64 {\n");
         out.push_str("        debug_assert!(slot < Self::DDT_STATE_COUNT, \"generated ddt state slot out of range\");\n");
-        out.push_str("        let previous = if self.ddt_state_initialized[slot] {\n");
-        out.push_str("            self.ddt_state_previous[slot]\n");
+        out.push_str("        let previous = if self.stamp_state.ddt_initialized[slot] {\n");
+        out.push_str("            self.stamp_state.ddt_previous[slot]\n");
         out.push_str("        } else {\n");
         out.push_str("            value\n");
         out.push_str("        };\n");
-        out.push_str("        let older = if self.ddt_state_initialized[slot] {\n");
-        out.push_str("            self.ddt_state_older[slot]\n");
+        out.push_str("        let older = if self.stamp_state.ddt_initialized[slot] {\n");
+        out.push_str("            self.stamp_state.ddt_older[slot]\n");
         out.push_str("        } else {\n");
         out.push_str("            value\n");
         out.push_str("        };\n");
-        out.push_str("        self.ddt_state_current[slot] = value;\n");
+        out.push_str("        self.stamp_state.ddt_current[slot] = value;\n");
         out.push_str("        if self.ddt_coefficients.active {\n");
         out.push_str("            let result = value * self.ddt_coefficients.derivative_scale\n");
         out.push_str("                - previous * self.ddt_coefficients.previous_value_scale\n");
         out.push_str("                - older * self.ddt_coefficients.older_value_scale\n");
-        out.push_str("                - self.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;\n");
-        out.push_str("            self.ddt_derivative_current[slot] = result;\n");
+        out.push_str("                - self.stamp_state.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;\n");
+        out.push_str("            self.stamp_state.ddt_derivative_current[slot] = result;\n");
         out.push_str("            result\n");
         out.push_str("        } else {\n");
-        out.push_str("            self.ddt_state_current[slot] = value;\n");
-        out.push_str("            self.ddt_state_previous[slot] = value;\n");
-        out.push_str("            self.ddt_state_older[slot] = value;\n");
-        out.push_str("            self.ddt_derivative_current[slot] = 0.0;\n");
-        out.push_str("            self.ddt_derivative_previous[slot] = 0.0;\n");
-        out.push_str("            self.ddt_state_initialized[slot] = true;\n");
+        out.push_str("            self.stamp_state.ddt_current[slot] = value;\n");
+        out.push_str("            self.stamp_state.ddt_previous[slot] = value;\n");
+        out.push_str("            self.stamp_state.ddt_older[slot] = value;\n");
+        out.push_str("            self.stamp_state.ddt_derivative_current[slot] = 0.0;\n");
+        out.push_str("            self.stamp_state.ddt_derivative_previous[slot] = 0.0;\n");
+        out.push_str("            self.stamp_state.ddt_initialized[slot] = true;\n");
         out.push_str("            0.0\n");
         out.push_str("        }\n");
         out.push_str("    }\n\n");
@@ -16113,8 +16064,8 @@ pub(super) fn generate_state_file_with_extensions(
             "    pub(crate) fn eval_idt(&mut self, slot: usize, value: f64, ic: f64) -> f64 {\n",
         );
         out.push_str("        debug_assert!(slot < Self::IDT_STATE_COUNT, \"generated idt state slot out of range\");\n");
-        out.push_str("        let previous = if self.idt_state_initialized[slot] {\n");
-        out.push_str("            self.idt_state_previous[slot]\n");
+        out.push_str("        let previous = if self.stamp_state.idt_initialized[slot] {\n");
+        out.push_str("            self.stamp_state.idt_previous[slot]\n");
         out.push_str("        } else {\n");
         out.push_str("            ic\n");
         out.push_str("        };\n");
@@ -16123,10 +16074,10 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        } else {\n");
         out.push_str("            ic\n");
         out.push_str("        };\n");
-        out.push_str("        self.idt_state_current[slot] = current;\n");
+        out.push_str("        self.stamp_state.idt_current[slot] = current;\n");
         out.push_str("        if self.timestep.abs() <= Self::DDT_EPSILON {\n");
-        out.push_str("            self.idt_state_previous[slot] = current;\n");
-        out.push_str("            self.idt_state_initialized[slot] = true;\n");
+        out.push_str("            self.stamp_state.idt_previous[slot] = current;\n");
+        out.push_str("            self.stamp_state.idt_initialized[slot] = true;\n");
         out.push_str("        }\n");
         out.push_str("        current\n");
         out.push_str("    }\n\n");
@@ -17367,6 +17318,9 @@ fn emit_temperature_static_refresh(
     out: &mut String,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
 ) {
+    if scalar_hybrid_plan.is_some_and(|plan| plan.static_cache.has_instance_values()) {
+        out.push_str("        self.ensure_instance_static();\n");
+    }
     if scalar_hybrid_plan.is_some_and(|plan| plan.static_cache.has_temperature_values()) {
         out.push_str("        let scalar_temperature_static_temperature = (ctx).temperature();\n");
         out.push_str(
@@ -17745,11 +17699,84 @@ fn generate_scratch_struct() -> String {
         "    }",
         "}",
         "",
+        "const INACTIVE_DERIVATIVE_ROW: u32 = u32::MAX;",
+        "",
+        "pub(crate) struct DerivativeMatrix<const ROW_COUNT: usize, const AXIS_COUNT: usize> {",
+        "    row_slots: Box<[u32; ROW_COUNT]>,",
+        "    rows: Box<[[f64; AXIS_COUNT]]>,",
+        "    zero: [f64; AXIS_COUNT],",
+        "}",
+        "",
+        "impl<const ROW_COUNT: usize, const AXIS_COUNT: usize> DerivativeMatrix<ROW_COUNT, AXIS_COUNT> {",
+        "    fn new(activity_masks: &'static [u128]) -> Self {",
+        "        assert!(ROW_COUNT < u32::MAX as usize, \"generated derivative row count exceeds packed workspace ABI\");",
+        "        let valid_mask = if AXIS_COUNT >= u128::BITS as usize { u128::MAX } else if AXIS_COUNT == 0 { 0 } else { (1u128 << AXIS_COUNT) - 1 };",
+        "        let mut active_count = 0usize;",
+        "        let mut row_slots = Box::<[u32; ROW_COUNT]>::new_uninit();",
+        "        unsafe {",
+        "            let slots = row_slots.as_mut_ptr().cast::<u32>();",
+        "            std::ptr::write_bytes(slots, 0xff, ROW_COUNT);",
+        "            for row in 0..ROW_COUNT {",
+        "                let active = AXIS_COUNT != 0 && (AXIS_COUNT > u128::BITS as usize || activity_masks.get(row).map_or(true, |mask| mask & valid_mask != 0));",
+        "                if active {",
+        "                    slots.add(row).write(active_count as u32);",
+        "                    active_count += 1;",
+        "                }",
+        "            }",
+        "            let mut rows = Box::<[[f64; AXIS_COUNT]]>::new_uninit_slice(active_count);",
+        "            std::ptr::write_bytes(rows.as_mut_ptr(), 0, active_count);",
+        "            Self { row_slots: row_slots.assume_init(), rows: rows.assume_init(), zero: [0.0; AXIS_COUNT] }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn active_slot(&self, row: usize) -> Option<usize> {",
+        "        let slot = self.row_slots[row];",
+        "        (slot != INACTIVE_DERIVATIVE_ROW).then_some(slot as usize)",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn write_row(&mut self, row: usize, value: [f64; AXIS_COUNT]) {",
+        "        if let Some(slot) = self.active_slot(row) { self.rows[slot] = value; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn clear_row(&mut self, row: usize) {",
+        "        if let Some(slot) = self.active_slot(row) { self.rows[slot] = [0.0; AXIS_COUNT]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn copy_row(&mut self, target: usize, source: usize) {",
+        "        let value = self[source];",
+        "        self.write_row(target, value);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn active_row_count(&self) -> usize { self.rows.len() }",
+        "}",
+        "",
+        "impl<const ROW_COUNT: usize, const AXIS_COUNT: usize> std::ops::Index<usize> for DerivativeMatrix<ROW_COUNT, AXIS_COUNT> {",
+        "    type Output = [f64; AXIS_COUNT];",
+        "",
+        "    #[inline]",
+        "    fn index(&self, row: usize) -> &Self::Output {",
+        "        self.active_slot(row).map_or(&self.zero, |slot| &self.rows[slot])",
+        "    }",
+        "}",
+        "",
+        "impl<const ROW_COUNT: usize, const AXIS_COUNT: usize> std::ops::IndexMut<usize> for DerivativeMatrix<ROW_COUNT, AXIS_COUNT> {",
+        "    #[inline]",
+        "    fn index_mut(&mut self, row: usize) -> &mut Self::Output {",
+        "        let slot = self.active_slot(row).expect(\"generated kernel wrote an inactive derivative row\");",
+        "        &mut self.rows[slot]",
+        "    }",
+        "}",
+        "",
         "struct Scratch {",
         "    values: [f64; Instance::VARIABLE_COUNT],",
         "    bool_values: [bool; Instance::VARIABLE_COUNT],",
-        "    node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
-        "    branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "    node_derivatives: DerivativeMatrix<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }>,",
+        "    branch_derivatives: DerivativeMatrix<{ Instance::VARIABLE_COUNT }, { Instance::BRANCH_COUNT }>,",
         "    derivatives_dirty: [bool; Instance::VARIABLE_COUNT],",
         "    activity: DerivativeActivity,",
         "}",
@@ -17766,8 +17793,13 @@ fn generate_scratch_struct() -> String {
         "    fn new_box_with_activity(node_masks: &'static [u128], branch_masks: &'static [u128]) -> Box<Self> {",
         "        let mut boxed = Box::<Self>::new_uninit();",
         "        unsafe {",
-        "            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);",
-        "            std::ptr::addr_of_mut!((*boxed.as_mut_ptr()).activity).write(DerivativeActivity::new(node_masks, branch_masks));",
+        "            let ptr = boxed.as_mut_ptr();",
+        "            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).values), 0, 1);",
+        "            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).bool_values), 0, 1);",
+        "            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).derivatives_dirty), 0, 1);",
+        "            std::ptr::addr_of_mut!((*ptr).node_derivatives).write(DerivativeMatrix::new(node_masks));",
+        "            std::ptr::addr_of_mut!((*ptr).branch_derivatives).write(DerivativeMatrix::new(branch_masks));",
+        "            std::ptr::addr_of_mut!((*ptr).activity).write(DerivativeActivity::new(node_masks, branch_masks));",
         "            boxed.assume_init()",
         "        }",
         "    }",
@@ -17776,8 +17808,8 @@ fn generate_scratch_struct() -> String {
         "        Self {",
         "            values: [0.0; Instance::VARIABLE_COUNT],",
         "            bool_values: [false; Instance::VARIABLE_COUNT],",
-        "            node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
-        "            branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "            node_derivatives: DerivativeMatrix::new(&[]),",
+        "            branch_derivatives: DerivativeMatrix::new(&[]),",
         "            derivatives_dirty: [false; Instance::VARIABLE_COUNT],",
         "            activity: DerivativeActivity::dense(),",
         "        }",
@@ -17791,15 +17823,15 @@ fn generate_scratch_struct() -> String {
         "    #[inline]",
         "    fn store_ad(&mut self, index: usize, value: &AdValue) {",
         "        self.values[index] = value.value;",
-        "        self.node_derivatives[index] = value.node_derivatives;",
-        "        self.branch_derivatives[index] = value.branch_derivatives;",
+        "        self.node_derivatives.write_row(index, value.node_derivatives);",
+        "        self.branch_derivatives.write_row(index, value.branch_derivatives);",
         "    }",
         "",
         "    #[inline]",
         "    fn copy_ad(&mut self, target: usize, source: usize) {",
         "        self.values[target] = self.values[source];",
-        "        self.node_derivatives[target] = self.node_derivatives[source];",
-        "        self.branch_derivatives[target] = self.branch_derivatives[source];",
+        "        self.node_derivatives.copy_row(target, source);",
+        "        self.branch_derivatives.copy_row(target, source);",
         "        self.derivatives_dirty[target] = self.derivatives_dirty[source];",
         "    }",
         "",
@@ -17822,8 +17854,8 @@ fn generate_scratch_struct() -> String {
         "    #[inline]",
         "    fn clear_derivatives_if_dirty(&mut self, index: usize) {",
         "        if std::mem::replace(&mut self.derivatives_dirty[index], false) {",
-        "            self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
-        "            self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "            self.node_derivatives.clear_row(index);",
+        "            self.branch_derivatives.clear_row(index);",
         "        }",
         "    }",
     ]
@@ -17838,12 +17870,12 @@ fn generate_scratch_struct() -> String {
         "struct ReactiveScratch {",
         "    values: [f64; Instance::VARIABLE_COUNT],",
         "    bool_values: [bool; Instance::VARIABLE_COUNT],",
-        "    node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
-        "    branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "    node_derivatives: DerivativeMatrix<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }>,",
+        "    branch_derivatives: DerivativeMatrix<{ Instance::VARIABLE_COUNT }, { Instance::BRANCH_COUNT }>,",
         "    derivatives_dirty: [bool; Instance::VARIABLE_COUNT],",
         "    reactive_values: [f64; Instance::VARIABLE_COUNT],",
-        "    reactive_node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
-        "    reactive_branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "    reactive_node_derivatives: DerivativeMatrix<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }>,",
+        "    reactive_branch_derivatives: DerivativeMatrix<{ Instance::VARIABLE_COUNT }, { Instance::BRANCH_COUNT }>,",
         "    activity: DerivativeActivity,",
         "}",
         "",
@@ -17859,8 +17891,16 @@ fn generate_scratch_struct() -> String {
         "    fn new_box_with_activity(node_masks: &'static [u128], branch_masks: &'static [u128]) -> Box<Self> {",
         "        let mut boxed = Box::<Self>::new_uninit();",
         "        unsafe {",
-        "            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);",
-        "            std::ptr::addr_of_mut!((*boxed.as_mut_ptr()).activity).write(DerivativeActivity::new(node_masks, branch_masks));",
+        "            let ptr = boxed.as_mut_ptr();",
+        "            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).values), 0, 1);",
+        "            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).bool_values), 0, 1);",
+        "            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).derivatives_dirty), 0, 1);",
+        "            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).reactive_values), 0, 1);",
+        "            std::ptr::addr_of_mut!((*ptr).node_derivatives).write(DerivativeMatrix::new(node_masks));",
+        "            std::ptr::addr_of_mut!((*ptr).branch_derivatives).write(DerivativeMatrix::new(branch_masks));",
+        "            std::ptr::addr_of_mut!((*ptr).reactive_node_derivatives).write(DerivativeMatrix::new(node_masks));",
+        "            std::ptr::addr_of_mut!((*ptr).reactive_branch_derivatives).write(DerivativeMatrix::new(branch_masks));",
+        "            std::ptr::addr_of_mut!((*ptr).activity).write(DerivativeActivity::new(node_masks, branch_masks));",
         "            boxed.assume_init()",
         "        }",
         "    }",
@@ -17869,12 +17909,12 @@ fn generate_scratch_struct() -> String {
         "        Self {",
         "            values: [0.0; Instance::VARIABLE_COUNT],",
         "            bool_values: [false; Instance::VARIABLE_COUNT],",
-        "            node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
-        "            branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "            node_derivatives: DerivativeMatrix::new(&[]),",
+        "            branch_derivatives: DerivativeMatrix::new(&[]),",
         "            derivatives_dirty: [false; Instance::VARIABLE_COUNT],",
         "            reactive_values: [0.0; Instance::VARIABLE_COUNT],",
-        "            reactive_node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
-        "            reactive_branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "            reactive_node_derivatives: DerivativeMatrix::new(&[]),",
+        "            reactive_branch_derivatives: DerivativeMatrix::new(&[]),",
         "            activity: DerivativeActivity::dense(),",
         "        }",
         "    }",
@@ -17887,15 +17927,15 @@ fn generate_scratch_struct() -> String {
         "    #[inline]",
         "    fn store_ad(&mut self, index: usize, value: &AdValue) {",
         "        self.values[index] = value.value;",
-        "        self.node_derivatives[index] = value.node_derivatives;",
-        "        self.branch_derivatives[index] = value.branch_derivatives;",
+        "        self.node_derivatives.write_row(index, value.node_derivatives);",
+        "        self.branch_derivatives.write_row(index, value.branch_derivatives);",
         "    }",
         "",
         "    #[inline]",
         "    fn copy_ad(&mut self, target: usize, source: usize) {",
         "        self.values[target] = self.values[source];",
-        "        self.node_derivatives[target] = self.node_derivatives[source];",
-        "        self.branch_derivatives[target] = self.branch_derivatives[source];",
+        "        self.node_derivatives.copy_row(target, source);",
+        "        self.branch_derivatives.copy_row(target, source);",
         "        self.derivatives_dirty[target] = self.derivatives_dirty[source];",
         "    }",
         "",
@@ -17918,8 +17958,8 @@ fn generate_scratch_struct() -> String {
         "    #[inline]",
         "    fn clear_derivatives_if_dirty(&mut self, index: usize) {",
         "        if std::mem::replace(&mut self.derivatives_dirty[index], false) {",
-        "            self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
-        "            self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "            self.node_derivatives.clear_row(index);",
+        "            self.branch_derivatives.clear_row(index);",
         "        }",
         "    }",
     ]
@@ -17929,6 +17969,42 @@ fn generate_scratch_struct() -> String {
     out.push('\n');
     out.push_str(&operation_runtime.primal_helpers);
     out.push_str("\n}\n\n");
+    for (from, to) in [
+        (
+            "self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+            "self.node_derivatives.clear_row(index);",
+        ),
+        (
+            "self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+            "self.branch_derivatives.clear_row(index);",
+        ),
+        (
+            "self.node_derivatives[index] = value.node_derivatives;",
+            "self.node_derivatives.write_row(index, value.node_derivatives);",
+        ),
+        (
+            "self.branch_derivatives[index] = value.branch_derivatives;",
+            "self.branch_derivatives.write_row(index, value.branch_derivatives);",
+        ),
+        (
+            "self.node_derivatives[index] = self.node_derivatives[source];",
+            "self.node_derivatives.copy_row(index, source);",
+        ),
+        (
+            "self.branch_derivatives[index] = self.branch_derivatives[source];",
+            "self.branch_derivatives.copy_row(index, source);",
+        ),
+        (
+            "self.node_derivatives[target] = self.node_derivatives[source];",
+            "self.node_derivatives.copy_row(target, source);",
+        ),
+        (
+            "self.branch_derivatives[target] = self.branch_derivatives[source];",
+            "self.branch_derivatives.copy_row(target, source);",
+        ),
+    ] {
+        out = out.replace(from, to);
+    }
     out = out
         .replace(
             "for axis in 0..Instance::NODE_COUNT {",
@@ -30898,6 +30974,14 @@ pub fn render_runtime_support_module() -> String {
         .replace(
             "            pub(crate) reactive_branch_derivatives:",
             "            reactive_branch_derivatives:",
+        )
+        .replace(
+            "    pub(crate) fn index(&self, row: usize) -> &Self::Output {",
+            "    fn index(&self, row: usize) -> &Self::Output {",
+        )
+        .replace(
+            "    pub(crate) fn index_mut(&mut self, row: usize) -> &mut Self::Output {",
+            "    fn index_mut(&mut self, row: usize) -> &mut Self::Output {",
         );
 
     compact_runtime_support_surface(support)
@@ -31253,22 +31337,25 @@ fn emit_stamp_body(
     } else {
         StampOperatorUsage::transient(ddt_slots)
     };
+    if operator_usage.has_any() {
+        out.push_str("        let stamp_state = self.stamp_state.as_mut();\n");
+    }
     if operator_usage.ddt {
-        out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
-        out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
-        out.push_str("        let ddt_state_older = self.ddt_state_older.as_mut();\n");
-        out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str("        let ddt_state_current = &mut stamp_state.ddt_current;\n");
+        out.push_str("        let ddt_state_previous = &mut stamp_state.ddt_previous;\n");
+        out.push_str("        let ddt_state_older = &mut stamp_state.ddt_older;\n");
+        out.push_str("        let ddt_state_initialized = &mut stamp_state.ddt_initialized;\n");
         out.push_str(
-            "        let ddt_derivative_current = self.ddt_derivative_current.as_mut();\n",
+            "        let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;\n",
         );
         out.push_str(
-            "        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();\n",
+            "        let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;\n",
         );
     }
     if operator_usage.idt {
-        out.push_str("        let idt_state_current = self.idt_state_current.as_mut();\n");
-        out.push_str("        let idt_state_previous = self.idt_state_previous.as_mut();\n");
-        out.push_str("        let idt_state_initialized = self.idt_state_initialized.as_mut();\n");
+        out.push_str("        let idt_state_current = &mut stamp_state.idt_current;\n");
+        out.push_str("        let idt_state_previous = &mut stamp_state.idt_previous;\n");
+        out.push_str("        let idt_state_initialized = &mut stamp_state.idt_initialized;\n");
     }
     if operator_usage.has_any() {
         out.push_str("        let ddt_active = self.ddt_coefficients.active;\n");
@@ -31480,25 +31567,21 @@ fn emit_stamp_body(
     let uses_scratch =
         has_live_variables && (!use_local_variables || residual_uses_scratch_with_local_variables);
     if uses_scratch {
-        let scratch_field = if reactive {
-            "reactive_scratch"
-        } else {
-            "scratch"
-        };
         let scratch_type = if reactive {
             "ReactiveScratch"
         } else {
             "Scratch"
         };
-        out.push_str(&format!(
-            "        let s = match &mut self.{scratch_field} {{\n"
-        ));
-        out.push_str("            Some(buf) => buf.as_mut(),\n");
         let activity_prefix = if reactive { "REACTIVE" } else { "TRANSIENT" };
+        let pool = if reactive {
+            "REACTIVE_SCRATCH_POOL"
+        } else {
+            "TRANSIENT_SCRATCH_POOL"
+        };
         out.push_str(&format!(
-            "            slot @ None => slot.insert({scratch_type}::new_box_with_activity(&{activity_prefix}_NODE_DERIVATIVE_ACTIVITY, &{activity_prefix}_BRANCH_DERIVATIVE_ACTIVITY)).as_mut(),\n"
+            "        let mut scratch_lease = ScratchLease::acquire(&{pool}, || {scratch_type}::new_box_with_activity(&{activity_prefix}_NODE_DERIVATIVE_ACTIVITY, &{activity_prefix}_BRANCH_DERIVATIVE_ACTIVITY));\n"
         ));
-        out.push_str("        };\n");
+        out.push_str("        let s = scratch_lease.get_mut();\n");
     }
     let mut variables = if use_local_variables && uses_scratch {
         let mut variables = emit_variable_initializers(
@@ -33913,6 +33996,14 @@ fn emit_structured_derivative_activity(
         if !used {
             continue;
         }
+        out.push_str(&format!(
+            "const {prefix}_NODE_ACTIVE_DERIVATIVE_ROWS: usize = {};\n",
+            plane.node_masks.iter().filter(|mask| **mask != 0).count()
+        ));
+        out.push_str(&format!(
+            "const {prefix}_BRANCH_ACTIVE_DERIVATIVE_ROWS: usize = {};\n",
+            plane.branch_masks.iter().filter(|mask| **mask != 0).count()
+        ));
         emit_structured_derivative_activity_array(
             &format!("{prefix}_NODE_DERIVATIVE_ACTIVITY"),
             &plane.node_masks,
@@ -34948,7 +35039,11 @@ fn compactable_generated_statement(line: &str) -> Option<(&str, &str)> {
         return None;
     }
     let statement = line[indent_len..].trim_end();
-    if !statement.ends_with(';') || statement.starts_with("//") {
+    if !statement.ends_with(';')
+        || statement.starts_with("//")
+        || statement.contains("ScratchLease::acquire")
+        || statement == "let s = scratch_lease.get_mut();"
+    {
         return None;
     }
     Some((&line[..indent_len], statement))

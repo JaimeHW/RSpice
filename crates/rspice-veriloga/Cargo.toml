@@ -17,6 +17,7 @@ doctest = false
 thiserror.workspace = true
 log.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 blake3 = "1.5"
 web-time = "1.1"
 

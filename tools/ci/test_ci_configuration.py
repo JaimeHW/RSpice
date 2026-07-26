@@ -146,6 +146,20 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-core --tests", workflow)
         self.assertIn("Test non-UI crates (fast tier)", workflow)
         self.assertIn("cargo test --locked -p rspice-cli -p rspice-veriloga -p rspice-bench", workflow)
+        self.assertIn("Gate generated Verilog-A Rust resources", workflow)
+        self.assertIn(
+            "cargo run --locked -p rspice-bench -- generated-rust",
+            workflow,
+        )
+        for budget in [
+            "--max-source-bytes 125000000",
+            "--max-noise-source-bytes 71000000",
+            "--max-model-source-bytes 10100000",
+            "--max-file-count 650",
+            "--max-pooled-workspace-payload-bytes 650000",
+            "--max-stamp-state-payload-bytes 6200",
+        ]:
+            self.assertIn(budget, workflow)
         self.assertIn("Test Verilog-A native JIT units (Linux x64)", workflow)
         self.assertRegex(
             workflow,

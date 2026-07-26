@@ -3489,6 +3489,8 @@ fn quick_result_availability(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::PoleZero { .. })
         ),
+        // The sample table needs nothing but retained samples.
+        ResultViewer::Table => has_waveform(),
     };
     if available {
         RetainedHardcopySourceAvailability::Available
@@ -4288,6 +4290,7 @@ fn resolve_results_quick_view_parts(
         | ResultViewer::Contribution
         | ResultViewer::TransferFunction
         | ResultViewer::Specs
+        | ResultViewer::Table
         | ResultViewer::PoleZero => HardcopySemanticDocument::ResultSummary(
             semantic_result_summary(viewer, active.analysis)?,
         ),

@@ -46,6 +46,11 @@ pub enum BenchError {
         /// Human-readable benchmark failure.
         message: String,
     },
+    /// Generated Rust resource measurement or authentication failed.
+    GeneratedRust {
+        /// Actionable resource or integrity failure.
+        message: String,
+    },
     /// A baseline or performance-gate policy was invalid or incomparable.
     BenchmarkPolicy {
         /// Actionable explanation of the rejected policy or baseline.
@@ -83,6 +88,7 @@ impl fmt::Display for BenchError {
             ),
             Self::Json { context, .. } => write!(f, "{context}"),
             Self::NativeJit { message } => write!(f, "{message}"),
+            Self::GeneratedRust { message } => write!(f, "{message}"),
             Self::BenchmarkPolicy { message } => write!(f, "{message}"),
             Self::Internal(message) => write!(f, "internal error: {message}"),
         }

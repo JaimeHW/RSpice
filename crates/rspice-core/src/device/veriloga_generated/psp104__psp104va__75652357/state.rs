@@ -1303,21 +1303,37 @@ fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct StampState<const DDT: usize, const IDT: usize> {
+    pub(crate) ddt_current: [f64; DDT],
+    pub(crate) ddt_previous: [f64; DDT],
+    pub(crate) ddt_older: [f64; DDT],
+    pub(crate) ddt_derivative_current: [f64; DDT],
+    pub(crate) ddt_derivative_previous: [f64; DDT],
+    pub(crate) idt_current: [f64; IDT],
+    pub(crate) idt_previous: [f64; IDT],
+    pub(crate) ddt_initialized: [bool; DDT],
+    pub(crate) idt_initialized: [bool; IDT],
+}
+
+impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
+    fn new_box() -> Box<Self> {
+        let mut boxed = Box::<Self>::new_uninit();
+        unsafe {
+            // SAFETY: every field is an array of f64 or bool; all-zero bytes are valid values for both.
+            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+            boxed.assume_init()
+        }
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 12],
     pub branches: [usize; 7],
     pub params: Box<Parameters>,
     pub(crate) param_given: Box<[bool; 925]>,
     pub(crate) multiplicity: f64,
-    pub(crate) ddt_state_current: Box<[f64; 11]>,
-    pub(crate) ddt_state_previous: Box<[f64; 11]>,
-    pub(crate) ddt_state_older: Box<[f64; 11]>,
-    pub(crate) ddt_state_initialized: Box<[bool; 11]>,
-    pub(crate) ddt_derivative_current: Box<[f64; 11]>,
-    pub(crate) ddt_derivative_previous: Box<[f64; 11]>,
-    pub(crate) idt_state_current: Box<[f64; 0]>,
-    pub(crate) idt_state_previous: Box<[f64; 0]>,
-    pub(crate) idt_state_initialized: Box<[bool; 0]>,
+    pub(crate) stamp_state: Box<StampState<11, 0>>,
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
@@ -1332,15 +1348,7 @@ impl Clone for Instance {
             params: self.params.clone(),
             param_given: self.param_given.clone(),
             multiplicity: self.multiplicity,
-            ddt_state_current: self.ddt_state_current.clone(),
-            ddt_state_previous: self.ddt_state_previous.clone(),
-            ddt_state_older: self.ddt_state_older.clone(),
-            ddt_state_initialized: self.ddt_state_initialized.clone(),
-            ddt_derivative_current: self.ddt_derivative_current.clone(),
-            ddt_derivative_previous: self.ddt_derivative_previous.clone(),
-            idt_state_current: self.idt_state_current.clone(),
-            idt_state_previous: self.idt_state_previous.clone(),
-            idt_state_initialized: self.idt_state_initialized.clone(),
+            stamp_state: self.stamp_state.clone(),
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
@@ -1359,7 +1367,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 2913;
     pub const DDT_STATE_COUNT: usize = 11;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "ad5870efab8527f274495f1618fb56fe0d4d430c7dd855bc88e386c0bdbc21c7";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6e9d98600424864355b9f1c9244980337215d74007525818f19e703fca503c0e";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -1373,15 +1381,7 @@ impl Instance {
             params: Parameters::new_box(),
             param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
             multiplicity: 1.0,
-            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
-            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
-            ddt_state_older: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
-            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),
-            ddt_derivative_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
-            ddt_derivative_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),
-            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
-            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),
-            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),
+            stamp_state: StampState::new_box(),
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
@@ -1396,15 +1396,7 @@ impl Instance {
             params,
             param_given,
             multiplicity,
-            ddt_state_current,
-            ddt_state_previous,
-            ddt_state_older,
-            ddt_state_initialized,
-            ddt_derivative_current,
-            ddt_derivative_previous,
-            idt_state_current,
-            idt_state_previous,
-            idt_state_initialized,
+            stamp_state,
             time,
             timestep,
             ddt_coefficients,
@@ -1415,15 +1407,7 @@ impl Instance {
             params,
             param_given,
             multiplicity,
-            ddt_state_current,
-            ddt_state_previous,
-            ddt_state_older,
-            ddt_state_initialized,
-            ddt_derivative_current,
-            ddt_derivative_previous,
-            idt_state_current,
-            idt_state_previous,
-            idt_state_initialized,
+            stamp_state,
             time,
             timestep,
             ddt_coefficients,
@@ -1432,12 +1416,12 @@ impl Instance {
 
     pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {
         GeneratedVerilogAPersistentState {
-            ddt_previous: self.ddt_state_previous.to_vec(),
-            ddt_older: self.ddt_state_older.to_vec(),
-            ddt_derivative_previous: self.ddt_derivative_previous.to_vec(),
-            ddt_initialized: self.ddt_state_initialized.to_vec(),
-            idt_previous: self.idt_state_previous.to_vec(),
-            idt_initialized: self.idt_state_initialized.to_vec(),
+            ddt_previous: self.stamp_state.ddt_previous.to_vec(),
+            ddt_older: self.stamp_state.ddt_older.to_vec(),
+            ddt_derivative_previous: self.stamp_state.ddt_derivative_previous.to_vec(),
+            ddt_initialized: self.stamp_state.ddt_initialized.to_vec(),
+            idt_previous: self.stamp_state.idt_previous.to_vec(),
+            idt_initialized: self.stamp_state.idt_initialized.to_vec(),
             limiter_anchor: Vec::new(),
             limiter_initialized: Vec::new(),
         }
@@ -1458,15 +1442,15 @@ impl Instance {
 
     pub(crate) fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {
         self.validate_persistent_state_shape(state)?;
-        self.ddt_state_previous.copy_from_slice(&state.ddt_previous);
-        self.ddt_state_current.copy_from_slice(&state.ddt_previous);
-        self.ddt_state_older.copy_from_slice(&state.ddt_older);
-        self.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);
-        self.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);
-        self.ddt_state_initialized.copy_from_slice(&state.ddt_initialized);
-        self.idt_state_previous.copy_from_slice(&state.idt_previous);
-        self.idt_state_current.copy_from_slice(&state.idt_previous);
-        self.idt_state_initialized.copy_from_slice(&state.idt_initialized);
+        self.stamp_state.ddt_previous.copy_from_slice(&state.ddt_previous);
+        self.stamp_state.ddt_current.copy_from_slice(&state.ddt_previous);
+        self.stamp_state.ddt_older.copy_from_slice(&state.ddt_older);
+        self.stamp_state.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);
+        self.stamp_state.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);
+        self.stamp_state.ddt_initialized.copy_from_slice(&state.ddt_initialized);
+        self.stamp_state.idt_previous.copy_from_slice(&state.idt_previous);
+        self.stamp_state.idt_current.copy_from_slice(&state.idt_previous);
+        self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);
         Ok(())
     }
 
@@ -1482,8 +1466,9 @@ impl Instance {
             return Err(format!("unknown parameter '{}' for generated Verilog-A model 'PSP104VA'", name));
         };
         validate_parameter_scalar_metadata(index, value)?;
-        self.write_parameter_slot(index, value);
-        self.finish_set_parameter(index);
+        let was_given = self.param_given[index];
+        let value_changed = self.write_parameter_slot(index, value);
+        self.finish_set_parameter(index, value_changed || !was_given);
         Ok(())
     }
 
@@ -1497,18 +1482,21 @@ impl Instance {
     }
 
     #[inline]
-    fn write_parameter_slot(&mut self, index: usize, value: f64) {
+    fn write_parameter_slot(&mut self, index: usize, value: f64) -> bool {
         debug_assert!(index < Self::PARAMETER_COUNT, "generated parameter index out of range");
         // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.
         unsafe {
             let ptr = self.params.as_mut() as *mut Parameters as *mut f64;
+            let changed = (*ptr.add(index)).to_bits() != value.to_bits();
             *ptr.add(index) = value;
+            changed
         }
     }
 
     #[inline]
-    fn finish_set_parameter(&mut self, index: usize) {
+    fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
+        let _ = invalidates_caches;
     }
 
     #[inline]
@@ -1518,9 +1506,12 @@ impl Instance {
     }
 
     #[inline]
-    pub fn set_multiplicity(&mut self, multiplicity: f64) {
+    pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
         if multiplicity.is_finite() && multiplicity > 0.0 {
             self.multiplicity = multiplicity;
+            Ok(())
+        } else {
+            Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))
         }
     }
 
@@ -1535,16 +1526,16 @@ impl Instance {
     pub fn accept_timestep(&mut self) {
         let mut index = 0usize;
         while index < Self::DDT_STATE_COUNT {
-            self.ddt_state_older[index] = self.ddt_state_previous[index];
-            self.ddt_state_previous[index] = self.ddt_state_current[index];
-            self.ddt_derivative_previous[index] = self.ddt_derivative_current[index];
-            self.ddt_state_initialized[index] = true;
+            self.stamp_state.ddt_older[index] = self.stamp_state.ddt_previous[index];
+            self.stamp_state.ddt_previous[index] = self.stamp_state.ddt_current[index];
+            self.stamp_state.ddt_derivative_previous[index] = self.stamp_state.ddt_derivative_current[index];
+            self.stamp_state.ddt_initialized[index] = true;
             index += 1;
         }
         let mut index = 0usize;
         while index < Self::IDT_STATE_COUNT {
-            self.idt_state_previous[index] = self.idt_state_current[index];
-            self.idt_state_initialized[index] = true;
+            self.stamp_state.idt_previous[index] = self.stamp_state.idt_current[index];
+            self.stamp_state.idt_initialized[index] = true;
             index += 1;
         }
     }
@@ -1552,31 +1543,31 @@ impl Instance {
     #[inline]
     pub(crate) fn eval_ddt(&mut self, slot: usize, value: f64) -> f64 {
         debug_assert!(slot < Self::DDT_STATE_COUNT, "generated ddt state slot out of range");
-        let previous = if self.ddt_state_initialized[slot] {
-            self.ddt_state_previous[slot]
+        let previous = if self.stamp_state.ddt_initialized[slot] {
+            self.stamp_state.ddt_previous[slot]
         } else {
             value
         };
-        let older = if self.ddt_state_initialized[slot] {
-            self.ddt_state_older[slot]
+        let older = if self.stamp_state.ddt_initialized[slot] {
+            self.stamp_state.ddt_older[slot]
         } else {
             value
         };
-        self.ddt_state_current[slot] = value;
+        self.stamp_state.ddt_current[slot] = value;
         if self.ddt_coefficients.active {
             let result = value * self.ddt_coefficients.derivative_scale
                 - previous * self.ddt_coefficients.previous_value_scale
                 - older * self.ddt_coefficients.older_value_scale
-                - self.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;
-            self.ddt_derivative_current[slot] = result;
+                - self.stamp_state.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;
+            self.stamp_state.ddt_derivative_current[slot] = result;
             result
         } else {
-            self.ddt_state_current[slot] = value;
-            self.ddt_state_previous[slot] = value;
-            self.ddt_state_older[slot] = value;
-            self.ddt_derivative_current[slot] = 0.0;
-            self.ddt_derivative_previous[slot] = 0.0;
-            self.ddt_state_initialized[slot] = true;
+            self.stamp_state.ddt_current[slot] = value;
+            self.stamp_state.ddt_previous[slot] = value;
+            self.stamp_state.ddt_older[slot] = value;
+            self.stamp_state.ddt_derivative_current[slot] = 0.0;
+            self.stamp_state.ddt_derivative_previous[slot] = 0.0;
+            self.stamp_state.ddt_initialized[slot] = true;
             0.0
         }
     }

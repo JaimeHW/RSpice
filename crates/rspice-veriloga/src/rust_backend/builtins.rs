@@ -7,11 +7,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
-use crate::canonical_ir::StableDigest;
 use crate::{CompilerOptions, VerilogACompiler};
 
 use super::{
-    GeneratedBuiltinManifest, GeneratedRustDevice, RustBackendSelection, RustTranspiler,
+    GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION, GeneratedBuiltinManifest,
+    GeneratedBuiltinManifestDevice, GeneratedBuiltinManifestFile,
+    GeneratedBuiltinWorkspaceResources, GeneratedRustDevice, RustBackendSelection, RustTranspiler,
     VERILOGA_DISCOVERY_SKIP_MARKER, VerilogACompileProfile, VerilogASourceCandidate,
     cleanup_stale_generated_device_folders, discover_veriloga_sources,
     parse_generated_builtin_manifest, render_generated_builtin_manifest,
@@ -127,7 +128,7 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
 
     let source_tree_digest = tree_digest(model_root, false)?;
     let generator_digest = generator_digest(generator_root, false)?;
-    let (devices, backend_counts, fallback_reasons) =
+    let (devices, backend_counts, fallback_reasons, manifest_devices) =
         generate_devices_with_stack(model_root.to_path_buf(), None, progress, jobs)?;
     reject_legacy_backend_selections(&backend_counts, &fallback_reasons)?;
     reject_non_scalar_backend_selections_if_requested(&backend_counts, &fallback_reasons)?;
@@ -144,11 +145,12 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
     write_kernel_runtime(generated_root)?;
     write_registry(generated_root, &devices)?;
 
-    let manifest = GeneratedBuiltinManifest {
+    let manifest = build_generated_manifest(
+        generated_root,
         source_tree_digest,
         generator_digest,
-        device_count: devices.len(),
-    };
+        manifest_devices,
+    )?;
     write_generated_manifest(generated_root, &manifest)?;
 
     Ok(BuiltinGenerationReport {
@@ -182,7 +184,7 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
 ) -> BuiltinResult<BuiltinSubsetGenerationReport> {
     validate_model_root(model_root)?;
 
-    let (devices, backend_counts, fallback_reasons) = generate_devices_with_stack(
+    let (devices, backend_counts, fallback_reasons, _) = generate_devices_with_stack(
         model_root.to_path_buf(),
         Some(filter.to_string()),
         progress,
@@ -222,6 +224,7 @@ pub fn validate_generated_builtins(
     if let Some(manifest) =
         read_generated_manifest(generated_root, &source_tree_digest, &generator_digest)
     {
+        validate_generated_manifest_outputs(generated_root, &manifest)?;
         reject_legacy_ad_runtime_files(generated_root)?;
         return Ok(manifest);
     }
@@ -261,8 +264,14 @@ fn stale_generated_builtins_error(
         .and_then(|text| parse_generated_builtin_manifest(&text))
         .map(|manifest| {
             format!(
-                "current manifest has source_tree_digest={}, generator_digest={}, device_count={}",
-                manifest.source_tree_digest, manifest.generator_digest, manifest.device_count
+                "current manifest has schema_version={}, source_tree_digest={}, generator_digest={}, bundle_digest={}, device_count={}, file_count={}, source_bytes={}",
+                manifest.schema_version,
+                manifest.source_tree_digest,
+                manifest.generator_digest,
+                manifest.bundle_digest,
+                manifest.device_count,
+                manifest.file_count,
+                manifest.source_bytes,
             )
         })
         .unwrap_or_else(|| "current manifest is missing or invalid".to_string());
@@ -295,7 +304,7 @@ fn generator_digest(generator_root: &Path, emit_cargo_rerun: bool) -> BuiltinRes
         input.push_str(&digest);
         input.push('\0');
     }
-    Ok(StableDigest::from_text(&input).as_hex())
+    Ok(blake3::hash(input.as_bytes()).to_hex().to_string())
 }
 
 fn file_digest(path: &Path) -> BuiltinResult<String> {
@@ -307,7 +316,7 @@ fn file_digest(path: &Path) -> BuiltinResult<String> {
     input.push('\0');
     input.push_str(&normalized);
     input.push('\0');
-    Ok(StableDigest::from_text(&input).as_hex())
+    Ok(blake3::hash(input.as_bytes()).to_hex().to_string())
 }
 
 fn read_generated_manifest(
@@ -320,10 +329,13 @@ fn read_generated_manifest(
     }
     let manifest_path = generated_root.join(GENERATED_BUILTIN_MANIFEST_FILE_NAME);
     let manifest = parse_generated_builtin_manifest(&fs::read_to_string(manifest_path).ok()?)?;
-    (manifest.source_tree_digest == source_tree_digest
+    (manifest.schema_version == GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION
+        && manifest.source_tree_digest == source_tree_digest
         && manifest.generator_digest == generator_digest
-        && manifest.device_count > 0)
-        .then_some(manifest)
+        && manifest.device_count > 0
+        && manifest.device_count == manifest.devices.len()
+        && manifest.file_count == manifest.files.len())
+    .then_some(manifest)
 }
 
 fn reject_legacy_ad_runtime(devices: &[GeneratedRustDevice]) -> BuiltinResult<()> {
@@ -445,12 +457,150 @@ fn write_generated_manifest(
     Ok(())
 }
 
+struct GeneratedOutputFingerprint {
+    bundle_digest: String,
+    source_bytes: u64,
+    files: Vec<GeneratedBuiltinManifestFile>,
+}
+
+fn build_generated_manifest(
+    generated_root: &Path,
+    source_tree_digest: String,
+    generator_digest: String,
+    mut devices: Vec<GeneratedBuiltinManifestDevice>,
+) -> BuiltinResult<GeneratedBuiltinManifest> {
+    let output = generated_output_fingerprint(generated_root)?;
+    for device in &mut devices {
+        let prefix = format!("{}/", device.folder_name);
+        let mut file_count = 0usize;
+        let mut source_bytes = 0u64;
+        for file in output
+            .files
+            .iter()
+            .filter(|file| file.relative_path.starts_with(&prefix))
+        {
+            file_count += 1;
+            source_bytes = source_bytes
+                .checked_add(file.bytes)
+                .ok_or("generated device output byte count overflowed u64")?;
+        }
+        device.file_count = file_count;
+        device.source_bytes = source_bytes;
+    }
+    Ok(GeneratedBuiltinManifest {
+        schema_version: GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION,
+        source_tree_digest,
+        generator_digest,
+        bundle_digest: output.bundle_digest,
+        device_count: devices.len(),
+        file_count: output.files.len(),
+        source_bytes: output.source_bytes,
+        devices,
+        files: output.files,
+    })
+}
+
+fn generated_output_fingerprint(
+    generated_root: &Path,
+) -> BuiltinResult<GeneratedOutputFingerprint> {
+    let mut paths = Vec::new();
+    collect_tree_files(generated_root, &mut paths)?;
+    paths.retain(|path| {
+        path.file_name().and_then(|name| name.to_str())
+            != Some(GENERATED_BUILTIN_MANIFEST_FILE_NAME)
+    });
+    paths.sort();
+
+    let mut bundle_hasher = blake3::Hasher::new();
+    let mut source_bytes = 0u64;
+    let mut files = Vec::with_capacity(paths.len());
+    for path in paths {
+        let relative_path = path
+            .strip_prefix(generated_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let bytes = fs::read(&path)?;
+        let byte_count = bytes.len() as u64;
+        source_bytes = source_bytes
+            .checked_add(byte_count)
+            .ok_or("generated Verilog-A output byte count overflowed u64")?;
+        update_digest_record(&mut bundle_hasher, relative_path.as_bytes());
+        update_digest_record(&mut bundle_hasher, &bytes);
+        files.push(GeneratedBuiltinManifestFile {
+            relative_path,
+            bytes: byte_count,
+            blake3: blake3::hash(&bytes).to_hex().to_string(),
+        });
+    }
+
+    Ok(GeneratedOutputFingerprint {
+        bundle_digest: bundle_hasher.finalize().to_hex().to_string(),
+        source_bytes,
+        files,
+    })
+}
+
+fn validate_generated_manifest_outputs(
+    generated_root: &Path,
+    manifest: &GeneratedBuiltinManifest,
+) -> BuiltinResult<()> {
+    let actual = generated_output_fingerprint(generated_root)?;
+    if actual.bundle_digest != manifest.bundle_digest {
+        return Err(format!(
+            "generated Verilog-A bundle digest mismatch: manifest={}, actual={}; run `{REGENERATE_BUILTINS_COMMAND}`",
+            manifest.bundle_digest, actual.bundle_digest
+        )
+        .into());
+    }
+    if actual.files != manifest.files
+        || actual.files.len() != manifest.file_count
+        || actual.source_bytes != manifest.source_bytes
+    {
+        return Err(format!(
+            "generated Verilog-A bundle file census mismatch: manifest files={}, bytes={}; actual files={}, bytes={}; run `{REGENERATE_BUILTINS_COMMAND}`",
+            manifest.file_count,
+            manifest.source_bytes,
+            actual.files.len(),
+            actual.source_bytes,
+        )
+        .into());
+    }
+
+    for device in &manifest.devices {
+        let prefix = format!("{}/", device.folder_name);
+        let files = actual
+            .files
+            .iter()
+            .filter(|file| file.relative_path.starts_with(&prefix))
+            .collect::<Vec<_>>();
+        let source_bytes = files.iter().map(|file| file.bytes).sum::<u64>();
+        if files.len() != device.file_count || source_bytes != device.source_bytes {
+            return Err(format!(
+                "generated Verilog-A device '{}' resource manifest mismatch: manifest files={}, bytes={}; actual files={}, bytes={}",
+                device.public_model_name,
+                device.file_count,
+                device.source_bytes,
+                files.len(),
+                source_bytes,
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn update_digest_record(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
 fn tree_digest(root: &Path, emit_cargo_rerun: bool) -> BuiltinResult<String> {
     let mut files = Vec::new();
     collect_tree_files(root, &mut files)?;
     files.sort();
 
-    let mut input = String::new();
+    let mut hasher = blake3::Hasher::new();
     for path in files {
         if emit_cargo_rerun {
             println!("cargo:rerun-if-changed={}", path.display());
@@ -461,15 +611,11 @@ fn tree_digest(root: &Path, emit_cargo_rerun: bool) -> BuiltinResult<String> {
             .to_string_lossy()
             .replace('\\', "/");
         let bytes = fs::read(&path)?;
-        input.push_str(&relative);
-        input.push('\0');
-        input.push_str(&bytes.len().to_string());
-        input.push('\0');
-        input.push_str(&String::from_utf8_lossy(&bytes));
-        input.push('\0');
+        update_digest_record(&mut hasher, relative.as_bytes());
+        update_digest_record(&mut hasher, &bytes);
     }
 
-    Ok(StableDigest::from_text(&input).as_hex())
+    Ok(hasher.finalize().to_hex().to_string())
 }
 
 fn collect_tree_files(root: &Path, files: &mut Vec<PathBuf>) -> BuiltinResult<()> {
@@ -499,6 +645,7 @@ fn generate_devices(
     Vec<GeneratedRustDevice>,
     BuiltinBackendSelectionCounts,
     Vec<BuiltinBackendFallbackReason>,
+    Vec<GeneratedBuiltinManifestDevice>,
 )> {
     let model_root = model_root
         .canonicalize()
@@ -526,8 +673,29 @@ fn generate_devices(
     let mut devices = Vec::with_capacity(generated.len());
     let mut backend_counts = BuiltinBackendSelectionCounts::default();
     let mut fallback_reasons = Vec::new();
+    let mut manifest_devices = Vec::with_capacity(generated.len());
     for generated in generated {
         backend_counts.record(generated.backend);
+        let fallback_reason = generated
+            .fallback_reason
+            .as_ref()
+            .map(|reason| reason.reason.clone());
+        let workspace = generated_workspace_resources(&generated.device)?;
+        manifest_devices.push(GeneratedBuiltinManifestDevice {
+            module_name: generated.device.module_name.clone(),
+            public_model_name: generated.device.public_model_name.clone(),
+            folder_name: generated.device.folder_name.clone(),
+            backend: generated.backend,
+            fallback_reason,
+            file_count: generated.device.files.len(),
+            source_bytes: generated
+                .device
+                .files
+                .iter()
+                .map(|file| file.contents.len() as u64)
+                .sum(),
+            workspace,
+        });
         if let Some(reason) = generated.fallback_reason {
             fallback_reasons.push(reason);
         }
@@ -539,7 +707,223 @@ fn generate_devices(
             .cmp(&right.public_model_name)
             .then_with(|| left.folder_name.cmp(&right.folder_name))
     });
-    Ok((devices, backend_counts, fallback_reasons))
+    manifest_devices.sort_by(|left, right| {
+        left.public_model_name
+            .cmp(&right.public_model_name)
+            .then_with(|| left.folder_name.cmp(&right.folder_name))
+    });
+    Ok((devices, backend_counts, fallback_reasons, manifest_devices))
+}
+
+fn generated_workspace_resources(
+    device: &GeneratedRustDevice,
+) -> BuiltinResult<GeneratedBuiltinWorkspaceResources> {
+    let state = generated_device_file(device, "state.rs")?;
+    let stamp = generated_device_file(device, "stamp.rs")?;
+    let variable_count = parse_generated_usize_const(state, "VARIABLE_COUNT")?;
+    let node_count = parse_generated_usize_const(state, "NODE_COUNT")?;
+    let branch_count = parse_generated_usize_const(state, "BRANCH_COUNT")?;
+    let ddt_state_count = parse_generated_usize_const(state, "DDT_STATE_COUNT")?;
+    let idt_state_count = parse_generated_usize_const(state, "IDT_STATE_COUNT")?;
+    let uses_transient = stamp.contains("&TRANSIENT_SCRATCH_POOL");
+    let uses_reactive = stamp.contains("&REACTIVE_SCRATCH_POOL");
+    let transient_active_node_rows = parse_optional_workspace_row_count(
+        stamp,
+        "TRANSIENT_NODE_ACTIVE_DERIVATIVE_ROWS",
+        uses_transient,
+    )?;
+    let transient_active_branch_rows = parse_optional_workspace_row_count(
+        stamp,
+        "TRANSIENT_BRANCH_ACTIVE_DERIVATIVE_ROWS",
+        uses_transient,
+    )?;
+    let reactive_active_node_rows = parse_optional_workspace_row_count(
+        stamp,
+        "REACTIVE_NODE_ACTIVE_DERIVATIVE_ROWS",
+        uses_reactive,
+    )?;
+    let reactive_active_branch_rows = parse_optional_workspace_row_count(
+        stamp,
+        "REACTIVE_BRANCH_ACTIVE_DERIVATIVE_ROWS",
+        uses_reactive,
+    )?;
+
+    let transient_packed = uses_transient.then(|| {
+        transient_workspace_payload_bytes(
+            variable_count,
+            node_count,
+            branch_count,
+            transient_active_node_rows,
+            transient_active_branch_rows,
+        )
+    });
+    let reactive_packed = uses_reactive.then(|| {
+        reactive_workspace_payload_bytes(
+            variable_count,
+            node_count,
+            branch_count,
+            reactive_active_node_rows,
+            reactive_active_branch_rows,
+        )
+    });
+    let legacy_dense = uses_transient
+        .then(|| dense_transient_workspace_payload_bytes(variable_count, node_count, branch_count))
+        .into_iter()
+        .chain(uses_reactive.then(|| {
+            dense_reactive_workspace_payload_bytes(variable_count, node_count, branch_count)
+        }))
+        .try_fold(0u128, |total, bytes| total.checked_add(bytes))
+        .ok_or("generated dense workspace resource estimate overflowed u128")?;
+    let pooled = transient_packed
+        .into_iter()
+        .chain(reactive_packed)
+        .try_fold(0u128, |total, bytes| total.checked_add(bytes))
+        .ok_or("generated packed workspace resource estimate overflowed u128")?;
+    let stamp_state_payload = stamp_state_payload_bytes(ddt_state_count, idt_state_count);
+    let stamp_state_heap_allocations = u64::from(stamp_state_payload != 0);
+    let legacy_stamp_state_heap_allocations =
+        u64::from(ddt_state_count != 0) * 6 + u64::from(idt_state_count != 0) * 3;
+
+    Ok(GeneratedBuiltinWorkspaceResources {
+        abi_version: 2,
+        variable_count,
+        node_count,
+        branch_count,
+        transient_active_node_rows,
+        transient_active_branch_rows,
+        reactive_active_node_rows,
+        reactive_active_branch_rows,
+        retained_workspace_bytes_per_instance: 0,
+        pooled_workspace_payload_bytes_per_thread: u64::try_from(pooled)
+            .map_err(|_| "generated packed workspace resource estimate exceeds u64")?,
+        legacy_dense_workspace_payload_bytes_per_instance: u64::try_from(legacy_dense)
+            .map_err(|_| "generated dense workspace resource estimate exceeds u64")?,
+        stamp_state_payload_bytes_per_instance: u64::try_from(stamp_state_payload)
+            .map_err(|_| "generated stamp-state resource estimate exceeds u64")?,
+        stamp_state_heap_allocations_per_instance: stamp_state_heap_allocations,
+        stamp_state_pointer_slots_per_instance: 1,
+        legacy_stamp_state_heap_allocations_per_instance: legacy_stamp_state_heap_allocations,
+        legacy_stamp_state_pointer_slots_per_instance: 9,
+    })
+}
+
+fn generated_device_file<'a>(
+    device: &'a GeneratedRustDevice,
+    relative_path: &str,
+) -> BuiltinResult<&'a str> {
+    device
+        .files
+        .iter()
+        .find(|file| file.relative_path == relative_path)
+        .map(|file| file.contents.as_str())
+        .ok_or_else(|| {
+            format!(
+                "generated device '{}' is missing required resource input '{}'",
+                device.module_name, relative_path
+            )
+            .into()
+        })
+}
+
+fn parse_optional_workspace_row_count(
+    source: &str,
+    name: &str,
+    required: bool,
+) -> BuiltinResult<usize> {
+    match parse_generated_usize_const_optional(source, name)? {
+        Some(value) => Ok(value),
+        None if !required => Ok(0),
+        None => {
+            Err(format!("generated stamp is missing required workspace constant '{name}'").into())
+        }
+    }
+}
+
+fn parse_generated_usize_const(source: &str, name: &str) -> BuiltinResult<usize> {
+    parse_generated_usize_const_optional(source, name)?.ok_or_else(|| {
+        format!("generated source is missing required usize constant '{name}'").into()
+    })
+}
+
+fn parse_generated_usize_const_optional(source: &str, name: &str) -> BuiltinResult<Option<usize>> {
+    let marker = format!("const {name}: usize = ");
+    let Some(line) = source.lines().find(|line| line.contains(&marker)) else {
+        return Ok(None);
+    };
+    let value = line
+        .split_once(&marker)
+        .map(|(_, value)| value)
+        .and_then(|value| value.trim().strip_suffix(';'))
+        .ok_or_else(|| format!("generated usize constant '{name}' is malformed"))?;
+    Ok(Some(value.parse::<usize>().map_err(|error| {
+        format!("generated usize constant '{name}' has invalid value '{value}': {error}")
+    })?))
+}
+
+fn derivative_matrix_payload_bytes(
+    variable_count: usize,
+    axis_count: usize,
+    active_rows: usize,
+) -> u128 {
+    // Fixed-array row map (u32), packed active rows, one shared zero row,
+    // and the thin/fat Box pointer payload in DerivativeMatrix.
+    variable_count as u128 * 4
+        + active_rows as u128 * axis_count as u128 * 8
+        + axis_count as u128 * 8
+        + 24
+}
+
+fn stamp_state_payload_bytes(ddt_state_count: usize, idt_state_count: usize) -> u128 {
+    let f64_bytes = (ddt_state_count as u128 * 5 + idt_state_count as u128 * 2) * 8;
+    let bool_bytes = ddt_state_count as u128 + idt_state_count as u128;
+    let bytes = f64_bytes + bool_bytes;
+    if bytes == 0 { 0 } else { (bytes + 7) & !7 }
+}
+
+fn transient_workspace_payload_bytes(
+    variable_count: usize,
+    node_count: usize,
+    branch_count: usize,
+    active_node_rows: usize,
+    active_branch_rows: usize,
+) -> u128 {
+    variable_count as u128 * 10
+        + derivative_matrix_payload_bytes(variable_count, node_count, active_node_rows)
+        + derivative_matrix_payload_bytes(variable_count, branch_count, active_branch_rows)
+        + 32
+}
+
+fn reactive_workspace_payload_bytes(
+    variable_count: usize,
+    node_count: usize,
+    branch_count: usize,
+    active_node_rows: usize,
+    active_branch_rows: usize,
+) -> u128 {
+    variable_count as u128 * 18
+        + 2 * derivative_matrix_payload_bytes(variable_count, node_count, active_node_rows)
+        + 2 * derivative_matrix_payload_bytes(variable_count, branch_count, active_branch_rows)
+        + 32
+}
+
+fn dense_transient_workspace_payload_bytes(
+    variable_count: usize,
+    node_count: usize,
+    branch_count: usize,
+) -> u128 {
+    variable_count as u128 * 10
+        + variable_count as u128 * (node_count + branch_count) as u128 * 8
+        + 32
+}
+
+fn dense_reactive_workspace_payload_bytes(
+    variable_count: usize,
+    node_count: usize,
+    branch_count: usize,
+) -> u128 {
+    variable_count as u128 * 18
+        + variable_count as u128 * (node_count + branch_count) as u128 * 16
+        + 32
 }
 
 fn generate_devices_sequential(
@@ -990,6 +1374,7 @@ fn generate_devices_with_stack(
         Vec<GeneratedRustDevice>,
         BuiltinBackendSelectionCounts,
         Vec<BuiltinBackendFallbackReason>,
+        Vec<GeneratedBuiltinManifestDevice>,
     ),
     Box<dyn std::error::Error + Send + Sync>,
 > {
@@ -1078,6 +1463,56 @@ mod tests {
     }
 
     #[test]
+    fn generated_manifest_authenticates_every_output_file() {
+        let root = temporary_registry_root("manifest-authentication");
+        let _ = fs::remove_dir_all(&root);
+        let folder = root.join("fixture__fixture__12345678");
+        fs::create_dir_all(&folder).expect("create generated fixture folder");
+        fs::write(folder.join("stamp.rs"), "abc").expect("write generated fixture");
+        fs::write(folder.join(".rspice-veriloga-generated"), "marker")
+            .expect("write generated ownership marker");
+        fs::write(root.join("registry.rs"), "registry").expect("write registry fixture");
+        fs::write(root.join("kernel_runtime.rs"), "runtime").expect("write runtime fixture");
+
+        let manifest = build_generated_manifest(
+            &root,
+            "source".to_string(),
+            "generator".to_string(),
+            vec![GeneratedBuiltinManifestDevice {
+                module_name: "fixture".to_string(),
+                public_model_name: "fixture".to_string(),
+                folder_name: "fixture__fixture__12345678".to_string(),
+                backend: RustBackendSelection::ScalarOptIr,
+                fallback_reason: None,
+                file_count: 1,
+                source_bytes: 3,
+                workspace: Default::default(),
+            }],
+        )
+        .expect("build generated manifest");
+
+        assert_eq!(
+            manifest.schema_version,
+            GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION
+        );
+        assert_eq!(manifest.file_count, 4);
+        assert_eq!(manifest.devices[0].file_count, 2);
+        assert_eq!(manifest.devices[0].source_bytes, 9);
+        validate_generated_manifest_outputs(&root, &manifest)
+            .expect("fresh generated output authenticates");
+
+        fs::write(folder.join("stamp.rs"), "tampered").expect("tamper generated fixture");
+        let error = validate_generated_manifest_outputs(&root, &manifest)
+            .expect_err("tampered generated output must fail validation");
+        assert!(
+            error.to_string().contains("bundle digest mismatch"),
+            "{error}"
+        );
+
+        fs::remove_dir_all(root).expect("remove generated fixture");
+    }
+
+    #[test]
     fn builtin_generation_rejects_legacy_backend_selections() {
         let counts = BuiltinBackendSelectionCounts {
             scalar: 1,
@@ -1161,6 +1596,14 @@ mod tests {
         let runtime = fs::read_to_string(root.join("kernel_runtime.rs"))
             .expect("read generated kernel runtime");
         assert!(runtime.contains("pub(crate) struct Scratch<"), "{runtime}");
+        assert!(
+            runtime.contains("pub(crate) struct DerivativeMatrix<"),
+            "{runtime}"
+        );
+        assert!(
+            runtime.contains("pub(crate) dn: DerivativeMatrix<"),
+            "{runtime}"
+        );
         assert!(runtime.contains("#[inline(never)]"), "{runtime}");
         assert!(runtime.contains("pub(crate) fn new_box()"), "{runtime}");
         assert!(runtime.contains("pub(crate) fn store_scalar("), "{runtime}");
@@ -1178,6 +1621,57 @@ mod tests {
     }
 
     #[test]
+    fn generated_workspace_resources_record_pooled_packed_abi() {
+        let mut device = generated_device_fixture("workspace_model", "workspace");
+        device.files = vec![
+            crate::rust_backend::GeneratedRustFile {
+                relative_path: "state.rs".to_string(),
+                contents: [
+                    "pub const VARIABLE_COUNT: usize = 4;",
+                    "pub const NODE_COUNT: usize = 2;",
+                    "pub const BRANCH_COUNT: usize = 1;",
+                    "pub const DDT_STATE_COUNT: usize = 2;",
+                    "pub const IDT_STATE_COUNT: usize = 1;",
+                ]
+                .join("\n"),
+            },
+            crate::rust_backend::GeneratedRustFile {
+                relative_path: "stamp.rs".to_string(),
+                contents: [
+                    "let _ = &TRANSIENT_SCRATCH_POOL;",
+                    "let _ = &REACTIVE_SCRATCH_POOL;",
+                    "const TRANSIENT_NODE_ACTIVE_DERIVATIVE_ROWS: usize = 2;",
+                    "const TRANSIENT_BRANCH_ACTIVE_DERIVATIVE_ROWS: usize = 0;",
+                    "const REACTIVE_NODE_ACTIVE_DERIVATIVE_ROWS: usize = 1;",
+                    "const REACTIVE_BRANCH_ACTIVE_DERIVATIVE_ROWS: usize = 1;",
+                ]
+                .join("\n"),
+            },
+        ];
+
+        let resources = generated_workspace_resources(&device).expect("workspace resources");
+        assert_eq!(resources.abi_version, 2);
+        assert_eq!(resources.transient_active_node_rows, 2);
+        assert_eq!(resources.transient_active_branch_rows, 0);
+        assert_eq!(resources.reactive_active_node_rows, 1);
+        assert_eq!(resources.reactive_active_branch_rows, 1);
+        assert_eq!(resources.retained_workspace_bytes_per_instance, 0);
+        assert_eq!(resources.pooled_workspace_payload_bytes_per_thread, 568);
+        assert_eq!(
+            resources.legacy_dense_workspace_payload_bytes_per_instance,
+            464
+        );
+        assert_eq!(resources.stamp_state_payload_bytes_per_instance, 104);
+        assert_eq!(resources.stamp_state_heap_allocations_per_instance, 1);
+        assert_eq!(resources.stamp_state_pointer_slots_per_instance, 1);
+        assert_eq!(
+            resources.legacy_stamp_state_heap_allocations_per_instance,
+            9
+        );
+        assert_eq!(resources.legacy_stamp_state_pointer_slots_per_instance, 9);
+    }
+
+    #[test]
     fn builtin_registry_dispatches_noise_metadata_and_evaluation_by_variant() {
         let root = temporary_registry_root("noise-registry");
         let _ = fs::remove_dir_all(&root);
@@ -1189,6 +1683,10 @@ mod tests {
         write_registry(&root, &devices).expect("write generated registry");
         let registry = fs::read_to_string(root.join("registry.rs")).expect("read registry");
 
+        assert!(
+            registry.contains("instance.set_multiplicity(*value)?;"),
+            "{registry}"
+        );
         assert!(
             registry.contains("Self::Device0(device) => device.limiter_converged()"),
             "{registry}"
@@ -1602,7 +2100,7 @@ fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
                 "                if let Err(error) = instance.set_parameter(name, *value) {\n",
             );
             out.push_str("                    if name.eq_ignore_ascii_case(\"m\") {\n");
-            out.push_str("                        instance.set_multiplicity(*value);\n");
+            out.push_str("                        instance.set_multiplicity(*value)?;\n");
             out.push_str("                    } else {\n");
             out.push_str("                        return Err(error);\n");
             out.push_str("                    }\n");

@@ -20,9 +20,10 @@ numbers, use rspice-core's
 
 | File | Contents |
 | :--- | :--- |
-| `src/main.rs` | CLI entry point: `gen`, `native-jit`, and `run` subcommands |
+| `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `native-jit`, and `run` subcommands |
 | `src/runner.rs` | The `run` subcommand: locates executables, runs warmup + timed repeats per deck/simulator, computes min/median/mean and the median speedup, writes the scoreboard, prints the table |
 | `src/generate.rs` | The `gen` subcommand: deterministically regenerates the generated decks (RC ladders, MOS array) with byte-stable output — fixed formatting, no timestamps |
+| `src/generated_rust.rs` | Authenticated source-resource report and budget gate for checked-in Verilog-A Rust kernels |
 | `src/native_jit.rs` | The `native-jit` subcommand: in-process Verilog-A native JIT benchmark gate with median speedup and optional p95 budgets |
 | `src/error.rs` | `BenchError` with full context on every failure path |
 
@@ -47,9 +48,32 @@ target/release/rspice-bench run \
 # Run the native Verilog-A JIT gate
 target/release/rspice-bench native-jit
 
+# Authenticate and measure the checked-in generated Rust bundle
+target/release/rspice-bench generated-rust \
+  --out benchmarks/scoreboards/generated-rust.json
+
 # Regenerate the generated decks (verify with git diff afterwards)
 target/release/rspice-bench gen
 ```
+
+### `rspice-bench generated-rust`
+
+This deterministic gate reads the v3 generator manifest, authenticates every
+generated file, and reports total source bytes/lines, noise-source bytes,
+category totals, and the largest files and models. Optional limits turn each
+metric into a non-zero-exit release budget.
+
+| Flag | Default | Meaning |
+| :--- | :--- | :--- |
+| `--generated-root <DIR>` | `crates/rspice-core/src/device/veriloga_generated` | Generated bundle to authenticate and measure |
+| `--max-source-bytes <N>` | unset | Maximum total generated-source bytes |
+| `--max-noise-source-bytes <N>` | unset | Maximum source bytes attributable to noise kernels |
+| `--max-model-source-bytes <N>` | unset | Maximum source bytes for any one generated model |
+| `--max-file-count <N>` | unset | Maximum generated-file count |
+| `--max-pooled-workspace-payload-bytes <N>` | unset | Maximum pooled scratch-workspace payload for any model on one worker thread |
+| `--max-stamp-state-payload-bytes <N>` | unset | Maximum persistent DDT/IDT stamp-state payload for any model instance |
+| `--top <N>` | 20 | Largest files and models retained in output |
+| `--out <PATH>` | unset | Optional deterministic JSON report |
 
 ### `rspice-bench run`
 

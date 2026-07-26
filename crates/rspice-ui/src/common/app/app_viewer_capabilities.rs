@@ -209,7 +209,7 @@ mod tests {
         results.hidden_strips.insert(0);
         results.maximized_strip = Some(0);
         results.views.insert(
-            (ResultViewer::Waves, 0),
+            (ResultViewer::Waves, 0, 0),
             PlotView {
                 x: Some((0.0, 1.0)),
                 y: Some((-1.0, 1.0)),

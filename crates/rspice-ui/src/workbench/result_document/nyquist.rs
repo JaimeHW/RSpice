@@ -121,6 +121,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         label: "−1 + j0".to_owned(),
         drop_line: false,
         label_dy: 0.0,
+        shape: plot::MarkerShape::Point,
     });
 
     // Unit circle + vertical axis underlay.

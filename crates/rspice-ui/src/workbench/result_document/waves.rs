@@ -23,7 +23,7 @@ use crate::ui::plot::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::section_header;
+use crate::ui::widgets::{chip, section_header};
 use crate::workbench::visualization_family::{
     FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
 };
@@ -33,8 +33,8 @@ use crate::workbench::{
 
 use super::strip::{LegendChip, StripHeader};
 use super::{
-    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, ResultsState, WaveformSeriesResult,
-    waveform_color, well_hint,
+    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, MarkerKind, ResultMarker, ResultsState,
+    WaveformSeriesResult, waveform_color, well_hint,
 };
 
 /// How a trace's Y values are interpreted.
@@ -323,6 +323,149 @@ impl StripModel {
                 fmt_si_significant(value, self.y_unit, significant_digits)
             }
         }
+    }
+
+    // -- accessors for the TABLE viewer ------------------------------------
+    //
+    // The table renders this same model, so its columns cannot name a trace
+    // the plot does not draw or report a value in a different unit than the
+    // curve. These are the only reads it needs.
+
+    /// Index of the analysis this strip renders.
+    pub(super) fn analysis_index(&self) -> usize {
+        self.analysis_index
+    }
+
+    /// The unit one trace is measured in.
+    fn trace_unit(&self, trace: &StripTrace) -> &'static str {
+        signal_unit(&trace.base_name, trace.kind, self.y_unit)
+    }
+
+    /// The strip's panes: visible traces grouped by unit, in the order the
+    /// units first appear so a strip's layout is stable across frames.
+    ///
+    /// Phase does not take a pane of its own while a magnitude pane exists
+    /// to read it against — splitting a Bode pair across two stacked panes
+    /// would break the one reading they are drawn together for.
+    pub(super) fn unit_panes(&self) -> Vec<UnitPane> {
+        let mut panes: Vec<UnitPane> = Vec::new();
+        let mut phase: Vec<usize> = Vec::new();
+        for (index, trace) in self.traces.iter().enumerate() {
+            if !trace.visible {
+                continue;
+            }
+            if trace.kind.is_phase() {
+                phase.push(index);
+                continue;
+            }
+            let unit = self.trace_unit(trace);
+            match panes.iter_mut().find(|pane| pane.unit == unit) {
+                Some(pane) => pane.traces.push(index),
+                None => panes.push(UnitPane {
+                    unit,
+                    traces: vec![index],
+                    right: Vec::new(),
+                }),
+            }
+        }
+        if phase.is_empty() {
+            return panes;
+        }
+        // Attach phase to the magnitude pane it belongs to; with no
+        // magnitude on screen it becomes a pane in its own right.
+        let host = panes
+            .iter()
+            .position(|pane| pane.unit == "dB")
+            .or_else(|| (!panes.is_empty()).then_some(0));
+        match host.and_then(|index| panes.get_mut(index)) {
+            Some(pane) => pane.right = phase,
+            None => {
+                let unit = self
+                    .traces
+                    .get(phase[0])
+                    .map_or("°", |trace| self.trace_unit(trace));
+                panes.push(UnitPane {
+                    unit,
+                    traces: phase,
+                    right: Vec::new(),
+                });
+            }
+        }
+        panes
+    }
+
+    /// Total trace count, including overlay runs.
+    pub(super) fn trace_count(&self) -> usize {
+        self.traces.len()
+    }
+
+    /// Indices of the visible active-run signal traces, in legend order.
+    pub(super) fn visible_signal_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.traces
+            .iter()
+            .take(self.signal_trace_count)
+            .enumerate()
+            .filter(|(_, trace)| trace.visible)
+            .map(|(index, _)| index)
+    }
+
+    /// The analysis' retained sample grid — the X array every trace on this
+    /// strip was solved against.
+    pub(super) fn sample_grid(&self) -> Option<&[f64]> {
+        self.traces.first().map(|trace| trace.x.as_slice())
+    }
+
+    /// Column heading for the X axis ("t · s").
+    pub(super) fn x_axis_heading(&self) -> String {
+        if self.x_unit.is_empty() {
+            self.x_label.clone()
+        } else {
+            format!("{} · {}", self.x_label, self.x_unit)
+        }
+    }
+
+    /// The X value at one grid index, formatted.
+    pub(super) fn format_x_at(
+        &self,
+        index: usize,
+        significant_digits: usize,
+        quantity_policy: crate::quantity::QuantityPresentationPolicy,
+    ) -> String {
+        self.sample_grid()
+            .and_then(|grid| grid.get(index).copied())
+            .map_or_else(
+                || "—".to_owned(),
+                |x| self.format_x(x, significant_digits, quantity_policy),
+            )
+    }
+
+    /// One trace's retained value at a grid index, formatted in that
+    /// trace's own unit.
+    ///
+    /// `None` when the trace is shorter than the grid: a table reporting
+    /// exact samples must say it has none rather than borrow a neighbour's.
+    pub(super) fn format_sample(
+        &self,
+        trace_index: usize,
+        sample: usize,
+        significant_digits: usize,
+        quantity_policy: crate::quantity::QuantityPresentationPolicy,
+    ) -> Option<String> {
+        let trace = self.traces.get(trace_index)?;
+        let value = trace.y.as_slice().get(sample).copied()?;
+        Some(self.format_trace_value(trace, value, significant_digits, quantity_policy))
+    }
+
+    /// Display name of one trace, for a column heading.
+    pub(super) fn trace_heading(&self, index: usize) -> Option<(&str, egui::Color32)> {
+        self.traces
+            .get(index)
+            .map(|trace| (trace.name.as_str(), trace.color))
+    }
+
+    /// Analysis label for the table's analysis picker.
+    pub(super) fn table_label(&self) -> String {
+        format!("{} · {}", self.kind_tag, self.subtitle)
     }
 }
 
@@ -927,28 +1070,97 @@ fn displayed_phase_series(
 /// measurement caches. Phase traces fold in the wrapped/continuous choice
 /// so a toggle never serves stale envelopes, ranges, or stats.
 fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
+    run_mixed_key(anchor_key(model, trace), trace.run_id, trace.overlay)
+}
+
+/// Run-independent identity of a trace: what a marker anchors to.
+///
+/// Every solve of the same signal shares this key, which is exactly the
+/// difference from [`trace_key`] — a decimation envelope must not outlive
+/// the run that produced it, while a marker is a statement about the
+/// signal and is meant to survive re-simulation.
+fn anchor_key(model: &StripModel, trace: &StripTrace) -> u64 {
     let continuous = (trace.kind.is_phase() && model.phase_continuous) as u64;
     let base = (model.analysis_index as u64) << 44
         | continuous << 43
         | (trace.waveform_index as u64) << 3
         | trace.kind as u64;
-    run_mixed_key(
-        base ^ trace.presentation_key.rotate_left(11),
-        trace.run_id,
-        trace.overlay,
-    )
+    base ^ trace.presentation_key.rotate_left(11)
+}
+
+/// Case-insensitive prefix test for a signal-name accessor (`V(`, `i(`).
+fn starts_with_accessor(name: &str, accessor: &str) -> bool {
+    name.len() >= accessor.len() && name[..accessor.len()].eq_ignore_ascii_case(accessor)
+}
+
+/// Peel the derived-projection wrappers off a display name so the
+/// underlying accessor is visible: `re(V(out))` is still volts.
+fn unwrap_projection(name: &str) -> &str {
+    let name = name.trim_start();
+    for wrapper in ["re(", "im(", "mag(", "abs("] {
+        if starts_with_accessor(name, wrapper) {
+            return name[wrapper.len()..].trim_start();
+        }
+    }
+    name.strip_prefix('|').unwrap_or(name)
+}
+
+/// The engineering unit a trace is measured in.
+///
+/// This is the axis model: a signal owns its unit, and the analysis default
+/// applies only where the name carries no accessor to read it from. Without
+/// this, a transient strip carrying `V(out)` and `I(R1)` would label both
+/// against the analysis' nominal volts and quietly misreport the current.
+fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'static str {
+    match kind {
+        TraceKind::MagnitudeDb => "dB",
+        TraceKind::PhaseDeg => "°",
+        TraceKind::PhaseRad => "rad",
+        TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+            let name = unwrap_projection(name);
+            if starts_with_accessor(name, "i(") {
+                "A"
+            } else if starts_with_accessor(name, "v(") {
+                "V"
+            } else if starts_with_accessor(name, "p(") {
+                "W"
+            } else {
+                analysis_unit
+            }
+        }
+    }
+}
+
+/// One Y axis of a strip: the traces measured in a single unit.
+///
+/// Panes of a strip always share the strip's X domain — they are one
+/// measurement read against several scales, not several plots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct UnitPane {
+    /// The unit every trace on this pane's left axis is measured in.
+    pub unit: &'static str,
+    /// Trace indices on the left axis.
+    pub traces: Vec<usize>,
+    /// Trace indices on this pane's right axis — phase read against the
+    /// magnitude it belongs to, which is what keeps a Bode pair together.
+    pub right: Vec<usize>,
 }
 
 /// Y range of the visible traces on one axis side, padded 8 %. Per-trace
 /// extremes are cached on the data version — never rescanned per frame.
-fn y_range(derived: &mut DerivedSeries, model: &StripModel, phase: bool) -> Option<(f64, f64)> {
+/// Y range of one pane's traces, padded 8 %. Per-trace extremes are cached
+/// on the data version — never rescanned per frame.
+///
+/// The fit is per pane because each pane carries its own unit: fitting
+/// volts and amps to one range would flatten whichever is smaller.
+fn pane_y_range(
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    indices: &[usize],
+) -> Option<(f64, f64)> {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
-    for trace in &model.traces {
-        let is_phase = trace.kind.is_phase();
-        if is_phase != phase || !trace.visible {
-            continue;
-        }
+    for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
         let extremes =
             derived.range_or(trace_key(model, trace), || super::finite_extremes(&trace.y));
         if let Some((lo, hi)) = extremes {
@@ -1141,8 +1353,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         let zoomed = state
                             .ui
                             .results
-                            .plot_view(super::ResultViewer::Waves, model.analysis_index)
-                            .is_zoomed();
+                            .strip_is_zoomed(super::ResultViewer::Waves, model.analysis_index);
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
                             .maximized(maximized)
                             .closable(!maximized && n > 1)
@@ -1909,6 +2120,30 @@ fn append_copied_cursor(
     }
 }
 
+/// Kind owns the marker's colour: a spec limit reads as a bound to meet,
+/// a peak as a called-out feature, a note as neutral annotation.
+fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
+    match kind {
+        MarkerKind::Note => t.color.text,
+        MarkerKind::Peak => t.color.accent,
+        MarkerKind::Spec => t.color.warn,
+    }
+}
+
+/// Tag text: the id always, the note only when the user wrote one.
+fn marker_label(marker: &ResultMarker) -> String {
+    if marker.note.trim().is_empty() {
+        format!("M{}", marker.id)
+    } else {
+        format!("M{} · {}", marker.id, marker.note.trim())
+    }
+}
+
+/// One strip, drawn as one pane per unit.
+///
+/// Signals route to the pane that owns their unit; the panes stack and
+/// share the strip's X domain, so a strip stays one measurement read
+/// against as many scales as it genuinely needs.
 fn show_strip_plot(
     ui: &mut Ui,
     state: &mut AppState,
@@ -1916,27 +2151,79 @@ fn show_strip_plot(
     linked_cursor_domain: Option<&CursorDomain>,
 ) {
     let t = Tokens::get(ui.ctx());
+    let Some(x_domain) = x_range(model) else {
+        well_hint(ui, "No data");
+        return;
+    };
+    let panes = model.unit_panes();
+    if panes.is_empty() {
+        well_hint(ui, "No visible traces — enable one in the legend");
+        return;
+    }
+
+    // Expression traces participate in the first pane's automatic fit.
+    let exprs = resolve_strip_exprs(state, model, &t);
+    let available = ui.available_rect_before_wrap();
+    let count = panes.len();
+    let seams = count.saturating_sub(1) as f32;
+    let pane_height = ((available.height() - seams) / count as f32).max(56.0);
+
+    for (ordinal, pane) in panes.iter().enumerate() {
+        if ordinal > 0 {
+            let (seam, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+            ui.painter()
+                .rect_filled(seam, 0.0, t.color.canvas_grid);
+        }
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), pane_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_height(pane_height);
+                show_unit_pane(
+                    ui,
+                    state,
+                    model,
+                    pane,
+                    ordinal,
+                    x_domain,
+                    // Only the first pane carries the strip's expressions:
+                    // an expression has no declared unit, so it cannot be
+                    // routed to a unit-owning pane on the evidence available.
+                    if ordinal == 0 { &exprs } else { &[] },
+                    linked_cursor_domain,
+                );
+            },
+        );
+    }
+}
+
+fn show_unit_pane(
+    ui: &mut Ui,
+    state: &mut AppState,
+    model: &StripModel,
+    pane: &UnitPane,
+    ordinal: usize,
+    x_domain: (f64, f64),
+    exprs: &[ResolvedExpr],
+    linked_cursor_domain: Option<&CursorDomain>,
+) {
+    let t = Tokens::get(ui.ctx());
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let Some((x0, x1)) = x_range(model) else {
-        well_hint(ui, "No data");
-        return;
-    };
+    let (x0, x1) = x_domain;
 
-    // Expression traces participate in the automatic fit alongside the
-    // run's visible traces.
-    let exprs = resolve_strip_exprs(state, model, &t);
-    let model_range = y_range(&mut state.ui.results.derived, model, false);
+    let pane_range = pane_y_range(&mut state.ui.results.derived, model, &pane.traces);
     let auto_y = {
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
-        if let Some((a, b)) = model_range {
+        if let Some((a, b)) = pane_range {
             lo = a;
             hi = b;
         }
-        for expr in &exprs {
+        for expr in exprs {
             if let Some((a, b)) = expr.y_extremes {
                 lo = lo.min(a);
                 hi = hi.max(b);
@@ -1955,11 +2242,12 @@ fn show_strip_plot(
         return;
     };
 
-    // User zoom/pan overrides the automatic fit per axis.
-    let view = state
-        .ui
-        .results
-        .plot_view(super::ResultViewer::Waves, model.analysis_index);
+    // User zoom/pan overrides the automatic fit per axis, per pane.
+    let view =
+        state
+            .ui
+            .results
+            .plot_view_pane(super::ResultViewer::Waves, model.analysis_index, ordinal);
     let (x0, x1) = view.x.unwrap_or((x0, x1));
     let (y0, y1) = view.y.unwrap_or((y0, y1));
 
@@ -1972,20 +2260,20 @@ fn show_strip_plot(
         let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
         x_axis = x_axis.with_display_transform(scale, offset, unit);
     }
-    let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, model.y_unit))
+    let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, pane.unit))
         .accessible_name("Waveform plot");
     spec.display_decimation = display_decimation(presentation.large_dataset_display());
 
-    // Right (phase) axis when phase traces are visible.
-    let has_phase = model
-        .traces
-        .iter()
-        .any(|trace| trace.kind.is_phase() && trace.visible);
-    if has_phase && let Some((p0, p1)) = y_range(&mut state.ui.results.derived, model, true) {
-        let displays_radians = model
-            .traces
+    // Right (phase) axis when this pane hosts phase traces.
+    let has_phase = !pane.right.is_empty();
+    if has_phase
+        && let Some((p0, p1)) = pane_y_range(&mut state.ui.results.derived, model, &pane.right)
+    {
+        let displays_radians = pane
+            .right
             .iter()
-            .any(|trace| trace.kind == TraceKind::PhaseRad && trace.visible);
+            .filter_map(|index| model.traces.get(*index))
+            .any(|trace| trace.kind == TraceKind::PhaseRad);
         let axis = match (view.y_right, displays_radians) {
             (Some((z0, z1)), true) => Axis::linear_with(z0, z1, "rad", 5),
             (None, true) => Axis::linear_with(p0, p1, "rad", 5),
@@ -2014,23 +2302,23 @@ fn show_strip_plot(
         };
         spec.y_right = Some((axis, t.color.traces[2]));
     }
-    // 0 dB reference on log-magnitude strips.
-    if model.y_unit == "dB" && y0 < 0.0 && y1 > 0.0 {
+    // 0 dB reference on a log-magnitude pane.
+    if pane.unit == "dB" && y0 < 0.0 && y1 > 0.0 {
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
 
     // Run owns weight: overlay traces keep the signal hue at reduced alpha
     // and stroke, painted first so the active run draws at full strength
     // on top.
-    let draw_order = model
-        .traces
+    let pane_indices = pane.traces.iter().chain(pane.right.iter()).copied();
+    let pane_traces: Vec<(usize, &StripTrace)> = pane_indices
+        .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
+        .collect();
+    let draw_order = pane_traces
         .iter()
-        .filter(|trace| trace.overlay)
-        .chain(model.traces.iter().filter(|trace| !trace.overlay));
-    for trace in draw_order {
-        if !trace.visible {
-            continue;
-        }
+        .filter(|(_, trace)| trace.overlay)
+        .chain(pane_traces.iter().filter(|(_, trace)| !trace.overlay));
+    for (index, trace) in draw_order {
         let color = if trace.overlay {
             trace.color.gamma_multiply(0.40)
         } else {
@@ -2043,18 +2331,49 @@ fn show_strip_plot(
         if trace.overlay {
             plot_trace = plot_trace.thin();
         }
-        if trace.kind.is_phase() {
+        if pane.right.contains(index) {
             plot_trace = plot_trace.right().dashed();
         }
         spec.traces.push(plot_trace);
     }
-    for expr in &exprs {
+    for expr in exprs {
         spec.traces.push(apply_family_trace_style(
             Trace::new(&expr.x, &expr.y, expr.color)
                 .thin()
                 .cache_key(expr.cache_key),
             expr.family_style,
         ));
+    }
+
+    // Markers ride their anchored trace: Y is resampled here rather than
+    // stored, so zoom, pan, and a re-run all leave the tag on the curve.
+    for marker in state.ui.results.strip_markers(model.analysis_index) {
+        let color = marker_color(marker.kind, &t);
+        let label = marker_label(marker);
+        if marker.kind == MarkerKind::Spec {
+            // A spec constrains the X position, which every pane of the
+            // strip shares — so it draws on all of them.
+            spec.markers
+                .push(plot::Marker::limit_line(marker.x, color, label));
+            continue;
+        }
+        // A marker belongs to the pane that owns its trace's unit; the
+        // other panes are a different scale and would misplace it.
+        let anchored = pane_traces.iter().find(|(_, trace)| {
+            !trace.overlay && anchor_key(model, trace) == marker.anchor
+        });
+        let Some((index, trace)) = anchored else {
+            continue;
+        };
+        let y = sample_at_with(&trace.x, &trace.y, marker.x, interpolation);
+        if !y.is_finite() {
+            continue;
+        }
+        let mut plot_marker = plot::Marker::point(marker.x, y, color, label);
+        if pane.right.contains(index) {
+            plot_marker.side = plot::YSide::Right;
+        }
+        spec.markers.push(plot_marker);
     }
 
     let model_cursor_domain = model.cursor_domain();
@@ -2068,7 +2387,7 @@ fn show_strip_plot(
             model.x_label().to_owned(),
             model.format_x(x, significant_digits, quantity_policy),
         )];
-        for trace in model.traces.iter().filter(|t| t.visible).take(6) {
+        for (_, trace) in pane_traces.iter().take(6) {
             let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
             rows.push((
                 trace.name.clone(),
@@ -2093,7 +2412,45 @@ fn show_strip_plot(
         Some(&readout),
     );
 
-    if let Some(clicked_x) = response.clicked_x {
+    // The marker tool takes the click when armed: one click cannot both
+    // annotate and move a cursor, and the armed chip says which it will do.
+    if let Some(clicked_x) = response.clicked_x
+        && state.ui.results.marker_tool.is_armed()
+    {
+        let right_range = spec.y_right.as_ref().map(|(axis, _)| (axis.min, axis.max));
+        let pointer_y = response.response.interact_pointer_pos().map(|pos| pos.y);
+        let plot_rect = response.plot_rect;
+        // "Nearest" has to mean what the eye sees, so each trace is measured
+        // in screen space against the axis it actually draws on.
+        let screen_y = |value: f64, right: bool| -> Option<f32> {
+            let (lo, hi) = if right { right_range? } else { (y0, y1) };
+            (value.is_finite() && hi > lo).then(|| {
+                plot_rect.bottom() - ((value - lo) / (hi - lo)) as f32 * plot_rect.height()
+            })
+        };
+        let nearest = pane_traces
+            .iter()
+            .filter(|(_, trace)| !trace.overlay)
+            .filter_map(|(index, trace)| {
+                let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
+                let y = screen_y(value, pane.right.contains(index))?;
+                Some((trace, pointer_y.map_or(0.0, |pointer| (pointer - y).abs())))
+            })
+            .min_by(|(_, a), (_, b)| a.total_cmp(b));
+        if let Some((trace, _)) = nearest {
+            let anchor = anchor_key(model, trace);
+            let name = trace.name.clone();
+            let id = state
+                .ui
+                .results
+                .add_marker(model.analysis_index, anchor, name, clicked_x);
+            // Focus the new marker's note field: placing one is normally the
+            // first half of saying what it means.
+            state.ui.results.editing_marker = Some(id);
+        }
+    } else if let Some(clicked_x) = response.clicked_x
+        && state.ui.results.cursor_tool.is_armed()
+    {
         let results = &mut state.ui.results;
         if results.cursor_strip != Some(model.analysis_index)
             && (!results.linked_cursors || !cursor_domain_matches)
@@ -2108,7 +2465,7 @@ fn show_strip_plot(
         state
             .ui
             .results
-            .plot_view_mut(super::ResultViewer::Waves, model.analysis_index)
+            .plot_view_pane_mut(super::ResultViewer::Waves, model.analysis_index, ordinal)
             .apply(&response.view);
     }
 }
@@ -2117,16 +2474,456 @@ fn show_strip_plot(
 // right panel
 // ---------------------------------------------------------------------------
 
-/// Cursors + measurements readout.
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+// ---------------------------------------------------------------------------
+// readout strip
+// ---------------------------------------------------------------------------
+
+/// Height of the cursor readout strip's header row.
+const READOUT_HEADER_H: f32 = 26.0;
+/// Height of one per-trace row in the readout strip.
+const READOUT_ROW_H: f32 = 20.0;
+/// Most trace rows the strip will show before it stops growing.
+const READOUT_TRACE_LIMIT: usize = 4;
+const READOUT_PAD_X: f32 = 10.0;
+
+/// Traces the readout strip will report for the cursor's strip.
+fn readout_trace_count(state: &AppState) -> usize {
+    let Some(index) = state.ui.results.cursor_strip else {
+        return 0;
+    };
+    state
+        .simulation
+        .active_run()
+        .and_then(|run| run.analyses.get(index))
+        .map_or(0, |analysis| {
+            analysis
+                .waveforms
+                .iter()
+                .filter(|waveform| waveform.visible)
+                .count()
+                .min(READOUT_TRACE_LIMIT)
+        })
+}
+
+/// Height of one marker row.
+const MARKER_ROW_H: f32 = 22.0;
+/// Most marker rows the strip will show before it stops growing.
+const MARKER_ROW_LIMIT: usize = 4;
+
+/// Analysis indices whose strips are on screen right now.
+///
+/// A marker on a closed or un-maximized strip has nothing to point at, so
+/// it must not hold the readout strip open.
+fn on_screen_strips(state: &AppState) -> Vec<usize> {
+    let Some(run) = state.simulation.active_run() else {
+        return Vec::new();
+    };
+    let results = &state.ui.results;
+    let present = |index: usize| index < run.analyses.len();
+    match results.maximized_strip {
+        Some(max_index) if present(max_index) => vec![max_index],
+        _ => (0..run.analyses.len())
+            .filter(|index| !results.hidden_strips.contains(index))
+            .collect(),
+    }
+}
+
+/// Markers the strip will list, in placement order.
+fn visible_markers(state: &AppState) -> Vec<&ResultMarker> {
+    let strips = on_screen_strips(state);
+    state
+        .ui
+        .results
+        .markers
+        .iter()
+        .filter(|marker| strips.contains(&marker.analysis_index))
+        .collect()
+}
+
+/// Exact height the readout strip needs, or zero when it stands down.
+///
+/// The strip is content-fit by design: it is a readout, not a dock, so it
+/// never reserves space for rows it has nothing to put in. Three states are
+/// reachable — the full cursor readout, a markers-only strip when markers
+/// exist without cursors, and no strip at all.
+pub fn readout_strip_height(state: &AppState) -> f32 {
+    let mut height = 0.0;
+    if state.ui.results.cursor_readout_active() {
+        height += READOUT_HEADER_H + readout_trace_count(state) as f32 * READOUT_ROW_H;
+    }
+    let markers = visible_markers(state).len();
+    if markers > 0 {
+        height += READOUT_HEADER_H + markers.min(MARKER_ROW_LIMIT) as f32 * MARKER_ROW_H;
+    }
+    height
+}
+
+/// The cursor readout: one X row naming A, B and Δ, then the value each
+/// visible trace takes at those cursors.
+///
+/// This is the single home for the cursor readout. The inspector reports
+/// window statistics the strip does not carry, and never repeats these
+/// numbers one panel away.
+pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, c.bg_panel);
+    ui.painter()
+        .hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
 
-    if let Some(action) = section_header(ui, "Cursors", Some("Clear"))
-        && action.clicked()
-    {
-        state.ui.results.clear_cursors();
+    let cursor_bottom = cursor_readout_section(ui, state, rect);
+    let marker_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), cursor_bottom),
+        egui::pos2(rect.right(), rect.bottom()),
+    );
+    if marker_rect.height() > 1.0 {
+        if cursor_bottom > rect.top() {
+            ui.painter().hline(
+                rect.x_range(),
+                cursor_bottom,
+                egui::Stroke::new(1.0, c.border),
+            );
+        }
+        marker_section(ui, state, marker_rect);
     }
+}
+
+/// The A/B half of the strip. Returns the Y the marker section starts at,
+/// which equals the strip top when there is no cursor readout to draw.
+fn cursor_readout_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    if !state.ui.results.cursor_readout_active() {
+        return rect.top();
+    }
+    // Read the reserved height from the same source as `readout_strip_height`
+    // so the marker section can never start off the end of the strip.
+    let section_bottom =
+        rect.top() + READOUT_HEADER_H + readout_trace_count(state) as f32 * READOUT_ROW_H;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &t,
+    );
+    let Some(model) = state
+        .ui
+        .results
+        .cursor_strip
+        .and_then(|index| models.iter().find(|model| model.analysis_index == index))
+    else {
+        return rect.top();
+    };
+    let cursors = state.ui.results.cursors;
+    let Some(a) = cursors.a else {
+        return rect.top();
+    };
+
+    // Header: the X positions and their separation.
+    let header = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.right(), rect.top() + READOUT_HEADER_H),
+    );
+    let painter = ui.painter().with_clip_rect(header);
+    let mut x = header.left() + READOUT_PAD_X;
+    let mut chip = |text: String, color: egui::Color32, painter: &egui::Painter| {
+        let galley =
+            painter.layout_no_wrap(text, theme::mono(tokens::FS_0, FontWeight::Regular), color);
+        painter.galley(
+            egui::pos2(x, header.center().y - galley.size().y * 0.5),
+            galley.clone(),
+            color,
+        );
+        x += galley.size().x + 14.0;
+    };
+    chip("CURSORS".to_owned(), c.text_faint, &painter);
+    chip(
+        format!(
+            "A  {} = {}",
+            model.x_label(),
+            model.format_x(a, significant_digits, quantity_policy)
+        ),
+        c.accent,
+        &painter,
+    );
+    if let Some(b) = cursors.b {
+        chip(
+            format!(
+                "B  {} = {}",
+                model.x_label(),
+                model.format_x(b, significant_digits, quantity_policy)
+            ),
+            c.traces[4],
+            &painter,
+        );
+        chip(
+            format!(
+                "Δ  {}",
+                x_separation(model, a, b, significant_digits, quantity_policy)
+            ),
+            c.text,
+            &painter,
+        );
+        if let Some(slope) = slope_between(model, a, b, presentation) {
+            chip(format!("slope  {slope}"), c.text_dim, &painter);
+        }
+    } else {
+        chip("click again to place B".to_owned(), c.text_faint, &painter);
+    }
+
+    // Per-trace values at A, at B, and their difference.
+    let rows = value_rows(model, a, presentation, quantity_policy);
+    let b_rows = cursors
+        .b
+        .map(|b| value_rows(model, b, presentation, quantity_policy));
+    let deltas = cursors
+        .b
+        .map(|b| delta_values(model, a, b, presentation, quantity_policy));
+    let name_column = (rect.width() * 0.28).clamp(80.0, 220.0);
+    let value_column = ((rect.width() - name_column - READOUT_PAD_X * 2.0) / 3.0).max(1.0);
+    for (index, (name, a_value)) in rows.iter().take(READOUT_TRACE_LIMIT).enumerate() {
+        let top = header.bottom() + index as f32 * READOUT_ROW_H;
+        let row = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), top),
+            egui::pos2(rect.right(), top + READOUT_ROW_H),
+        );
+        let painter = ui.painter().with_clip_rect(row);
+        painter.text(
+            egui::pos2(row.left() + READOUT_PAD_X, row.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.text_dim,
+        );
+        let mut column = row.left() + READOUT_PAD_X + name_column;
+        let mut cell = |text: &str, color: egui::Color32| {
+            painter.text(
+                egui::pos2(column, row.center().y),
+                egui::Align2::LEFT_CENTER,
+                text,
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                color,
+            );
+            column += value_column;
+        };
+        cell(a_value, c.text);
+        if let Some(b_rows) = b_rows.as_ref() {
+            cell(
+                b_rows.get(index).map_or("", |(_, value)| value.as_str()),
+                c.text,
+            );
+        }
+        if let Some(deltas) = deltas.as_ref() {
+            cell(deltas.get(index).map_or("", String::as_str), c.text_dim);
+        }
+    }
+    section_bottom
+}
+
+/// The marker half of the strip: one editable row per marker.
+///
+/// Markers are document content, so their row is the place they are named,
+/// re-kinded and removed — there is no second marker list elsewhere to
+/// disagree with this one.
+fn marker_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &t,
+    );
+
+    let shown: Vec<u32> = visible_markers(state)
+        .into_iter()
+        .take(MARKER_ROW_LIMIT)
+        .map(|marker| marker.id)
+        .collect();
+    let total = visible_markers(state).len();
+    if shown.is_empty() {
+        return;
+    }
+
+    let header = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.right(), rect.top() + READOUT_HEADER_H),
+    );
+    let painter = ui.painter().with_clip_rect(header);
+    painter.text(
+        egui::pos2(header.left() + READOUT_PAD_X, header.center().y),
+        egui::Align2::LEFT_CENTER,
+        "MARKERS",
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.text_faint,
+    );
+    if total > shown.len() {
+        painter.text(
+            egui::pos2(header.right() - READOUT_PAD_X, header.center().y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{} of {total}", shown.len()),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.text_faint,
+        );
+    }
+
+    let mut remove: Option<u32> = None;
+    for (index, id) in shown.iter().copied().enumerate() {
+        let top = header.bottom() + index as f32 * MARKER_ROW_H;
+        let row = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + READOUT_PAD_X, top),
+            egui::pos2(rect.right() - READOUT_PAD_X, top + MARKER_ROW_H),
+        );
+        // Everything the row reports is derived here, from the same model
+        // the plot drew, so a row can never describe a marker the plot
+        // placed somewhere else.
+        let Some(marker) = state.ui.results.markers.iter().find(|m| m.id == id) else {
+            continue;
+        };
+        let kind = marker.kind;
+        let anchor = marker.anchor;
+        let marker_x = marker.x;
+        let analysis_index = marker.analysis_index;
+        let trace_name = marker.trace_name.clone();
+        let model = models
+            .iter()
+            .find(|model| model.analysis_index == analysis_index);
+        let position = model.map_or_else(
+            || fmt_si_significant(marker_x, "", significant_digits),
+            |model| {
+                format!(
+                    "{} = {}",
+                    model.x_label(),
+                    model.format_x(marker_x, significant_digits, quantity_policy)
+                )
+            },
+        );
+        // A spec marker constrains the X position alone; reporting a curve
+        // value against it would assert a reading it does not make.
+        let value = kind.rides_a_trace().then(|| {
+            model
+                .and_then(|model| {
+                    let trace = model
+                        .traces
+                        .iter()
+                        .find(|trace| !trace.overlay && anchor_key(model, trace) == anchor)?;
+                    let sampled = sample_at_with(&trace.x, &trace.y, marker_x, interpolation);
+                    Some(model.format_trace_value(
+                        trace,
+                        sampled,
+                        significant_digits,
+                        quantity_policy,
+                    ))
+                })
+                .unwrap_or_else(|| "trace unavailable".to_owned())
+        });
+
+        let mut row_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row_ui.set_clip_rect(row);
+        row_ui.spacing_mut().item_spacing.x = 8.0;
+        let color = marker_color(kind, &t);
+        row_ui.label(
+            egui::RichText::new(format!("M{id}"))
+                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                .color(color),
+        );
+        if chip(&mut row_ui, kind.label(), false)
+            .on_hover_text("Cycle marker kind: note → peak → spec")
+            .clicked()
+            && let Some(marker) = state.ui.results.marker_mut(id)
+        {
+            marker.kind = kind.next();
+        }
+        if row_ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("×")
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .color(c.text_dim),
+                )
+                .frame(false),
+            )
+            .on_hover_text("Remove this marker")
+            .clicked()
+        {
+            remove = Some(id);
+        }
+        row_ui.label(
+            egui::RichText::new(trace_name)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(if kind.rides_a_trace() {
+                    c.text_dim
+                } else {
+                    c.text_faint
+                }),
+        );
+        row_ui.label(
+            egui::RichText::new(position)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(c.text),
+        );
+        if let Some(value) = value {
+            row_ui.label(
+                egui::RichText::new(value)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text),
+            );
+        }
+        // The note field takes what is left of the row.
+        let note_width = row_ui.available_width().max(60.0);
+        let mut note = state
+            .ui
+            .results
+            .markers
+            .iter()
+            .find(|m| m.id == id)
+            .map_or_else(String::new, |m| m.note.clone());
+        let response = row_ui.add(
+            egui::TextEdit::singleline(&mut note)
+                .desired_width(note_width)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .hint_text("note…"),
+        );
+        if state.ui.results.editing_marker == Some(id) {
+            response.request_focus();
+            state.ui.results.editing_marker = None;
+        }
+        if response.changed()
+            && let Some(marker) = state.ui.results.marker_mut(id)
+        {
+            marker.note = note;
+        }
+    }
+    if let Some(id) = remove {
+        state.ui.results.remove_marker(id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// right panel
+// ---------------------------------------------------------------------------
+
+/// Window statistics over the cursor span.
+///
+/// The A/B/Δ readout itself lives in the stage's readout strip; repeating it
+/// one panel away is what the results de-duplication pass removed.
+pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
 
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
@@ -2143,59 +2940,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .cursor_strip
         .and_then(|idx| models.iter().find(|m| m.analysis_index == idx));
 
+    // Statistics over the cursor window (or the full range).
     let cursors = state.ui.results.cursors;
-    match (cursor_model, cursors.a) {
-        (Some(model), Some(a)) => {
-            cursor_block(
-                ui,
-                "A",
-                c.accent,
-                &format!(
-                    "{} = {}",
-                    model.x_label(),
-                    model.format_x(a, significant_digits, quantity_policy)
-                ),
-                &value_rows(model, a, presentation, quantity_policy),
-            );
-            if let Some(b) = cursors.b {
-                cursor_block(
-                    ui,
-                    "B",
-                    c.traces[4],
-                    &format!(
-                        "{} = {}",
-                        model.x_label(),
-                        model.format_x(b, significant_digits, quantity_policy)
-                    ),
-                    &value_rows(model, b, presentation, quantity_policy),
-                );
-                cursor_block(
-                    ui,
-                    "B − A",
-                    c.text_faint,
-                    &format!(
-                        "Δ{} = {}",
-                        model.x_label(),
-                        model.format_x(b - a, significant_digits, quantity_policy)
-                    ),
-                    &delta_rows(model, a, b, presentation, quantity_policy),
-                );
-            }
-        }
-        _ => {
-            ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                ui.add_space(12.0);
-                ui.label(
-                    egui::RichText::new("Click a plot to place cursor A, again for B. Esc clears.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(c.text_faint),
-                );
-            });
-        }
-    }
-
-    // Measurements over the cursor window (or the full range).
     let measured_model = cursor_model.or_else(|| models.first());
     if let Some(model) = measured_model {
         let window = match (cursors.a, cursors.b) {
@@ -2242,145 +2988,88 @@ fn value_rows(
         .collect()
 }
 
-fn delta_rows(
+/// Per-trace change between the cursors, in the same order and length as
+/// [`value_rows`] so the readout strip's columns stay aligned row for row.
+///
+/// The difference is taken in value space, never between two formatted
+/// readouts, so a Δ can never disagree with the values above it.
+fn delta_values(
     model: &StripModel,
     a: f64,
     b: f64,
     presentation: ResultPresentationPolicy,
     quantity_policy: crate::quantity::QuantityPresentationPolicy,
-) -> Vec<(String, String)> {
-    let mut rows = Vec::new();
+) -> Vec<String> {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
+    model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .take(READOUT_TRACE_LIMIT)
+        .map(|trace| {
+            let dv = sample_at_with(&trace.x, &trace.y, b, interpolation)
+                - sample_at_with(&trace.x, &trace.y, a, interpolation);
+            model.format_trace_value(trace, dv, significant_digits, quantity_policy)
+        })
+        .collect()
+}
+
+/// The separation between the cursors, named the way the X axis reads: a
+/// time span also reports its reciprocal, because 1/Δt is the number a
+/// designer is actually after when measuring a period.
+fn x_separation(
+    model: &StripModel,
+    a: f64,
+    b: f64,
+    significant_digits: usize,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> String {
     let dx = b - a;
     match model.x_scale {
         XScale::Linear if model.x_unit == "s" => {
-            rows.push((
-                "Δt".to_owned(),
-                fmt_si_significant(dx, "s", significant_digits),
-            ));
-            if dx != 0.0 {
-                rows.push((
-                    "1/Δt".to_owned(),
-                    quantity_policy.format_frequency(1.0 / dx.abs(), significant_digits),
-                ));
+            let span = fmt_si_significant(dx, "s", significant_digits);
+            if dx == 0.0 {
+                span
+            } else {
+                format!(
+                    "{span}  ({})",
+                    quantity_policy.format_frequency(1.0 / dx.abs(), significant_digits)
+                )
             }
         }
-        XScale::Log10 => {
-            rows.push((
-                "Δf".to_owned(),
-                quantity_policy.format_frequency(dx, significant_digits),
-            ));
-        }
-        _ => rows.push((
-            format!("Δ{}", model.x_label()),
-            fmt_si_significant(dx, &model.x_unit, significant_digits),
-        )),
+        XScale::Log10 => quantity_policy.format_frequency(dx, significant_digits),
+        _ => fmt_si_significant(dx, &model.x_unit, significant_digits),
     }
-    for trace in model.traces.iter().filter(|t| t.visible).take(4) {
-        let dv = sample_at_with(&trace.x, &trace.y, b, interpolation)
-            - sample_at_with(&trace.x, &trace.y, a, interpolation);
-        rows.push((
-            format!("Δ{}", trace.name),
-            model.format_trace_value(trace, dv, significant_digits, quantity_policy),
-        ));
-    }
-    // dB/decade slope between cursors on log strips.
-    if model.x_scale == XScale::Log10 && a > 0.0 && b > 0.0 {
-        let dlog = (b.log10() - a.log10()).abs();
-        if dlog > 1e-12
-            && let Some(mag) = model
-                .traces
-                .iter()
-                .find(|t| t.kind == TraceKind::MagnitudeDb && t.visible)
-        {
-            let ddb = sample_at_with(&mag.x, &mag.y, b, interpolation)
-                - sample_at_with(&mag.x, &mag.y, a, interpolation);
-            rows.push((
-                "slope".to_owned(),
-                fmt_significant(ddb / dlog, significant_digits, " dB/dec"),
-            ));
-        }
-    }
-    rows
 }
 
-/// The design's `.cursor-block`: inset bordered block with a letter head and
-/// mono key/value rows.
-fn cursor_block(
-    ui: &mut Ui,
-    letter: &str,
-    dot: egui::Color32,
-    x_label: &str,
-    rows: &[(String, String)],
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    egui::Frame::NONE
-        .fill(c.bg_inset)
-        .stroke(egui::Stroke::new(1.0, c.border))
-        .rounding(t.radius)
-        .outer_margin(egui::Margin {
-            left: 12,
-            right: 12,
-            top: 2,
-            bottom: 6,
-        })
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            let width = ui.available_width();
-            // Head row.
-            let (head, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), egui::Sense::hover());
-            let painter = ui.painter();
-            painter.rect_filled(
-                egui::Rect::from_center_size(
-                    egui::pos2(head.left() + 13.0, head.center().y),
-                    egui::vec2(8.0, 8.0),
-                ),
-                2.0,
-                dot,
-            );
-            painter.text(
-                egui::pos2(head.left() + 24.0, head.center().y),
-                egui::Align2::LEFT_CENTER,
-                letter,
-                theme::mono(tokens::FS_0, FontWeight::Medium),
-                c.text,
-            );
-            painter.text(
-                egui::pos2(head.right() - 9.0, head.center().y),
-                egui::Align2::RIGHT_CENTER,
-                x_label,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text_dim,
-            );
-            painter.hline(
-                head.x_range(),
-                head.bottom() - 0.5,
-                egui::Stroke::new(1.0, c.border),
-            );
-            // Value rows.
-            for (key, value) in rows {
-                let (row, _) =
-                    ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
-                let painter = ui.painter();
-                painter.text(
-                    egui::pos2(row.left() + 9.0, row.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    key,
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    c.text_dim,
-                );
-                painter.text(
-                    egui::pos2(row.right() - 9.0, row.center().y),
-                    egui::Align2::RIGHT_CENTER,
-                    value,
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    c.text,
-                );
-            }
-            ui.add_space(5.0);
-        });
+/// dB/decade slope of the magnitude trace between the cursors, on log-X
+/// strips that carry one.
+fn slope_between(
+    model: &StripModel,
+    a: f64,
+    b: f64,
+    presentation: ResultPresentationPolicy,
+) -> Option<String> {
+    if model.x_scale != XScale::Log10 || a <= 0.0 || b <= 0.0 {
+        return None;
+    }
+    let dlog = (b.log10() - a.log10()).abs();
+    if dlog <= 1e-12 {
+        return None;
+    }
+    let magnitude = model
+        .traces
+        .iter()
+        .find(|trace| trace.kind == TraceKind::MagnitudeDb && trace.visible)?;
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
+    let ddb = sample_at_with(&magnitude.x, &magnitude.y, b, interpolation)
+        - sample_at_with(&magnitude.x, &magnitude.y, a, interpolation);
+    Some(fmt_significant(
+        ddb / dlog,
+        usize::from(presentation.displayed_significant_digits().get()),
+        " dB/dec",
+    ))
 }
 
 /// min / max / rms rows per visible trace, optionally windowed to [a, b].
@@ -2448,6 +3137,50 @@ fn measurement_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
+        let mut state = AppState::default();
+        assert!(state.ui.results.cursor_tool.is_armed(), "armed by default");
+        assert!(!state.ui.results.cursor_readout_active());
+        assert_eq!(readout_strip_height(&state), 0.0);
+
+        state.ui.results.cursors.place(1.0e-3);
+        assert!(state.ui.results.cursor_readout_active());
+        // No visible traces on an empty run: the header alone, never a band
+        // of blank rows.
+        assert_eq!(readout_strip_height(&state), READOUT_HEADER_H);
+    }
+
+    #[test]
+    fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
+        let mut state = AppState::default();
+        state.ui.results.cursors.place(1.0);
+        state.ui.results.cursors.place(2.0);
+        state.ui.results.cursor_strip = Some(0);
+
+        state.ui.results.toggle_cursor_tool();
+
+        assert!(!state.ui.results.cursor_tool.is_armed());
+        assert!(!state.ui.results.cursors.any());
+        assert_eq!(state.ui.results.cursor_strip, None);
+        assert_eq!(readout_strip_height(&state), 0.0);
+
+        state.ui.results.toggle_cursor_tool();
+        assert!(state.ui.results.cursor_tool.is_armed());
+        assert!(
+            !state.ui.results.cursors.any(),
+            "re-arming must not resurrect cleared cursors"
+        );
+    }
+
+    #[test]
+    fn the_strip_never_grows_past_its_trace_limit() {
+        assert_eq!(READOUT_TRACE_LIMIT, 4);
+        // Height is header + rows, so the limit bounds the strip exactly.
+        let bounded = READOUT_HEADER_H + READOUT_TRACE_LIMIT as f32 * READOUT_ROW_H;
+        assert!(bounded < 120.0, "the readout is a strip, not a dock");
+    }
     use crate::product::{AnalysisInstanceId, ContentDigest, DatasetId, ObjectRevision};
     use crate::results::visualization_document::{
         FamilyAggregationMethod, FamilyAggregationPolicy, FamilyComparisonOperator,
@@ -2559,6 +3292,380 @@ mod tests {
                 ],
                 failed_corners: 0,
             })
+    }
+
+    /// A one-analysis transient run with a single ramp on `V(out)`.
+    fn marker_fixture() -> AppState {
+        let mut state = AppState::default();
+        state.simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            ]),
+        );
+        state
+    }
+
+    #[test]
+    fn a_marker_reattaches_to_its_signal_after_a_re_run() {
+        let waveforms = || {
+            vec![WaveformData::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 5.0],
+                "#fff",
+            )]
+        };
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms()),
+        );
+        let mut derived = DerivedSeries::default();
+        let first = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+        let anchor = anchor_key(&first[0], &first[0].traces[0]);
+
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms()),
+        );
+        let mut derived = DerivedSeries::default();
+        let second = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+        let reattached = second[0]
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay && anchor_key(&second[0], trace) == anchor)
+            .expect("the marker's anchor still names the signal after a re-run");
+        let anchor = anchor_key(&second[0], reattached);
+
+        // Every run of a signal shares its anchor — a marker names the
+        // signal, not one solve of it — while the decimation key an overlay
+        // run draws under stays separated, so two runs' envelopes can never
+        // serve each other.
+        assert_eq!(run_mixed_key(anchor, 7, false), anchor);
+        assert_ne!(run_mixed_key(anchor, 7, true), anchor);
+    }
+
+    #[test]
+    fn markers_alone_keep_a_compact_readout_strip_on_screen() {
+        let mut state = marker_fixture();
+        assert_eq!(readout_strip_height(&state), 0.0);
+
+        state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        assert_eq!(
+            readout_strip_height(&state),
+            READOUT_HEADER_H + MARKER_ROW_H,
+            "markers-only strip: the marker header and its one row"
+        );
+
+        // A closed strip takes its markers off screen with it.
+        state.ui.results.hidden_strips.insert(0);
+        assert_eq!(readout_strip_height(&state), 0.0);
+    }
+
+    #[test]
+    fn the_strip_carries_cursors_and_markers_together() {
+        let mut state = marker_fixture();
+        state.ui.results.cursors.place(0.5);
+        state.ui.results.cursor_strip = Some(0);
+        let cursors_only = readout_strip_height(&state);
+        assert!(cursors_only > 0.0);
+
+        state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        assert_eq!(
+            readout_strip_height(&state),
+            cursors_only + READOUT_HEADER_H + MARKER_ROW_H
+        );
+    }
+
+    #[test]
+    fn markers_outlive_the_tool_that_placed_them() {
+        let mut state = marker_fixture();
+        assert!(
+            !state.ui.results.marker_tool.is_armed(),
+            "annotating is deliberate — the tool is off until asked for"
+        );
+        state.ui.results.toggle_marker_tool();
+        let id = state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        state.ui.results.toggle_marker_tool();
+
+        assert!(!state.ui.results.marker_tool.is_armed());
+        assert_eq!(state.ui.results.markers.len(), 1);
+
+        // Cursors are a readout and clear; markers are content and do not.
+        state.ui.results.clear_cursors();
+        assert_eq!(state.ui.results.markers.len(), 1);
+        assert_eq!(state.ui.results.markers[0].id, id);
+    }
+
+    #[test]
+    fn removing_a_marker_takes_its_open_note_editor_with_it() {
+        let mut state = marker_fixture();
+        let first = state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        state.ui.results.editing_marker = Some(first);
+
+        state.ui.results.remove_marker(first);
+
+        assert!(state.ui.results.markers.is_empty());
+        assert_eq!(state.ui.results.editing_marker, None);
+
+        // Ids are not recycled: M1 must not come back meaning something else.
+        let second = state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.9);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn only_a_spec_marker_declines_to_report_a_trace_value() {
+        assert!(MarkerKind::Note.rides_a_trace());
+        assert!(MarkerKind::Peak.rides_a_trace());
+        assert!(
+            !MarkerKind::Spec.rides_a_trace(),
+            "a spec constrains the axis position, not one curve"
+        );
+
+        let mut kind = MarkerKind::Note;
+        for _ in 0..MarkerKind::ALL.len() {
+            kind = kind.next();
+        }
+        assert_eq!(kind, MarkerKind::Note, "the kind control cycles");
+    }
+
+    #[test]
+    fn a_marker_tag_names_the_note_only_when_there_is_one() {
+        let mut marker = ResultMarker {
+            id: 3,
+            analysis_index: 0,
+            anchor: 0x51,
+            trace_name: "V(out)".to_owned(),
+            x: 0.0,
+            kind: MarkerKind::Note,
+            note: String::new(),
+        };
+        assert_eq!(marker_label(&marker), "M3");
+
+        marker.note = "  settling  ".to_owned();
+        assert_eq!(marker_label(&marker), "M3 · settling");
+    }
+
+    #[test]
+    fn a_signal_owns_its_unit_rather_than_inheriting_the_analysis_default() {
+        // The accessor in the name is authoritative where there is one.
+        assert_eq!(signal_unit("V(out)", TraceKind::Value, "V"), "V");
+        assert_eq!(signal_unit("I(R1)", TraceKind::Value, "V"), "A");
+        assert_eq!(signal_unit("i(vsense)", TraceKind::Value, "V"), "A");
+        assert_eq!(signal_unit("P(M1)", TraceKind::Value, "V"), "W");
+
+        // Derived projections keep the underlying signal's unit.
+        assert_eq!(signal_unit("re(V(out))", TraceKind::Real, ""), "V");
+        assert_eq!(signal_unit("im(I(R1))", TraceKind::Imaginary, ""), "A");
+
+        // The analysis default applies only where the name carries nothing
+        // to read a unit from.
+        assert_eq!(signal_unit("onoise", TraceKind::Value, "V^2/Hz"), "V^2/Hz");
+
+        // Derived kinds have their own units regardless of the source.
+        assert_eq!(signal_unit("V(out)", TraceKind::MagnitudeDb, "V"), "dB");
+        assert_eq!(signal_unit("V(out)", TraceKind::PhaseDeg, "V"), "°");
+    }
+
+    #[test]
+    fn mixed_units_on_one_analysis_become_separate_panes() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+                WaveformData::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
+                WaveformData::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            ]),
+        );
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(panes.len(), 2, "volts and amps cannot share an axis");
+        assert_eq!(panes[0].unit, "V");
+        assert_eq!(
+            panes[0].traces.len(),
+            2,
+            "both voltages belong to the volt pane"
+        );
+        assert_eq!(panes[1].unit, "A");
+        assert_eq!(panes[1].traces.len(), 1);
+    }
+
+    #[test]
+    fn one_unit_stays_one_pane() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+                WaveformData::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            ]),
+        );
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(panes.len(), 1, "a strip does not split without a reason to");
+        assert_eq!(panes[0].unit, "V");
+        assert!(panes[0].right.is_empty());
+    }
+
+    #[test]
+    fn a_hidden_trace_takes_its_pane_with_it() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+                WaveformData::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
+            ]),
+        );
+        if let Some(run) = simulation.active_run_mut()
+            && let Some(analysis) = run.analyses.get_mut(0)
+            && let Some(current) = analysis.waveforms.get_mut(1)
+        {
+            current.visible = false;
+        }
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].unit, "V", "the amp axis goes with its only trace");
+    }
+
+    #[test]
+    fn phase_rides_the_magnitude_pane_rather_than_taking_its_own() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+                WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
+                WaveformData::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
+            ]),
+        );
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(
+            panes.len(),
+            1,
+            "a Bode pair is one reading — splitting it across stacked panes breaks it"
+        );
+        assert_eq!(panes[0].unit, "dB");
+        assert_eq!(panes[0].right.len(), 1, "phase goes to the right axis");
+    }
+
+    #[test]
+    fn fitting_a_strip_fits_every_pane_of_it() {
+        let mut state = AppState::default();
+        let viewer = super::super::ResultViewer::Waves;
+        state
+            .ui
+            .results
+            .plot_view_pane_mut(viewer, 0, 0)
+            .y = Some((0.0, 1.0));
+        state
+            .ui
+            .results
+            .plot_view_pane_mut(viewer, 0, 1)
+            .y = Some((0.0, 2.0));
+        state
+            .ui
+            .results
+            .plot_view_pane_mut(viewer, 1, 0)
+            .y = Some((0.0, 3.0));
+        assert!(state.ui.results.strip_is_zoomed(viewer, 0));
+
+        state.ui.results.reset_plot_view(viewer, 0);
+
+        assert!(
+            !state.ui.results.strip_is_zoomed(viewer, 0),
+            "leaving one pane zoomed would make the strip's panes disagree"
+        );
+        assert!(
+            state.ui.results.strip_is_zoomed(viewer, 1),
+            "fitting one strip does not reach into another"
+        );
+    }
+
+    #[test]
+    fn each_pane_keeps_its_own_y_viewport() {
+        let mut state = AppState::default();
+        let viewer = super::super::ResultViewer::Waves;
+        state.ui.results.plot_view_pane_mut(viewer, 0, 0).y = Some((-5.0, 5.0));
+        state.ui.results.plot_view_pane_mut(viewer, 0, 1).y = Some((0.0, 1.0e-3));
+
+        // One zoom factor across volts and amps would mean nothing, so the
+        // panes never share a Y override.
+        assert_eq!(
+            state.ui.results.plot_view_pane(viewer, 0, 0).y,
+            Some((-5.0, 5.0))
+        );
+        assert_eq!(
+            state.ui.results.plot_view_pane(viewer, 0, 1).y,
+            Some((0.0, 1.0e-3))
+        );
     }
 
     #[test]

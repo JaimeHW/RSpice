@@ -561,6 +561,11 @@ impl Command {
                 "Open specification results",
                 "Results",
             ),
+            Self::ResultViewer(crate::workbench::ResultViewer::Table) => spec(
+                "result-table",
+                "Open sample table",
+                "Results",
+            ),
             Self::ResultViewer(crate::workbench::ResultViewer::Nyquist) => {
                 spec("result-nyquist", "Open Nyquist viewer", "Results")
             }
@@ -1991,7 +1996,7 @@ fn reset_active_view(app: &mut RSpiceApp) {
                 .ui
                 .results
                 .views
-                .retain(|(candidate, _), _| *candidate != viewer);
+                .retain(|(candidate, _, _), _| *candidate != viewer);
             app.state.ui.results.clear_cursors();
             app.state.ui.results.rf_pin.remove(&viewer);
             if viewer == crate::workbench::ResultViewer::Waves {

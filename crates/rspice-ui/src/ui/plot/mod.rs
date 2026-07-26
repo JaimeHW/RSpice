@@ -36,4 +36,4 @@ pub use render::{
     square_outer_rect,
 };
 pub use scale::XScale;
-pub use spec::{Axis, Band, Marker, PlotMapper, PlotSpec, RefLine, Trace, YSide};
+pub use spec::{Axis, Band, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine, Trace, YSide};

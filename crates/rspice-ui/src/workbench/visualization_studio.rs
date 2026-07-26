@@ -3145,6 +3145,8 @@ fn resolved_viewer_availability_for_binding(
         ResultViewer::Specs => {
             !analysis.measurements.is_empty() || !state.workspace.specs.is_empty()
         }
+        // The table lists whatever samples the analysis retained.
+        ResultViewer::Table => !analysis.waveforms.is_empty(),
         ResultViewer::PoleZero => retained_pole_zero_payload(analysis).is_some(),
         ResultViewer::Contribution => retained_sensitivity_payload(analysis).is_some(),
         ResultViewer::TransferFunction => analysis.result_payload.as_ref().is_some_and(|payload| {
@@ -3194,7 +3196,7 @@ fn viewer_document_id(viewer: ResultViewer) -> &'static str {
         ResultViewer::Fft | ResultViewer::NoiseContrib => "viewer-spectrum",
         ResultViewer::Eye => "eye-viewer",
         ResultViewer::Hist => "viewer-histogram",
-        ResultViewer::Op | ResultViewer::Specs => "viewer-table",
+        ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
         ResultViewer::Smith => "viewer-smith",
         ResultViewer::PoleZero => "viewer-pz",
         ResultViewer::Contribution => "viewer-contribution",

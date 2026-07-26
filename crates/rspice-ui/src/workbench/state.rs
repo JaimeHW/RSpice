@@ -1508,7 +1508,10 @@ impl InlineEdit {
 
     /// Abandon any session that does not belong to `component` — selection
     /// moved on, so its buffer and snapshot are no longer meaningful.
-    pub fn release_unless(&mut self, component: Option<u64>) -> Option<crate::state::SchematicSnapshot> {
+    pub fn release_unless(
+        &mut self,
+        component: Option<u64>,
+    ) -> Option<crate::state::SchematicSnapshot> {
         match (&self.target, component) {
             (Some((owner, _)), Some(id)) if *owner == id => None,
             (Some(_), _) => self.end(),
@@ -2458,7 +2461,9 @@ const fn result_viewer_document_id(viewer: super::ResultViewer) -> &'static str 
         super::ResultViewer::TransferFunction => "viewer-transfer-function",
         super::ResultViewer::Eye => "eye-viewer",
         super::ResultViewer::Hist => "viewer-histogram",
-        super::ResultViewer::Op | super::ResultViewer::Specs => "viewer-table",
+        super::ResultViewer::Op | super::ResultViewer::Specs | super::ResultViewer::Table => {
+            "viewer-table"
+        }
         super::ResultViewer::Smith => "viewer-smith",
         super::ResultViewer::PoleZero => "viewer-pz",
     }

@@ -387,6 +387,7 @@ mod tests {
         let netlist = parse_netlist("branch current\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 2n\n.end\n");
         let result = rspice_core::engine::TransientResult {
             time: vec![0.0, 1.0e-9, 2.0e-9],
+            step_sizes: vec![0.0, 1.0e-9, 1.0e-9],
             voltages: vec![vec![0.0, 1.0, 1.0]],
             branch_currents: vec![vec![0.0, -1.0e-3, -1.0e-3]],
             num_nodes: 1,
@@ -420,8 +421,14 @@ mod tests {
             .map(|time| (2.0 * std::f64::consts::PI * time).sin())
             .collect::<Vec<_>>();
         let branch_values = values.iter().map(|value| -*value).collect::<Vec<_>>();
+        // The initial sample has a zero interval; every later step is the
+        // uniform 50 ms this fixture advances by.
+        let step_sizes = std::iter::once(0.0)
+            .chain(time.windows(2).map(|pair| pair[1] - pair[0]))
+            .collect::<Vec<_>>();
         let result = rspice_core::engine::TransientResult {
             time: time.clone(),
+            step_sizes,
             voltages: vec![values],
             branch_currents: vec![branch_values],
             num_nodes: 1,
