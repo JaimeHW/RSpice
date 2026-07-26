@@ -189,24 +189,46 @@ pub struct VerilogACompiler {
     options: CompilerOptions,
 }
 
-/// Compiler configuration options
+/// Compiler configuration options.
+///
+/// Only the three preprocessor fields ([`include_paths`](Self::include_paths),
+/// [`defines`](Self::defines), [`undefines`](Self::undefines)) currently change
+/// what the compiler produces. The remaining fields are reserved: they are
+/// accepted, and they are folded into the compiler-contract identity that
+/// [`VerilogACompiler::compile_virtual_runtime`] derives — so changing one does
+/// invalidate a cached compilation — but no compiler phase reads them yet.
 #[derive(Debug, Clone, Default)]
 pub struct CompilerOptions {
-    /// Enable Verilog-AMS mixed-signal support
+    /// Reserved for Verilog-AMS mixed-signal support. Gates no behavior today;
+    /// the analog subset is always accepted and digital constructs are always
+    /// rejected regardless of this flag.
     pub enable_ams: bool,
-    /// Include paths for `include directives
+    /// Directories searched by `` `include `` directives, in order. Consulted
+    /// only by the file-system-backed entry points; the sealed in-memory paths
+    /// ([`VerilogACompiler::compile_runtime`] and the virtual-bundle APIs)
+    /// deliberately ignore them.
     pub include_paths: Vec<std::path::PathBuf>,
-    /// Define macros for preprocessor
+    /// Macros predefined before preprocessing, as `(name, value)`. A `None`
+    /// value defines the macro as the empty string.
     pub defines: Vec<(String, Option<String>)>,
-    /// Remove standard preprocessor macros before applying `defines`.
+    /// Standard preprocessor macros to remove before [`Self::defines`] is
+    /// applied, letting a caller replace a built-in definition rather than
+    /// redefine it.
     pub undefines: Vec<String>,
-    /// Enable strict LRM compliance (errors on extensions)
+    /// Reserved for strict LRM compliance (erroring on vendor extensions).
+    /// Gates no behavior today.
     pub strict_mode: bool,
-    /// Target integration method compatibility
+    /// Reserved for selecting the companion-model integration rule. Gates no
+    /// behavior today: `ddt`/`idt` compile to integration-agnostic state slots
+    /// and the engine supplies the coefficients per timestep through
+    /// [`vm::IntegrationCoefficients`].
     pub integration_order: IntegrationOrder,
 }
 
-/// Integration order for `idt` and `ddt` operators
+/// Integration order for the `idt` and `ddt` companion models.
+///
+/// Reserved — see [`CompilerOptions::integration_order`]. The effective
+/// integration rule is chosen by the engine at run time, not here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum IntegrationOrder {
     /// First-order (Gear-1, Backward Euler)

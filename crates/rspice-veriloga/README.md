@@ -54,15 +54,22 @@ let model = compiler.compile_file(path)?;                    // from disk, with 
 let file  = compiler.compile_file_with_metadata(path)?;      // + include dependency list
 ```
 
-`CompilerOptions` fields: `enable_ams`, `include_paths`, `defines`,
-`strict_mode` (strict LRM compliance — errors on extensions), and
-`integration_order` (`First` = backward Euler, `Second` = Gear-2/
-trapezoidal, the default) for the `ddt`/`idt` companion models.
+`CompilerOptions` carries three fields that change what the compiler
+produces, all of them preprocessor inputs: `include_paths` (searched by
+`` `include ``, and only by the file-system entry points), `defines`, and
+`undefines` (drops a standard macro so `defines` can replace it).
+
+`enable_ams`, `strict_mode`, and `integration_order` are **reserved**:
+they are accepted and they participate in the compiler-contract identity
+hash, so changing one invalidates a cached compilation, but no compiler
+phase reads them yet. In particular `integration_order` does not pick the
+`ddt`/`idt` integration rule — the engine supplies companion coefficients
+per timestep, so one compiled model serves backward Euler and Gear-2
+alike.
+
 Multi-module foundry files are supported via `compile_module` /
 `compile_file_module_with_metadata`; compiling without a module name
 errors if the source declares more than one module, listing their names.
-Setting `RSPICE_DEBUG_PP=1` dumps the preprocessed source next to the
-input file.
 
 ### Runtime: `VerilogADevice`
 
