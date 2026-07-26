@@ -99,12 +99,42 @@ pub enum ModelLevel {
     Bsim3v3,
     /// BSIM4
     Bsim4,
+    /// BSIM-SOI family (PD/FD/DD and the CMC Verilog-A releases)
+    BsimSoi,
     /// BSIM CMG (FinFET)
     BsimCmg,
-    /// PSP
+    /// BSIM-BULK
+    BsimBulk,
+    /// BSIM-IMG
+    BsimImg,
+    /// PSP (including thermal and NQS releases)
     Psp,
-    /// EKV
+    /// EKV (2.6 / 3.x)
     Ekv,
+    /// HiSIM family (HV / SOI / SOTB)
+    HiSim,
+    /// L-UTSOI
+    LUtsoi,
+    /// MOSVAR varactor
+    Mosvar,
+    /// MVSG-CMC (GaN)
+    Mvsg,
+    /// VDMOS power MOSFET
+    Vdmos,
+    /// VBIC 1.3
+    Vbic,
+    /// MEXTRAM 504/505
+    Mextram,
+    /// HICUM L0/L2
+    Hicum,
+    /// GaAs/GaN HEMT compact models (ASM-HEMT, Angelov, EPFL HEMT)
+    Hemt,
+    /// JUNCAP200 junction model
+    Juncap,
+    /// DIODE_CMC
+    DiodeCmc,
+    /// CMC resistor models (r2_cmc / r3_cmc)
+    RCmc,
     /// Verilog-A compact model
     VerilogA,
     /// SPICE Level 1
@@ -122,9 +152,24 @@ impl ModelLevel {
         match self {
             ModelLevel::Bsim3v3 => "BSIM3v3",
             ModelLevel::Bsim4 => "BSIM4",
+            ModelLevel::BsimSoi => "BSIM-SOI",
             ModelLevel::BsimCmg => "BSIM-CMG",
+            ModelLevel::BsimBulk => "BSIM-BULK",
+            ModelLevel::BsimImg => "BSIM-IMG",
             ModelLevel::Psp => "PSP",
             ModelLevel::Ekv => "EKV",
+            ModelLevel::HiSim => "HiSIM",
+            ModelLevel::LUtsoi => "L-UTSOI",
+            ModelLevel::Mosvar => "MOSVAR",
+            ModelLevel::Mvsg => "MVSG",
+            ModelLevel::Vdmos => "VDMOS",
+            ModelLevel::Vbic => "VBIC",
+            ModelLevel::Mextram => "MEXTRAM",
+            ModelLevel::Hicum => "HICUM",
+            ModelLevel::Hemt => "HEMT",
+            ModelLevel::Juncap => "JUNCAP",
+            ModelLevel::DiodeCmc => "DIODE_CMC",
+            ModelLevel::RCmc => "R-CMC",
             ModelLevel::VerilogA => "Verilog-A",
             ModelLevel::SpiceLevel1 => "SPICE L1",
             ModelLevel::SpiceLevel3 => "SPICE L3",

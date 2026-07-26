@@ -2569,7 +2569,7 @@ impl ModelLibraryManager {
             name: model.name.clone(),
             model_type,
             spice_type: Some(model.spice_type.clone()),
-            level: Self::convert_model_level(model.level),
+            level: Self::convert_model_level(model.level, &model.spice_type),
             spice_level: model.level,
             model_version: model.version,
             description: model.description.clone().unwrap_or_default(),
@@ -2592,10 +2592,84 @@ impl ModelLibraryManager {
         }
     }
 
-    fn convert_model_level(level: Option<u32>) -> ModelLevel {
+    /// Classify what a model card *claims to be* for browsing/filtering.
+    /// The card's type keyword wins over the LEVEL number because several
+    /// LEVEL values are overloaded across device families (e.g. 8 is
+    /// BSIM3v3 on a MOS card but HICUM/L2 on a BJT card, and 2002 is MVSG
+    /// on MOS but DIODE_CMC on a diode). This is not a statement of native
+    /// engine support.
+    fn convert_model_level(level: Option<u32>, spice_type: &str) -> ModelLevel {
+        let type_token = spice_type.trim().to_ascii_uppercase();
+
+        // Family-named cards classify regardless of LEVEL.
+        let by_name = match type_token.as_str() {
+            t if t.starts_with("BSIMSOI") || t.starts_with("BSIM-SOI") => Some(ModelLevel::BsimSoi),
+            t if t.starts_with("BSIMCMG") => Some(ModelLevel::BsimCmg),
+            t if t.starts_with("BSIMBULK") => Some(ModelLevel::BsimBulk),
+            t if t.starts_with("BSIMIMG") => Some(ModelLevel::BsimImg),
+            t if t.starts_with("PSP") => Some(ModelLevel::Psp),
+            t if t.starts_with("EKV") => Some(ModelLevel::Ekv),
+            t if t.starts_with("HISIM") => Some(ModelLevel::HiSim),
+            t if t.starts_with("L_UTSOI") || t.starts_with("LUTSOI") => Some(ModelLevel::LUtsoi),
+            "MOSVAR" => Some(ModelLevel::Mosvar),
+            t if t.starts_with("MVSG") => Some(ModelLevel::Mvsg),
+            t if t.starts_with("VDMOS") || t == "NVDMOS" || t == "PVDMOS" => {
+                Some(ModelLevel::Vdmos)
+            }
+            t if t.starts_with("VBIC") => Some(ModelLevel::Vbic),
+            t if t.starts_with("MEXTRAM") || t.starts_with("BJT505") || t.starts_with("BJTD505") => {
+                Some(ModelLevel::Mextram)
+            }
+            t if t.starts_with("HICUM") => Some(ModelLevel::Hicum),
+            t if t.starts_with("ASMHEMT")
+                || t.starts_with("ANGELOV")
+                || t.starts_with("EPFL_HEMT")
+                || t.starts_with("EPFLHEMT") =>
+            {
+                Some(ModelLevel::Hemt)
+            }
+            "JUNCAP200" => Some(ModelLevel::Juncap),
+            "DIODE_CMC" => Some(ModelLevel::DiodeCmc),
+            t if t.starts_with("R2_CMC")
+                || t.starts_with("R3_CMC")
+                || t == "R2"
+                || t == "R3"
+                || t == "R2_ET" =>
+            {
+                Some(ModelLevel::RCmc)
+            }
+            _ => None,
+        };
+        if let Some(family) = by_name {
+            return family;
+        }
+
+        let is_bjt = matches!(type_token.as_str(), "NPN" | "PNP" | "LPNP");
+        let is_mos = matches!(type_token.as_str(), "NMOS" | "PMOS");
+        let is_diode = matches!(type_token.as_str(), "D" | "DIODE");
+        let is_resistor = matches!(type_token.as_str(), "R" | "RES" | "RESISTOR");
+
         match level {
+            Some(4 | 9 | 11 | 12 | 13) if is_bjt => ModelLevel::Vbic,
+            Some(8 | 230 | 234) if is_bjt => ModelLevel::Hicum,
+            Some(504 | 505) if is_bjt => ModelLevel::Mextram,
+            Some(200) if is_diode => ModelLevel::Juncap,
+            Some(2002) if is_diode => ModelLevel::DiodeCmc,
+            Some(1002 | 1003) if is_resistor => ModelLevel::RCmc,
             Some(1) => ModelLevel::SpiceLevel1,
             Some(3) => ModelLevel::SpiceLevel3,
+            Some(8 | 49) if is_mos => ModelLevel::Bsim3v3,
+            Some(14 | 54) if is_mos => ModelLevel::Bsim4,
+            Some(10 | 55..=57 | 70470) if is_mos => ModelLevel::BsimSoi,
+            Some(107 | 108 | 110 | 111) if is_mos => ModelLevel::BsimCmg,
+            Some(104) if is_mos => ModelLevel::Psp,
+            Some(260 | 301) if is_mos => ModelLevel::Ekv,
+            Some(10240) if is_mos => ModelLevel::LUtsoi,
+            Some(1000) if is_mos => ModelLevel::Mosvar,
+            Some(2002) if is_mos => ModelLevel::Mvsg,
+            Some(18) if is_mos => ModelLevel::Vdmos,
+            // Preserve the historical level-only classification for cards
+            // whose type keyword was not recognized.
             Some(8 | 49) => ModelLevel::Bsim3v3,
             Some(14 | 54) => ModelLevel::Bsim4,
             _ => ModelLevel::Unknown,
