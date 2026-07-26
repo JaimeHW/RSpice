@@ -2619,6 +2619,51 @@ struct XyceStaticDcPlan {
     diagnostics: Vec<crate::netlist::ParseDiagnostic>,
 }
 
+/// Native static DC sensitivity contract.  Xyce emits a sensitivity table
+/// alongside the ordinary `.PRINT DC` table; the table contains the requested
+/// base probes followed by one nominal objective and one derivative column per
+/// selected parameter/mode.  Keeping this contract separate from
+/// `XyceStaticDcPlan` lets ordinary DC output retain its existing oracle path
+/// while sharing the parsed sweep, STEP, and netlist execution envelope.
+#[derive(Debug, Clone)]
+struct XyceStaticDcSensitivityPlan {
+    dc: XyceStaticDcPlan,
+    reference_path: PathBuf,
+    reference_format: XyceDcSensitivityReferenceFormat,
+    print: XycePrintRequest,
+    objectives: Vec<XyceAcSensitivityObjective>,
+    parameters: Vec<String>,
+    direct: bool,
+    adjoint: bool,
+    no_index: bool,
+    add_stepnum_col: bool,
+    side_outputs: Vec<XyceStaticDcSensitivitySideOutput>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceStaticDcSensitivitySideOutput {
+    file: String,
+    reference_path: PathBuf,
+    reference_format: XyceDcSensitivityReferenceFormat,
+    print: XycePrintRequest,
+    no_index: bool,
+}
+
+#[derive(Debug, Clone)]
+struct XyceDcSensitivityEvaluation {
+    netlist: Netlist,
+    point: DcSweepPointResult,
+    objectives: Vec<crate::analysis::advanced::SensitivityResult>,
+    step_index: usize,
+    local_index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceDcSensitivityReferenceFormat {
+    Prn,
+    Csv,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceXdmReplaceGroundKind {
     GndExclamation,
@@ -7021,47 +7066,52 @@ impl XyceTestRunner {
             return result;
         }
 
-        let result = match self.static_hb_plan_for_deck(deck) {
-            Ok(plan) => self.run_static_prn_hb_plan(deck, plan, start),
-            Err(hb_reason) => match self.execution_plan(deck) {
-                Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
-                Err(dc_reason) => match self.static_noise_plan_for_deck(deck) {
-                    Ok(plan) => self.run_static_noise_plan(deck, plan, start),
-                    Err(noise_reason)
-                        if Self::normalize_manifest_key(&deck.relative_path)
-                            == XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD =>
-                    {
-                        self.failure_result(
-                            deck,
-                            start,
-                            "wrapper_scalar_measure_step_noise",
-                            noise_reason,
-                            Vec::new(),
-                        )
-                    }
-                    Err(noise_reason) => match self.static_ac_plan_for_deck(deck) {
-                        Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
-                        Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
-                            Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
-                            Err(tran_reason) => {
-                                let reason = if self.deck_has_print_analysis(deck, "HB") {
-                                    hb_reason
-                                } else if self.deck_has_print_analysis(deck, "NOISE") {
-                                    noise_reason
-                                } else if self.deck_has_print_analysis(deck, "AC") {
-                                    ac_reason
-                                } else if self.deck_has_print_analysis(deck, "TRAN") {
-                                    tran_reason
-                                } else {
-                                    dc_reason
-                                };
-                                return self.expected_unsupported_result(
-                                    deck,
-                                    start,
-                                    "unsupported_xyce_contract",
-                                    &reason,
-                                );
-                            }
+        let result = match self.static_dc_sensitivity_plan_for_deck(deck) {
+            Ok(plan) => self.run_static_prn_dc_sensitivity_plan(deck, plan, start),
+            Err(sensitivity_reason) => match self.static_hb_plan_for_deck(deck) {
+                Ok(plan) => self.run_static_prn_hb_plan(deck, plan, start),
+                Err(hb_reason) => match self.execution_plan(deck) {
+                    Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
+                    Err(dc_reason) => match self.static_noise_plan_for_deck(deck) {
+                        Ok(plan) => self.run_static_noise_plan(deck, plan, start),
+                        Err(noise_reason)
+                            if Self::normalize_manifest_key(&deck.relative_path)
+                                == XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD =>
+                        {
+                            self.failure_result(
+                                deck,
+                                start,
+                                "wrapper_scalar_measure_step_noise",
+                                noise_reason,
+                                Vec::new(),
+                            )
+                        }
+                        Err(noise_reason) => match self.static_ac_plan_for_deck(deck) {
+                            Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
+                            Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
+                                Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
+                                Err(tran_reason) => {
+                                    let reason = if self.deck_has_print_analysis(deck, "SENS") {
+                                        sensitivity_reason
+                                    } else if self.deck_has_print_analysis(deck, "HB") {
+                                        hb_reason
+                                    } else if self.deck_has_print_analysis(deck, "NOISE") {
+                                        noise_reason
+                                    } else if self.deck_has_print_analysis(deck, "AC") {
+                                        ac_reason
+                                    } else if self.deck_has_print_analysis(deck, "TRAN") {
+                                        tran_reason
+                                    } else {
+                                        dc_reason
+                                    };
+                                    return self.expected_unsupported_result(
+                                        deck,
+                                        start,
+                                        "unsupported_xyce_contract",
+                                        &reason,
+                                    );
+                                }
+                            },
                         },
                     },
                 },
@@ -21885,6 +21935,322 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Ok(false)
     }
 
+    /// Parse the native static DC `.SENS` output contract.  The parser is
+    /// deliberately independent of the ordinary DC contract so a deck that
+    /// emits both `.PRINT DC` and `.PRINT SENS` is admitted by the sensitivity
+    /// path before the generic wrapper classifier sees the extra table.
+    fn static_dc_sensitivity_plan_for_deck(
+        &self,
+        deck: &XyceDeck,
+    ) -> Result<XyceStaticDcSensitivityPlan, String> {
+        let authored_source =
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        let sensitivity_lines = Self::logical_netlist_lines(&authored_source)
+            .into_iter()
+            .filter(|line| {
+                Self::strip_netlist_comment(line)
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|command| command.eq_ignore_ascii_case(".sens"))
+            })
+            .collect::<Vec<_>>();
+        if sensitivity_lines.is_empty() {
+            return Err("deck has no .SENS directive".to_string());
+        }
+        if sensitivity_lines.len() != 1 {
+            return Err(
+                "native static DC sensitivity contract requires exactly one .SENS directive"
+                    .to_string(),
+            );
+        }
+        // Keep AC/TRAN/HB/NOISE sensitivity decks on their existing analysis
+        // adapters.  `.SENS` is shared by DC, AC, and transient contracts, so
+        // selecting the static DC path solely from the card would otherwise
+        // mask the more specific family reason.
+        for line in Self::logical_netlist_lines(&authored_source) {
+            let command = Self::strip_netlist_comment(&line)
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if matches!(
+                command.as_str(),
+                ".ac" | ".tran" | ".noise" | ".hb" | ".sp" | ".stb" | ".disto" | ".pz" | ".tf"
+            ) {
+                return Err(format!(
+                    "deck contains {command}; static DC sensitivity adapter only covers .DC/.OP"
+                ));
+            }
+        }
+
+        let print_requests = Self::aggregate_print_output_requests(
+            Self::print_output_requests(&authored_source, "SENS")?,
+            "SENS",
+        )?;
+        let primary_requests = print_requests
+            .iter()
+            .filter(|request| request.file.is_none())
+            .cloned()
+            .collect::<Vec<_>>();
+        if primary_requests.len() > 1 {
+            return Err(
+                "native static DC sensitivity contract requires at most one primary .PRINT SENS statement"
+                    .to_string(),
+            );
+        }
+        let side_requests = print_requests
+            .iter()
+            .filter(|request| request.file.is_some())
+            .cloned()
+            .collect::<Vec<_>>();
+        if primary_requests.is_empty() && side_requests.is_empty() {
+            return Err(
+                "native static DC sensitivity contract requires one .PRINT SENS output destination"
+                    .to_string(),
+            );
+        }
+        let canonical_request = primary_requests
+            .first()
+            .cloned()
+            .or_else(|| side_requests.first().cloned())
+            .expect("one primary or side .PRINT SENS request");
+        let (reference_format, no_index) =
+            Self::dc_sensitivity_output_schema(canonical_request.format.as_deref())?;
+
+        let tokens = Self::split_print_fields(&sensitivity_lines[0])?;
+        let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut objfunc = None;
+        let mut parameters = None;
+        let mut index = 1usize;
+        while index < token_refs.len() {
+            let Some((raw_key, raw_value, consumed)) =
+                Self::print_option_assignment(&token_refs, index)
+            else {
+                return Err(format!(
+                    "Xyce .SENS directive contains an unsupported field '{}'",
+                    token_refs[index]
+                ));
+            };
+            let key = raw_key.trim().to_ascii_lowercase();
+            let value = raw_value.trim();
+            if value.is_empty() {
+                return Err(format!("Xyce .SENS {key} assignment is missing a value"));
+            }
+            let destination = match key.as_str() {
+                "objfunc" | "objvars" => &mut objfunc,
+                "param" | "params" => &mut parameters,
+                _ => {
+                    return Err(format!(
+                        "native static DC sensitivity contract does not cover .SENS field '{raw_key}'"
+                    ));
+                }
+            };
+            if destination.is_some() {
+                return Err(format!("Xyce .SENS contains duplicate {key} assignments"));
+            }
+            *destination = Some(value.to_string());
+            index += consumed;
+        }
+
+        let objectives =
+            Self::parse_xyce_dc_sensitivity_objectives(objfunc.as_deref().ok_or_else(|| {
+                "Xyce .SENS directive must provide OBJFUNC={output}[,...]".to_string()
+            })?)?;
+        let parameters =
+            Self::parse_xyce_sensitivity_parameters(parameters.as_deref().ok_or_else(|| {
+                "Xyce .SENS directive must provide PARAM=<device:param>[,<device:param>...]"
+                    .to_string()
+            })?)?;
+        let (direct, adjoint) = Self::parse_xyce_sensitivity_flags(&authored_source)?;
+
+        let reference_extension = match reference_format {
+            XyceDcSensitivityReferenceFormat::Prn => "SENS.prn",
+            XyceDcSensitivityReferenceFormat::Csv => "SENS.csv",
+        };
+        let reference_path = self
+            .static_output_reference_path(&deck.path, reference_extension)
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static DC sensitivity oracle at {}",
+                self.display_path(&reference_path)
+            ));
+        }
+
+        let mut side_outputs = Vec::new();
+        for request in side_requests {
+            let file = request
+                .file
+                .clone()
+                .expect("side sensitivity output has FILE= set");
+            let (side_reference_format, side_no_index) =
+                Self::dc_sensitivity_output_schema(request.format.as_deref())?;
+            let candidate = Self::side_output_reference_candidate(&reference_path, &file)?;
+            let side_reference_path = if candidate.is_file() {
+                candidate
+            } else if side_reference_format == XyceDcSensitivityReferenceFormat::Prn
+                && !side_no_index
+            {
+                // GNUPLOT/SPLOT are PRN-compatible writers in Xyce.  When no
+                // distinct side artifact is retained, compare the canonical
+                // table under the same probe/schema contract.
+                reference_path.clone()
+            } else {
+                return Err(format!(
+                    "missing checked-in static DC sensitivity side-output oracle {}",
+                    self.display_path(&candidate)
+                ));
+            };
+            if side_reference_path == reference_path
+                && (side_reference_format != reference_format || side_no_index != no_index)
+            {
+                return Err(format!(
+                    "DC sensitivity side output '{file}' falls back to an incompatible canonical schema"
+                ));
+            }
+            side_outputs.push(XyceStaticDcSensitivitySideOutput {
+                file,
+                reference_path: side_reference_path,
+                reference_format: side_reference_format,
+                print: XycePrintRequest {
+                    probes: request.probes,
+                },
+                no_index: side_no_index,
+            });
+        }
+
+        let stripped_source = Self::source_without_xyce_sensitivity_directives(&authored_source);
+        let dc = self.static_dc_plan_for_source_with_execution_dir(
+            &deck.path,
+            stripped_source,
+            ExpressionDialect::Xyce,
+            None,
+        )?;
+        if dc.dc.sweep2.is_some() {
+            return Err(
+                "native static DC sensitivity contract does not yet cover a secondary .DC sweep"
+                    .to_string(),
+            );
+        }
+        let parsed_netlist = Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+            &dc.source,
+            &dc.deck_path,
+            dc.expression_dialect,
+            dc.parameter_redefinition_policy,
+            dc.execution_dir.as_deref(),
+        )
+        .map_err(|err| format!("netlist parser rejected static DC sensitivity deck: {err}"))?;
+        if !parsed_netlist.analyses.iter().any(|analysis| {
+            matches!(
+                analysis,
+                AnalysisCommand::Dc { .. }
+                    | AnalysisCommand::Op
+                    | AnalysisCommand::Sensitivity { .. }
+                    | AnalysisCommand::Step(_)
+            )
+        }) {
+            return Err(
+                "native static DC sensitivity contract requires a .DC or .OP analysis".to_string(),
+            );
+        }
+        if parsed_netlist.analyses.iter().any(|analysis| {
+            !matches!(
+                analysis,
+                AnalysisCommand::Dc { .. }
+                    | AnalysisCommand::Op
+                    | AnalysisCommand::Sensitivity { .. }
+                    | AnalysisCommand::Step(_)
+            )
+        }) {
+            return Err(
+                "native static DC sensitivity contract does not cover mixed AC/TRAN/HB analyses"
+                    .to_string(),
+            );
+        }
+
+        let add_stepnum_col = Self::source_requests_sensitivity_stepnum_column(&authored_source);
+        Ok(XyceStaticDcSensitivityPlan {
+            dc,
+            reference_path,
+            reference_format,
+            print: XycePrintRequest {
+                probes: canonical_request.probes,
+            },
+            objectives,
+            parameters,
+            direct,
+            adjoint,
+            no_index,
+            add_stepnum_col,
+            side_outputs,
+        })
+    }
+
+    fn dc_sensitivity_output_schema(
+        format: Option<&str>,
+    ) -> Result<(XyceDcSensitivityReferenceFormat, bool), String> {
+        let normalized = format.unwrap_or("STD").trim();
+        if normalized.eq_ignore_ascii_case("CSV") {
+            return Ok((XyceDcSensitivityReferenceFormat::Csv, true));
+        }
+        if normalized.eq_ignore_ascii_case("NOINDEX") {
+            return Ok((XyceDcSensitivityReferenceFormat::Prn, true));
+        }
+        if normalized.eq_ignore_ascii_case("STD")
+            || matches!(
+                normalized.to_ascii_lowercase().as_str(),
+                "raw" | "raw_ascii" | "probe" | "gnuplot" | "splot" | "dakota"
+            )
+        {
+            return Ok((XyceDcSensitivityReferenceFormat::Prn, false));
+        }
+        Err(format!(
+            "native static DC sensitivity contract does not cover .PRINT SENS FORMAT={normalized}"
+        ))
+    }
+
+    fn source_requests_sensitivity_stepnum_column(source: &str) -> bool {
+        Self::logical_netlist_lines(source).into_iter().any(|line| {
+            let normalized = Self::strip_netlist_comment(&line)
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            normalized.contains(".optionsoutputadd_stepnum_col=true")
+                || normalized.contains(".optionsoutputadd_stepnum_col=1")
+        })
+    }
+
+    fn parse_xyce_dc_sensitivity_objectives(
+        value: &str,
+    ) -> Result<Vec<XyceAcSensitivityObjective>, String> {
+        let mut objectives = Vec::new();
+        for raw in Self::split_xyce_sensitivity_list(value)? {
+            let mut objective = raw.trim();
+            if objective.starts_with('{') && objective.ends_with('}') {
+                objective = &objective[1..objective.len() - 1];
+            }
+            if objective.trim().is_empty() {
+                return Err("Xyce .SENS OBJFUNC contains an empty objective".to_string());
+            }
+            let parsed = Self::parse_xyce_sensitivity_objectives(objective)?;
+            objectives.extend(parsed);
+        }
+        let mut seen = BTreeSet::new();
+        for objective in &objectives {
+            if !seen.insert(Self::normalize_probe(&objective.authored_name)) {
+                return Err(format!(
+                    "Xyce .SENS OBJFUNC contains duplicate objective '{}'",
+                    objective.authored_name
+                ));
+            }
+        }
+        if objectives.is_empty() {
+            return Err("Xyce .SENS OBJFUNC contains no objectives".to_string());
+        }
+        Ok(objectives)
+    }
+
     fn static_dc_plan_for_path(
         &self,
         deck_path: &Path,
@@ -27042,6 +27408,195 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
         Ok(all_mismatches)
+    }
+
+    fn run_static_prn_dc_sensitivity_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticDcSensitivityPlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = if plan.dc.steps.is_empty() {
+            "wrapper_static_sens_dc"
+        } else {
+            "wrapper_static_sens_step_dc"
+        };
+        if plan.dc.dc_data.is_some() {
+            return self.expected_unsupported_result(
+                deck,
+                start,
+                "unsupported_xyce_contract",
+                "native static DC sensitivity does not yet cover .DC DATA tables",
+            );
+        }
+        let netlist = match Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
+            &plan.dc.source,
+            &plan.dc.deck_path,
+            plan.dc.expression_dialect,
+            plan.dc.parameter_redefinition_policy,
+            plan.dc.execution_dir.as_deref(),
+        ) {
+            Ok(netlist) => netlist,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("parse failed after static DC sensitivity validation: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let batches = if plan.dc.steps.is_empty() {
+            match self.run_static_dc_result_batches(&netlist, &plan.dc.dc, start) {
+                Ok(batches) => batches,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support this DC sensitivity deck: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            }
+        } else {
+            let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+            let engine = self.create_dc_engine();
+            let step_runs = match Self::nested_step_runs_for_commands_with_limits_and_abort(
+                &engine,
+                &netlist,
+                &plan.dc.steps,
+                xyce_step_plan_limits(),
+                &abort,
+            ) {
+                Ok(runs) => runs,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            ".STEP expansion exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support this .STEP sensitivity deck: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(".STEP expansion error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mut batches = Vec::with_capacity(step_runs.len());
+            for run in step_runs {
+                let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
+                    &run.netlist,
+                    &plan.dc.dc.source,
+                    &plan.dc.dc.primary_spec(),
+                    plan.dc.dc.sweep2.as_ref(),
+                    &abort,
+                ) {
+                    Ok(results) => results,
+                    Err(SimulationError::Aborted) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "simulation exceeded timeout ({}ms)",
+                                self.config.max_time_per_test_ms
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                    Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                        return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            "unsupported_xyce_runtime",
+                            &format!("RSpice runtime does not yet support this stepped sensitivity deck: {err}"),
+                        );
+                    }
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("simulation error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+                batches.push(XyceDcResultBatch {
+                    netlist: run.netlist,
+                    results,
+                });
+            }
+            batches
+        };
+
+        let mismatches = match self.compare_dc_sensitivity_outputs(&plan, &batches, start) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("DC sensitivity reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("{} Xyce DC sensitivity mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
     }
 
     fn run_static_prn_dc_plan(
@@ -46426,6 +46981,458 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             }
         }
 
+        Ok(mismatches)
+    }
+
+    fn compare_dc_sensitivity_outputs(
+        &self,
+        plan: &XyceStaticDcSensitivityPlan,
+        batches: &[XyceDcResultBatch],
+        start: Instant,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let evaluations = self.evaluate_dc_sensitivity_batches(plan, batches, start)?;
+        let mut mismatches = self.compare_dc_sensitivity_table(
+            plan,
+            &plan.reference_path,
+            plan.reference_format,
+            &plan.print,
+            plan.no_index,
+            &evaluations,
+            None,
+        )?;
+        for side in &plan.side_outputs {
+            let mut side_mismatches = self.compare_dc_sensitivity_table(
+                plan,
+                &side.reference_path,
+                side.reference_format,
+                &side.print,
+                side.no_index,
+                &evaluations,
+                Some(&side.file),
+            )?;
+            mismatches.append(&mut side_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(mismatches)
+    }
+
+    fn evaluate_dc_sensitivity_batches(
+        &self,
+        plan: &XyceStaticDcSensitivityPlan,
+        batches: &[XyceDcResultBatch],
+        start: Instant,
+    ) -> Result<Vec<XyceDcSensitivityEvaluation>, String> {
+        let engine = self.create_xyce_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let mut evaluations = Vec::new();
+        for (step_index, batch) in batches.iter().enumerate() {
+            for (local_index, point) in batch.results.iter().enumerate() {
+                if abort.is_aborted() {
+                    return Err(format!(
+                        "DC sensitivity evaluation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ));
+                }
+                let sweep_point = XyceDcSweepPoint {
+                    primary: point.sweep_value,
+                    secondary: None,
+                };
+                let point_netlist =
+                    Self::dc_sensitivity_point_netlist(&batch.netlist, &plan.dc.dc, sweep_point)?;
+                let mut objectives = Vec::with_capacity(plan.objectives.len());
+                for objective in &plan.objectives {
+                    let output =
+                        Self::xyce_dc_sensitivity_output_from_spec(&objective.spec, &point.result)?;
+                    let sensitivity = engine
+                        .run_sensitivity_dc_complete_with_abort(
+                            &point_netlist,
+                            output,
+                            &plan.parameters,
+                            &abort,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    objectives.push(sensitivity);
+                }
+                evaluations.push(XyceDcSensitivityEvaluation {
+                    netlist: point_netlist,
+                    point: point.clone(),
+                    objectives,
+                    step_index,
+                    local_index,
+                });
+            }
+        }
+        if evaluations.is_empty() {
+            return Err("DC sensitivity simulation produced no result points".to_string());
+        }
+        Ok(evaluations)
+    }
+
+    fn dc_sensitivity_point_netlist(
+        netlist: &Netlist,
+        dc: &XyceDcSweep,
+        sweep_point: XyceDcSweepPoint,
+    ) -> Result<Netlist, String> {
+        let dimension = XyceDcSweepDimension {
+            source: dc.source.clone(),
+            start: dc.start,
+            stop: dc.stop,
+            step: dc.step,
+            mode: dc.mode.clone(),
+        };
+        let mut swept = netlist.clone();
+        Self::apply_static_dc_dimension(&mut swept, &dimension, sweep_point.primary)
+            .map_err(|error| error.to_string())?;
+        if let Some(sweep2) = &dc.sweep2
+            && let Some(secondary) = sweep_point.secondary
+        {
+            let dimension = XyceDcSweepDimension {
+                source: sweep2.source.clone(),
+                start: sweep2.start,
+                stop: sweep2.stop,
+                step: sweep2.step,
+                mode: sweep2.mode.clone(),
+            };
+            Self::apply_static_dc_dimension(&mut swept, &dimension, secondary)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(swept)
+    }
+
+    fn xyce_dc_sensitivity_output_from_spec(
+        spec: &XyceAcSensitivityObjectiveSpec,
+        result: &crate::solver::SimulationResult,
+    ) -> Result<AcSensitivityOutput, String> {
+        let node_index = |node: &str| {
+            if node.eq_ignore_ascii_case("0") {
+                return Ok(0usize);
+            }
+            result
+                .node_names
+                .iter()
+                .position(|name| Self::normalize_probe(name) == Self::normalize_probe(node))
+                .ok_or_else(|| {
+                    format!("DC sensitivity objective node '{node}' is not in the solved circuit")
+                })
+        };
+        match spec {
+            XyceAcSensitivityObjectiveSpec::Voltage { positive, negative } => {
+                let positive = node_index(positive)?;
+                let negative = negative.as_deref().map(node_index).transpose()?;
+                if positive == 0 {
+                    return Err("DC sensitivity objective voltage must not be ground".to_string());
+                }
+                if negative == Some(positive) {
+                    return Err("DC sensitivity objective voltage nodes must differ".to_string());
+                }
+                Ok(AcSensitivityOutput::Voltage { positive, negative })
+            }
+            XyceAcSensitivityObjectiveSpec::BranchCurrent(element) => {
+                Ok(AcSensitivityOutput::BranchCurrent(element.clone()))
+            }
+        }
+    }
+
+    fn dc_sensitivity_nominal_column_name(objective_probe: &str) -> String {
+        Self::normalize_probe(&format!("{{{objective_probe}}}"))
+    }
+
+    fn dc_sensitivity_derivative_column_name(
+        objective_probe: &str,
+        parameter: &str,
+        mode: &str,
+    ) -> String {
+        Self::normalize_probe(&format!("d_{{{objective_probe}}}/d_{parameter}_{mode}"))
+    }
+
+    fn xyce_dc_sensitivity_trace_matches(
+        trace: &crate::analysis::advanced::Sensitivity,
+        parameter: &str,
+    ) -> bool {
+        trace.vector_name.eq_ignore_ascii_case(parameter)
+            || trace.element.eq_ignore_ascii_case(parameter)
+            || format!("{}:{}", trace.element, trace.parameter).eq_ignore_ascii_case(parameter)
+    }
+
+    fn compare_dc_sensitivity_table(
+        &self,
+        plan: &XyceStaticDcSensitivityPlan,
+        reference_path: &Path,
+        reference_format: XyceDcSensitivityReferenceFormat,
+        print: &XycePrintRequest,
+        no_index: bool,
+        evaluations: &[XyceDcSensitivityEvaluation],
+        side_file: Option<&str>,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let reference = match reference_format {
+            XyceDcSensitivityReferenceFormat::Prn => Self::parse_prn_file(reference_path)?,
+            XyceDcSensitivityReferenceFormat::Csv => Self::parse_csv_file(reference_path)?,
+        };
+        if reference.columns.is_empty() {
+            return Err(format!(
+                "DC sensitivity oracle {} has no columns",
+                reference_path.display()
+            ));
+        }
+        if reference.rows.len() != evaluations.len() {
+            return Err(format!(
+                "DC sensitivity oracle {} has {} rows, but the simulation produced {} points",
+                reference_path.display(),
+                reference.rows.len(),
+                evaluations.len()
+            ));
+        }
+        let has_stepnum = reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("STEPNUM"));
+        if has_stepnum && !plan.add_stepnum_col {
+            return Err(format!(
+                "DC sensitivity oracle {} contains STEPNUM without ADD_STEPNUM_COL",
+                reference_path.display()
+            ));
+        }
+        if plan.add_stepnum_col && !plan.dc.steps.is_empty() && !has_stepnum {
+            return Err(format!(
+                "DC sensitivity oracle {} is missing the requested STEPNUM column",
+                reference_path.display()
+            ));
+        }
+        let index_column = usize::from(has_stepnum);
+        let data_offset = index_column + usize::from(!no_index);
+        if !no_index {
+            if reference
+                .columns
+                .get(index_column)
+                .is_none_or(|column| !column.eq_ignore_ascii_case("Index"))
+            {
+                return Err(format!(
+                    "DC sensitivity oracle {} must contain Index before data columns",
+                    reference_path.display()
+                ));
+            }
+        }
+        if no_index && has_stepnum && reference.columns.len() <= data_offset {
+            return Err(format!(
+                "DC sensitivity NOINDEX oracle {} has no data columns",
+                reference_path.display()
+            ));
+        }
+        let mut expected_generated = BTreeSet::new();
+        for objective in &plan.objectives {
+            let objective_probe = Self::xyce_sensitivity_objective_probe(&objective.spec);
+            expected_generated.insert(Self::dc_sensitivity_nominal_column_name(&objective_probe));
+            for parameter in &plan.parameters {
+                if plan.direct {
+                    expected_generated.insert(Self::dc_sensitivity_derivative_column_name(
+                        &objective_probe,
+                        parameter,
+                        "dir",
+                    ));
+                }
+                if plan.adjoint {
+                    expected_generated.insert(Self::dc_sensitivity_derivative_column_name(
+                        &objective_probe,
+                        parameter,
+                        "adj",
+                    ));
+                }
+            }
+        }
+        let generated_offset = reference
+            .columns
+            .iter()
+            .enumerate()
+            .skip(data_offset)
+            .find_map(|(index, column)| {
+                expected_generated
+                    .contains(&Self::normalize_probe(column))
+                    .then_some(index)
+            })
+            .ok_or_else(|| {
+                format!(
+                    "DC sensitivity oracle {} has no generated objective/sensitivity columns",
+                    reference_path.display()
+                )
+            })?;
+        let base_columns = &reference.columns[data_offset..generated_offset];
+        if base_columns.len() != print.probes.len() {
+            return Err(format!(
+                "DC sensitivity oracle {} has {} base columns, but .PRINT SENS declares {} probes",
+                reference_path.display(),
+                base_columns.len(),
+                print.probes.len()
+            ));
+        }
+        for (column, probe) in base_columns.iter().zip(&print.probes) {
+            if Self::normalize_probe(column) != Self::normalize_probe(probe) {
+                return Err(format!(
+                    "DC sensitivity oracle {} base column '{}' does not match .PRINT SENS probe '{}'",
+                    reference_path.display(),
+                    column,
+                    probe
+                ));
+            }
+        }
+        let mut generated_indices = BTreeMap::new();
+        for (index, column) in reference.columns.iter().enumerate().skip(generated_offset) {
+            let normalized = Self::normalize_probe(column);
+            if !expected_generated.contains(&normalized) {
+                return Err(format!(
+                    "DC sensitivity oracle {} contains unsupported generated column '{}'",
+                    reference_path.display(),
+                    column
+                ));
+            }
+            if generated_indices.insert(normalized, index).is_some() {
+                return Err(format!(
+                    "DC sensitivity oracle {} contains duplicate generated column '{}'",
+                    reference_path.display(),
+                    column
+                ));
+            }
+        }
+        if generated_indices.len() != expected_generated.len() {
+            return Err(format!(
+                "DC sensitivity oracle {} has {} generated columns, expected {}",
+                reference_path.display(),
+                generated_indices.len(),
+                expected_generated.len()
+            ));
+        }
+        let mut mismatches = Vec::new();
+        for (row_index, (row, evaluation)) in reference.rows.iter().zip(evaluations).enumerate() {
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "DC sensitivity oracle {} row {} has {} values, expected {}",
+                    reference_path.display(),
+                    row_index,
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            if has_stepnum {
+                let expected = row[0];
+                let actual = evaluation.step_index as Value;
+                Self::record_sensitivity_mismatch(
+                    self,
+                    &mut mismatches,
+                    row_index,
+                    &reference.columns[0],
+                    expected,
+                    actual,
+                );
+            }
+            if !no_index {
+                let expected = row[index_column];
+                let actual = evaluation.local_index as Value;
+                Self::record_sensitivity_mismatch(
+                    self,
+                    &mut mismatches,
+                    row_index,
+                    &reference.columns[index_column],
+                    expected,
+                    actual,
+                );
+            }
+            let sweep_point = XyceDcSweepPoint {
+                primary: evaluation.point.sweep_value,
+                secondary: None,
+            };
+            for (column_index, probe) in print.probes.iter().enumerate() {
+                let expected = row[data_offset + column_index];
+                let actual = Self::evaluate_dc_probe(
+                    probe,
+                    &evaluation.netlist,
+                    &plan.dc.dc,
+                    sweep_point,
+                    &evaluation.point.result,
+                    &evaluation.point.device_op_report,
+                )?;
+                let actual = Self::quantize_dc_print_value(&plan.dc.source, probe, actual)?;
+                let normalized = Self::normalize_probe(probe);
+                let tolerance = self.default_comparison_tolerance(&normalized);
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: side_file
+                            .map(|file| format!("{file}:{probe}"))
+                            .unwrap_or_else(|| probe.to_string()),
+                        expected,
+                        actual,
+                        relative_error,
+                    });
+                }
+            }
+            for (objective_index, objective) in plan.objectives.iter().enumerate() {
+                let objective_probe = Self::xyce_sensitivity_objective_probe(&objective.spec);
+                let sensitivity = evaluation
+                    .objectives
+                    .get(objective_index)
+                    .ok_or_else(|| "DC sensitivity objective result count mismatch".to_string())?;
+                let nominal_key = Self::dc_sensitivity_nominal_column_name(&objective_probe);
+                let nominal_column = *generated_indices
+                    .get(&nominal_key)
+                    .ok_or_else(|| format!("missing generated column '{nominal_key}'"))?;
+                let nominal_expected = row[nominal_column];
+                let nominal_actual = sensitivity.output_value;
+                let nominal_probe = side_file
+                    .map(|file| format!("{file}:{}", reference.columns[nominal_column]))
+                    .unwrap_or_else(|| reference.columns[nominal_column].clone());
+                Self::record_sensitivity_mismatch(
+                    self,
+                    &mut mismatches,
+                    row_index,
+                    &nominal_probe,
+                    nominal_expected,
+                    nominal_actual,
+                );
+                for parameter in &plan.parameters {
+                    let trace = sensitivity
+                        .sensitivities
+                        .iter()
+                        .find(|trace| Self::xyce_dc_sensitivity_trace_matches(trace, parameter))
+                        .ok_or_else(|| {
+                            format!(
+                                "DC sensitivity objective '{}' produced no trace for parameter '{parameter}'",
+                                objective.authored_name
+                            )
+                        })?;
+                    for mode in [plan.direct.then_some("dir"), plan.adjoint.then_some("adj")]
+                        .into_iter()
+                        .flatten()
+                    {
+                        let key = Self::dc_sensitivity_derivative_column_name(
+                            &objective_probe,
+                            parameter,
+                            mode,
+                        );
+                        let column = *generated_indices
+                            .get(&key)
+                            .ok_or_else(|| format!("missing generated column '{key}'"))?;
+                        let expected = row[column];
+                        let probe = side_file
+                            .map(|file| format!("{file}:{}", reference.columns[column]))
+                            .unwrap_or_else(|| reference.columns[column].clone());
+                        Self::record_sensitivity_mismatch(
+                            self,
+                            &mut mismatches,
+                            row_index,
+                            &probe,
+                            expected,
+                            trace.absolute,
+                        );
+                    }
+                }
+            }
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                return Ok(mismatches);
+            }
+        }
         Ok(mismatches)
     }
 
