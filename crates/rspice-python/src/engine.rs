@@ -663,15 +663,12 @@ fn configure_hb_numerics(
     Ok(())
 }
 
-/// RSpice simulation engine
+/// Outcome of `Engine.health_check()`
 ///
-/// The Engine class is the main interface for running circuit simulations.
-/// It can be configured with custom simulation parameters or use defaults.
-///
-/// Example:
-///     >>> engine = Engine()
-///     >>> result = engine.run_dc_op(netlist)
-///     >>> print(f"V(out) = {result.voltage('out')} V")
+/// Reports the wall-clock duration of the probe and the size of the circuit
+/// it built. The report is only produced when the probe succeeded, so
+/// `status` is always `"ready"` and `ready` is always `True`; a failed probe
+/// raises instead.
 #[pyclass(name = "HealthReport", module = "rspice", frozen, from_py_object)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PyHealthReport {
@@ -705,6 +702,15 @@ impl From<rspice_core::EngineHealthReport> for PyHealthReport {
     }
 }
 
+/// RSpice simulation engine
+///
+/// The Engine class is the main interface for running circuit simulations.
+/// It can be configured with custom simulation parameters or use defaults.
+///
+/// Example:
+///     >>> engine = Engine()
+///     >>> result = engine.run_dc_op(netlist)
+///     >>> print(f"V(out) = {result.voltage('out')} V")
 #[pyclass(name = "Engine", module = "rspice", frozen)]
 pub struct PyEngine {
     inner: Engine,
