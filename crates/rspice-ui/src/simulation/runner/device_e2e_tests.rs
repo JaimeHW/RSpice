@@ -336,16 +336,17 @@ fn coupled_cpl_line_bench_solves_op() {
 
 #[test]
 fn memristor_bench_solves_tran() {
-    // The TEAM memristor is a dynamical device (hidden state node) and
-    // qualifies with a UIC transient start; the DC-startup path for the
-    // native TEAM device is a known core gap tracked separately.
+    // The TEAM memristor carries a hidden state node whose steady-state row is
+    // degenerate at the default exponents, so the core gauges it to XON at the
+    // operating point. That makes the palette device start from a real DC
+    // solve, without UIC.
     let mut bench = Bench::new();
     let v = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "0.2", "");
     let mr = bench.place(ComponentType::Memristor, 200, 0, "MR1", "", "");
     bench.connect((v, 0), (mr, 0));
     bench.ground((mr, 1));
     bench.ground((v, 1));
-    solve_tran_with_uic(&bench.netlist(), 1e-7, 1e-9, true);
+    solve_tran_with_uic(&bench.netlist(), 1e-7, 1e-9, false);
 }
 
 #[test]
