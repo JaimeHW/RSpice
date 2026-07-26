@@ -352,25 +352,28 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
 // Shared section pieces
 // =============================================================================
 
-/// A stacked, full-width action group matching the mockup's
-/// `.section-body.panel-action-stack`.
-fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_space(10.0);
-        let width = (ui.available_width() - 10.0).max(1.0);
-        ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-            body(ui);
-        });
-    });
-    ui.add_space(2.0);
-}
+/// The section body's action row: content-sized buttons that wrap, matching
+/// the mockup's `.section-body.panel-action-stack` box and the design
+/// system's own rule that an action row is a group, not a run-on.
+const ACTION_ROW_PAD_X: f32 = 10.0;
+const ACTION_ROW_PAD_Y: f32 = 8.0;
+const ACTION_ROW_GAP: f32 = 6.0;
 
-/// A full-width action button inside an [`action_stack`].
-fn stacked_button<'a>(ui: &Ui, button: Button<'a>) -> Button<'a> {
-    let width = ui.available_width().max(1.0);
-    button.min_width(width).max_width(width)
+fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+    let width = (ui.available_width() - 2.0 * ACTION_ROW_PAD_X).max(1.0);
+    ui.add_space(ACTION_ROW_PAD_Y);
+    ui.horizontal(|ui| {
+        ui.add_space(ACTION_ROW_PAD_X);
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, 0.0),
+            egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+            |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(ACTION_ROW_GAP, ACTION_ROW_GAP);
+                body(ui);
+            },
+        );
+    });
+    ui.add_space(ACTION_ROW_PAD_Y);
 }
 
 /// One action bound to a workbench command, disabled with the registry's
@@ -384,14 +387,11 @@ fn command_action(
     destructive: bool,
 ) {
     let availability = command.availability(app);
-    let response = stacked_button(
-        ui,
-        Button::new(label)
-            .icon(icon)
-            .destructive(destructive)
-            .enabled(availability.is_available()),
-    )
-    .show(ui);
+    let response = Button::new(label)
+        .icon(icon)
+        .destructive(destructive)
+        .enabled(availability.is_available())
+        .show(ui);
     if let CommandAvailability::Disabled(reason) = availability {
         response.on_disabled_hover_text(reason);
     } else if response.clicked() {
@@ -741,11 +741,7 @@ fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
     let descend = Command::DescendHierarchy.availability(app);
     action_stack(ui, |ui| {
         let editable = !app.state.active_view_read_only();
-        let response = stacked_button(
-            ui,
-            Button::new("Properties…").ghost().enabled(editable),
-        )
-        .show(ui);
+        let response = Button::new("Properties…").ghost().enabled(editable).show(ui);
         if response.clicked() {
             crate::common::app::open_property_editor(&mut app.state, component.id);
         }
@@ -759,11 +755,7 @@ fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
                 .and_then(|library| library.get_cell(&reference.cell))
                 .and_then(|cell| cell.get_view(&reference.view))
                 .is_some();
-            let response = stacked_button(
-                ui,
-                Button::new("Edit symbol…").ghost().enabled(exists),
-            )
-            .show(ui);
+            let response = Button::new("Edit symbol…").ghost().enabled(exists).show(ui);
             if response.clicked() {
                 app.state.open_workspace_view(reference);
             }
@@ -775,10 +767,7 @@ fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
                 || "Descend into instance".to_owned(),
                 |binding| format!("Descend into {}", binding.cell),
             );
-            if stacked_button(ui, Button::new(&label).ghost())
-                .show(ui)
-                .clicked()
-            {
+            if Button::new(&label).ghost().show(ui).clicked() {
                 Command::DescendHierarchy.execute(app);
             }
         }
@@ -1155,10 +1144,7 @@ fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[DesignNet]) {
             if plottable {
                 let display = format!("V({net_name})");
                 let label = format!("Plot {display}");
-                if stacked_button(ui, Button::new(&label).icon(Icon::Results))
-                    .show(ui)
-                    .clicked()
-                {
+                if Button::new(&label).icon(Icon::Results).show(ui).clicked() {
                     crate::schematic::view::toggle_probe_with_feedback(
                         ui,
                         &mut app.state,
@@ -1168,7 +1154,8 @@ fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[DesignNet]) {
                 }
             }
             if !connected.is_empty()
-                && stacked_button(ui, Button::new("Select connected instances").ghost())
+                && Button::new("Select connected instances")
+                    .ghost()
                     .show(ui)
                     .clicked()
             {
