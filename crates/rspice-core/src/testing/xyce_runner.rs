@@ -34916,10 +34916,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 );
             }
 
+            let target_locked_time_grid = contract
+                .comparison
+                .compares_waveforms_exactly()
+                .then(|| baseline_result.time.clone());
             let (target_netlist, target_result) = match self.run_transient_family_plan(
                 &target_plan,
                 start,
-                None,
+                target_locked_time_grid,
             ) {
                 Ok(result) => result,
                 Err(SimulationError::Aborted) => {
