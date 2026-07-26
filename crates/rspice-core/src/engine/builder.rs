@@ -6750,6 +6750,9 @@ impl Engine {
                     let txl_lossless_branch = model_params
                         .map(|params| params.uses_txl_lossless_branch())
                         .unwrap_or(false);
+                    let zero_length_pass_through = model_params
+                        .map(|params| params.is_zero_length_rc_rg())
+                        .unwrap_or(false);
                     let attenuation = model_params.and_then(|p| {
                         if txl_lossless_branch {
                             None
@@ -6886,6 +6889,12 @@ impl Engine {
                             let branch1 = circuit.allocate_branch_named(&format!("{}#ibr1", name));
                             let branch2 = circuit.allocate_branch_named(&format!("{}#ibr2", name));
                             tline.set_ltra_branch_ordinals(branch1, branch2);
+                        }
+                        if zero_length_pass_through {
+                            tline.set_zero_length_pass_through();
+                            let branch1 = circuit.allocate_branch_named(&format!("{}#ibr1", name));
+                            let branch2 = circuit.allocate_branch_named(&format!("{}#ibr2", name));
+                            tline.set_zero_length_branch_ordinals(branch1, branch2);
                         }
                         if let Some(att) = attenuation {
                             tline.set_attenuation(att);

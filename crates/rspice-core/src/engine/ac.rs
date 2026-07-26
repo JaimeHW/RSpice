@@ -1664,6 +1664,12 @@ impl Engine {
         // nodal Y-parameter stamp would land on absent matrix cells and
         // leave the branch equations singular (dead far port).
         for tline in &circuit.tlines {
+            if let Some((br1, br2)) = tline.zero_length_branch_matrix_indices() {
+                // Xyce's zero-length RC/RG special cases are exact ideal
+                // through connections in small signal as well as transient.
+                Self::stamp_txl_branch_ac(ac_matrix, tline, br1, br2);
+                continue;
+            }
             if let Some((br1, br2)) = tline.ltra_branch_matrix_indices()
                 && Self::stamp_ltra_branch_ac(ac_matrix, tline, br1, br2, omega)
             {

@@ -110,6 +110,9 @@ impl Engine {
             let previous_backward = tl.launched_backward_wave();
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(accepted_solution, tl.node2_pos, tl.node2_neg);
+            if tl.is_zero_length_pass_through() {
+                continue;
+            }
             if let Some((br1, br2)) = tl.txl_branch_matrix_indices() {
                 let i1 = accepted_solution.get(br1 - 1).copied().unwrap_or(0.0);
                 let i2 = accepted_solution.get(br2 - 1).copied().unwrap_or(0.0);

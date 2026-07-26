@@ -279,6 +279,29 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn stamp_zero_length_branch_runtime(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        tl: &crate::device::TransmissionLine,
+    ) {
+        let Some((br1, br2)) = tl.zero_length_branch_matrix_indices() else {
+            return;
+        };
+
+        // Preserve the exact ideal-through MNA equations for every transient
+        // candidate: I1 + I2 = 0 and V1 - V2 = 0.  No delayed history or
+        // companion conductance is introduced for LEN=0 RC/RG cards.
+        Self::stamp_txl_branch_kcl(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_txl_branch_kcl(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        matrix.add(br1 - 1, br1 - 1, 1.0);
+        matrix.add(br1 - 1, br2 - 1, 1.0);
+        Self::stamp_txl_voltage_row(matrix, br2, tl.node1_pos, tl.node1_neg, 1.0);
+        Self::stamp_txl_voltage_row(matrix, br2, tl.node2_pos, tl.node2_neg, -1.0);
+        rhs[br1 - 1] = 0.0;
+        rhs[br2 - 1] = 0.0;
+    }
+
+    #[inline]
     pub(crate) fn stamp_tline_branch_topology(
         triplets: &mut Vec<(usize, usize, Value)>,
         tl: &crate::device::TransmissionLine,

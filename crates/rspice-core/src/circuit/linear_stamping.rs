@@ -50,6 +50,10 @@ impl CircuitData {
                 self.stamp_txl_dc_direct(matrix, tl);
                 continue;
             }
+            if tl.is_zero_length_pass_through() {
+                self.stamp_zero_length_branch_dc_direct(matrix, tl);
+                continue;
+            }
             if tl.ltra_branch_ordinals().is_some() {
                 self.stamp_ltra_branch_dc_direct(matrix, tl);
                 continue;
@@ -126,6 +130,10 @@ impl CircuitData {
                 self.stamp_txl_dc(matrix, tl);
                 continue;
             }
+            if tl.is_zero_length_pass_through() {
+                self.stamp_zero_length_branch_dc(matrix, tl);
+                continue;
+            }
             if tl.ltra_branch_ordinals().is_some() {
                 self.stamp_ltra_branch_dc(matrix, tl);
                 continue;
@@ -193,6 +201,37 @@ impl CircuitData {
     }
 
     #[inline]
+    fn stamp_zero_length_branch_dc_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        tl: &crate::device::TransmissionLine,
+    ) {
+        let Some((br1_ordinal, br2_ordinal)) = tl.zero_length_branch_ordinals() else {
+            return;
+        };
+        let br1 = self.get_branch_matrix_index(br1_ordinal);
+        let br2 = self.get_branch_matrix_index(br2_ordinal);
+
+        // An RC/RG LTRA line with LEN=0 is exactly an ideal through
+        // connection: I1 + I2 = 0 and V1 - V2 = 0.  Keep these as explicit
+        // MNA branch equations so the short remains exact at every scale.
+        Self::stamp_branch_kcl_direct(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_branch_kcl_direct(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        matrix.add(br1 - 1, br1 - 1, 1.0);
+        matrix.add(br1 - 1, br2 - 1, 1.0);
+        Self::stamp_branch_voltage_row_direct(
+            matrix,
+            br2,
+            tl.node1_pos,
+            tl.node1_neg,
+            tl.node2_pos,
+            tl.node2_neg,
+            1.0,
+            -1.0,
+        );
+    }
+
+    #[inline]
     fn stamp_txl_dc(&self, matrix: &mut TripletMatrix, tl: &crate::device::TransmissionLine) {
         let Some((br1_ordinal, br2_ordinal)) = tl.txl_branch_ordinals() else {
             return;
@@ -246,6 +285,34 @@ impl CircuitData {
             -1.0,
         );
         matrix.push(br2 - 1, br1 - 1, -r_series);
+    }
+
+    #[inline]
+    fn stamp_zero_length_branch_dc(
+        &self,
+        matrix: &mut TripletMatrix,
+        tl: &crate::device::TransmissionLine,
+    ) {
+        let Some((br1_ordinal, br2_ordinal)) = tl.zero_length_branch_ordinals() else {
+            return;
+        };
+        let br1 = self.get_branch_matrix_index(br1_ordinal);
+        let br2 = self.get_branch_matrix_index(br2_ordinal);
+
+        Self::stamp_branch_kcl_triplet(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_branch_kcl_triplet(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        matrix.push(br1 - 1, br1 - 1, 1.0);
+        matrix.push(br1 - 1, br2 - 1, 1.0);
+        Self::stamp_branch_voltage_row_triplet(
+            matrix,
+            br2,
+            tl.node1_pos,
+            tl.node1_neg,
+            tl.node2_pos,
+            tl.node2_neg,
+            1.0,
+            -1.0,
+        );
     }
 
     #[inline]

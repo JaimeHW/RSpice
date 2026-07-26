@@ -97,6 +97,12 @@ pub struct TransmissionLine {
     txl_branch_ordinals: Option<(NodeId, NodeId)>,
     /// LTRA RLC branch-current ordinals allocated by the circuit builder.
     ltra_branch_ordinals: Option<(NodeId, NodeId)>,
+    /// Whether this LTRA card is Xyce's zero-length RC/RG ideal through case.
+    /// Such a line has no propagation history or distributed kernel; it is
+    /// represented by an exact two-port short in every analysis.
+    zero_length_pass_through: bool,
+    /// Branch-current ordinals reserved for the zero-length through case.
+    zero_length_branch_ordinals: Option<(NodeId, NodeId)>,
 
     /// Current simulation time
     current_time: Value,
@@ -301,6 +307,8 @@ impl TransmissionLine {
             txl: None,
             txl_branch_ordinals: None,
             ltra_branch_ordinals: None,
+            zero_length_pass_through: false,
+            zero_length_branch_ordinals: None,
             current_time: 0.0,
         }
     }
@@ -341,6 +349,33 @@ impl TransmissionLine {
         self.ltra_branch_ordinals = Some((branch1, branch2));
     }
 
+    /// Configure the exact zero-length RC/RG through connection.
+    pub fn set_zero_length_pass_through(&mut self) {
+        self.zero_length_pass_through = true;
+        self.txl = None;
+        self.distributed_rlc = None;
+        self.distributed_rlc_cache.set(None);
+    }
+
+    /// Return whether this line is an exact zero-length RC/RG through case.
+    #[inline]
+    pub fn is_zero_length_pass_through(&self) -> bool {
+        self.zero_length_pass_through
+    }
+
+    /// Set branch ordinals for the zero-length through connection.
+    pub fn set_zero_length_branch_ordinals(&mut self, branch1: NodeId, branch2: NodeId) {
+        self.zero_length_branch_ordinals = Some((branch1, branch2));
+    }
+
+    /// Return zero-length through branch ordinals, if configured.
+    #[inline]
+    pub fn zero_length_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
+        self.zero_length_pass_through
+            .then_some(self.zero_length_branch_ordinals)
+            .flatten()
+    }
+
     /// Return TXL branch ordinals, if this line uses the native TXL runtime.
     #[inline]
     pub fn txl_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
@@ -369,6 +404,14 @@ impl TransmissionLine {
         self.distributed_rlc.as_ref()?;
         self.txl.is_none().then_some(())?;
         self.ltra_branch_ordinals?;
+        Some((self.branch1?, self.branch2?))
+    }
+
+    /// Return linked zero-length through branch matrix indices.
+    #[inline]
+    pub fn zero_length_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
+        self.zero_length_pass_through.then_some(())?;
+        self.zero_length_branch_ordinals?;
         Some((self.branch1?, self.branch2?))
     }
 

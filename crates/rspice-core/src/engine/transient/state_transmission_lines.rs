@@ -12,7 +12,9 @@ impl Engine {
         _tline_dc_refs: &[(Value, Value)],
     ) {
         for tl in &circuit.tlines {
-            if tl.has_txl_runtime() {
+            if tl.is_zero_length_pass_through() {
+                Self::stamp_zero_length_branch_runtime(matrix, rhs, tl);
+            } else if tl.has_txl_runtime() {
                 if let Some(stamp) = tl.txl_transient_stamp(time) {
                     Self::stamp_txl_branch_runtime(matrix, rhs, tl, stamp);
                 }
@@ -170,6 +172,9 @@ impl Engine {
             let v1 = Self::differential_voltage(initial_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(initial_solution, tl.node2_pos, tl.node2_neg);
             refs.push((v1, v2));
+            if tl.is_zero_length_pass_through() {
+                continue;
+            }
             if let Some((br1, br2)) = tl.txl_branch_matrix_indices() {
                 let i1 = initial_solution.get(br1 - 1).copied().unwrap_or(0.0);
                 let i2 = initial_solution.get(br2 - 1).copied().unwrap_or(0.0);

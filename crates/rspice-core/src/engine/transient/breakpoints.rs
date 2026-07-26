@@ -605,7 +605,11 @@ impl Engine {
             // Ngspice TXL and LTRA advance their native histories from accepted
             // points and schedule arrival breakpoints dynamically from history
             // derivative changes, not from statically propagated source edges.
-            .filter(|tl| !tl.has_txl_runtime() && !tl.has_distributed_rlgc())
+            .filter(|tl| {
+                !tl.is_zero_length_pass_through()
+                    && !tl.has_txl_runtime()
+                    && !tl.has_distributed_rlgc()
+            })
             .map(crate::device::TransmissionLine::delay)
             .chain(
                 circuit

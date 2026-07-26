@@ -65,6 +65,31 @@ impl TransmissionLineModelParams {
         let g = self.g.unwrap_or(0.0);
         g.is_finite() && g < 1.0e-2 && r / l < 5.0e5
     }
+
+    /// Return whether this is one of Xyce's zero-length LTRA special cases.
+    ///
+    /// Xyce accepts an RC line (`R > 0`, `C > 0`) or an RG line (`R > 0`,
+    /// `G > 0`) with `LEN=0`.  Both reduce exactly to an ideal through
+    /// connection; they are not finite-length distributed-RLC models and
+    /// must therefore bypass the delayed-wave kernel entirely.
+    #[inline]
+    pub(in crate::engine::builder) fn is_zero_length_rc_rg(self) -> bool {
+        if self.kind != TransmissionLineModelKind::Ltra
+            || self.len != Some(0.0)
+            || !self.r.is_some_and(|r| r.is_finite() && r > 0.0)
+            || self.l.is_some_and(|l| !l.is_finite() || l != 0.0)
+        {
+            return false;
+        }
+
+        let g_zero = self.g.unwrap_or(0.0);
+        let c_zero = self.c.unwrap_or(0.0);
+        let rc =
+            self.c.is_some_and(|c| c.is_finite() && c > 0.0) && g_zero.is_finite() && g_zero == 0.0;
+        let rg =
+            self.g.is_some_and(|g| g.is_finite() && g > 0.0) && c_zero.is_finite() && c_zero == 0.0;
+        rc || rg
+    }
 }
 
 fn resolve_ltra_interpolation_mode(params: &[(String, f64)]) -> LtraInterpolationMode {
@@ -256,6 +281,10 @@ pub(crate) fn validate_native_xyce_ltra_model_contract(
     let params = resolve_tline_model_params(netlist, model_name)?.ok_or_else(|| {
         SimulationError::Circuit(format!("LTRA model '{model_name}' is not defined"))
     })?;
+    if params.is_zero_length_rc_rg() {
+        return Ok(());
+    }
+
     let (Some(r), Some(l), Some(c), Some(len), Some(z0), Some(td)) = (
         params.r, params.l, params.c, params.len, params.z0, params.td,
     ) else {
@@ -355,6 +384,7 @@ fn finalize_ltra_model_params(
     params: TransmissionLineModelParams,
 ) -> Result<TransmissionLineModelParams, SimulationError> {
     validate_optional_ltra_non_negative(model_name, "R", params.r)?;
+    let zero_length = params.len == Some(0.0);
     if let Some(g) = params.g {
         if !g.is_finite() {
             return Err(SimulationError::Circuit(format!(
@@ -362,16 +392,22 @@ fn finalize_ltra_model_params(
                 model_name, g
             )));
         }
-        if g.abs() > LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS {
+        if !zero_length && g.abs() > LTRA_SUPPORTED_SHUNT_CONDUCTANCE_ABS {
             return Err(SimulationError::Circuit(format!(
                 "LTRA model '{}' uses unsupported G={}; use G=0 for the native LTRA runtime",
                 model_name, g
             )));
         }
     }
-    validate_optional_ltra_positive(model_name, "L", params.l)?;
-    validate_optional_ltra_positive(model_name, "C", params.c)?;
-    validate_optional_ltra_positive(model_name, "LENGTH", params.len)?;
+    if params.is_zero_length_rc_rg() {
+        // The special-case predicate already enforces the exact finite RC/RG
+        // value domain (including R>0 and LEN=0).  Keep the shared optional
+        // validation for the remaining tolerance controls below.
+    } else {
+        validate_optional_ltra_positive(model_name, "L", params.l)?;
+        validate_optional_ltra_positive(model_name, "C", params.c)?;
+        validate_optional_ltra_positive(model_name, "LENGTH", params.len)?;
+    }
     validate_optional_ltra_non_negative(model_name, "REL", params.rel)?;
     validate_optional_ltra_non_negative(model_name, "ABS", params.abs)?;
     validate_optional_ltra_non_negative(model_name, "COMPACTREL", params.compactrel)?;
@@ -772,6 +808,44 @@ mod tests {
         assert_eq!(lin.ltra_interpolation, LtraInterpolationMode::Linear);
         assert_eq!(quad.ltra_interpolation, LtraInterpolationMode::Quadratic);
         assert_eq!(mixed.ltra_interpolation, LtraInterpolationMode::Mixed);
+    }
+
+    #[test]
+    fn ltra_zero_length_rc_and_rg_resolve_as_exact_special_cases() {
+        let rc = resolve_test_tline(
+            r#"title
+.model y ltra r=0.05 c=20p len=0
+.end
+"#,
+        );
+        assert!(rc.is_zero_length_rc_rg());
+        assert_eq!(rc.r, Some(0.05));
+        assert_eq!(rc.c, Some(20e-12));
+        assert_eq!(rc.len, Some(0.0));
+
+        let rg = resolve_test_tline(
+            r#"title
+.model y ltra r=0.05 g=20 len=0
+.end
+"#,
+        );
+        assert!(rg.is_zero_length_rc_rg());
+        assert_eq!(rg.r, Some(0.05));
+        assert_eq!(rg.g, Some(20.0));
+        assert_eq!(rg.len, Some(0.0));
+    }
+
+    #[test]
+    fn native_xyce_ltra_contract_accepts_zero_length_rc_and_rg_only() {
+        for model in [
+            ".model y ltra r=0.05 c=20p len=0",
+            ".model y ltra r=0.05 g=20 len=0",
+        ] {
+            let netlist = crate::netlist::Netlist::parse(&format!("title\n{model}\n.end\n"))
+                .expect("zero-length special-case model parses");
+            validate_native_xyce_ltra_model_contract(&netlist, "y")
+                .expect("zero-length RC/RG is part of native contract");
+        }
     }
 
     #[test]

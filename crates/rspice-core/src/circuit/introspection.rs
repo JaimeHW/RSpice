@@ -534,6 +534,7 @@ impl CircuitData {
             if let Some((branch1, branch2)) = tline
                 .txl_branch_ordinals()
                 .or_else(|| tline.ltra_branch_ordinals())
+                .or_else(|| tline.zero_length_branch_ordinals())
             {
                 tline.set_branches(self.num_nodes + branch1, self.num_nodes + branch2);
             }
