@@ -1,3 +1,16 @@
+//! Sweeps, RF, and statistical analyses: `.STEP`, `.HB`, `.SP`, Monte Carlo,
+//! plus the command-line-only PSS, `--sparam`, and `--corners` modes.
+//!
+//! Two S-parameter paths live here and write different tags. The `.SP` card
+//! solves the N ports the deck declares with `PORT` voltage sources (`sp`
+//! tag); `--sparam` drives four explicitly named nodes as a two-port over the
+//! deck's `.AC` sweep (`sparam` tag). Both write Touchstone when the `-o`
+//! extension matches the port count, and the standard complex tables
+//! otherwise.
+//!
+//! Corner sweeps re-elaborate the deck per corner on `--jobs` workers,
+//! tagging each corner's output so workers never collide.
+
 use super::RunContext;
 use super::basic::{run_dc_op, run_temp};
 use super::shared::{generate_frequency_sweep, generate_step_values};

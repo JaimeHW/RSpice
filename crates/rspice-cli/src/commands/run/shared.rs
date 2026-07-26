@@ -1,3 +1,7 @@
+//! Helpers shared by the `run` analysis modules: node lookup by name or
+//! index, `.STEP`/frequency sweep point generation, HDF5 error mapping, and
+//! the non-finite result guard behind `--allow-nonfinite`.
+
 use crate::cli::CliError;
 use rspice_core::{Engine, Netlist};
 use std::collections::HashMap;

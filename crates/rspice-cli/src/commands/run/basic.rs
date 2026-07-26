@@ -1,3 +1,10 @@
+//! Time-domain and DC analysis cards: `.OP`, `.DC`, `.TRAN`, `.FOUR`, `.TEMP`.
+//!
+//! Each entry point runs one card against the shared [`RunContext`], prints
+//! the console report, and exports the `op`/`dc`/`tran`/`four`/`temp` tagged
+//! file when `-o` is set. `.TRAN` also owns the progress bar, the
+//! `--checkpoint`/`--resume` segmented path, and `--tran-stop`.
+
 use super::RunContext;
 use super::shared::{NodeResolver, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};

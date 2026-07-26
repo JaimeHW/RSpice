@@ -1,3 +1,12 @@
+//! Turn engine results into named export signals.
+//!
+//! One place decides how a node or branch becomes a column: the rawfile name
+//! (`v(out)`, `i(v1)`) and the display name, the differential `V(a,b)` series
+//! a `.SAVE`/`--save` request synthesizes, digital XSPICE states as numeric
+//! values, and the `SaveSet` filter that drops everything not requested.
+//! Every analysis exporter goes through here so a signal is named identically
+//! whichever analysis produced it.
+
 use rspice_core::{
     Complex64, Value, analysis::AcResult, engine::TransientResult, netlist::SaveSet,
     netlist::SaveSignal, solver::SimulationResult, xspice::DigitalValue,

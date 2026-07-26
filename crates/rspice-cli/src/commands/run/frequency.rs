@@ -1,3 +1,12 @@
+//! Frequency-domain and small-signal analyses: `.AC` (including `DATA=`
+//! table sweeps), `.DISTO`, `.STB`, `.NOISE` (including `DATA=`), `.PZ`,
+//! `.TF`, and `.SENS`.
+//!
+//! `.DISTO` runs the linearized AC sweep its card describes; the CLI does not
+//! emit Volterra distortion products. The report-shaped analyses (`.TF`,
+//! `.PZ`, `.SENS`) have no natural HDF5 section and reject `-f hdf5` rather
+//! than write a misleading file.
+
 use super::RunContext;
 use super::shared::{NodeResolver, generate_frequency_sweep, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
