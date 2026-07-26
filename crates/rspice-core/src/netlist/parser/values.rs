@@ -3,6 +3,32 @@
 use super::*;
 use crate::netlist::lexer::{Token, collect_contiguous_expression};
 
+/// Temperature- and thermal-voltage-dependent model expressions must remain
+/// symbolic.  Evaluating them against the parser's default 27 C context
+/// would freeze the device parameter before an analysis starts.
+fn model_expression_references_temperature(expression: &str) -> bool {
+    let bytes = expression.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
+            let start = index;
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+            {
+                index += 1;
+            }
+            let identifier = expression[start..index].to_ascii_uppercase();
+            if matches!(identifier.as_str(), "TEMP" | "TEMPER" | "VT") {
+                return true;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    false
+}
+
 pub(super) fn split_spice_fields(line: &str) -> Vec<String> {
     let mut fields = Vec::new();
     let mut current = String::new();
@@ -376,7 +402,9 @@ pub(super) fn parse_model_params(
                             };
                             let expr = expr.clone();
                             stream.advance();
-                            if defer_expression_params {
+                            if defer_expression_params
+                                || model_expression_references_temperature(&expr)
+                            {
                                 expr_params.push((name, expr));
                             } else if let Ok(value) = eval_expression(&expr, params) {
                                 numeric_params.push((name, value));
@@ -615,7 +643,7 @@ fn try_xspice_model_scalar_expression(
     if let Some(value) = parse_boolean_literal(&expr) {
         return Some(ParsedModelScalarExpression::Resolved(value));
     }
-    if defer_expression_params {
+    if defer_expression_params || model_expression_references_temperature(&expr) {
         return Some(ParsedModelScalarExpression::Deferred(expr));
     }
 
