@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Coupled transmission line (CPL, two conductors over a shared
-     reference). Box 60x60, pins a1(0,10), a2(0,30), ar(0,50),
-     b1(60,10), b2(60,30), br(60,50). -->
+     reference). Conductors drawn as closed trace rectangles; the bottom
+     rail with hatching is the shared reference. Box 60x60, pins
+     a1(0,10), a2(0,30), ar(0,50), b1(60,10), b2(60,30), br(60,50). -->
 <svg viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
   <path d="M 0,10 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 48,10 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 12,8 H 48" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 12,12 H 48" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,8 H 48 V 12 H 12 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
   <path d="M 0,30 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 48,30 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 12,28 H 48" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 12,32 H 48" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,28 H 48 V 32 H 12 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
   <path d="M 0,50 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 22,50 l -4,5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 31,50 l -4,5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
