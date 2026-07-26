@@ -12,12 +12,11 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Pill, PillState, crumb_text, docbar};
+use crate::ui::widgets::Button;
 use crate::workbench::{SymbolSelection, SymbolTool};
 
 const BODY_GRID: i32 = SYMBOL_TERMINAL_GRID / 4;
 const PIN_HIT_RADIUS: f32 = 10.0;
-const RAIL_WIDTH: f32 = 280.0;
 const DOT_RADIUS: i32 = 3;
 const SCROLL_ZOOM_SENSITIVITY: f32 = 0.001;
 const PREVIEW_TILE_MAX_WIDTH: f32 = 240.0;
@@ -102,21 +101,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     document.reconcile_ports(&ports);
 
     let mut generate_requested = false;
-    docbar(ui, |ui| {
-        breadcrumb(ui, state);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if pin_pill(ui, &document, &ports, state.active_view_read_only()) {
-                state.ui.symbol.tool = SymbolTool::PlacePin;
-                if let Some(pin) = next_unplaced_pin(&document) {
-                    state.ui.symbol.select_pin(pin);
-                } else {
-                    state.ui.symbol.clear_selection();
-                }
-            }
-            tool_echo(ui, state);
-        });
-    });
-
     if state.active_view_read_only() {
         read_only_banner(ui, state);
     }
@@ -136,12 +120,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
+    // The stage is full-bleed: tools live in the workspace toolbar, the pin
+    // contract in the left panel, and object editing in the inspector, so
+    // the canvas keeps the whole document area.
+    let stage = ui.available_rect_before_wrap();
     let height = ui.available_height();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        let show_rail = ui.available_width() > 760.0;
-        let rail_width = if show_rail { RAIL_WIDTH } else { 0.0 };
-        let canvas_size = vec2((ui.available_width() - rail_width).max(180.0), height);
+        let canvas_size = vec2(ui.available_width().max(180.0), height);
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
         let mut changed = false;
         let viewport = update_viewport(ui, state, rect, &document, &response);
@@ -172,52 +158,102 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         if changed && let Err(error) = state.store_active_symbol_document(&document) {
             state.push_user_message(ConsoleMessage::warning(error));
         }
-        if show_rail {
-            pins_rail(ui, state, &mut document, &ports, height);
-        }
     });
+    canvas_breadcrumb(ui.ctx(), state, stage);
+    canvas_check_note(ui.ctx(), &document, &ports, stage);
 }
 
-fn breadcrumb(ui: &mut Ui, state: &AppState) {
+/// Floating cell path, matching the schematic stage's overlay.
+fn canvas_breadcrumb(ctx: &egui::Context, state: &AppState, stage: Rect) {
     let reference = &state.workspace.active_view;
-    crumb_text(
-        ui,
-        &[
-            (reference.library.as_str(), false),
-            (reference.cell.as_str(), true),
-            (reference.view.as_str(), false),
-        ],
+    let t = Tokens::get(ctx);
+    let text = format!(
+        "{} / {} / {}",
+        reference.library, reference.cell, reference.view
     );
+    egui::Area::new(egui::Id::new("symbol-editor.canvas-breadcrumb"))
+        .order(egui::Order::Middle)
+        .fixed_pos(stage.min + vec2(10.0, 9.0))
+        .constrain_to(stage)
+        .interactable(false)
+        .show(ctx, |ui| {
+            overlay_frame(ui, &t, t.color.border, |ui| {
+                ui.label(
+                    egui::RichText::new(text)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text),
+                );
+            });
+        });
 }
 
-fn tool_echo(ui: &mut Ui, state: &AppState) {
-    ui.add_space(10.0);
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(state.ui.symbol.tool.label())
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_faint),
-    );
-}
-
-fn pin_pill(ui: &mut Ui, document: &SymbolDocument, ports: &[PortSpec], read_only: bool) -> bool {
-    let summary = document.pin_summary(ports);
-    let (state, label) = match summary {
-        PinSummary::Match => (PillState::Ok, "PINS match schematic".to_owned()),
-        PinSummary::Unplaced(count) => (PillState::Error, format!("PINS {count} unplaced")),
-        PinSummary::Orphaned(count) => (PillState::Error, format!("PINS {count} orphaned")),
-        PinSummary::NoSchematic => (PillState::Idle, "PINS no schematic".to_owned()),
-    };
-    Pill::new(state, &label).show(ui);
-    if !matches!(summary, PinSummary::Unplaced(_)) {
-        return false;
+/// Floating pin-contract state, matching the schematic stage's check note.
+fn canvas_check_note(
+    ctx: &egui::Context,
+    document: &SymbolDocument,
+    ports: &[PortSpec],
+    stage: Rect,
+) {
+    if ctx.content_rect().width() <= 820.0 {
+        return;
     }
-    ui.add_space(6.0);
-    Button::new("Place new pins")
-        .enabled(!read_only)
-        .show(ui)
-        .clicked()
+    let t = Tokens::get(ctx);
+    let (message, color) = match document.pin_summary(ports) {
+        PinSummary::Match => ("Pin contract matches the interface".to_owned(), t.color.ok),
+        PinSummary::Unplaced(count) => (
+            format!(
+                "{count} declared pin{} unplaced",
+                if count == 1 { "" } else { "s" }
+            ),
+            t.color.err,
+        ),
+        PinSummary::Orphaned(count) => (
+            format!(
+                "{count} pin{} not declared by the interface",
+                if count == 1 { "" } else { "s" }
+            ),
+            t.color.err,
+        ),
+        PinSummary::NoSchematic => (
+            "No schematic interface declares this cell".to_owned(),
+            t.color.warn,
+        ),
+    };
+    egui::Area::new(egui::Id::new("symbol-editor.canvas-check-note"))
+        .order(egui::Order::Middle)
+        .pivot(Align2::RIGHT_TOP)
+        .fixed_pos(stage.right_top() + vec2(-11.0, 10.0))
+        .constrain_to(stage)
+        .interactable(false)
+        .show(ctx, |ui| {
+            overlay_frame(ui, &t, color.gamma_multiply(0.55), |ui| {
+                ui.label(
+                    egui::RichText::new(message)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                        .color(color),
+                );
+            });
+        });
 }
+
+fn overlay_frame(ui: &mut Ui, t: &Tokens, stroke: Color32, body: impl FnOnce(&mut Ui)) {
+    egui::Frame::new()
+        .fill(Color32::from_rgba_unmultiplied(
+            t.color.bg_panel.r(),
+            t.color.bg_panel.g(),
+            t.color.bg_panel.b(),
+            242,
+        ))
+        .stroke(Stroke::new(1.0, stroke))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::symmetric(9, 0))
+        .shadow(t.shadow())
+        .show(ui, |ui| {
+            ui.set_min_height(27.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), body);
+        });
+}
+
 
 fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
@@ -982,6 +1018,36 @@ fn draw_preview_tile(
     );
 }
 
+/// Draw a symbol document fitted into `rect`, exactly as it will appear on
+/// a sheet. Shared by the editor's as-placed tile and the inspector hero so
+/// the two can never disagree about what the symbol looks like.
+pub(crate) fn draw_document_preview(
+    painter: &egui::Painter,
+    rect: Rect,
+    document: &SymbolDocument,
+    ports: &[PortSpec],
+    cell: &str,
+    color: egui::Color32,
+) {
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    let viewport = preview_viewport_for_tile(rect, document);
+    let mut component =
+        Component::new(0, ComponentType::CellInstance, Point::origin());
+    component.name = "X1".to_owned();
+    component.value = cell.to_owned();
+    let resolved = ResolvedCellSymbol::from_authored_document(document.clone(), ports);
+    draw_resolved_symbol(
+        &painter.with_clip_rect(rect),
+        viewport.world_to_screen(Point::origin()),
+        viewport.zoom,
+        &component,
+        &resolved,
+        Stroke::new(1.1, color),
+    );
+}
+
 fn preview_tile_rect(canvas: Rect) -> Rect {
     let available_width = (canvas.width() - PREVIEW_TILE_MARGIN * 2.0).max(96.0);
     let available_height = (canvas.height() - PREVIEW_TILE_MARGIN * 2.0).max(96.0);
@@ -1016,162 +1082,6 @@ fn preview_viewport_for_tile(rect: Rect, document: &SymbolDocument) -> SymbolVie
 fn preview_effective_bounds(document: &SymbolDocument) -> (Point, Point) {
     let (min, max) = document_bounds(document);
     (min - document.origin, max - document.origin)
-}
-
-fn pins_rail(
-    ui: &mut Ui,
-    state: &mut AppState,
-    document: &mut SymbolDocument,
-    ports: &[PortSpec],
-    height: f32,
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    ui.allocate_ui_with_layout(vec2(RAIL_WIDTH, height), egui::Layout::top_down(egui::Align::Min), |ui| {
-        let rect = ui.max_rect();
-        ui.painter().rect_filled(rect, 0.0, c.bg_panel);
-        ui.painter().vline(rect.left() + 0.5, rect.y_range(), Stroke::new(1.0, c.border));
-        rail_header(ui, "PINS - SCHEMATIC CONTRACT");
-        let mut changed = false;
-        let listed: Vec<SymbolPin> = if ports.is_empty() {
-            document.pins.clone()
-        } else {
-            ports
-                .iter()
-                .map(|port| {
-                    document
-                        .pin(&port.name)
-                        .cloned()
-                        .unwrap_or_else(|| SymbolPin::new(&port.name, port.direction, None))
-                })
-                .collect()
-        };
-        let selected_pins = state.ui.symbol.effective_selection().pins;
-        for pin in listed {
-            let selected = selected_pins.contains(&pin.name);
-            let response = pin_row(ui, &pin, selected);
-            if response.clicked() {
-                state.ui.symbol.select_pin(pin.name.clone());
-                state.ui.symbol.tool = SymbolTool::PlacePin;
-            }
-        }
-        let orphaned: Vec<String> = document
-            .pins
-            .iter()
-            .filter(|pin| {
-                !ports.is_empty()
-                    && !ports
-                        .iter()
-                        .any(|port| port.name.eq_ignore_ascii_case(&pin.name))
-            })
-            .map(|pin| pin.name.clone())
-            .collect();
-        if !orphaned.is_empty() {
-            rail_header(ui, "ORPHANED");
-            for name in orphaned {
-                let label = format!("{name} - delete");
-                if Button::new(&label)
-                    .ghost()
-                    .enabled(!state.active_view_read_only())
-                    .show(ui)
-                    .clicked()
-                {
-                    if state.deny_read_only_edit() {
-                        continue;
-                    }
-                    state.record_symbol_edit(document);
-                    document.pins.retain(|pin| pin.name != name);
-                    changed = true;
-                }
-            }
-        }
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            ui.add_space(10.0);
-            ui.label(
-                egui::RichText::new(
-                    "Rows come from the schematic ports; the symbol places pins, it does not invent the contract.",
-                )
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(c.text_faint),
-            );
-        });
-        if changed && let Err(error) = state.store_active_symbol_document(document) {
-            state.push_user_message(ConsoleMessage::warning(error));
-        }
-    });
-}
-
-fn rail_header(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 30.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.add_space(12.0);
-            ui.label(
-                egui::RichText::new(text)
-                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text_faint),
-            );
-        },
-    );
-}
-
-fn pin_row(ui: &mut Ui, pin: &SymbolPin, selected: bool) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), t.metrics.row_h), Sense::click());
-    if response.hovered() || selected {
-        ui.painter()
-            .rect_filled(rect, 0.0, if selected { c.accent_dim } else { c.bg_hover });
-    }
-    let state = if pin.position.is_some() {
-        if pin.terminal_on_grid() {
-            "placed"
-        } else {
-            "off-grid"
-        }
-    } else {
-        "unplaced"
-    };
-    let state_color = match state {
-        "placed" => c.ok,
-        "off-grid" => c.err,
-        _ => c.err,
-    };
-    response.widget_info(|| {
-        WidgetInfo::selected(
-            WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            selected,
-            format!("{} pin, {}, {state}", pin.name, pin.direction.keyword()),
-        )
-    });
-    let y = rect.center().y;
-    ui.painter().text(
-        pos2(rect.left() + 12.0, y),
-        Align2::LEFT_CENTER,
-        &pin.name,
-        theme::mono(tokens::FS_1, FontWeight::Medium),
-        c.text,
-    );
-    ui.painter().text(
-        pos2(rect.right() - 128.0, y),
-        Align2::LEFT_CENTER,
-        pin.direction.keyword(),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        c.text_faint,
-    );
-    ui.painter().text(
-        pos2(rect.right() - 72.0, y),
-        Align2::LEFT_CENTER,
-        state,
-        theme::mono(10.0, FontWeight::Regular),
-        state_color,
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn hit_pin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> Option<String> {

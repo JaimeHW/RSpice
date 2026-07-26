@@ -171,6 +171,10 @@ pub struct SymbolUiState {
     pub dragging_label: Option<String>,
     pub dragging_origin: bool,
     pub drag_undo_recorded: bool,
+    /// `true` once the open inspector field has pushed its undo snapshot.
+    /// Typing into a coordinate is one edit, not one per keystroke; the flag
+    /// clears when the field loses focus.
+    pub inspector_undo_recorded: bool,
     pub marquee_start: Option<crate::state::Point>,
     pub marquee_current: Option<crate::state::Point>,
     pub zoom: f32,
@@ -195,6 +199,7 @@ impl Default for SymbolUiState {
             dragging_label: None,
             dragging_origin: false,
             drag_undo_recorded: false,
+            inspector_undo_recorded: false,
             marquee_start: None,
             marquee_current: None,
             zoom: 4.0,

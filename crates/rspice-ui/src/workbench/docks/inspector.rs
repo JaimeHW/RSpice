@@ -1,6 +1,7 @@
 //! Context inspector with authoritative object and provenance details.
 
 mod design;
+mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
@@ -58,6 +59,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             begin_inspector_sections(ui);
             match app.state.workbench.workspace {
                 Workspace::Project => project(ui, app),
+                // A symbol cellview is edited against its pin contract, not
+                // against a schematic selection.
+                Workspace::Design
+                    if app.state.workspace.active_view_type()
+                        == crate::state::ViewType::Symbol =>
+                {
+                    symbol::show(ui, app);
+                }
                 Workspace::Design => design::show(ui, app),
                 Workspace::Simulate => simulate(ui, app),
                 Workspace::Results => results(ui, app),
