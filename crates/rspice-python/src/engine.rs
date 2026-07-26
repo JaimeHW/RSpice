@@ -2,10 +2,15 @@
 //!
 //! Provides Python access to the RSpice simulation engine:
 //! - DC operating point and sweep analysis
-//! - AC frequency analysis (explicit lists or dec/oct/lin sweeps)
-//! - Transient time-domain analysis (Ctrl-C interruptible)
-//! - Noise, pole-zero, Monte Carlo, sensitivity, parametric step
-//! - Transfer function (.TF)
+//! - AC frequency analysis (explicit lists, dec/oct/lin sweeps, `.DATA` tables)
+//! - Third-order Volterra distortion (`.DISTO`)
+//! - Transient time-domain analysis (Ctrl-C interruptible), plus
+//!   error-bounded waveform compression and fingerprinted checkpoint/resume
+//! - Noise, pole-zero, transfer function, and Tian loop stability (`.STB`)
+//! - N-port S-parameters, optionally with `.SP donoise` port-noise correlation
+//! - Periodic/RF: PSS, single- and multi-tone HB, PAC, driven periodic noise,
+//!   and autonomous oscillator phase noise
+//! - Monte Carlo, DC and AC sensitivity, parametric step
 //! - `run()`: execute the netlist's own analysis directives and evaluate
 //!   .MEAS statements — the automated-verification entry point
 //!
@@ -1344,12 +1349,16 @@ impl PyEngine {
 
     /// Run every analysis directive in the netlist and evaluate .MEAS
     ///
-    /// Executes the netlist's own `.op`, `.dc`, `.ac`, `.hb`, `.disto`,
-    /// `.sp`, `.tran`, `.noise`, `.tf`, and `.four` directives in order, then
-    /// evaluates `.MEAS` statements against the corresponding results.
-    /// Directives the engine
-    /// cannot execute are reported in `records` with `skipped=True` and a
-    /// reason — nothing is dropped silently.
+    /// Executes every directive the netlist carries, in deck order: `.op`,
+    /// `.dc`, `.tran`, `.ac` and `.ac data`, `.disto`, `.hb`, `.sp` (with
+    /// `donoise`), `.noise` and `.noise data`, `.tf`, `.stb`, `.pz`, `.mc`,
+    /// `.step`, `.temp`, DC and AC `.sens`, and `.four`. `.four` is evaluated
+    /// after the loop so it may precede its `.tran` in the deck.
+    ///
+    /// `.MEAS` statements are then evaluated against the TRAN, DC, AC, and
+    /// NOISE results. Every directive contributes at least one entry to
+    /// `records`; anything that could not be executed is recorded with
+    /// `skipped=True` and a reason instead of being dropped silently.
     ///
     /// Measurements whose analysis did not run are reported as failed with
     /// an explanatory error, so `assert_passed()` cannot green-wash a CI
@@ -2437,17 +2446,25 @@ impl PyEngine {
     /// Run pole-zero analysis
     ///
     /// Finds the poles and zeros of the circuit's transfer function
-    /// between input and output nodes. The input is driven with a unit
-    /// current, so `dc_gain` is a transimpedance; pole/zero locations are
-    /// input-independent.
+    /// between input and output nodes. Pole and zero locations are
+    /// input-independent; only the gain scaling depends on `input_type`.
     ///
     /// Args:
     ///     netlist: Parsed netlist to simulate
     ///     input_node: Input node index or name (non-ground)
     ///     output_node: Output node index or name
+    ///     input_negative: Optional negative input node (differential drive)
+    ///     output_negative: Optional negative output node (differential probe)
+    ///     input_type: "current" (default) drives a unit current, making
+    ///                 `dc_gain` a transimpedance in V/A; "voltage" drives a
+    ///                 unit voltage, making `dc_gain` a voltage ratio
+    ///     analysis: "pz" for both (default), "poles", or "zeros"
     ///
     /// Returns:
     ///     PoleZeroResult: Poles, zeros, and gain information
+    ///
+    /// Raises:
+    ///     ValueError: For an unknown input_type or analysis
     ///
     /// Example:
     ///     >>> result = engine.run_pz(netlist, "in", "out")
