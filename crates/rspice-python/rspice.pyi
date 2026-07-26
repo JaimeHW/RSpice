@@ -154,9 +154,24 @@ class ParseError(RSpiceError):
     limit: int | None
 
 class SimulationError(RSpiceError):
-    """Raised when simulation fails due to circuit or solver errors."""
+    """Raised when simulation fails due to circuit or solver errors.
+
+    `kind`, `code`, and `category` are stable snake-case tags, deliberately
+    typed as `str` because the engine may add values without a breaking
+    change. Current values:
+
+    - kind: "configuration", "resource_limit", "circuit", "solver",
+      "netlist", "convergence", "aborted"
+    - code: "invalid_configuration", "resource_limit", "circuit_error",
+      "solver_error", "netlist_error", "convergence_error", "aborted"
+    - category: "configuration", "resource_limit", "simulation", "solver",
+      "netlist", "convergence", "cancellation"
+    """
 
     kind: str
+    code: str
+    category: str
+    retryable: bool
     iterations: int | None
     resource: str | None
     requested: int | None
