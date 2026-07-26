@@ -26,8 +26,102 @@ veriloga = [
 ]
 # Native JIT for Verilog-A devices (native targets only). Native mode is full JIT or error.
 veriloga-native = ["veriloga", "rspice-veriloga/native"]
-# Build-time generated Verilog-A built-ins compiled into rspice-core.
-veriloga-builtins = []
+# Runtime integration shared by every build-time generated Verilog-A model.
+# Prefer a `veriloga-model-*` feature for small production binaries and fast builds.
+veriloga-builtins-base = []
+# Noise analysis is independently selectable because its generated schedules are
+# more than half of the checked-in Rust source. The compatibility umbrella below
+# retains the historical all-model, noise-enabled behavior.
+veriloga-builtins-noise = ["veriloga-builtins-base"]
+veriloga-model-diode-cmc = ["veriloga-builtins-base"]
+veriloga-model-epfl-hemt-10a = ["veriloga-builtins-base"]
+veriloga-model-juncap200 = ["veriloga-builtins-base"]
+veriloga-model-psp104tva = ["veriloga-builtins-base"]
+veriloga-model-psp104va = ["veriloga-builtins-base"]
+veriloga-model-pspnqs104va = ["veriloga-builtins-base"]
+veriloga-model-angelov = ["veriloga-builtins-base"]
+veriloga-model-angelov-gan = ["veriloga-builtins-base"]
+veriloga-model-asmesd = ["veriloga-builtins-base"]
+veriloga-model-asmesd-dio = ["veriloga-builtins-base"]
+veriloga-model-asmhemt = ["veriloga-builtins-base"]
+veriloga-model-bjt505-va = ["veriloga-builtins-base"]
+veriloga-model-bjt505t-va = ["veriloga-builtins-base"]
+veriloga-model-bjtd505-va = ["veriloga-builtins-base"]
+veriloga-model-bjtd505t-va = ["veriloga-builtins-base"]
+veriloga-model-bsimbulk = ["veriloga-builtins-base"]
+veriloga-model-bsimcmg-va = ["veriloga-builtins-base"]
+veriloga-model-bsimimg = ["veriloga-builtins-base"]
+veriloga-model-bsimsoi-18c250bc = ["veriloga-builtins-base"]
+veriloga-model-bsimsoi-e2aff994 = ["veriloga-builtins-base"]
+veriloga-model-bsimsoi-va = ["veriloga-builtins-base"]
+veriloga-model-ekv-va = ["veriloga-builtins-base"]
+veriloga-model-hicuml0va = ["veriloga-builtins-base"]
+veriloga-model-hicuml2va = ["veriloga-builtins-base"]
+veriloga-model-hisimhv-n4-va = ["veriloga-builtins-base"]
+veriloga-model-hisimhv-n5-va = ["veriloga-builtins-base"]
+veriloga-model-hisimhv-va = ["veriloga-builtins-base"]
+veriloga-model-hisimsoi-va-5be18005 = ["veriloga-builtins-base"]
+veriloga-model-hisimsoi-va-242bc21d = ["veriloga-builtins-base"]
+veriloga-model-hisimsoi-va-38074d06 = ["veriloga-builtins-base"]
+veriloga-model-hisimsotb-va = ["veriloga-builtins-base"]
+veriloga-model-l-utsoi-832ce87d = ["veriloga-builtins-base"]
+veriloga-model-l-utsoi-485e0ac9 = ["veriloga-builtins-base"]
+veriloga-model-mosvar = ["veriloga-builtins-base"]
+veriloga-model-mvsg-cmc = ["veriloga-builtins-base"]
+veriloga-model-r2-cmc = ["veriloga-builtins-base"]
+veriloga-model-r2-et-cmc = ["veriloga-builtins-base"]
+veriloga-model-r3-cmc = ["veriloga-builtins-base"]
+veriloga-model-vbic13 = ["veriloga-builtins-base"]
+veriloga-model-vbic13-3t-et = ["veriloga-builtins-base"]
+veriloga-model-vbic13-4t = ["veriloga-builtins-base"]
+veriloga-model-vbic-4t-et-cf = ["veriloga-builtins-base"]
+# Complete generated model catalog without the optional noise schedules.
+veriloga-builtins-models = [
+    "veriloga-model-diode-cmc",
+    "veriloga-model-epfl-hemt-10a",
+    "veriloga-model-juncap200",
+    "veriloga-model-psp104tva",
+    "veriloga-model-psp104va",
+    "veriloga-model-pspnqs104va",
+    "veriloga-model-angelov",
+    "veriloga-model-angelov-gan",
+    "veriloga-model-asmesd",
+    "veriloga-model-asmesd-dio",
+    "veriloga-model-asmhemt",
+    "veriloga-model-bjt505-va",
+    "veriloga-model-bjt505t-va",
+    "veriloga-model-bjtd505-va",
+    "veriloga-model-bjtd505t-va",
+    "veriloga-model-bsimbulk",
+    "veriloga-model-bsimcmg-va",
+    "veriloga-model-bsimimg",
+    "veriloga-model-bsimsoi-18c250bc",
+    "veriloga-model-bsimsoi-e2aff994",
+    "veriloga-model-bsimsoi-va",
+    "veriloga-model-ekv-va",
+    "veriloga-model-hicuml0va",
+    "veriloga-model-hicuml2va",
+    "veriloga-model-hisimhv-n4-va",
+    "veriloga-model-hisimhv-n5-va",
+    "veriloga-model-hisimhv-va",
+    "veriloga-model-hisimsoi-va-5be18005",
+    "veriloga-model-hisimsoi-va-242bc21d",
+    "veriloga-model-hisimsoi-va-38074d06",
+    "veriloga-model-hisimsotb-va",
+    "veriloga-model-l-utsoi-832ce87d",
+    "veriloga-model-l-utsoi-485e0ac9",
+    "veriloga-model-mosvar",
+    "veriloga-model-mvsg-cmc",
+    "veriloga-model-r2-cmc",
+    "veriloga-model-r2-et-cmc",
+    "veriloga-model-r3-cmc",
+    "veriloga-model-vbic13",
+    "veriloga-model-vbic13-3t-et",
+    "veriloga-model-vbic13-4t",
+    "veriloga-model-vbic-4t-et-cf",
+]
+# Backwards-compatible complete generated catalog, including noise.
+veriloga-builtins = ["veriloga-builtins-models", "veriloga-builtins-noise"]
 simd = ["wide"]
 
 [lib]

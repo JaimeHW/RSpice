@@ -83,17 +83,21 @@ JIT is active for diagnostics.
 The supported subset, as documented in the crate docs (`src/lib.rs`) and
 exercised by the test suite:
 
-- **Analog operators**: `ddt`, `idt`, `idtmod` (backward Euler), `ddx`,
-  `limexp`, `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
-  `zi_nd/zp/zd/np`, `$limit`, `$table_model`
+- **Analog operators**: `ddt`, `idt`, `idtmod`, `ddx`, `limexp`,
+  `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
+  `zi_nd/zp/zd/np`, `last_crossing`, `$limit`, `$table_model`. The
+  integration rule for `ddt`/`idt` is not a compile-time choice — the
+  engine supplies the companion coefficients per timestep, so the same
+  compiled model runs under backward Euler or Gear-2/trapezoidal
 - **Noise**: `white_noise`, `flicker_noise`, `noise_table`,
   `noise_table_log`, injected into `.noise` with amplitude scaling and
   mode gating
 - **Indirect contributions**: `V(x): lhs == rhs` as constraint rows on a
   branch unknown
-- **System functions**: `$temperature`, `$vt`, `$abstime`, `$simparam`,
-  `$param_given`, `$port_connected`, `$mfactor` (with automatic
-  multiplicity scaling), `$bound_step`, `$discontinuity`
+- **System functions**: `$temperature`, `$vt`, `$thermal_vt`, `$abstime`,
+  `$realtime`, `$simparam`, `$param_given`, `$port_connected`, `$mfactor`
+  (with automatic multiplicity scaling), `$bound_step`, `$discontinuity`,
+  and the `analysis()` analysis-name query
 - **Data**: 1-D array variables (compile-time and runtime indexing, with
   shadowed derivatives), runtime-bounded loops, parameters with dependent
   defaults/ranges/exclusions, localparams, `aliasparam`, attribute
@@ -103,15 +107,25 @@ exercised by the test suite:
   non-ANSI port styles
 - **Control flow**, lowered to guarded dataflow: `if`/`else`, `case`,
   compile-time-bounded `for`/`repeat` loops, event controls
-  (`initial_step`, `cross`, `above`, `timer`)
-- **Functions**: user-defined analog functions (inlined), and the built-in
-  math set (`abs`, `sqrt`, `exp`, `ln`, `log`, trig/hyperbolic and their
-  inverses, `floor`, `ceil`, `pow`, `hypot`, `atan2`, `min`, `max`)
+  (`initial_step`, `final_step`, `cross`, `above`, `timer`)
+- **Functions**: user-defined analog functions (inlined, including
+  `output`/`inout` arguments), and the built-in math set (`abs`, `sqrt`,
+  `exp`, `ln`, `log`, `log10`, trig/hyperbolic and their inverses,
+  `floor`, `ceil`, `pow`, `hypot`, `atan2`, `min`, `max`)
 
-**Known limitations** (clean compile errors, never silent): `noise_table`
-file input (inline the pair list) and correlated noise;
-parameter-dependent `zi_*` sample periods; multi-dimensional arrays; array
-locals and `output`/`inout` arguments in analog functions.
+**Known limitations**, every one of them a compile error rather than a
+silent miscompile: `noise_table` file input (inline the `{f, p, ...}` pair
+list); parameter-dependent `zi_*` sample periods; multi-dimensional
+arrays; array locals in analog functions; and `output`/`inout`
+analog-function arguments used inside conditional expressions or any other
+context that must stay free of side effects.
+
+Two constructs are accepted but inert, so they are worth knowing about:
+noise sources are always mutually uncorrelated (the trailing name argument
+is a label carried into the results, not a correlation key), and the
+no-effect system tasks — `$display`, `$write`, `$strobe`, `$monitor`,
+`$info`, `$warning`, `$error`, `$fatal`, `$finish`, `$stop` — parse and
+then do nothing, so a model cannot print from the analog block.
 
 ## Feature flags
 

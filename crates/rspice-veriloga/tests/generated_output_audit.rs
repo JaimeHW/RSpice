@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -136,7 +137,10 @@ fn generated_veriloga_noise_is_one_pass_and_allocation_free() {
         }
     });
 
-    assert!(noise_files > 0, "generated bundle has no noise translation units");
+    assert!(
+        noise_files > 0,
+        "generated bundle has no noise translation units"
+    );
     assert!(
         failures.is_empty(),
         "generated Verilog-A noise evaluation must traverse once and allocate no heap storage:\n{}",
@@ -170,9 +174,7 @@ fn generated_veriloga_noise_uses_bounded_helpers_and_a_compact_workspace() {
             partitioned_noise_files += 1;
             let lines = helper.lines().count();
             if lines > MAX_ATOMIC_HELPER_LINES {
-                let name = helper
-                    .split_once('(')
-                    .map_or("<unknown>", |(name, _)| name);
+                let name = helper.split_once('(').map_or("<unknown>", |(name, _)| name);
                 failures.push(format!(
                     "{} helper `{name}` has {lines} lines (limit {MAX_ATOMIC_HELPER_LINES})",
                     display_path(path)
@@ -190,6 +192,71 @@ fn generated_veriloga_noise_uses_bounded_helpers_and_a_compact_workspace() {
         "generated Verilog-A noise helpers must remain bounded and use compact workspaces:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn generated_model_features_match_the_core_feature_catalog() {
+    let workspace_root = workspace_root();
+    let generated_root = generated_veriloga_root();
+    let registry = fs::read_to_string(generated_root.join("registry.rs"))
+        .expect("read generated built-in registry");
+    let core_manifest = fs::read_to_string(workspace_root.join("crates/rspice-core/Cargo.toml"))
+        .expect("read rspice-core manifest");
+
+    let mut model_features = BTreeSet::new();
+    for line in registry.lines() {
+        let Some(feature) = line
+            .trim()
+            .strip_prefix("#[cfg(feature = \"")
+            .and_then(|line| line.strip_suffix("\")]"))
+        else {
+            continue;
+        };
+        if feature.starts_with("veriloga-model-") {
+            model_features.insert(feature.to_string());
+        }
+    }
+
+    assert_eq!(
+        model_features.len(),
+        42,
+        "every generated model must have one stable compile feature"
+    );
+    for feature in &model_features {
+        assert!(
+            core_manifest.contains(&format!("{feature} = [\"veriloga-builtins-base\"]")),
+            "rspice-core is missing generated model feature `{feature}`"
+        );
+        assert!(
+            core_manifest.contains(&format!("    \"{feature}\",")),
+            "the `veriloga-builtins-models` feature is missing `{feature}`"
+        );
+    }
+    assert!(
+        core_manifest.contains("veriloga-builtins-noise = [\"veriloga-builtins-base\"]"),
+        "rspice-core must expose generated noise as an independent feature"
+    );
+    assert!(
+        core_manifest.contains(
+            "veriloga-builtins = [\"veriloga-builtins-models\", \"veriloga-builtins-noise\"]"
+        ),
+        "the compatibility feature must enable the complete model catalog and noise"
+    );
+
+    let mut device_modules = 0usize;
+    scan_generated_rust(&generated_root, &mut |path, source| {
+        if path.file_name().is_some_and(|name| name == "mod.rs")
+            && path.parent().is_some_and(|parent| parent != generated_root)
+        {
+            device_modules += 1;
+            assert!(
+                source.contains("#[cfg(feature = \"veriloga-builtins-noise\")]\npub mod noise;"),
+                "{} does not feature-gate its noise translation unit",
+                display_path(path)
+            );
+        }
+    });
+    assert_eq!(device_modules, model_features.len());
 }
 
 fn workspace_root() -> PathBuf {

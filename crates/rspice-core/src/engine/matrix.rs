@@ -1472,7 +1472,7 @@ impl Engine {
             }
         }
 
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         for device in circuit.generated_veriloga_devices().iter() {
             let mut device_nodes: Vec<usize> = device
                 .nodes

@@ -64,9 +64,9 @@ mod model_policy;
 use model_policy::*;
 mod advanced_mos;
 use advanced_mos::{Bsim3v3SharedModel, Bsim3v3SharedModelKey, Bsim4v8SharedModel};
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 mod generated_model_routing;
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 use generated_model_routing::{
     try_route_generated_bjt_model, try_route_generated_diode_model, try_route_generated_mos_model,
     try_route_generated_resistor_model,
@@ -4423,7 +4423,7 @@ impl Engine {
                     instance_params,
                     deferred_params,
                 } => {
-                    #[cfg(not(feature = "veriloga-builtins"))]
+                    #[cfg(not(feature = "veriloga-builtins-base"))]
                     let _ = deferred_params;
 
                     let prepared_value_expr = value_expr
@@ -4440,7 +4440,7 @@ impl Engine {
                         .transpose()?;
                     let value_expr = prepared_value_expr.as_deref();
 
-                    #[cfg(feature = "veriloga-builtins")]
+                    #[cfg(feature = "veriloga-builtins-base")]
                     if let Some(model_name) = model.as_deref()
                         && try_route_generated_resistor_model(
                             &mut circuit,
@@ -4825,10 +4825,10 @@ impl Engine {
                     instance_params,
                     deferred_params,
                 } => {
-                    #[cfg(not(feature = "veriloga-builtins"))]
+                    #[cfg(not(feature = "veriloga-builtins-base"))]
                     let _ = deferred_params;
 
-                    #[cfg(feature = "veriloga-builtins")]
+                    #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_diode_model(
                         &mut circuit,
                         netlist,
@@ -5010,7 +5010,7 @@ impl Engine {
                     instance_params,
                     deferred_params,
                 } => {
-                    #[cfg(not(feature = "veriloga-builtins"))]
+                    #[cfg(not(feature = "veriloga-builtins-base"))]
                     let _ = deferred_params;
 
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
@@ -5029,7 +5029,7 @@ impl Engine {
                     let bjt_level;
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
-                    #[cfg(feature = "veriloga-builtins")]
+                    #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_bjt_model(
                         &mut circuit,
                         netlist,
@@ -5234,7 +5234,7 @@ impl Engine {
                 } => {
                     // Resolve NMOS/PMOS from model card when available.
                     let model_def = find_binned_model_def(netlist, model, instance_params);
-                    #[cfg(feature = "veriloga-builtins")]
+                    #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_mos_model(
                         &mut circuit,
                         netlist,
@@ -6278,10 +6278,10 @@ impl Engine {
                     subckt_name,
                     params,
                 } => {
-                    #[cfg(not(any(feature = "veriloga-builtins", feature = "veriloga")))]
+                    #[cfg(not(any(feature = "veriloga-builtins-base", feature = "veriloga")))]
                     let _ = params;
 
-                    #[cfg(feature = "veriloga-builtins")]
+                    #[cfg(feature = "veriloga-builtins-base")]
                     {
                         if let Some(mut device) =
                             crate::device::veriloga_generated::instantiate_builtin(

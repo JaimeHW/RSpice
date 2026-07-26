@@ -343,7 +343,7 @@ impl ValidationContract {
         match self {
             Self::ExpectedUnsupported => true,
             Self::ExpectedUnsupportedWithoutGeneratedBuiltins => {
-                !cfg!(feature = "veriloga-builtins")
+                !cfg!(feature = "veriloga-builtins-base")
             }
             _ => false,
         }

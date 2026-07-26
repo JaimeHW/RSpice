@@ -88,7 +88,7 @@ impl Engine {
         }
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     fn generated_noise_source(
         circuit: &CircuitData,
         instance_name: &str,
@@ -878,7 +878,7 @@ impl Engine {
             }
         }
 
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         for device in circuit.generated_veriloga_devices().iter() {
             let evaluated = device
                 .evaluate_noise_sources(
@@ -2420,7 +2420,7 @@ R2 out 0 1k
         assert!(rhs[..6].iter().all(|value| *value == 0.0.into()));
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_noise_translation_preserves_identity_table_and_potential_axis() {
         use crate::analysis::{NoiseSourceIdentity, NoiseSourceType};
@@ -2548,7 +2548,7 @@ R2 out 0 1k
         );
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_r2_noise_catalog_retains_canonical_mechanisms() {
         let netlist = Netlist::parse(
@@ -2599,7 +2599,7 @@ r1 a 0 rmod
         );
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     fn assert_generated_vbic13_noise_initializes(deck: &str, expected_mechanisms: usize) {
         let netlist = Netlist::parse(deck).expect("VBIC13 oracle deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
@@ -2628,7 +2628,7 @@ r1 a 0 rmod
         assert!(vbic.iter().all(|source| source.ef.is_finite()));
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_vbic13_3t_noise_initializes_for_the_new_analysis() {
         assert_generated_vbic13_noise_initializes(
@@ -2640,7 +2640,7 @@ r1 a 0 rmod
         );
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_vbic13_4t_noise_initializes_for_the_new_analysis() {
         assert_generated_vbic13_noise_initializes(

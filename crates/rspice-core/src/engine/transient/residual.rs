@@ -38,12 +38,12 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) tline_dc_refs: &'a [(Value, Value)],
     pub(super) coupled_tline_refs: &'a [CoupledTlineReferenceState],
     #[cfg_attr(
-        not(any(feature = "veriloga", feature = "veriloga-builtins")),
+        not(any(feature = "veriloga", feature = "veriloga-builtins-base")),
         allow(dead_code)
     )]
     pub(super) analysis_initial_step: bool,
     #[cfg_attr(
-        not(any(feature = "veriloga", feature = "veriloga-builtins")),
+        not(any(feature = "veriloga", feature = "veriloga-builtins-base")),
         allow(dead_code)
     )]
     pub(super) analysis_final_step: bool,
@@ -332,7 +332,7 @@ impl Engine {
                     )
                     .map_err(SimulationError::Circuit)?;
             }
-            #[cfg(feature = "veriloga-builtins")]
+            #[cfg(feature = "veriloga-builtins-base")]
             if circuit.has_generated_veriloga_devices() {
                 circuit.prepare_generated_veriloga_timepoint(
                     time,

@@ -340,7 +340,7 @@ impl TestRunner {
                         model
                     ));
                 }
-                #[cfg(not(feature = "veriloga-builtins"))]
+                #[cfg(not(feature = "veriloga-builtins-base"))]
                 if token == ".model"
                     && let Some(reason) =
                         Self::unsupported_generated_builtin_model_without_builtins(&trimmed)
@@ -370,7 +370,7 @@ impl TestRunner {
         None
     }
 
-    #[cfg(not(feature = "veriloga-builtins"))]
+    #[cfg(not(feature = "veriloga-builtins-base"))]
     fn unsupported_generated_builtin_model_without_builtins(line: &str) -> Option<String> {
         let mut parts = line.split_whitespace();
         if !parts.next()?.eq_ignore_ascii_case(".model") {
@@ -472,7 +472,7 @@ a_rom [a1 a2] sel [o1 o2] d_rom1
         );
     }
 
-    #[cfg(not(feature = "veriloga-builtins"))]
+    #[cfg(not(feature = "veriloga-builtins-base"))]
     #[test]
     fn unsupported_detection_rejects_explicit_generated_vbic_without_builtins() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
@@ -492,7 +492,7 @@ generated vbic deck
         );
     }
 
-    #[cfg(not(feature = "veriloga-builtins"))]
+    #[cfg(not(feature = "veriloga-builtins-base"))]
     #[test]
     fn unsupported_detection_allows_native_vbic_numeric_levels_without_builtins() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());

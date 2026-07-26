@@ -269,13 +269,13 @@ impl CircuitData {
         &mut self.veriloga_devices
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     #[inline]
     pub fn has_generated_veriloga_devices(&self) -> bool {
         !self.generated_veriloga_devices.is_empty()
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     pub fn add_generated_veriloga_device(
         &mut self,
         device: crate::device::veriloga_generated::BuiltinVerilogAInstance,
@@ -283,14 +283,14 @@ impl CircuitData {
         self.generated_veriloga_devices.add(device);
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) fn generated_veriloga_devices(
         &self,
     ) -> &crate::device::veriloga_generated::BuiltinVerilogADevices {
         &self.generated_veriloga_devices
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) fn generated_veriloga_devices_mut(
         &mut self,
     ) -> &mut crate::device::veriloga_generated::BuiltinVerilogADevices {
@@ -1748,7 +1748,7 @@ impl CircuitData {
     }
 
     /// Prepare build-time generated Verilog-A devices for a transient timepoint.
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     pub fn prepare_generated_veriloga_timepoint(
         &mut self,
         time: Value,
@@ -1769,7 +1769,7 @@ impl CircuitData {
     }
 
     /// Commit build-time generated Verilog-A integrator state after acceptance.
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     pub fn accept_generated_veriloga_timestep(&mut self) {
         self.generated_veriloga_devices.accept_timestep();
     }
@@ -1777,11 +1777,11 @@ impl CircuitData {
     pub(crate) fn generated_veriloga_checkpoint_states(
         &self,
     ) -> Vec<crate::device::veriloga_generated::GeneratedVerilogAInstanceCheckpoint> {
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             self.generated_veriloga_devices.checkpoint_states()
         }
-        #[cfg(not(feature = "veriloga-builtins"))]
+        #[cfg(not(feature = "veriloga-builtins-base"))]
         {
             Vec::new()
         }
@@ -1794,12 +1794,12 @@ impl CircuitData {
     ) -> Result<(), String> {
         self.validate_generated_veriloga_checkpoint_states(states, state_available)?;
 
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             self.generated_veriloga_devices
                 .restore_checkpoint_states(states)
         }
-        #[cfg(not(feature = "veriloga-builtins"))]
+        #[cfg(not(feature = "veriloga-builtins-base"))]
         {
             debug_assert!(states.is_empty());
             Ok(())
@@ -1818,7 +1818,7 @@ impl CircuitData {
                         .to_string(),
                 );
             }
-            #[cfg(feature = "veriloga-builtins")]
+            #[cfg(feature = "veriloga-builtins-base")]
             if !self.generated_veriloga_devices.is_empty() {
                 return Err(
                     "legacy transient checkpoint does not contain generated Verilog-A persistent state"
@@ -1828,12 +1828,12 @@ impl CircuitData {
             return Ok(());
         }
 
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             self.generated_veriloga_devices
                 .validate_checkpoint_states(states)
         }
-        #[cfg(not(feature = "veriloga-builtins"))]
+        #[cfg(not(feature = "veriloga-builtins-base"))]
         {
             if states.is_empty() {
                 Ok(())

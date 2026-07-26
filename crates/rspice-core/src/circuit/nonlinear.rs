@@ -32,7 +32,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     xspice_event_queue: EventQueue,
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     generated_veriloga_devices: crate::device::veriloga_generated::BuiltinVerilogADevices,
 }
 
@@ -80,7 +80,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_simparam_gmin_is_solver_controlled_and_not_rolled_back() {
         let mut circuit = CircuitData::new();
@@ -194,11 +194,11 @@ impl CircuitData {
             || !self.generic_switches.is_empty()
             || self.behavioral_sources.has_solution_dependent_sources()
             || {
-                #[cfg(feature = "veriloga-builtins")]
+                #[cfg(feature = "veriloga-builtins-base")]
                 {
                     self.has_generated_veriloga_devices()
                 }
-                #[cfg(not(feature = "veriloga-builtins"))]
+                #[cfg(not(feature = "veriloga-builtins-base"))]
                 {
                     false
                 }
@@ -394,11 +394,11 @@ impl CircuitData {
                 .iter()
                 .any(|instance| instance.requires_conservative_newton_damping())
             || {
-                #[cfg(feature = "veriloga-builtins")]
+                #[cfg(feature = "veriloga-builtins-base")]
                 {
                     self.has_generated_veriloga_devices()
                 }
-                #[cfg(not(feature = "veriloga-builtins"))]
+                #[cfg(not(feature = "veriloga-builtins-base"))]
                 {
                     false
                 }
@@ -448,7 +448,7 @@ impl CircuitData {
 
         // External Verilog-A can model ideal branch constraints whose exact
         // Newton step must not be rejected by global line-search damping.
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             if self.has_generated_veriloga_devices() {
                 return true;
@@ -511,7 +511,7 @@ impl CircuitData {
         for dev in &mut self.ekv26s.devices {
             dev.set_eval_gmin(gmin);
         }
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         self.generated_simulation_parameters.set_gmin(gmin);
     }
 
@@ -570,7 +570,7 @@ impl CircuitData {
             xspice_event_queue: self.xspice_event_queue.clone(),
             #[cfg(feature = "veriloga")]
             veriloga_devices: self.veriloga_devices.clone(),
-            #[cfg(feature = "veriloga-builtins")]
+            #[cfg(feature = "veriloga-builtins-base")]
             generated_veriloga_devices: self.generated_veriloga_devices.clone(),
         }
     }
@@ -609,7 +609,7 @@ impl CircuitData {
         {
             self.veriloga_devices = snapshot.veriloga_devices;
         }
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             self.generated_veriloga_devices
                 .restore_from_snapshot(snapshot.generated_veriloga_devices);
@@ -1046,7 +1046,7 @@ impl CircuitData {
         _evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
     ) {
         self.stamp_behavioral_sources(matrix, rhs, solution, time);
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             let generated_analysis = match _analysis {
                 crate::xspice::AnalysisType::Ac => {
@@ -1077,9 +1077,9 @@ impl CircuitData {
     /// Check if all nonlinear devices have converged
     pub fn nonlinear_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         use crate::device::NonlinearDevice;
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         let generated_veriloga_converged = self.generated_veriloga_devices.all_converged();
-        #[cfg(not(feature = "veriloga-builtins"))]
+        #[cfg(not(feature = "veriloga-builtins-base"))]
         let generated_veriloga_converged = true;
         #[cfg(feature = "veriloga")]
         let dynamic_veriloga_converged = self.veriloga_devices.all_converged();

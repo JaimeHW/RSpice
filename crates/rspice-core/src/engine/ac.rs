@@ -1429,7 +1429,7 @@ impl Engine {
                     })?;
             }
         }
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         if circuit.has_generated_veriloga_devices() {
             let omega = 2.0 * std::f64::consts::PI * frequency_hz;
             let mut generated = circuit.generated_veriloga_devices().clone();

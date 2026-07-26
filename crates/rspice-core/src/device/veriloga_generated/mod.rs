@@ -9,13 +9,13 @@ use crate::solver::{ComplexMatrix, CscIndex, StaticMatrix};
 
 pub(crate) mod limiting;
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 #[allow(clippy::all)]
 pub mod builtins {
     include!("registry.rs");
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub(crate) mod kernel_runtime;
@@ -369,7 +369,7 @@ fn map_generated_noise_endpoint(
     })
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 #[derive(Clone)]
 pub struct BuiltinVerilogAInstance {
     pub model_name: &'static str,
@@ -383,14 +383,14 @@ pub struct BuiltinVerilogAInstance {
     kind: builtins::GeneratedBuiltinKind,
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BuiltinEvaluatedNoiseSource {
     pub mapped: GeneratedMappedNoiseDescriptor,
     pub evaluation: GeneratedNoiseEvaluation,
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug)]
 pub(crate) enum BuiltinNoiseEvaluationError {
     Topology {
@@ -405,7 +405,7 @@ pub(crate) enum BuiltinNoiseEvaluationError {
     },
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 impl std::fmt::Display for BuiltinNoiseEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -429,7 +429,7 @@ impl std::fmt::Display for BuiltinNoiseEvaluationError {
     }
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 impl std::error::Error for BuiltinNoiseEvaluationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -439,7 +439,7 @@ impl std::error::Error for BuiltinNoiseEvaluationError {
     }
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 impl std::fmt::Debug for BuiltinVerilogAInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BuiltinVerilogAInstance")
@@ -452,13 +452,13 @@ impl std::fmt::Debug for BuiltinVerilogAInstance {
     }
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinVerilogADevices {
     devices: Vec<BuiltinVerilogAInstance>,
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogADevices {
     #[inline]
     pub fn new() -> Self {
@@ -656,7 +656,7 @@ impl BuiltinVerilogADevices {
     }
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogAInstance {
     fn checkpoint_state(&self) -> GeneratedVerilogAInstanceCheckpoint {
         GeneratedVerilogAInstanceCheckpoint {
@@ -949,7 +949,7 @@ impl BuiltinVerilogAInstance {
     }
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-builtins-base")]
 pub fn instantiate_builtin(
     model_name: &str,
     instance_name: &str,
@@ -5833,10 +5833,10 @@ mod tests {
         GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedSimulationParameters,
     };
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     use super::{BuiltinVerilogADevices, instantiate_builtin};
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     fn checkpoint_test_devices() -> BuiltinVerilogADevices {
         let mut circuit = crate::CircuitData::new();
         let mut devices = BuiltinVerilogADevices::new();
@@ -5856,7 +5856,7 @@ mod tests {
         devices
     }
 
-    #[cfg(feature = "veriloga-builtins")]
+    #[cfg(feature = "veriloga-builtins-base")]
     #[test]
     fn generated_checkpoint_restore_is_atomic_and_validates_provenance() {
         let mut devices = checkpoint_test_devices();

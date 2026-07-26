@@ -1442,7 +1442,7 @@ impl Engine {
                 false,
             )
             .map_err(SimulationError::Circuit)?;
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         circuit
             .generated_veriloga_devices_mut()
             .set_analysis_step(resume.is_none() && !uic_requested, false);
@@ -3889,7 +3889,7 @@ impl Engine {
                     if circuit.has_veriloga_devices() {
                         circuit.accept_veriloga_timestep();
                     }
-                    #[cfg(feature = "veriloga-builtins")]
+                    #[cfg(feature = "veriloga-builtins-base")]
                     if circuit.has_generated_veriloga_devices() {
                         circuit.accept_generated_veriloga_timestep();
                     }
@@ -4811,7 +4811,7 @@ impl Engine {
                     if circuit.has_veriloga_devices() {
                         circuit.accept_veriloga_timestep();
                     }
-                    #[cfg(feature = "veriloga-builtins")]
+                    #[cfg(feature = "veriloga-builtins-base")]
                     if circuit.has_generated_veriloga_devices() {
                         circuit.accept_generated_veriloga_timestep();
                     }
@@ -5061,7 +5061,7 @@ impl Engine {
             } else {
                 false
             };
-            #[cfg(feature = "veriloga-builtins")]
+            #[cfg(feature = "veriloga-builtins-base")]
             if circuit.has_generated_veriloga_devices() {
                 circuit.accept_generated_veriloga_timestep();
             }

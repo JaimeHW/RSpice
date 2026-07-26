@@ -473,7 +473,7 @@ impl<'a> Flattener<'a> {
                 names.insert(stem.to_ascii_uppercase());
             }
         }
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             for name in crate::device::veriloga_generated::builtins::builtin_names() {
                 names.insert(name.to_ascii_uppercase());

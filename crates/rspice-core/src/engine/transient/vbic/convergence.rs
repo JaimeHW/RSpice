@@ -152,9 +152,9 @@ impl Engine {
         circuit: &crate::circuit::Circuit,
     ) -> bool {
         let criteria = self.device_convergence_criteria();
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         let generated_veriloga_converged = circuit.generated_veriloga_devices.all_converged();
-        #[cfg(not(feature = "veriloga-builtins"))]
+        #[cfg(not(feature = "veriloga-builtins-base"))]
         let generated_veriloga_converged = true;
         #[cfg(feature = "veriloga")]
         let dynamic_veriloga_converged = circuit.veriloga_devices.all_converged();

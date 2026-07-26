@@ -476,7 +476,7 @@ impl CircuitData {
             + self.jiles_atherton_inductors.len();
         #[cfg(feature = "veriloga")]
         let count = count + self.veriloga_device_count();
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         let count = count + self.generated_veriloga_devices.len();
         count
     }
@@ -521,7 +521,7 @@ impl CircuitData {
         for dev in &mut self.b3soi_pd.devices {
             dev.resolve_instance_ic_branches(num_nodes);
         }
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         {
             let num_nodes = self.num_nodes;
             self.generated_veriloga_devices_mut()

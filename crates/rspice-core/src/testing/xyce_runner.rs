@@ -21684,7 +21684,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
-        #[cfg(not(feature = "veriloga-builtins"))]
+        #[cfg(not(feature = "veriloga-builtins-base"))]
         if let Some(print) = print.as_ref() {
             if Self::noise_print_requires_generated_vbic_mechanisms(print, &netlist)? {
                 return Err(
@@ -21913,7 +21913,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Ok(references)
     }
 
-    #[cfg_attr(feature = "veriloga-builtins", allow(dead_code))]
+    #[cfg_attr(feature = "veriloga-builtins-base", allow(dead_code))]
     fn noise_print_requires_generated_vbic_mechanisms(
         print: &XycePrintRequest,
         netlist: &Netlist,

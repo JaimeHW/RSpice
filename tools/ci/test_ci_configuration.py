@@ -147,6 +147,11 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("Test non-UI crates (fast tier)", workflow)
         self.assertIn("cargo test --locked -p rspice-cli -p rspice-veriloga -p rspice-bench", workflow)
         self.assertIn("Gate generated Verilog-A Rust resources", workflow)
+        self.assertIn("Check granular generated Verilog-A features", workflow)
+        self.assertIn(
+            "--features veriloga-model-hisimhv-va,veriloga-builtins-noise",
+            workflow,
+        )
         self.assertIn(
             "cargo run --locked -p rspice-bench -- generated-rust",
             workflow,

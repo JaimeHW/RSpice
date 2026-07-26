@@ -212,7 +212,10 @@ only.
 | `simd` | yes | `wide`-based SIMD kernels (`simd/` module, `device/batch/`) |
 | `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus serde_json/blake3/dirs for the compiled-model cache |
 | `veriloga-native` | no | RSpice-owned native JIT for Verilog-A devices; requested native mode is full JIT or typed construction error |
-| `veriloga-builtins` | no | Checked-in generated Rust devices from bundled Verilog-A sources under `src/device/veriloga_generated/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins`. Feature-gated until CMC model qualification and product gates are explicit |
+| `veriloga-model-*` | no | Compiles one checked-in generated Verilog-A model and the shared runtime. Prefer these granular features in production to minimize compile time, peak rustc memory, and binary size |
+| `veriloga-builtins-noise` | no | Adds generated noise schedules to whichever `veriloga-model-*` features are selected |
+| `veriloga-builtins-models` | no | Enables every checked-in generated Verilog-A model without the optional noise schedules |
+| `veriloga-builtins` | no | Backwards-compatible umbrella that enables every generated model plus noise. Generated sources live under `src/device/veriloga_generated/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins` |
 | `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
 | `ffi` | no | Experimental `libloading` integration for dynamically loaded external device models; not a production-stable device ABI until the callback ownership, library lifetime, and stamping contracts are audited |
 
@@ -233,6 +236,13 @@ cargo test -p rspice-core --features veriloga-native
 
 # Generated Verilog-A built-in runtime checks (feature-gated)
 cargo test -p rspice-core --features veriloga-builtins --test generated_veriloga_runtime
+
+# Production-sized generated model build, with noise only when required
+cargo build -p rspice-core --features veriloga-model-vbic13
+cargo build -p rspice-core --features veriloga-model-vbic13,veriloga-builtins-noise
+
+# Complete model catalog without compiling the optional noise schedules
+cargo build -p rspice-core --features veriloga-builtins-models
 
 # Solver kernel micro-benchmark (factor/refactor/solve in isolation)
 cargo run --release -p rspice-core --example klu_bench

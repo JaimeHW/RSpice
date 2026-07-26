@@ -56,6 +56,14 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --workspace --exclude rspice-python --exclude rspice-wasm
+      - name: Check granular generated Verilog-A features
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          cargo check --locked -p rspice-core --features veriloga-builtins-base
+          cargo test --locked -p rspice-core --features veriloga-model-diode-cmc --test generated_veriloga_feature_shards
+          cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards
+          cargo check --locked -p rspice-core --features veriloga-model-hisimhv-va,veriloga-builtins-noise
       - name: Clippy (warnings denied)
         run: cargo clippy --locked --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
       - name: Clear check artifacts before tests

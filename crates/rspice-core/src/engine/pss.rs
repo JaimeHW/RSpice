@@ -941,7 +941,7 @@ impl Engine {
         if circuit.has_veriloga_devices() {
             blockers.push("Verilog-A integration state");
         }
-        #[cfg(feature = "veriloga-builtins")]
+        #[cfg(feature = "veriloga-builtins-base")]
         if circuit.has_generated_veriloga_devices() {
             blockers.push("generated Verilog-A integration state");
         }
