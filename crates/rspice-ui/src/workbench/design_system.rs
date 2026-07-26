@@ -761,6 +761,76 @@ pub fn property_row_status(
     property_row_with_tone(ui, label, value, value_tone, Some(mark))
 }
 
+/// Horizontal padding inside a property row.
+const PROPERTY_ROW_PAD: f32 = 10.0;
+/// Gap between a property row's label and value columns.
+const PROPERTY_ROW_GAP: f32 = 8.0;
+/// Share of the column space the label takes.
+const PROPERTY_LABEL_FRACTION: f32 = 0.4;
+/// Shortest a property row is ever drawn.
+const PROPERTY_ROW_MIN_H: f32 = 29.0;
+
+/// Column widths shared by every property row so a read-only row and an
+/// editable row in the same list line up to the pixel.
+fn property_row_columns(width: f32) -> (f32, f32, f32) {
+    let inner_width = (width - 2.0 * PROPERTY_ROW_PAD).max(1.0);
+    let gap = PROPERTY_ROW_GAP.min(inner_width);
+    let columns_width = (inner_width - gap).max(1.0);
+    let label_column = columns_width * PROPERTY_LABEL_FRACTION;
+    let value_column = (columns_width - label_column).max(1.0);
+    (label_column, gap, value_column)
+}
+
+/// Editable twin of [`property_row`]: the same label column and value
+/// column, with a compact mono input in place of the painted value.
+///
+/// `invalid` outlines the input in the error tone — the typed text has not
+/// been applied to the design.
+pub fn property_row_input(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    invalid: bool,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (label_column, gap, value_column) = property_row_columns(width);
+    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let label_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(label_rect).text(
+        Pos2::new(label_rect.left(), label_rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let value_rect = Rect::from_min_max(
+        Pos2::new(label_rect.right() + gap, rect.center().y - t.metrics.ctl_h * 0.5),
+        Pos2::new(rect.right() - PROPERTY_ROW_PAD, rect.center().y + t.metrics.ctl_h * 0.5),
+    );
+    let mut edit = egui::TextEdit::singleline(value)
+        .font(egui::TextStyle::Monospace)
+        .margin(egui::Margin::symmetric(8, 4))
+        .desired_width(value_column);
+    if invalid {
+        edit = edit.text_color(t.color.err);
+    }
+    let response = ui.put(value_rect, edit);
+    if invalid {
+        ui.painter().rect_stroke(
+            value_rect,
+            t.radius,
+            egui::Stroke::new(1.0, t.color.err),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response
+}
+
 fn property_row_with_tone(
     ui: &mut Ui,
     label: &str,
@@ -774,11 +844,7 @@ fn property_row_with_tone(
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let width = ui.available_width().max(1.0);
-    let inner_width = (width - 20.0).max(1.0);
-    let gap = 8.0_f32.min(inner_width);
-    let columns_width = (inner_width - gap).max(1.0);
-    let label_column = columns_width * 0.4;
-    let value_column = (columns_width - label_column).max(1.0);
+    let (label_column, gap, value_column) = property_row_columns(width);
     let label_galley =
         ui.painter()
             .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
@@ -789,15 +855,16 @@ fn property_row_with_tone(
         value_tone,
         (value_column - status_prefix).max(1.0),
     );
-    let height = (label_galley.size().y.max(value_galley.size().y) + 12.0).max(29.0);
+    let height =
+        (label_galley.size().y.max(value_galley.size().y) + 12.0).max(PROPERTY_ROW_MIN_H);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + 10.0, rect.top()),
-        Pos2::new(rect.left() + 10.0 + label_column, rect.bottom()),
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
     );
     let value_rect = Rect::from_min_max(
         Pos2::new(label_rect.right() + gap, rect.top()),
-        Pos2::new(rect.right() - 10.0, rect.bottom()),
+        Pos2::new(rect.right() - PROPERTY_ROW_PAD, rect.bottom()),
     );
     ui.painter().with_clip_rect(label_rect).galley(
         Pos2::new(label_rect.left(), label_rect.top() + 6.0),

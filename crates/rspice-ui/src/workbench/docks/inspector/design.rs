@@ -21,8 +21,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, TreeRow};
 use crate::workbench::commands::{Command, CommandAvailability};
 use crate::workbench::design_system::{
-    StatusMark, WorkbenchIcon, property_row, property_row_status,
+    StatusMark, WorkbenchIcon, property_row, property_row_input, property_row_status,
 };
+use crate::workbench::state::InlineEditField;
 
 use super::{
     ComponentModelEvidence, component_model_evidence, muted_inspector_copy, section_header,
@@ -145,7 +146,22 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let sheet = sheet_connectivity(&app.state);
-    match subject(&app.state, &sheet.nets) {
+    let inspected = subject(&app.state, &sheet.nets);
+
+    // An edit session belongs to one instance. If the selection moved on
+    // while a field was still open, close it now so its keystrokes land in
+    // the undo history as the single entry they were.
+    let owner = match inspected {
+        DesignSubject::Component(id) => Some(id),
+        _ => None,
+    };
+    if let Some(before) = app.state.workbench.inline_edit.release_unless(owner) {
+        app.state
+            .schematic
+            .commit_undo_from(before, "edit instance");
+    }
+
+    match inspected {
         DesignSubject::Component(id) => component_panel(ui, app, id, &sheet),
         DesignSubject::Net(name) => net_panel(ui, app, &name, &sheet.nets),
         DesignSubject::Note(id) => note_panel(ui, app, id),
@@ -424,6 +440,230 @@ fn active_view_dirty(state: &AppState) -> bool {
 }
 
 // =============================================================================
+// Inline instance editing
+// =============================================================================
+
+/// The field's value as the design currently holds it.
+fn field_value(component: &Component, field: &InlineEditField) -> String {
+    match field {
+        InlineEditField::Instance => component.name.clone(),
+        InlineEditField::Value => component.value.clone(),
+        InlineEditField::Parameter(key) => crate::properties::parse_params_string(&component.params)
+            .get(key)
+            .cloned()
+            .unwrap_or_default(),
+    }
+}
+
+/// Why `candidate` cannot be applied to `field`, if it cannot.
+///
+/// Only the reference designator has legality rules: SPICE designators must
+/// parse and must be case-insensitively unique across the sheet. Values and
+/// parameters accept any text, exactly as the property dialog does.
+fn field_rejection(
+    state: &AppState,
+    component: &Component,
+    field: &InlineEditField,
+    candidate: &str,
+) -> Option<String> {
+    let InlineEditField::Instance = field else {
+        return None;
+    };
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return Some("Enter a non-empty instance name.".to_owned());
+    }
+    if candidate.eq_ignore_ascii_case(&component.name) {
+        return None;
+    }
+    if let Err(error) = component.validate_reference_designator(candidate) {
+        return Some(error);
+    }
+    state
+        .schematic
+        .components
+        .iter()
+        .any(|other| other.id != component.id && other.name.eq_ignore_ascii_case(candidate))
+        .then(|| {
+            format!(
+                "A component named `{candidate}` already exists; SPICE designators are case-insensitively unique."
+            )
+        })
+}
+
+/// Write `candidate` into `field` on the live design.
+///
+/// Returns `true` when the design actually changed, so a session that only
+/// regained and lost focus never manufactures an undo entry.
+fn apply_field(state: &mut AppState, id: u64, field: &InlineEditField, candidate: &str) -> bool {
+    let Some(component) = state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+    else {
+        return false;
+    };
+    let changed = match field {
+        InlineEditField::Instance => {
+            let candidate = candidate.trim();
+            if component.name == candidate {
+                false
+            } else {
+                component.name = candidate.to_owned();
+                true
+            }
+        }
+        InlineEditField::Value => {
+            if component.value == candidate {
+                false
+            } else {
+                component.value = candidate.to_owned();
+                true
+            }
+        }
+        InlineEditField::Parameter(key) => {
+            let updated = write_param(&component.params, key, candidate);
+            if component.params == updated {
+                false
+            } else {
+                component.params = updated;
+                true
+            }
+        }
+    };
+    if changed {
+        state.schematic.is_dirty = true;
+        state.schematic.bump_topology_version();
+    }
+    changed
+}
+
+/// Set `key` to `value` in a `key=value key=value` parameter string,
+/// preserving the order of the other entries. An empty value removes the
+/// entry, returning the instance to whatever it inherits.
+fn write_param(params: &str, key: &str, value: &str) -> String {
+    let value = value.trim();
+    let mut parts: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for entry in params.split_whitespace() {
+        let entry_key = entry.split_once('=').map_or(entry, |(name, _)| name);
+        if entry_key.eq_ignore_ascii_case(key) {
+            replaced = true;
+            if !value.is_empty() {
+                parts.push(format!("{key}={value}"));
+            }
+        } else {
+            parts.push(entry.to_owned());
+        }
+    }
+    if !replaced && !value.is_empty() {
+        parts.push(format!("{key}={value}"));
+    }
+    parts.join(" ")
+}
+
+/// Open an edit session on `field`, seeded with `current`.
+fn begin_edit(app: &mut RSpiceApp, component: &Component, field: InlineEditField, current: String) {
+    if app.state.active_view_read_only() || app.state.schematic.read_only {
+        return;
+    }
+    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
+    app.state
+        .workbench
+        .inline_edit
+        .begin(component.id, field, &current, before);
+}
+
+/// End the open session, folding everything typed into it into one undo
+/// entry described by `description`.
+fn commit_edit(app: &mut RSpiceApp, description: &str) {
+    if let Some(before) = app.state.workbench.inline_edit.end() {
+        app.state.schematic.commit_undo_from(before, description);
+    }
+}
+
+fn edit_description(field: &InlineEditField) -> String {
+    match field {
+        InlineEditField::Instance => "rename instance".to_owned(),
+        InlineEditField::Value => "edit instance value".to_owned(),
+        InlineEditField::Parameter(key) => format!("edit {key}"),
+    }
+}
+
+/// One editable instance row.
+///
+/// The row applies each keystroke to the design so the canvas, connectivity,
+/// and netlist track the edit as it is typed, but the undo history records a
+/// single entry when the field loses focus. Illegal text is held in the
+/// session buffer, outlined and explained, and never written to the design.
+fn edit_row(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    component: &Component,
+    field: InlineEditField,
+    label: &str,
+) {
+    let editable = !app.state.active_view_read_only() && !app.state.schematic.read_only;
+    if !editable {
+        property_row(ui, label, &field_value(component, &field));
+        return;
+    }
+
+    let mut buffer = app
+        .state
+        .workbench
+        .inline_edit
+        .buffer_for(component.id, &field)
+        .map_or_else(|| field_value(component, &field), str::to_owned);
+    let rejection = app
+        .state
+        .workbench
+        .inline_edit
+        .error_for(component.id, &field)
+        .map(str::to_owned);
+
+    let response = property_row_input(ui, label, &mut buffer, rejection.is_some());
+    if let Some(reason) = rejection.as_deref() {
+        rejection_note(ui, reason);
+    }
+
+    if response.gained_focus() {
+        begin_edit(app, component, field.clone(), buffer.clone());
+    }
+    if response.changed() {
+        begin_edit(app, component, field.clone(), buffer.clone());
+        app.state
+            .workbench
+            .inline_edit
+            .set_buffer(buffer.clone());
+        match field_rejection(&app.state, component, &field, &buffer) {
+            Some(reason) => app.state.workbench.inline_edit.set_error(Some(reason)),
+            None => {
+                app.state.workbench.inline_edit.set_error(None);
+                apply_field(&mut app.state, component.id, &field, &buffer);
+            }
+        }
+    }
+    if response.lost_focus() {
+        commit_edit(app, &edit_description(&field));
+    }
+}
+
+/// The reason a typed value has not been applied, in the error tone.
+fn rejection_note(ui: &mut Ui, reason: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(reason)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.err),
+        );
+    });
+}
+
+// =============================================================================
 // Component inspector
 // =============================================================================
 
@@ -471,8 +711,8 @@ fn component_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64, sheet: &SheetConne
 
 fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
     section_header(ui, "Identity", Some("editable"));
-    property_row(ui, "Instance", &component.name);
-    property_row(ui, "Value", &component.value);
+    edit_row(ui, app, component, InlineEditField::Instance, "Instance");
+    edit_row(ui, app, component, InlineEditField::Value, "Value");
     let library_cell = component.library_cell.as_ref().map_or_else(
         || format!("primitives/{}", component.kind.display_name()),
         |binding| format!("{}/{}", binding.library, binding.cell),
@@ -547,45 +787,63 @@ fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
 
 fn parameters_section(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    app: &mut RSpiceApp,
     component: &Component,
     evidence: &ComponentModelEvidence,
 ) {
-    section_header(ui, "Simulation parameters", None);
+    section_header(ui, "Simulation parameters", Some("editable"));
+    // Model, source, and section are resolved evidence, not instance
+    // fields: they follow the library binding, which the Replace instance
+    // and property transactions own.
     property_row(ui, "Model", &evidence.model);
     property_row(ui, "Source", &evidence.source);
     property_row(ui, "Section", &evidence.section);
-    property_row(
-        ui,
-        "Temperature",
-        &format!(
-            "inherit · {} °C",
-            app.state.sim_setup.reference_pvt.temperature_celsius
-        ),
-    );
 
-    // The family's declared parameters, one typed row each. Editing is the
-    // property dialog's transaction; the inspector reports the resolved
-    // values so the two surfaces can never disagree.
+    // Instance temperature is the `temp` parameter. Left empty it inherits
+    // the reference PVT point, which the row reports as its placeholder.
     let declared = crate::properties::parse_params_string(&component.params);
-    if declared.is_empty() {
-        property_row(
+    let inherited = format!(
+        "inherit · {} °C",
+        app.state.sim_setup.reference_pvt.temperature_celsius
+    );
+    if declared.contains_key(TEMPERATURE_PARAM) {
+        edit_row(
             ui,
-            "Parameters",
-            if component.params.trim().is_empty() {
-                "instance value"
-            } else {
-                component.params.as_str()
-            },
+            app,
+            component,
+            InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
+            "Temperature",
         );
     } else {
-        let mut keys: Vec<&String> = declared.keys().collect();
-        keys.sort_unstable();
-        for key in keys {
-            property_row(ui, key, &declared[key]);
+        let response = property_row(ui, "Temperature", &inherited);
+        if response.clicked() {
+            begin_edit(
+                app,
+                component,
+                InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
+                String::new(),
+            );
         }
     }
+
+    // Every declared instance parameter, one typed row each.
+    let mut keys: Vec<String> = declared
+        .keys()
+        .filter(|key| key.as_str() != TEMPERATURE_PARAM)
+        .cloned()
+        .collect();
+    keys.sort_unstable();
+    if keys.is_empty() && declared.is_empty() {
+        property_row(ui, "Parameters", "instance value");
+    }
+    for key in keys {
+        let label = key.clone();
+        edit_row(ui, app, component, InlineEditField::Parameter(key), &label);
+    }
 }
+
+/// SPICE instance-temperature parameter.
+const TEMPERATURE_PARAM: &str = "temp";
 
 /// Per-pin terminal table: every declared terminal with the net it binds,
 /// clickable to select that conductor. Unbound pins read `open` and are
@@ -1403,6 +1661,123 @@ mod tests {
         state.dialogs.drc_checked_version = state.schematic.topology_version();
         assert!(checks_current(&state));
         assert_eq!(checks_status(&state), "0 errors");
+    }
+
+    #[test]
+    fn writing_a_parameter_preserves_the_other_entries_and_their_order() {
+        assert_eq!(write_param("w=2u l=180n", "l", "220n"), "w=2u l=220n");
+        assert_eq!(write_param("w=2u l=180n", "m", "4"), "w=2u l=180n m=4");
+        assert_eq!(write_param("", "temp", "85"), "temp=85");
+    }
+
+    #[test]
+    fn clearing_a_parameter_removes_it_so_the_instance_inherits_again() {
+        assert_eq!(write_param("w=2u temp=85 l=180n", "temp", ""), "w=2u l=180n");
+        assert_eq!(write_param("temp=85", "temp", "   "), "");
+        // A bare flag with no value is left untouched by an unrelated write.
+        assert_eq!(write_param("off w=2u", "w", "3u"), "off w=3u");
+    }
+
+    #[test]
+    fn a_parameter_key_matches_case_insensitively_and_is_written_back_once() {
+        assert_eq!(write_param("TEMP=85", "temp", "27"), "temp=27");
+        assert_eq!(write_param("W=2u w=3u", "w", "4u"), "w=4u w=4u");
+    }
+
+    #[test]
+    fn an_instance_rename_is_rejected_when_it_collides_or_is_empty() {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(40, 0));
+        state.schematic.components[0].name = "R1".to_owned();
+        state.schematic.components[1].name = "R2".to_owned();
+        let subject = state.schematic.components[0].clone();
+
+        assert!(field_rejection(&state, &subject, &InlineEditField::Instance, "R7").is_none());
+        assert!(
+            field_rejection(&state, &subject, &InlineEditField::Instance, "R1").is_none(),
+            "its own name is not a collision"
+        );
+        let collision = field_rejection(&state, &subject, &InlineEditField::Instance, "r2")
+            .expect("case-insensitive collision is rejected");
+        assert!(collision.contains("already exists"), "was {collision}");
+        assert!(field_rejection(&state, &subject, &InlineEditField::Instance, "  ").is_some());
+    }
+
+    #[test]
+    fn an_instance_rename_still_obeys_the_family_designator_rule() {
+        let mut state = state_with_two_components();
+        state.schematic.components[0].name = "R1".to_owned();
+        let resistor = state.schematic.components[0].clone();
+
+        let rejected = field_rejection(&state, &resistor, &InlineEditField::Instance, "C1")
+            .expect("a resistor cannot take a capacitor designator");
+        assert!(rejected.contains('R'), "was {rejected}");
+    }
+
+    #[test]
+    fn values_and_parameters_accept_any_text() {
+        let state = state_with_two_components();
+        let subject = state.schematic.components[0].clone();
+
+        assert!(field_rejection(&state, &subject, &InlineEditField::Value, "10k").is_none());
+        assert!(field_rejection(&state, &subject, &InlineEditField::Value, "").is_none());
+        assert!(
+            field_rejection(
+                &state,
+                &subject,
+                &InlineEditField::Parameter("tc1".to_owned()),
+                "25p"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn applying_a_field_reports_whether_the_design_actually_changed() {
+        let mut state = state_with_two_components();
+        let id = state.schematic.components[0].id;
+        let before = state.schematic.topology_version();
+
+        assert!(apply_field(&mut state, id, &InlineEditField::Value, "10k"));
+        assert_eq!(state.schematic.components[0].value, "10k");
+        assert!(state.schematic.topology_version() > before);
+
+        let settled = state.schematic.topology_version();
+        assert!(
+            !apply_field(&mut state, id, &InlineEditField::Value, "10k"),
+            "rewriting the same text is not a change"
+        );
+        assert_eq!(
+            state.schematic.topology_version(),
+            settled,
+            "an unchanged write must not advance topology"
+        );
+    }
+
+    #[test]
+    fn an_inline_session_folds_its_keystrokes_into_one_undo_entry() {
+        let mut state = state_with_two_components();
+        let id = state.schematic.components[0].id;
+        state.schematic.init_undo_history();
+        let before = crate::state::SchematicSnapshot::capture(&state.schematic);
+
+        for text in ["1", "1k", "1k5"] {
+            apply_field(&mut state, id, &InlineEditField::Value, text);
+        }
+        assert!(state.schematic.commit_undo_from(before, "edit instance value"));
+        assert_eq!(state.schematic.components[0].value, "1k5");
+
+        assert!(state.schematic.undo());
+        assert_ne!(state.schematic.components[0].value, "1k5");
+        assert!(
+            !state.schematic.can_undo(),
+            "three keystrokes produced more than one undo step"
+        );
     }
 
     #[test]

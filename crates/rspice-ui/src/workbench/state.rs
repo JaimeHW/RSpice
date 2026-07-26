@@ -1424,6 +1424,99 @@ impl NotificationFilter {
     }
 }
 
+/// Which instance field an inspector inline edit is editing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InlineEditField {
+    /// The reference designator. Validated against the SPICE designator
+    /// rules and case-insensitive uniqueness before it is ever applied.
+    Instance,
+    /// The instance value.
+    Value,
+    /// One `key=value` instance parameter.
+    Parameter(String),
+}
+
+/// One live inline-edit session in the inspector.
+///
+/// Edits apply to the design on every keystroke so the canvas, netlist, and
+/// connectivity track what the field says. The undo history, however,
+/// records **one** entry per session: the snapshot is captured when the
+/// field takes focus and committed when it loses it, so typing a value is a
+/// single undo step rather than one per character.
+#[derive(Debug, Clone, Default)]
+pub struct InlineEdit {
+    /// Instance being edited, and which of its fields.
+    target: Option<(u64, InlineEditField)>,
+    /// Design state as it stood when the field took focus.
+    before: Option<crate::state::SchematicSnapshot>,
+    /// Text as typed, which may not yet be a legal value.
+    buffer: String,
+    /// Why the typed text has not been applied, when it has not.
+    error: Option<String>,
+}
+
+impl InlineEdit {
+    /// The buffer for `target`, or `None` when a different field (or no
+    /// field) owns the session.
+    pub fn buffer_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
+        (self.target.as_ref() == Some(&(component, field.clone()))).then_some(self.buffer.as_str())
+    }
+
+    /// Why the open session's text was rejected, if it was.
+    pub fn error_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
+        (self.target.as_ref() == Some(&(component, field.clone())))
+            .then_some(self.error.as_deref())
+            .flatten()
+    }
+
+    /// Open a session on `field`, seeding the buffer with the current text
+    /// and capturing the snapshot this session will fold into one undo
+    /// entry. Re-opening the same field keeps the session intact.
+    pub fn begin(
+        &mut self,
+        component: u64,
+        field: InlineEditField,
+        current: &str,
+        before: crate::state::SchematicSnapshot,
+    ) {
+        if self.target.as_ref() == Some(&(component, field.clone())) {
+            return;
+        }
+        self.target = Some((component, field));
+        self.before = Some(before);
+        self.buffer = current.to_owned();
+        self.error = None;
+    }
+
+    /// Replace the typed text.
+    pub fn set_buffer(&mut self, text: String) {
+        self.buffer = text;
+    }
+
+    /// Record why the typed text was not applied, or clear the rejection.
+    pub fn set_error(&mut self, error: Option<String>) {
+        self.error = error;
+    }
+
+    /// End the session, returning the snapshot to fold into one undo entry.
+    pub fn end(&mut self) -> Option<crate::state::SchematicSnapshot> {
+        self.target = None;
+        self.buffer.clear();
+        self.error = None;
+        self.before.take()
+    }
+
+    /// Abandon any session that does not belong to `component` — selection
+    /// moved on, so its buffer and snapshot are no longer meaningful.
+    pub fn release_unless(&mut self, component: Option<u64>) -> Option<crate::state::SchematicSnapshot> {
+        match (&self.target, component) {
+            (Some((owner, _)), Some(id)) if *owner == id => None,
+            (Some(_), _) => self.end(),
+            (None, _) => None,
+        }
+    }
+}
+
 /// New workbench session state.  Durable layout preferences are serialized;
 /// one-frame requests and open drawers are intentionally transient.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1566,6 +1659,11 @@ pub struct WorkbenchState {
     pub navigator_query: String,
     #[serde(default)]
     pub command_query: String,
+    /// The inspector's open inline-edit session. Runtime-only: a partially
+    /// typed instance name must never be restored as authoritative design
+    /// data, and the retained undo snapshot belongs to this process.
+    #[serde(skip)]
+    pub inline_edit: InlineEdit,
     /// Transactional project-name editor buffer. Runtime-only so a partially
     /// entered value can never be restored as authoritative project identity.
     #[serde(skip)]
@@ -1698,6 +1796,7 @@ impl Default for WorkbenchState {
             analysis_query: String::new(),
             navigator_query: String::new(),
             command_query: String::new(),
+            inline_edit: InlineEdit::default(),
             project_name_draft: String::new(),
             project_name_error: None,
             drawer: None,
