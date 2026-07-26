@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub(crate) mod account_organization;
 pub mod availability;
+pub mod calculator_tool;
 pub mod browser_navigation;
 pub mod capability_workflow;
 pub mod code_workspace;
