@@ -34,23 +34,34 @@ rspice health --json
 
 `rspice run` executes every analysis card found in the netlist, in order:
 
-`.OP`, `.DC`, `.TRAN`, `.AC`, `.DISTO`, `.NOISE`, `.SENS`, `.PZ`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. If the netlist contains no analysis cards, a DC operating point is run by default.
+`.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`, `.SENS`, `.PZ`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. `.AC` and `.NOISE` additionally accept the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table instead of a generated sweep. If the netlist contains no analysis cards, a DC operating point is run by default.
 
-Compatibility note: `.DISTO` is accepted as a deck card, but the CLI currently maps it to the corresponding linearized AC sweep and does not emit Volterra distortion products. Use `.FOUR`/THD/IMD post-processing for distortion metrics.
+Two cards are narrower than their full SPICE definition:
 
-A handful of analyses can instead be requested from the command line. When one of these flags is present, it runs **instead of** the netlist's analysis cards:
+- `.DISTO` runs the linearized AC sweep its card describes; it does not emit Volterra distortion products. Use `.FOUR`/THD/IMD post-processing for distortion metrics.
+- `.SP` exports S-parameters only. It needs voltage sources annotated `portnum=<n> [z0=<ohms>]`, numbered densely from 1, and the optional ngspice SP-noise flag parses without producing noise output.
 
-| Mode | Flags |
+A handful of analyses can instead be requested from the command line. When one of these flags is present, it runs **instead of** the netlist's analysis cards; if several are given, the first match in this order wins:
+
+| Mode | Trigger |
 | :--- | :--- |
-| Monte Carlo | `--monte-carlo N` (optional `--seed`, `--mc-distribution`, `--mc-spread`, `--mc-param`) |
-| Periodic steady-state (PSS) | `--pss-freq F` (optional `--pss-harmonics`, `--pss-tstab`) |
-| Harmonic balance | `--hb-freq F` (optional `--hb-harmonics`) |
-| Pole-zero | `--pz-input NODE --pz-output NODE` (node names or indices) |
-| DC sensitivity | `--sens-output NODE --sens-param NAME` (optional `--sens-value`) |
-| Process corners | `--corners tt,ss,ff` (optional `--corner-lib`, `-j` parallel workers) |
-| Two-port S-parameters | `--sparam "P1+,P1-,P2+,P2-"` (optional `--sparam-z0`; needs a `.AC` card) |
+| Monte Carlo | `--monte-carlo N` |
+| Periodic steady-state (PSS) | `--pss-freq F` |
+| Harmonic balance | `--hb-freq F` |
+| Pole-zero | `--pz-input NODE --pz-output NODE` |
+| DC sensitivity | `--sens-output NODE --sens-param NAME` |
+| Two-port S-parameters | `--sparam "P1+,P1-,P2+,P2-"` (needs a `.AC` card for the sweep) |
+| Process corners | `--corners tt,ss,ff` |
+
+Each mode's tuning flags are listed under **Analysis-mode options** below.
 
 Numeric flag values accept SPICE magnitude suffixes everywhere: `--pss-freq 2.4G`, `--max-step 1u`, `-D RLOAD=4.7k`.
+
+### Decks that expand into several runs
+
+HSPICE `.ALTER` and `.DATA` constructs expand into a plan of concrete decks, each parsed and solved independently. Every run tags its own output files so a later run cannot overwrite an earlier one: `.ALTER` runs are named `base` and then by block title, `.DATA` runs by table row, each reduced to a file-safe tag (`out.csv` → `out.base.csv`, `out.hot.csv`, `out.tbl_row_1.csv`). `-j` spreads the plan across workers. A failing run does not abort the rest — HSPICE semantics — so each one lands in the reports and the process exit status reflects the whole plan. `resources.max_batch_runs` bounds how large a plan may get.
+
+`.PREPROCESS ADDRESISTORS` writes its derived Xyce-compatible deck alongside the input as `<input>_xyce.cir`. It needs a file-backed netlist, and it is rejected in a multi-run deck, where one sibling name cannot represent several rewritten decks.
 
 ### Measurements and the exit status
 
@@ -67,20 +78,26 @@ Any statement may add `GOAL=value [TOL=value]`: a computed value that misses its
 
 ### Output files for every mode
 
-With `-o`, every run mode writes machine-readable results. When a deck runs several analyses, each writes its own tagged file (`out.csv` → `out.op.csv`, `out.tran.csv`, ...). Mode-specific shapes:
+With `-o`, every run mode writes machine-readable results. When a deck runs several analyses, each writes its own tagged file (`out.csv` → `out.op.csv`, `out.tran.csv`, ...). The `.OP`, `.DC`, `.TRAN`, `.AC`, and `.NOISE` cards write the expected node/branch tables under the `op`, `dc`, `tran`, `ac`, and `noise` tags. The rest have mode-specific shapes:
 
 | Mode | Tag | Contents |
 | :--- | :--- | :--- |
 | `.STEP` | `step` | One row per step value, node voltages as columns |
+| `.FOUR` | `four` | One row per harmonic and output: frequency, magnitude, phase, DC component, THD |
+| `.TEMP` | `temp` | One row per temperature point, node voltages as columns |
 | Monte Carlo | `mc` | Per-run samples; JSON adds mean/std/min/max, seed, failure count |
 | PSS | `pss` | One period of the steady-state waveforms (time domain) |
 | HB | `hb` | Complex spectrum per node over the harmonic frequencies |
+| `.STB` | `stb` | Complex `loopgain` plus `loopgain_mag_db` and `loopgain_phase_deg` |
 | `.TF` | `tf` | Gain, input impedance, output impedance |
 | Pole-zero | `pz` | `pole(i)`/`zero(i)` complex columns |
 | `.SENS` | `sens` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
-| S-parameters | `sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
+| `.SP` | `sp` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
+| `--sparam` | `sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
 
 TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
+
+`.FOUR` and `.TEMP` are harmonic and sweep tables rather than waveforms, so they do not use the waveform writers. `.FOUR` honors `csv`/`tsv` and writes JSON for every other format; `.TEMP` honors `csv` and `json`, and writes a plain-text dump otherwise. Ask for `csv` or `json` explicitly with these two.
 
 ## Commands
 
@@ -112,10 +129,10 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | :--- | :--- |
 | `-o, --output <FILE>` | Output file for results. With several analysis cards in one deck, each analysis writes its own tagged file: `out.csv` → `out.op.csv`, `out.tran.csv`, ... |
 | `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` (default: config `output.format`, else `raw`) |
-| `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
+| `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
 | `--meas` | Print `.MEAS` measurement results |
 | `--summary <FILE>` | Write a versioned JSON run summary — build/run identity, execution counts and timing, effective resource limits, typed failures, every measurement, result files, and overall verdict — to FILE, or stdout with `-` |
-| `--progress` | Show a live percentage bar during transient analysis (the engine reports its completed fraction) |
+| `--progress` | Show a live percentage bar during transient analysis (the engine reports its completed fraction; elapsed time, no ETA) |
 | `--compress` | Enable waveform compression for long simulations |
 | `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
 
@@ -129,6 +146,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--checkpoint <FILE>` | Save the transient integrator state when the run completes, for later `--resume` |
 | `--resume <FILE>` | Continue a transient from a saved checkpoint; the deck must be byte-identical (fingerprint-checked) and a segmented run reproduces the uninterrupted waveform |
 | `--tran-stop <TIME>` | Override the `.TRAN` stop time without editing the deck, so checkpoint segments share identical source |
+| `-j, --jobs <N>` | Parallel workers for `.ALTER`/`.DATA` multi-run plans and corner sweeps (default: 1; `0` = all cores). Outputs are tagged per run or corner so workers never collide, and results are byte-identical to a serial sweep. Above one worker, per-run console output reduces to status lines — files and reports carry the data. Requests above `resources.max_parallel_workers` are rejected rather than silently clamped |
 
 **Simulation options:**
 
@@ -174,7 +192,6 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--sparam-z0 <OHMS>` | S-parameter reference impedance (default: 50) |
 | `--corners <LIST>` | Process corners, comma-separated, e.g. `tt,ss,ff` |
 | `--corner-lib <FILE>` | Library with one `.lib <corner> ... .endl` section per corner; each corner re-elaborates the deck with its section applied (requires `--corners`) |
-| `-j, --jobs <N>` | Parallel workers for corner sweeps (default: 1). Corner outputs are tagged per corner so workers never collide; results are byte-identical to a serial sweep |
 
 Corner runs write per-corner tagged outputs (`res.csv` → `res.tt.csv`, `res.ss.csv`) and exit nonzero if any corner fails. Without `--corner-lib`, every corner runs nominal models and the sweep only checks convergence.
 
