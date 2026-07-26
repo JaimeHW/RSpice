@@ -115,6 +115,7 @@ impl Engine {
             })
     }
 
+    #[cfg(test)]
     fn normalized_locked_time_grid(grid: &[Value], resume_time: Value) -> Vec<Value> {
         let mut points: Vec<Value> = grid
             .iter()
@@ -127,6 +128,40 @@ impl Engine {
             (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
         });
         points
+    }
+
+    fn normalized_locked_time_schedule(
+        grid: &[Value],
+        step_sizes: Option<&[Value]>,
+        resume_time: Value,
+    ) -> (Vec<Value>, Option<Vec<Value>>) {
+        let paired_steps = step_sizes.filter(|steps| steps.len() == grid.len());
+        let mut points = grid
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, point)| point.is_finite() && *point > resume_time + 1e-30)
+            .collect::<Vec<_>>();
+        points.sort_by(|(_, left), (_, right)| left.total_cmp(right));
+
+        let mut normalized = Vec::with_capacity(points.len());
+        let mut normalized_steps = paired_steps.map(|_| Vec::with_capacity(points.len()));
+        for (original_index, point) in points {
+            let duplicate = normalized.last().is_some_and(|previous: &Value| {
+                let scale = previous.abs().max(point.abs()).max(Value::MIN_POSITIVE);
+                (point - *previous).abs() <= 64.0 * Value::EPSILON * scale
+            });
+            if duplicate {
+                continue;
+            }
+            normalized.push(point);
+            if let (Some(source_steps), Some(target_steps)) =
+                (paired_steps, normalized_steps.as_mut())
+            {
+                target_steps.push(source_steps[original_index]);
+            }
+        }
+        (normalized, normalized_steps)
     }
 
     /// Xyce restores OneStep history and drops to order one after a rejected
@@ -609,6 +644,7 @@ impl Engine {
         solution: &[Value],
         num_nodes: usize,
         time: Value,
+        step_size: Value,
         derived_branches: &[DerivedTransientBranchCurrent],
         record_device_op_traces: bool,
     ) -> Result<(), SimulationError> {
@@ -624,6 +660,7 @@ impl Engine {
                 .saturating_add(1),
         )?;
         result.time.push(time);
+        result.step_sizes.push(step_size);
         for (i, voltages) in result.voltages.iter_mut().take(num_nodes).enumerate() {
             voltages.push(solution.get(i).copied().unwrap_or(0.0));
         }
@@ -1303,6 +1340,7 @@ impl Engine {
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             let result = TransientResult {
                 time: vec![0.0],
+                step_sizes: vec![0.0],
                 voltages: Vec::new(),
                 branch_currents: Vec::new(),
                 num_nodes: 0,
@@ -1736,6 +1774,7 @@ impl Engine {
         }
         let mut result = TransientResult {
             time: vec![resume_time],
+            step_sizes: vec![0.0],
             voltages: (0..num_nodes)
                 .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
@@ -1903,11 +1942,22 @@ impl Engine {
         // authority. Accepted-reference modes still restart integration
         // history at source breakpoints and compute LTE for Xyce's order-
         // selection trial; the estimate cannot reject a prescribed target.
-        let locked_grid: Option<Vec<Value>> = self
+        let (locked_grid, locked_step_sizes): (Option<Vec<Value>>, Option<Vec<Value>>) = self
             .config
             .locked_time_grid
             .as_ref()
-            .map(|grid| Self::normalized_locked_time_grid(grid, t));
+            .map(|grid| {
+                let (grid, steps) = Self::normalized_locked_time_schedule(
+                    grid,
+                    self.config
+                        .locked_time_step_sizes
+                        .as_deref()
+                        .map(|steps| steps.as_slice()),
+                    t,
+                );
+                (Some(grid), steps)
+            })
+            .unwrap_or((None, None));
         let mut locked_cursor = 0usize;
         let tstop = match locked_grid.as_ref().and_then(|grid| grid.last()) {
             Some(&last) => last.min(tstop),
@@ -2278,6 +2328,15 @@ impl Engine {
                 ));
             }
             let mut locked_step_lands_on_grid = locked_grid.is_some();
+            let locked_schedule_aligned = locked_grid
+                .as_ref()
+                .zip(locked_step_sizes.as_ref())
+                .is_some_and(|(grid, _)| {
+                    locked_cursor == 0
+                        || grid
+                            .get(locked_cursor.saturating_sub(1))
+                            .is_some_and(|&previous_target| previous_target == t)
+                });
             let (dt, mut at_breakpoint) = match locked_grid.as_ref() {
                 Some(grid) => {
                     let Some(&target) = grid.get(locked_cursor) else {
@@ -2300,7 +2359,22 @@ impl Engine {
                         step_target = step_target.min(t + hinted_max_step);
                     }
                     locked_step_lands_on_grid = (step_target - target).abs() <= tolerance;
-                    (step_target - t, false)
+                    let mut locked_dt = step_target - t;
+                    if locked_schedule_aligned
+                        && locked_step_lands_on_grid
+                        && let Some(&scheduled_dt) = locked_step_sizes
+                            .as_ref()
+                            .and_then(|steps| steps.get(locked_cursor))
+                        && scheduled_dt.is_finite()
+                        && scheduled_dt > 0.0
+                    {
+                        // A result carries the exact accepted interval used by
+                        // its producing run. Prefer it over subtraction of
+                        // rounded absolute timestamps so replay preserves the
+                        // original integration coefficients bit-for-bit.
+                        locked_dt = scheduled_dt;
+                    }
+                    (locked_dt, false)
                 }
                 None => breakpoints.limit_step(t, timestep.dt()),
             };
@@ -3804,6 +3878,7 @@ impl Engine {
                         &solution,
                         num_nodes,
                         t,
+                        dt,
                         &derived_branch_currents,
                         record_device_op_traces,
                     )?;
@@ -4717,6 +4792,7 @@ impl Engine {
                         &solution,
                         num_nodes,
                         t,
+                        dt,
                         &derived_branch_currents,
                         record_device_op_traces,
                     )?;
@@ -4972,6 +5048,7 @@ impl Engine {
                 &solution,
                 num_nodes,
                 t,
+                dt,
                 &derived_branch_currents,
                 record_device_op_traces,
             )?;
@@ -5710,6 +5787,7 @@ mod tests {
             .collect::<Vec<_>>();
         let result = TransientResult {
             time: time.clone(),
+            step_sizes: vec![0.0; time.len()],
             voltages: vec![waveform.clone()],
             branch_currents: Vec::new(),
             num_nodes: 1,

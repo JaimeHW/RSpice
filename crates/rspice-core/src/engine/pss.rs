@@ -1412,6 +1412,7 @@ impl Engine {
 
             let waveform = TransientResult {
                 time: vec![0.0],
+                step_sizes: vec![0.0],
                 voltages: (0..circuit.num_nodes())
                     .map(|i| vec![dc_solution.get(i).copied().unwrap_or(0.0)])
                     .collect(),
@@ -2055,6 +2056,7 @@ impl Engine {
         let node_names = circuit.node_names_sorted();
         let mut result = TransientResult {
             time: vec![0.0],
+            step_sizes: vec![0.0],
             voltages: (0..num_nodes)
                 .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),

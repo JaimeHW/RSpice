@@ -68,6 +68,12 @@ pub struct TransientStoreTrace {
 pub struct TransientResult {
     /// Time points
     pub time: Vec<Value>,
+    /// Accepted integration interval for each time point. The initial sample
+    /// at `time[0]` has a zero interval; subsequent entries are the exact
+    /// timestep used to produce the corresponding sample. Keeping this
+    /// alongside the rounded absolute times makes deterministic grid replay
+    /// preserve the producing run's integration coefficients.
+    pub step_sizes: Vec<Value>,
     /// Voltage waveforms: [node_index][time_index]
     pub voltages: Vec<Vec<Value>>,
     /// Branch current waveforms: [branch_index][time_index]
@@ -395,8 +401,10 @@ impl From<TransientResultCompressed> for TransientResult {
         } else {
             (1..=compressed.num_nodes).map(|i| i.to_string()).collect()
         };
+        let step_size_count = compressed.time.len();
         Self {
             time: compressed.time,
+            step_sizes: vec![0.0; step_size_count],
             voltages: compressed.voltages,
             branch_currents: Vec::new(),
             num_nodes: compressed.num_nodes,

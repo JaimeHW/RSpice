@@ -271,6 +271,14 @@ pub struct SimulationConfig {
     /// comparison: replaying a reference grid isolates physics parity from
     /// adaptive step-selection parity.
     pub locked_time_grid: Option<std::sync::Arc<Vec<Value>>>,
+    /// Optional accepted-step history paired with `locked_time_grid`.
+    ///
+    /// When supplied with a reference result, these intervals are used as the
+    /// integration coefficients during replay instead of reconstructing them
+    /// by subtracting rounded absolute timestamps. The vectors must have the
+    /// same length as the locked grid; callers that provide only a grid retain
+    /// the normal timestamp-difference behavior.
+    pub locked_time_step_sizes: Option<std::sync::Arc<Vec<Value>>>,
 }
 
 impl SimulationConfig {
@@ -355,6 +363,30 @@ impl SimulationConfig {
                 self.resource_limits.max_analysis_points,
             )?;
             validate_locked_time_grid(grid)?;
+            if let Some(step_sizes) = self.locked_time_step_sizes.as_deref() {
+                if step_sizes.len() != grid.len() {
+                    return Err(SimulationConfigError::InvalidValue {
+                        field: "locked_time_step_sizes",
+                        value: step_sizes.len() as Value,
+                        requirement: "the same length as locked_time_grid",
+                    });
+                }
+                for &step in step_sizes.iter() {
+                    if !step.is_finite() || step < 0.0 {
+                        return Err(SimulationConfigError::InvalidValue {
+                            field: "locked_time_step_sizes",
+                            value: step,
+                            requirement: "finite and non-negative values",
+                        });
+                    }
+                }
+            }
+        } else if self.locked_time_step_sizes.is_some() {
+            return Err(SimulationConfigError::InvalidValue {
+                field: "locked_time_step_sizes",
+                value: 1.0,
+                requirement: "requires locked_time_grid",
+            });
         }
         Ok(())
     }
@@ -637,6 +669,7 @@ impl Default for SimulationConfig {
             bypass_config: BypassConfig::default(),
             convergence_config: ConvergenceConfig::default(),
             locked_time_grid: None,
+            locked_time_step_sizes: None,
         }
     }
 }
