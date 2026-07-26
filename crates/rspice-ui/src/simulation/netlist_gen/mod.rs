@@ -255,18 +255,70 @@ fn finish_generation(
 // Design net summary (navigation UIs)
 //=============================================================================
 
+/// Electrical class of a design net.
+///
+/// The class is derived from declared design intent — the resolved ground
+/// net, a declared `dir=supply` interface port, or a power net label — and
+/// never guessed from the spelling of a name alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetClass {
+    /// The simulation reference node.
+    Ground,
+    /// A declared supply/power rail.
+    Supply,
+    /// Any other conductor.
+    Signal,
+}
+
+impl NetClass {
+    /// Lower-case vocabulary shared with the inspector and the navigator.
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Ground => "ground",
+            Self::Supply => "supply",
+            Self::Signal => "signal",
+        }
+    }
+}
+
+/// One component terminal bound to a net.
+#[derive(Debug, Clone)]
+pub struct NetTerminal {
+    /// Owning component, for selection and cross-probing.
+    pub component_id: u64,
+    /// Instance reference designator as drawn.
+    pub reference: String,
+    /// Terminal name on that instance.
+    pub pin: String,
+}
+
 /// One electrical net of the open schematic, summarized for navigation:
-/// the rail's Nets segment, cross-probe highlighting, search.
+/// the rail's Nets segment, the net inspector, cross-probe highlighting,
+/// search.
 #[derive(Debug, Clone)]
 pub struct DesignNet {
     /// SPICE name ("0", a label/port name, or autonamed `netN`).
     pub name: String,
-    /// Component terminals on this net.
-    pub pin_count: usize,
-    /// `true` when the net is an interface port of the cell.
-    pub is_port: bool,
+    /// Electrical class of the conductor.
+    pub class: NetClass,
+    /// Component terminals on this net, in document order.
+    pub terminals: Vec<NetTerminal>,
+    /// Declared direction when the net is an interface port of the cell.
+    pub port: Option<crate::state::PortDirection>,
     /// Wires belonging to this net (for canvas highlighting).
     pub wire_ids: Vec<u64>,
+}
+
+impl DesignNet {
+    /// Component terminals bound to this net.
+    pub fn pin_count(&self) -> usize {
+        self.terminals.len()
+    }
+
+    /// `true` when the net is an interface port of the cell.
+    pub const fn is_port(&self) -> bool {
+        self.port.is_some()
+    }
 }
 
 /// Live net summary: connectivity + ports + labels + ground, no instance
@@ -295,17 +347,23 @@ fn collect_design_nets(
     generator.apply_net_labels();
     generator.identify_ground();
 
-    let ports: HashSet<String> = schematic
+    let ports: HashMap<String, crate::state::PortDirection> = schematic
         .interface_ports()
         .iter()
-        .map(|port| port.name.to_ascii_lowercase())
+        .map(|port| (port.name.to_ascii_lowercase(), port.direction))
         .collect();
 
-    let mut pin_counts: HashMap<usize, usize> = HashMap::new();
+    // Terminals are collected in document order so the inspector's
+    // connectivity table reads the same way twice for the same drawing.
+    let mut terminals: HashMap<usize, Vec<NetTerminal>> = HashMap::new();
     for component in &schematic.components {
-        for (_, position) in generator.component_terminal_positions(component) {
+        for (pin, position) in generator.component_terminal_positions(component) {
             if let Some(net) = generator.net_at(position) {
-                *pin_counts.entry(net.id).or_default() += 1;
+                terminals.entry(net.id).or_default().push(NetTerminal {
+                    component_id: component.id,
+                    reference: component.name.clone(),
+                    pin,
+                });
             }
         }
     }
@@ -317,15 +375,37 @@ fn collect_design_nets(
             wires.entry(net.id).or_default().push(wire.id);
         }
     }
+    // A power label anywhere on the net declares it a supply rail.
+    let mut power_labelled: HashSet<usize> = HashSet::new();
+    for label in &schematic.net_labels {
+        if label.is_power_net()
+            && !label.is_ground()
+            && let Some(net) = generator.net_at(label.pos)
+        {
+            power_labelled.insert(net.id);
+        }
+    }
+    let ground_net = generator.ground_net_id();
 
     let mut nets: Vec<DesignNet> = generator
         .nets()
         .iter()
         .map(|net| {
             let name = net.spice_name();
+            let port = ports.get(&name.to_ascii_lowercase()).copied();
+            let class = if ground_net == Some(net.id) || name == "0" {
+                NetClass::Ground
+            } else if port == Some(crate::state::PortDirection::Supply)
+                || power_labelled.contains(&net.id)
+            {
+                NetClass::Supply
+            } else {
+                NetClass::Signal
+            };
             DesignNet {
-                is_port: ports.contains(&name.to_ascii_lowercase()),
-                pin_count: pin_counts.get(&net.id).copied().unwrap_or(0),
+                class,
+                port,
+                terminals: terminals.remove(&net.id).unwrap_or_default(),
                 wire_ids: wires.remove(&net.id).unwrap_or_default(),
                 name,
             }
@@ -338,8 +418,8 @@ fn collect_design_nets(
             .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
     };
     nets.sort_by(|a, b| {
-        (!a.is_port, autonamed(&a.name), a.name.to_ascii_lowercase()).cmp(&(
-            !b.is_port,
+        (!a.is_port(), autonamed(&a.name), a.name.to_ascii_lowercase()).cmp(&(
+            !b.is_port(),
             autonamed(&b.name),
             b.name.to_ascii_lowercase(),
         ))
@@ -829,7 +909,7 @@ mod tests {
         let nets = design_nets_with_hierarchy(&schematic, &hierarchy);
         let pin_counts: HashMap<_, _> = nets
             .iter()
-            .map(|net| (net.name.as_str(), net.pin_count))
+            .map(|net| (net.name.as_str(), net.pin_count()))
             .collect();
 
         assert_eq!(pin_counts.get("vin"), Some(&1));
