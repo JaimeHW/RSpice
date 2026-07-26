@@ -150,6 +150,48 @@ pub struct GeneratedNoiseEvaluation {
     pub table_operands: Vec<Value>,
 }
 
+/// Allocation-free view produced by a generated one-pass noise evaluator.
+///
+/// Table operands borrow a generated stack buffer for the duration of the
+/// visitor call. Consumers that retain an evaluation can materialize the
+/// existing owned representation with [`GeneratedNoiseEvaluationRef::to_owned`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedNoiseEvaluationRef<'a> {
+    pub active: bool,
+    pub psd: Value,
+    pub exponent: Option<Value>,
+    pub table_operands: &'a [Value],
+}
+
+impl GeneratedNoiseEvaluationRef<'_> {
+    #[inline]
+    pub fn to_owned(self) -> GeneratedNoiseEvaluation {
+        GeneratedNoiseEvaluation {
+            active: self.active,
+            psd: self.psd,
+            exponent: self.exponent,
+            table_operands: self.table_operands.to_vec(),
+        }
+    }
+}
+
+/// Type-erased sink used by generated devices to report every noise source in
+/// one dependency-schedule traversal.
+pub trait GeneratedNoiseVisitor {
+    /// Return `false` to stop evaluation after the current source.
+    fn visit(&mut self, index: usize, evaluation: GeneratedNoiseEvaluationRef<'_>) -> bool;
+}
+
+impl<F> GeneratedNoiseVisitor for F
+where
+    F: for<'a> FnMut(usize, GeneratedNoiseEvaluationRef<'a>) -> bool,
+{
+    #[inline]
+    fn visit(&mut self, index: usize, evaluation: GeneratedNoiseEvaluationRef<'_>) -> bool {
+        self(index, evaluation)
+    }
+}
+
 /// A generated noise evaluator rejected invalid model state or output.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeneratedNoiseEvaluationError {
@@ -708,30 +750,62 @@ impl BuiltinVerilogAInstance {
             false,
             simparams,
         );
+        let descriptors = self.kind.noise_descriptors();
+        let mut evaluated = Vec::with_capacity(descriptors.len());
+        let mut visitor_error = None;
         self.kind
-            .noise_descriptors()
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(index, descriptor)| {
-                let mapped = descriptor
-                    .map_topology(&self.nodes, &self.branches)
-                    .map_err(|source| BuiltinNoiseEvaluationError::Topology {
-                        index,
-                        mechanism: descriptor.mechanism,
-                        source,
-                    })?;
-                let evaluation =
-                    self.kind
-                        .evaluate_noise_source(index, &ctx)
-                        .map_err(|source| BuiltinNoiseEvaluationError::Evaluation {
+            .evaluate_noise_sources(
+                &ctx,
+                &mut |index, evaluation: GeneratedNoiseEvaluationRef<'_>| {
+                    let Some(descriptor) = descriptors.get(index).copied() else {
+                        visitor_error = Some(BuiltinNoiseEvaluationError::Evaluation {
                             index,
-                            mechanism: descriptor.mechanism,
-                            source,
-                        })?;
-                Ok(BuiltinEvaluatedNoiseSource { mapped, evaluation })
-            })
-            .collect()
+                            mechanism: "<missing descriptor>",
+                            source: GeneratedNoiseEvaluationError::SourceIndexOutOfRange {
+                                index,
+                                count: descriptors.len(),
+                            },
+                        });
+                        return false;
+                    };
+                    let mapped = match descriptor.map_topology(&self.nodes, &self.branches) {
+                        Ok(mapped) => mapped,
+                        Err(source) => {
+                            visitor_error = Some(BuiltinNoiseEvaluationError::Topology {
+                                index,
+                                mechanism: descriptor.mechanism,
+                                source,
+                            });
+                            return false;
+                        }
+                    };
+                    evaluated.push(BuiltinEvaluatedNoiseSource {
+                        mapped,
+                        evaluation: evaluation.to_owned(),
+                    });
+                    true
+                },
+            )
+            .map_err(|source| {
+                let index = match &source {
+                    GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index, .. }
+                    | GeneratedNoiseEvaluationError::NonFinite { index, .. }
+                    | GeneratedNoiseEvaluationError::NegativePower { index, .. } => *index,
+                    GeneratedNoiseEvaluationError::InvalidMultiplicity { .. } => 0,
+                };
+                BuiltinNoiseEvaluationError::Evaluation {
+                    index,
+                    mechanism: descriptors
+                        .get(index)
+                        .map_or("<device multiplicity>", |descriptor| descriptor.mechanism),
+                    source,
+                }
+            })?;
+        if let Some(error) = visitor_error {
+            return Err(error);
+        }
+        debug_assert_eq!(evaluated.len(), descriptors.len());
+        Ok(evaluated)
     }
 
     #[inline]

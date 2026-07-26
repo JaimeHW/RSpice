@@ -12238,7 +12238,103 @@ fn generated_noise_term_rust_compiles_with_runtime_stub() {
 }
 
 #[test]
-fn generated_zero_noise_evaluator_compiles_and_returns_typed_range_error() {
+fn generated_noise_evaluation_is_one_pass_and_allocation_free() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(noisy_current_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile one-pass noise source");
+    let noise = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "noise.rs")
+        .expect("noise ABI file")
+        .contents
+        .as_str();
+
+    assert_eq!(noise.matches("pub fn evaluate_noise_sources").count(), 1);
+    assert!(!noise.contains("source_index"), "{noise}");
+    assert!(!noise.contains("vec!["), "{noise}");
+
+    assert_generated_rust_compiles_with_tests(
+        &generated,
+        r#"
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct CountingAllocator;
+static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+#[derive(Default)]
+struct NoiseSink {
+    seen: [bool; 2],
+    psd: [f64; 2],
+    exponent: [Option<f64>; 2],
+}
+
+impl runtime::GeneratedNoiseVisitor for NoiseSink {
+    fn visit(
+        &mut self,
+        index: usize,
+        evaluation: runtime::GeneratedNoiseEvaluationRef<'_>,
+    ) -> bool {
+        assert!(evaluation.active);
+        assert!(evaluation.table_operands.is_empty());
+        self.seen[index] = true;
+        self.psd[index] = evaluation.psd;
+        self.exponent[index] = evaluation.exponent;
+        true
+    }
+}
+
+#[test]
+fn one_pass_noise_reports_all_sources_without_allocating() {
+    let instance = generated_device::Instance::new(&[0, 1]);
+    let context = runtime::GeneratedEvalContext::new(&[0.25, 0.0]);
+    let mut sink = NoiseSink::default();
+
+    instance
+        .evaluate_noise_sources(&context, &mut sink)
+        .expect("warmup noise evaluation");
+    assert_eq!(sink.seen, [true, true]);
+    assert!((sink.psd[0] - 1.0e-18).abs() <= 1.0e-30);
+    assert!((sink.psd[1] - 1.0e-20).abs() <= 1.0e-32);
+    assert_eq!(sink.exponent, [None, Some(1.0)]);
+
+    let before = ALLOCATION_COUNT.load(Ordering::Relaxed);
+    for _ in 0..128 {
+        sink = NoiseSink::default();
+        instance
+            .evaluate_noise_sources(&context, &mut sink)
+            .expect("steady-state noise evaluation");
+    }
+    let after = ALLOCATION_COUNT.load(Ordering::Relaxed);
+    assert_eq!(after, before, "generated noise evaluation allocated");
+    assert_eq!(sink.seen, [true, true]);
+}
+"#,
+    );
+}
+
+#[test]
+fn generated_zero_noise_evaluator_compiles_as_an_empty_one_pass() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
             r#"
@@ -12268,11 +12364,9 @@ endmodule
         noise.contains("NOISE_SOURCES: [GeneratedNoiseDescriptor; 0]"),
         "{noise}"
     );
-    assert!(
-        noise.contains("SourceIndexOutOfRange { index: source_index, count: 0 }"),
-        "{noise}"
-    );
-    assert!(!noise.contains("match source_index"), "{noise}");
+    assert!(noise.contains("evaluate_noise_sources"), "{noise}");
+    assert!(noise.contains("Ok(())"), "{noise}");
+    assert!(!noise.contains("source_index"), "{noise}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -14324,6 +14418,27 @@ pub mod runtime {{
         pub table_operands: Vec<f64>,
     }}
 
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct GeneratedNoiseEvaluationRef<'a> {{
+        pub active: bool,
+        pub psd: f64,
+        pub exponent: Option<f64>,
+        pub table_operands: &'a [f64],
+    }}
+
+    pub trait GeneratedNoiseVisitor {{
+        fn visit(&mut self, index: usize, evaluation: GeneratedNoiseEvaluationRef<'_>) -> bool;
+    }}
+
+    impl<F> GeneratedNoiseVisitor for F
+    where
+        F: for<'a> FnMut(usize, GeneratedNoiseEvaluationRef<'a>) -> bool,
+    {{
+        fn visit(&mut self, index: usize, evaluation: GeneratedNoiseEvaluationRef<'_>) -> bool {{
+            self(index, evaluation)
+        }}
+    }}
+
     #[derive(Debug, Clone, PartialEq)]
     pub enum GeneratedNoiseEvaluationError {{
         SourceIndexOutOfRange {{ index: usize, count: usize }},
@@ -15182,6 +15297,27 @@ pub mod runtime {{
         pub psd: f64,
         pub exponent: Option<f64>,
         pub table_operands: Vec<f64>,
+    }}
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct GeneratedNoiseEvaluationRef<'a> {{
+        pub active: bool,
+        pub psd: f64,
+        pub exponent: Option<f64>,
+        pub table_operands: &'a [f64],
+    }}
+
+    pub trait GeneratedNoiseVisitor {{
+        fn visit(&mut self, index: usize, evaluation: GeneratedNoiseEvaluationRef<'_>) -> bool;
+    }}
+
+    impl<F> GeneratedNoiseVisitor for F
+    where
+        F: for<'a> FnMut(usize, GeneratedNoiseEvaluationRef<'a>) -> bool,
+    {{
+        fn visit(&mut self, index: usize, evaluation: GeneratedNoiseEvaluationRef<'_>) -> bool {{
+            self(index, evaluation)
+        }}
     }}
 
     #[derive(Debug, Clone, PartialEq)]

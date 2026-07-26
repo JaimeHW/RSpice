@@ -1727,15 +1727,13 @@ mod tests {
             "{registry}"
         );
         assert!(
-            registry.contains(
-                "Self::Device0(device) => device.evaluate_noise_source(source_index, ctx)"
-            ),
+            registry
+                .contains("Self::Device0(device) => device.evaluate_noise_sources(ctx, visitor)"),
             "{registry}"
         );
         assert!(
-            registry.contains(
-                "Self::Device1(device) => device.evaluate_noise_source(source_index, ctx)"
-            ),
+            registry
+                .contains("Self::Device1(device) => device.evaluate_noise_sources(ctx, visitor)"),
             "{registry}"
         );
 
@@ -1763,10 +1761,11 @@ mod tests {
         assert!(registry.contains("        &[]"), "{registry}");
         assert!(
             registry.contains(
-                "GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index: source_index, count: 0 }"
+                "pub fn evaluate_noise_sources(&self, ctx: &super::GeneratedEvalContext<'_>, visitor: &mut dyn super::GeneratedNoiseVisitor)"
             ),
             "{registry}"
         );
+        assert!(registry.contains("        Ok(())"), "{registry}");
 
         fs::remove_dir_all(root).expect("remove empty registry fixture");
     }
@@ -1918,19 +1917,17 @@ fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
     out.push_str("    }\n");
     out.push('\n');
     out.push_str(
-        "    pub fn evaluate_noise_source(&self, source_index: usize, ctx: &super::GeneratedEvalContext<'_>) -> Result<super::GeneratedNoiseEvaluation, super::GeneratedNoiseEvaluationError> {\n",
+        "    pub fn evaluate_noise_sources(&self, ctx: &super::GeneratedEvalContext<'_>, visitor: &mut dyn super::GeneratedNoiseVisitor) -> Result<(), super::GeneratedNoiseEvaluationError> {\n",
     );
     if devices.is_empty() {
-        out.push_str("        let _ = (self, ctx);\n");
-        out.push_str(
-            "        Err(super::GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index: source_index, count: 0 })\n",
-        );
+        out.push_str("        let _ = (self, ctx, visitor);\n");
+        out.push_str("        Ok(())\n");
     } else {
         out.push_str("        match self {\n");
         for (index, _device) in devices.iter().enumerate() {
             writeln!(
                 out,
-                "            Self::Device{index}(device) => device.evaluate_noise_source(source_index, ctx),"
+                "            Self::Device{index}(device) => device.evaluate_noise_sources(ctx, visitor),"
             )?;
         }
         out.push_str("        }\n");
