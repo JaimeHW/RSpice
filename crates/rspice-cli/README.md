@@ -259,7 +259,14 @@ rspice info <NETLIST> [OPTIONS]
 
 ### `rspice check` — Validate Netlist
 
-Check netlist syntax and topology. Accepts `-` for stdin. Two singular-topology checks always run: a loop of ideal voltage sources/inductors is an error (the DC system cannot be solved), and a node connected only to current sources warns about its undefined voltage.
+Check netlist syntax and topology. Accepts `-` for stdin.
+
+Four checks always run, before any flag is considered:
+
+- **Parse diagnostics** from the netlist reader are reported as warnings.
+- **Output symbols** referenced by `.PRINT`/`.PLOT`/`.SAVE`/`.PROBE` must resolve; an undefined `V(x)` or `I(rbogus)` is an error.
+- **Singular topology**: a loop of ideal voltage sources/inductors is an error (the DC system cannot be solved), and a node connected only to current sources warns about its undefined voltage.
+- **XSPICE build**: a deck containing XSPICE devices is built into a circuit with external runtimes stubbed out, so a model that cannot be constructed fails here rather than at run time.
 
 ```bash
 rspice check <NETLIST> [OPTIONS]
@@ -271,6 +278,8 @@ rspice check <NETLIST> [OPTIONS]
 | `--models` | Check for undefined models |
 | `--strict` | Treat warnings as errors |
 | `--json` | Output as JSON |
+
+Errors exit 65; `--strict` turns a warning-only deck into a usage failure, which exits 2. The JSON document reports both verdicts separately — `valid` tracks the non-strict exit status, and `strict_valid` stays false whenever there are warnings — alongside the `errors` and `warnings` arrays.
 
 ### `rspice compare` — Golden File Comparison
 
@@ -318,7 +327,7 @@ rspice convert tran.raw window.csv --to csv --variables "V(out)" --start 1u --st
 
 ### `rspice compile-va` — Compile Verilog-A
 
-Compile a Verilog-A model for use in simulations.
+Compile a Verilog-A model and report its interface. Terminals, internal node count, and the parameter table (with defaults and bounds) always print to stdout; a compile failure exits 1.
 
 ```bash
 rspice compile-va <FILE> [OPTIONS]
@@ -329,8 +338,10 @@ rspice compile-va <FILE> [OPTIONS]
 | `-o, --output <FILE>` | Write a JSON interface summary: model name, terminals, internal node count, parameters with defaults and bounds |
 | `-I, --include <DIR>` | Add an include directory (repeatable) |
 | `--strict` | Enable strict LRM compliance mode |
-| `--detailed` | Show detailed compilation information |
-| `--show-usage` | Generate a usage example in the output |
+| `--detailed` | Also print per-branch stamp and Jacobian entry counts |
+| `--show-usage` | Print an example `.VERILOGA` line, instantiation, and `.MODEL` card for the compiled model |
+
+Includes are searched in order: `-I` directories, then config `paths.veriloga_includes`, then the source file's own directory.
 
 ### `rspice completions` — Shell Completions
 
