@@ -8,6 +8,189 @@ fn solution_partial(partials: &[(usize, Value)], column: usize) -> Value {
         .sum()
 }
 
+/// Runtime state for an Xyce LEVEL=2 self-consistent thermal resistor.
+///
+/// Xyce keeps this electrothermal state outside the electrical MNA unknowns:
+/// accepted electrical dissipation advances the temperature explicitly, and
+/// the next electrical load evaluates dependent material expressions at that
+/// temperature.
+#[derive(Debug, Clone)]
+pub struct ThermalResistorState {
+    pub length: Value,
+    pub area: Value,
+    pub thermal_length: Value,
+    pub thermal_area: Value,
+    pub multiplicity: Value,
+    pub scale: Value,
+    pub temperature_celsius: Value,
+    pub resistivity: Value,
+    pub heat_capacity: Value,
+    pub thermal_heat_capacity: Value,
+    /// Nominal, unmultiplied resistance exposed by the `R` probe.
+    pub reported_resistance: Value,
+    /// Resistance/current values from the just-completed electrical load.
+    /// Xyce advances temperature after that load, but its output lead current
+    /// and `R` parameter still describe the load that produced the sample.
+    pub output_resistance: Value,
+    pub output_conductance: Value,
+    /// Retained expression scope for temperature-dependent material values.
+    pub base_context: crate::netlist::ParamContext,
+    pub tnom_celsius: Value,
+    pub model_params: Vec<(String, Value)>,
+    pub model_expr_params: Vec<(String, String)>,
+    pub instance_resistivity: Option<Value>,
+    pub instance_heat_capacity: Option<Value>,
+    pub instance_thermal_heat_capacity: Option<Value>,
+}
+
+impl ThermalResistorState {
+    fn material_context(
+        &self,
+        temperature_celsius: Value,
+    ) -> Result<crate::netlist::ParamContext, String> {
+        let mut context = self.base_context.clone();
+        context.set("TEMP", temperature_celsius);
+        context.set("TEMPER", temperature_celsius);
+        context.set("TNOM", self.tnom_celsius);
+        context.set(
+            "VT",
+            crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(
+                temperature_celsius,
+            )),
+        );
+        crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
+        for (name, value) in &self.model_params {
+            context.set(name, *value);
+        }
+
+        let mut pending = self.model_expr_params.clone();
+        while !pending.is_empty() {
+            let mut progress = false;
+            let mut unresolved = Vec::new();
+            for (name, expression) in pending {
+                match crate::netlist::expr::eval_expression(&expression, &context) {
+                    Ok(value) => {
+                        context.set(&name, value);
+                        progress = true;
+                    }
+                    Err(_) => unresolved.push((name, expression)),
+                }
+            }
+            if !progress {
+                let names = unresolved
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(format!(
+                    "thermal resistor material expressions could not be resolved: {names}"
+                ));
+            }
+            pending = unresolved;
+        }
+        Ok(context)
+    }
+
+    fn model_value(&self, context: &crate::netlist::ParamContext, names: &[&str]) -> Option<Value> {
+        names.iter().find_map(|candidate| {
+            self.model_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
+                .map(|(_, value)| *value)
+                .or_else(|| {
+                    self.model_expr_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
+                        .and_then(|(_, expression)| {
+                            crate::netlist::expr::eval_expression(expression, context).ok()
+                        })
+                })
+        })
+    }
+
+    /// Re-evaluate dependent material values and the nominal resistance at a
+    /// new Celsius temperature.
+    pub fn update_material_at_temperature(
+        &mut self,
+        temperature_celsius: Value,
+    ) -> Result<(), String> {
+        if !temperature_celsius.is_finite() {
+            return Err(format!(
+                "thermal resistor temperature became non-finite: {temperature_celsius}"
+            ));
+        }
+        let context = self.material_context(temperature_celsius)?;
+        let resistivity = self
+            .instance_resistivity
+            .or_else(|| self.model_value(&context, &["RESISTIVITY"]))
+            .ok_or_else(|| "thermal resistor requires RESISTIVITY".to_string())?;
+        let heat_capacity = self
+            .instance_heat_capacity
+            .or_else(|| self.model_value(&context, &["HEATCAPACITY"]))
+            .ok_or_else(|| "thermal resistor requires HEATCAPACITY".to_string())?;
+        let thermal_heat_capacity = self
+            .instance_thermal_heat_capacity
+            .or_else(|| self.model_value(&context, &["THERMAL_HEATCAPACITY"]))
+            .unwrap_or(heat_capacity);
+        if !resistivity.is_finite()
+            || resistivity <= 0.0
+            || !heat_capacity.is_finite()
+            || heat_capacity <= 0.0
+            || !thermal_heat_capacity.is_finite()
+            || thermal_heat_capacity <= 0.0
+        {
+            return Err(format!(
+                "thermal resistor material values must be finite and positive (RESISTIVITY={resistivity}, HEATCAPACITY={heat_capacity}, THERMAL_HEATCAPACITY={thermal_heat_capacity})"
+            ));
+        }
+        let resistance = resistivity * self.length / self.area;
+        if !resistance.is_finite() || resistance <= 0.0 {
+            return Err(format!(
+                "thermal resistor material resistance is invalid: {resistance}"
+            ));
+        }
+        self.temperature_celsius = temperature_celsius;
+        self.resistivity = resistivity;
+        self.heat_capacity = heat_capacity;
+        self.thermal_heat_capacity = thermal_heat_capacity;
+        self.reported_resistance = resistance;
+        Ok(())
+    }
+
+    #[inline]
+    pub fn electrical_resistance(&self) -> Value {
+        self.reported_resistance * self.scale / self.multiplicity
+    }
+
+    /// Advance the explicit Xyce thermal state after an accepted electrical
+    /// solution; the resulting material is used by the next electrical load.
+    pub fn advance_after_accepted_step(
+        &mut self,
+        voltage: Value,
+        conductance: Value,
+        step_size: Value,
+    ) -> Result<(), String> {
+        if !step_size.is_finite() || step_size < 0.0 {
+            return Err(format!(
+                "thermal resistor accepted step size is invalid: {step_size}"
+            ));
+        }
+        let current = voltage * conductance;
+        self.output_resistance = self.reported_resistance;
+        self.output_conductance = conductance;
+        let dissipation = current * current * self.reported_resistance;
+        let denominator = self.area * self.length * self.heat_capacity
+            + self.thermal_area * self.thermal_length * self.thermal_heat_capacity;
+        if !denominator.is_finite() || denominator <= 0.0 {
+            return Err(format!(
+                "thermal resistor heat-capacity denominator is invalid: {denominator}"
+            ));
+        }
+        let temperature = self.temperature_celsius + dissipation * step_size / denominator;
+        self.update_material_at_temperature(temperature)
+    }
+}
+
 /// Resistor storage (SoA layout for cache efficiency)
 #[derive(Debug, Default, Clone)]
 pub struct Resistors {
@@ -30,6 +213,8 @@ pub struct Resistors {
     /// folding, and effective noise area pre-folded into the coefficient
     /// (resnoise.c semantics).
     pub flicker: Vec<Option<(Value, Value, Value)>>,
+    /// Optional Xyce LEVEL=2 thermal state aligned with the resistor arrays.
+    pub thermal: Vec<Option<ThermalResistorState>>,
 }
 
 impl Resistors {
@@ -57,6 +242,60 @@ impl Resistors {
         self.noise_temperature_offsets.push(0.0);
         self.noisy.push(true);
         self.flicker.push(None);
+        self.thermal.push(None);
+    }
+
+    /// Attach thermal state to the most recently added resistor.
+    pub fn set_last_thermal(&mut self, state: ThermalResistorState) {
+        let mut state = state;
+        state.output_resistance = state.reported_resistance;
+        state.output_conductance = 1.0 / state.electrical_resistance();
+        if let Some(slot) = self.thermal.last_mut() {
+            *slot = Some(state);
+        }
+    }
+
+    #[inline]
+    pub fn output_conductance(&self, index: usize) -> Value {
+        self.thermal
+            .get(index)
+            .and_then(Option::as_ref)
+            .map(|state| state.output_conductance)
+            .unwrap_or_else(|| self.conductances.get(index).copied().unwrap_or(0.0))
+    }
+
+    /// Advance every self-consistent thermal resistor after an accepted
+    /// transient solution and refresh the next-step conductances.
+    pub fn advance_thermal_states(
+        &mut self,
+        solution: &[Value],
+        step_size: Value,
+    ) -> Result<(), String> {
+        for index in 0..self.thermal.len() {
+            let Some(state) = self.thermal[index].as_mut() else {
+                continue;
+            };
+            let stamp = self.stamps[index];
+            let node_voltage = |node: usize| {
+                if node == 0 {
+                    0.0
+                } else {
+                    solution.get(node - 1).copied().unwrap_or(0.0)
+                }
+            };
+            let voltage = node_voltage(stamp.pp.row) - node_voltage(stamp.nn.row);
+            let old_conductance = self.conductances[index];
+            state.advance_after_accepted_step(voltage, old_conductance, step_size)?;
+            let resistance = state.electrical_resistance();
+            if !resistance.is_finite() || resistance <= 0.0 {
+                return Err(format!(
+                    "thermal resistor '{}' resolved to invalid electrical resistance {resistance}",
+                    self.names[index]
+                ));
+            }
+            self.conductances[index] = 1.0 / resistance;
+        }
+        Ok(())
     }
 
     /// Set the noise enable of the most recently added resistor.

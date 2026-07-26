@@ -4444,6 +4444,13 @@ impl Engine {
                         self.config.temperature,
                         self.config.spice_dialect,
                     )?;
+                    let thermal_state = resolve_resistor_thermal_state(
+                        &element.name,
+                        netlist,
+                        model.as_deref(),
+                        instance_params,
+                        self.config.temperature,
+                    )?;
                     let small_signal_resistance = resolve_resistor_small_signal_value(
                         &element.name,
                         resistance,
@@ -4456,7 +4463,10 @@ impl Engine {
                         .device_zero_resistance_tol
                         .unwrap_or(XYCE_DEFAULT_ZERO_RESISTANCE_TOL)
                         .max(0.0);
-                    if resistance.is_finite() && resistance.abs() <= zero_resistance_tol {
+                    if thermal_state.is_none()
+                        && resistance.is_finite()
+                        && resistance.abs() <= zero_resistance_tol
+                    {
                         if !small_signal_resistance.is_finite() {
                             return Err(SimulationError::Circuit(format!(
                                 "Resistor '{}' resolved to non-finite branch-form small-signal resistance {}",
@@ -4481,6 +4491,9 @@ impl Engine {
                         resistance,
                         small_signal_resistance,
                     );
+                    if let Some(thermal_state) = thermal_state {
+                        circuit.resistors.set_last_thermal(thermal_state);
+                    }
                     // Per-instance thermal-noise temperature, resnoise.c
                     // semantics: with TEMP given the offset is
                     // temp − CKTtemp + tnom (in Celsius terms, ngspice's

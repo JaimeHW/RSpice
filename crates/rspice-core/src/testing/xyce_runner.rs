@@ -56955,12 +56955,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 time,
                 element_name,
             ),
-            "temp" => Self::resistor_temperature_value(netlist, element_name)?.ok_or_else(|| {
-                format!(
-                    "resistor parameter probe '{}:TEMP' targets an unknown resistor",
-                    element_name
-                )
-            }),
+            "temp" => {
+                if let Some(waveform) = result.try_device_op_waveform_named(element_name, "temp") {
+                    Self::interpolate_transient_waveform_at(&result.time, waveform, time)
+                } else {
+                    Self::resistor_temperature_value(netlist, element_name)?.ok_or_else(|| {
+                        format!(
+                            "resistor parameter probe '{}:TEMP' targets an unknown resistor",
+                            element_name
+                        )
+                    })
+                }
+            }
             _ => Err(format!(
                 "device parameter probe '{}:{}' is not supported in transient output",
                 element_name, parameter
@@ -57015,6 +57021,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         time: Value,
         name: &str,
     ) -> Result<Value, String> {
+        if let Some(waveform) = result.try_device_op_waveform_named(name, "r") {
+            return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
+        }
         let element = Self::find_resistor_element(netlist, name).ok_or_else(|| {
             format!("resistor parameter probe '{name}:R' targets an unknown resistor")
         })?;

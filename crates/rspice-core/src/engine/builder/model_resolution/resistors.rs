@@ -1,4 +1,5 @@
 use super::*;
+use crate::circuit::ThermalResistorState;
 
 /// Resolve the resnoise.c flicker-noise terms for a resistor instance:
 /// `(coefficient, AF, EF)` where the density is
@@ -171,27 +172,6 @@ fn level2_requests_self_consistent_thermal_resistor(
     has_l && has_a && (has_instance_material || has_model_material)
 }
 
-/// The Xyce LEVEL=2 thermal resistor adds an explicit temperature state which
-/// is advanced from dissipated electrical power during transient integration.
-/// The scalar DC path is nevertheless well-defined at the ambient operating
-/// temperature: no thermal state is advanced, and the device contributes the
-/// material resistance `rho * L / A / M`.  Keep this boundary explicit so a
-/// static DC deck can use the canonical electrical operating point without
-/// accidentally advertising transient self-heating support.
-fn thermal_resistor_static_dc_contract(netlist: &Netlist) -> bool {
-    let mut has_dc = false;
-    for analysis in &netlist.analyses {
-        match analysis {
-            crate::netlist::AnalysisCommand::Dc { .. } => has_dc = true,
-            crate::netlist::AnalysisCommand::Op
-            | crate::netlist::AnalysisCommand::Step(_)
-            | crate::netlist::AnalysisCommand::Temp { .. } => {}
-            _ => return false,
-        }
-    }
-    has_dc
-}
-
 fn resolve_level2_thermal_resistor_static_value(
     element_name: &str,
     model_name: &str,
@@ -250,6 +230,123 @@ fn resolve_level2_thermal_resistor_static_value(
         )));
     }
     Ok(resistance)
+}
+
+/// Construct the runtime state for a self-consistent LEVEL=2 resistor.
+/// Material expressions are retained verbatim so `TEMP`-dependent tables and
+/// expression dependencies are reevaluated after every accepted transient
+/// step, exactly at the device's current temperature.
+pub(in crate::engine::builder) fn resolve_level2_thermal_resistor_state(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    instance_params: &[(String, f64)],
+    eval_ctx: &crate::netlist::ParamContext,
+    temperature_celsius: f64,
+) -> Result<Option<ThermalResistorState>, SimulationError> {
+    if !level2_requests_self_consistent_thermal_resistor(model_def, instance_params) {
+        return Ok(None);
+    }
+
+    let length = instance_param(instance_params, &["L", "LENGTH"]).ok_or_else(|| {
+        SimulationError::Circuit("thermal resistor requires instance L/LENGTH".to_string())
+    })?;
+    let area = instance_param(instance_params, &["A", "AREA"]).ok_or_else(|| {
+        SimulationError::Circuit("thermal resistor requires instance A/AREA".to_string())
+    })?;
+    let multiplicity = instance_param(instance_params, &["M", "MULT"]).unwrap_or(1.0);
+    let scale = instance_param(instance_params, &["SCALE"]).unwrap_or(1.0);
+    let thermal_length = instance_param(instance_params, &["THERMAL_L"]).unwrap_or(0.0);
+    let thermal_area = instance_param(instance_params, &["THERMAL_A"]).unwrap_or(0.0);
+    for (label, value) in [
+        ("LENGTH", length),
+        ("AREA", area),
+        ("M", multiplicity),
+        ("SCALE", scale),
+        ("THERMAL_L", thermal_length),
+        ("THERMAL_A", thermal_area),
+    ] {
+        if !value.is_finite()
+            || value < 0.0
+            || (label == "LENGTH" && value == 0.0)
+            || (label == "AREA" && value == 0.0)
+            || (label == "M" && value == 0.0)
+            || (label == "SCALE" && value == 0.0)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "thermal resistor parameter {label} must be finite and positive where required: {value}"
+            )));
+        }
+    }
+    let model_tnom = resolve_model_param(model_def, &["TNOM"], eval_ctx)?
+        .unwrap_or(netlist.options.tnom.unwrap_or(27.0));
+    if !model_tnom.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "thermal resistor TNOM is non-finite: {model_tnom}"
+        )));
+    }
+
+    let mut state = ThermalResistorState {
+        length,
+        area,
+        thermal_length,
+        thermal_area,
+        multiplicity,
+        scale,
+        temperature_celsius,
+        resistivity: 0.0,
+        heat_capacity: 0.0,
+        thermal_heat_capacity: 0.0,
+        reported_resistance: 0.0,
+        output_resistance: 0.0,
+        output_conductance: 0.0,
+        base_context: base_eval_context(netlist),
+        tnom_celsius: model_tnom,
+        model_params: model_def.params.clone(),
+        model_expr_params: model_def.expr_params.clone(),
+        instance_resistivity: instance_param(instance_params, &["RESISTIVITY"]),
+        instance_heat_capacity: instance_param(instance_params, &["HEATCAPACITY"]),
+        instance_thermal_heat_capacity: instance_param(instance_params, &["THERMAL_HEATCAPACITY"]),
+    };
+    state
+        .update_material_at_temperature(temperature_celsius)
+        .map_err(|error| {
+            SimulationError::Circuit(format!(
+                "thermal resistor material resolution failed: {error}"
+            ))
+        })?;
+    Ok(Some(state))
+}
+
+pub(in crate::engine::builder) fn resolve_resistor_thermal_state(
+    element_name: &str,
+    netlist: &Netlist,
+    model_name: Option<&str>,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<Option<ThermalResistorState>, SimulationError> {
+    let Some(model_name) = model_name else {
+        return Ok(None);
+    };
+    let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
+        SimulationError::Circuit(format!("resistor references unknown model '{model_name}'"))
+    })?;
+    let (eval_ctx, temperature_celsius, _) = resolve_resistor_eval_context(
+        netlist,
+        Some(model_def),
+        instance_params,
+        temperature_kelvin,
+    )?;
+    let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
+    if level != 2 {
+        return Ok(None);
+    }
+    resolve_level2_thermal_resistor_state(
+        netlist,
+        model_def,
+        instance_params,
+        &eval_ctx,
+        temperature_celsius,
+    )
 }
 
 fn resistor_uses_xyce_default_value(instance_params: &[(String, f64)]) -> bool {
@@ -535,15 +632,6 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     let uses_xyce_default = resistor_uses_xyce_default_value(instance_params);
     let resistor_level = if let (Some(model_def), Some(model_name)) = (model_def, model_name) {
         let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
-        if level == 2
-            && level2_requests_self_consistent_thermal_resistor(model_def, instance_params)
-            && !thermal_resistor_static_dc_contract(netlist)
-        {
-            return Err(SimulationError::Circuit(format!(
-                "Resistor '{}' model '{}' requests Xyce LEVEL=2 self-consistent thermal resistor state outside the native static-DC contract; transient electrothermal state integration is not implemented",
-                element_name, model_name
-            )));
-        }
         Some(level)
     } else {
         None
@@ -1032,7 +1120,7 @@ R1 a 0 1k TC1=0.1 DTEMP=5
     }
 
     #[test]
-    fn thermal_level2_static_dc_scales_branch_once_and_rejects_transient() {
+    fn thermal_level2_static_dc_scales_branch_once_and_supports_transient_state() {
         let source = r#"thermal resistor static boundary
 V1 in 0 1
 R1 in 0 RMOD L=2 A=1 M=2
@@ -1069,7 +1157,7 @@ R1 in 0 RMOD L=2 A=1 M=2
         else {
             panic!("thermal boundary fixture is not a resistor");
         };
-        let error = resolve_resistor_effective_parameters(
+        let resolved_transient = resolve_resistor_effective_parameters(
             &netlist,
             &element.name,
             *value,
@@ -1079,13 +1167,21 @@ R1 in 0 RMOD L=2 A=1 M=2
             crate::constants::TEMP_REFERENCE,
             SpiceDialect::Xyce,
         )
-        .expect_err("transient thermal state must remain outside the static contract");
-        assert!(
-            error
-                .to_string()
-                .contains("outside the native static-DC contract"),
-            "unexpected transient thermal boundary error: {error}"
-        );
+        .expect("transient thermal material resolves");
+        assert_eq!(resolved_transient.resistance, 1.0e-8);
+        assert_eq!(resolved_transient.reported_resistance, 2.0e-8);
+        let state = resolve_resistor_thermal_state(
+            "R1",
+            &netlist,
+            model.as_deref(),
+            instance_params,
+            crate::constants::TEMP_REFERENCE,
+        )
+        .expect("transient thermal state resolves")
+        .expect("thermal state is present");
+        assert_eq!(state.length, 2.0);
+        assert_eq!(state.area, 1.0);
+        assert_eq!(state.multiplicity, 2.0);
     }
 
     #[test]

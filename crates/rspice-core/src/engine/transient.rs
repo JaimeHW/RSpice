@@ -460,7 +460,7 @@ impl Engine {
                     solution,
                     stamp.pp.row,
                     stamp.nn.row,
-                    circuit.resistors.conductances[branch.index],
+                    circuit.resistors.output_conductance(branch.index),
                 )
             }
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
@@ -1284,6 +1284,20 @@ impl Engine {
             .signals
             .iter()
             .any(|signal| matches!(signal, SaveSignal::DeviceParam { .. }))
+            || netlist.elements.iter().any(|element| {
+                matches!(
+                    &element.kind,
+                    crate::netlist::ElementKind::Resistor {
+                        instance_params,
+                        model: Some(_),
+                        ..
+                    } if instance_params.iter().any(|(name, _)| {
+                        name.eq_ignore_ascii_case("L") || name.eq_ignore_ascii_case("LENGTH")
+                    }) && instance_params.iter().any(|(name, _)| {
+                        name.eq_ignore_ascii_case("A") || name.eq_ignore_ascii_case("AREA")
+                    })
+                )
+            })
             || netlist.elements.iter().any(|element| {
                 matches!(
                     &element.kind,
@@ -3881,6 +3895,10 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
+                    circuit
+                        .resistors
+                        .advance_thermal_states(&solution, dt)
+                        .map_err(SimulationError::Circuit)?;
                     if self.config.spice_dialect == SpiceDialect::Xyce
                         && !xyce_one_step_stateful_topology
                     {
@@ -4799,6 +4817,10 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
+                    circuit
+                        .resistors
+                        .advance_thermal_states(&solution, dt)
+                        .map_err(SimulationError::Circuit)?;
                     if self.config.spice_dialect == SpiceDialect::Xyce
                         && !xyce_one_step_stateful_topology
                     {
@@ -5055,6 +5077,10 @@ impl Engine {
             }
 
             solution.clone_from(&new_solution);
+            circuit
+                .resistors
+                .advance_thermal_states(&solution, dt)
+                .map_err(SimulationError::Circuit)?;
             if self.config.spice_dialect == SpiceDialect::Xyce && !xyce_one_step_stateful_topology {
                 xyce_static_history = Some(self.capture_xyce_static_residual(
                     &mut circuit,

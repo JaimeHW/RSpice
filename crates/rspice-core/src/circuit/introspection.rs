@@ -311,6 +311,25 @@ impl CircuitData {
             });
         }
 
+        // Xyce LEVEL=2 self-consistent thermal resistors expose their
+        // material resistance and temperature through the ordinary device-op
+        // channel.  Ordinary scalar resistors remain derived branch values;
+        // only devices with an actual thermal state are reported here.
+        for (index, name) in self.resistors.names.iter().enumerate() {
+            let Some(state) = self.resistors.thermal.get(index).and_then(Option::as_ref) else {
+                continue;
+            };
+            entries.push(DeviceOpEntry {
+                name: name.clone(),
+                device_kind: "RESISTOR",
+                region: None,
+                params: vec![
+                    ("r", state.output_resistance),
+                    ("temp", state.temperature_celsius),
+                ],
+            });
+        }
+
         for jfet in &self.jfets {
             let (vgs, vds, ids, gm, gds, igs, igd) = jfet.op_values();
             let device_kind = match jfet.params.channel_model {

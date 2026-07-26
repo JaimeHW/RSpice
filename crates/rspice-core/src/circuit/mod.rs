@@ -19,8 +19,8 @@ use thiserror::Error;
 mod storage;
 pub use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Capacitors, CurrentSources, Diodes,
-    Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, ResistorBranches, Resistors, Vdmoses,
-    VoltageSources,
+    Ekv3Mosfets, EkvMosfets, Inductors, Mosfets, ResistorBranches, Resistors, ThermalResistorState,
+    Vdmoses, VoltageSources,
 };
 mod construction;
 mod external_models;
