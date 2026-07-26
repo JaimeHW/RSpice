@@ -36,12 +36,33 @@ pub enum ComponentType {
     Njfet,
     /// P-channel JFET (SPICE prefix: J)
     Pjfet,
+    /// N-channel MESFET / HFET (SPICE prefix: Z)
+    Nmesfet,
+    /// P-channel MESFET / HFET (SPICE prefix: Z)
+    Pmesfet,
     /// N-channel VDMOS Power MOSFET (SPICE prefix: M)
     NVdmos,
     /// P-channel VDMOS Power MOSFET (SPICE prefix: M)
     PVdmos,
+    /// N-channel SOI MOSFET — D G S E (back gate) P (body contact)
+    /// (SPICE prefix: M)
+    NmosSoi,
+    /// P-channel SOI MOSFET (SPICE prefix: M)
+    PmosSoi,
+    /// NPN BJT with substrate terminal — C B E S (SPICE prefix: Q)
+    NpnBjt4,
+    /// PNP BJT with substrate terminal (SPICE prefix: Q)
+    PnpBjt4,
+    /// NPN BJT with substrate and thermal terminals — C B E S dT,
+    /// for electrothermal VBIC-class models (SPICE prefix: Q)
+    NpnBjt5,
+    /// PNP BJT with substrate and thermal terminals (SPICE prefix: Q)
+    PnpBjt5,
     /// Saturable Core Inductor (SPICE prefix: L)
     SaturableInductor,
+    /// Memristor — emitted as a Xyce YMEMRISTOR element (designator
+    /// prefix: MR)
+    Memristor,
     /// DC Voltage Source (SPICE prefix: V)
     VoltageSource,
     /// DC Current Source (SPICE prefix: I)
@@ -85,8 +106,20 @@ pub enum ComponentType {
     BehavioralSource,
     /// Voltage-controlled switch (SPICE prefix: S)
     VSwitch,
+    /// Current-controlled switch — senses the current through a named
+    /// V source (SPICE prefix: W)
+    ISwitch,
     /// Lossless transmission line (SPICE prefix: T)
     TransmissionLine,
+    /// Lossy transmission line bound to an LTRA or TXL model
+    /// (SPICE prefix: O)
+    LossyTransmissionLine,
+    /// Two-conductor coupled transmission line bound to a CPL model
+    /// (SPICE prefix: P)
+    CoupledTransmissionLine,
+    /// RF port — Z0-terminated Thevenin port for S-parameter and RF work
+    /// (SPICE prefix: P)
+    RfPort,
     /// Ground node (no SPICE prefix - implicit node 0)
     Ground,
     /// Interface port — names its net and declares it as a pin of the

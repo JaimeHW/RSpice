@@ -623,12 +623,20 @@ fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLa
         component.kind,
         crate::state::ComponentType::NpnBjt
             | crate::state::ComponentType::PnpBjt
+            | crate::state::ComponentType::NpnBjt4
+            | crate::state::ComponentType::PnpBjt4
+            | crate::state::ComponentType::NpnBjt5
+            | crate::state::ComponentType::PnpBjt5
             | crate::state::ComponentType::Nmos
             | crate::state::ComponentType::Pmos
             | crate::state::ComponentType::Njfet
             | crate::state::ComponentType::Pjfet
+            | crate::state::ComponentType::Nmesfet
+            | crate::state::ComponentType::Pmesfet
             | crate::state::ComponentType::NVdmos
             | crate::state::ComponentType::PVdmos
+            | crate::state::ComponentType::NmosSoi
+            | crate::state::ComponentType::PmosSoi
     );
 
     // Calculate label margin from component edge.

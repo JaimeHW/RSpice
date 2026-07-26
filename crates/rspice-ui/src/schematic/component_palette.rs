@@ -34,8 +34,24 @@ const PASSIVES: &[ComponentPaletteEntry] = &[
         label: "Saturable Inductor",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::CoupledInductor,
+        label: "K Coupling",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::Memristor,
+        label: "Memristor",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::TransmissionLine,
         label: "Transmission Line",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::LossyTransmissionLine,
+        label: "Lossy Transmission Line",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::CoupledTransmissionLine,
+        label: "Coupled Transmission Line",
     },
 ];
 
@@ -101,6 +117,10 @@ const SOURCES: &[ComponentPaletteEntry] = &[
         label: "Behavioral Source",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::RfPort,
+        label: "RF Port",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::Ground,
         label: "Ground",
     },
@@ -120,6 +140,14 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
         label: "PMOS",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::NmosSoi,
+        label: "NMOS SOI",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::PmosSoi,
+        label: "PMOS SOI",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::NpnBjt,
         label: "NPN BJT",
     },
@@ -128,12 +156,36 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
         label: "PNP BJT",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::NpnBjt4,
+        label: "NPN BJT (substrate)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::PnpBjt4,
+        label: "PNP BJT (substrate)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::NpnBjt5,
+        label: "NPN BJT (thermal)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::PnpBjt5,
+        label: "PNP BJT (thermal)",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::Njfet,
         label: "N-JFET",
     },
     ComponentPaletteEntry {
         kind: ComponentType::Pjfet,
         label: "P-JFET",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::Nmesfet,
+        label: "N-MESFET",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::Pmesfet,
+        label: "P-MESFET",
     },
     ComponentPaletteEntry {
         kind: ComponentType::NVdmos,
@@ -169,6 +221,10 @@ const CONTROLLED: &[ComponentPaletteEntry] = &[
     ComponentPaletteEntry {
         kind: ComponentType::VSwitch,
         label: "V-Switch (S)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::ISwitch,
+        label: "I-Switch (W)",
     },
 ];
 

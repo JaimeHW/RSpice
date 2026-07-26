@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- N-channel MESFET/HFET. Box 40x80, pins D(40,0), G(0,40), S(40,80).
+     Schottky gate bar parallel to the channel; gate arrow points into
+     the device. -->
+<svg viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,40 H 11" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 11,40 L 4.2,37.7 L 4.2,42.3 Z" fill="#000000" stroke="none"/>
+  <path d="M 11,28 V 52" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,22 V 58" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 40,0 V 22 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 40,80 V 58 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -9,6 +9,89 @@ impl PropertyRegistry {
         self.register_opamp();
         self.register_behavioral_source();
         self.register_vswitch();
+        self.register_iswitch();
+    }
+
+    /// Register the current-controlled switch (W element + CSW model card).
+    /// The sensed current flows through a named V source elsewhere in the
+    /// design — a 0 V source is the canonical ammeter.
+    pub(in super::super) fn register_iswitch(&mut self) {
+        let mut sheet = PropertySheet::new();
+
+        sheet.add(
+            PropertyDefinition::new("name")
+                .with_display_name("Instance Name")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("W1"))
+                .with_order(0)
+                .with_category("Instance")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("control")
+                .with_display_name("Sense V Source")
+                .with_description(
+                    "Name of the voltage source whose current controls the switch \
+                     (a 0 V source works as an ammeter)",
+                )
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string(""))
+                .with_order(10)
+                .with_category("Control")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("it")
+                .with_display_name("Threshold Current")
+                .with_description("Control current at which the switch toggles")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression("1m"))
+                .with_unit("A")
+                .with_order(11)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("ih")
+                .with_display_name("Hysteresis Current")
+                .with_description("Half-width of the hysteresis band around the threshold")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("A")
+                .with_order(12)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("ron")
+                .with_display_name("On Resistance")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1.0))
+                .with_unit("Ω")
+                .with_order(13)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("roff")
+                .with_display_name("Off Resistance")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression("1meg"))
+                .with_unit("Ω")
+                .with_order(14)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("state")
+                .with_display_name("Initial State")
+                .with_description("DC operating-point starting state hint")
+                .with_type(PropertyType::Enum)
+                .with_default(PropertyValue::enumeration(
+                    "auto",
+                    vec!["auto".to_string(), "on".to_string(), "off".to_string()],
+                ))
+                .with_order(20)
+                .with_category("Initial Conditions"),
+        );
+
+        self.sheets.insert(ComponentType::ISwitch, sheet);
     }
 
     /// Register the ideal op-amp (ground-referenced VCVS behind a triangle).

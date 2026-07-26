@@ -20,6 +20,18 @@ impl PropertyRegistry {
             &["default", "discrete"],
         ));
         self.sheets.insert(ComponentType::PnpBjt, pnp);
+
+        // Substrate (4T) and substrate+thermal (5T) variants share the
+        // standard BJT instance parameters; the extra terminals are
+        // resolved by the model card (GP substrate or VBIC thermal).
+        self.sheets
+            .insert(ComponentType::NpnBjt4, self.create_bjt_sheet("Q1", "npn"));
+        self.sheets
+            .insert(ComponentType::PnpBjt4, self.create_bjt_sheet("Q1", "pnp"));
+        self.sheets
+            .insert(ComponentType::NpnBjt5, self.create_bjt_sheet("Q1", "npn"));
+        self.sheets
+            .insert(ComponentType::PnpBjt5, self.create_bjt_sheet("Q1", "pnp"));
     }
 
     /// Create a BJT property sheet with commercial-grade parameters

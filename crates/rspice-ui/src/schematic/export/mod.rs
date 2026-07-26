@@ -335,7 +335,12 @@ fn write_component(
         }
         ComponentType::Transformer => write_transformer_symbol(svg, cx, cy, config),
         ComponentType::CoupledInductor => write_coupled_inductor_symbol(svg, cx, cy, config),
-        ComponentType::TransmissionLine => write_tline_symbol(svg, cx, cy, config),
+        // The export renderer draws family art; line-model detail (loss,
+        // coupling) is a property, not a distinct export glyph.
+        ComponentType::TransmissionLine
+        | ComponentType::LossyTransmissionLine
+        | ComponentType::CoupledTransmissionLine => write_tline_symbol(svg, cx, cy, config),
+        ComponentType::Memristor => write_resistor_symbol(svg, cx, cy, config),
         ComponentType::VoltageSource
         | ComponentType::VoltageSourceAc
         | ComponentType::VoltageSourcePulse
@@ -343,6 +348,7 @@ fn write_component(
         | ComponentType::VoltageSourcePwl
         | ComponentType::VoltageSourceExp
         | ComponentType::VoltageSourceSffm => write_vsource_symbol(svg, cx, cy, config),
+        ComponentType::RfPort => write_vsource_symbol(svg, cx, cy, config),
         ComponentType::Ground => write_ground_symbol(svg, cx, cy, config),
         ComponentType::Port => write_port_symbol(
             svg,
@@ -356,10 +362,18 @@ fn write_component(
             component.mirror_v,
             config,
         ),
-        ComponentType::Nmos | ComponentType::NVdmos => write_nmos_symbol(svg, cx, cy, config),
-        ComponentType::Pmos | ComponentType::PVdmos => write_pmos_symbol(svg, cx, cy, config),
-        ComponentType::NpnBjt => write_npn_symbol(svg, cx, cy, config),
-        ComponentType::PnpBjt => write_pnp_symbol(svg, cx, cy, config),
+        ComponentType::Nmos | ComponentType::NVdmos | ComponentType::NmosSoi => {
+            write_nmos_symbol(svg, cx, cy, config)
+        }
+        ComponentType::Pmos | ComponentType::PVdmos | ComponentType::PmosSoi => {
+            write_pmos_symbol(svg, cx, cy, config)
+        }
+        ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => {
+            write_npn_symbol(svg, cx, cy, config)
+        }
+        ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => {
+            write_pnp_symbol(svg, cx, cy, config)
+        }
         ComponentType::Diode => write_diode_symbol(svg, cx, cy, config),
         ComponentType::CurrentSource
         | ComponentType::CurrentSourceAc
@@ -369,16 +383,18 @@ fn write_component(
         | ComponentType::CurrentSourceExp
         | ComponentType::CurrentSourceNoise => write_current_source_symbol(svg, cx, cy, config),
         ComponentType::BehavioralSource => write_behavioral_source_symbol(svg, cx, cy, config),
-        // JFET symbols
-        ComponentType::Njfet => write_njfet_symbol(svg, cx, cy, config),
-        ComponentType::Pjfet => write_pjfet_symbol(svg, cx, cy, config),
+        // JFET symbols (MESFET exports share the JFET family art)
+        ComponentType::Njfet | ComponentType::Nmesfet => write_njfet_symbol(svg, cx, cy, config),
+        ComponentType::Pjfet | ComponentType::Pmesfet => write_pjfet_symbol(svg, cx, cy, config),
         // Controlled source symbols
         ComponentType::OpAmp => write_opamp_symbol(svg, cx, cy, config),
         ComponentType::Vcvs => write_vcvs_symbol(svg, cx, cy, config),
         ComponentType::Vccs => write_vccs_symbol(svg, cx, cy, config),
         ComponentType::Ccvs => write_ccvs_symbol(svg, cx, cy, config),
         ComponentType::Cccs => write_cccs_symbol(svg, cx, cy, config),
-        ComponentType::VSwitch => write_vswitch_symbol(svg, cx, cy, config),
+        ComponentType::VSwitch | ComponentType::ISwitch => {
+            write_vswitch_symbol(svg, cx, cy, config)
+        }
         ComponentType::CellInstance => {
             if let Some(symbol) = resolved_symbol {
                 write_resolved_symbol_svg(svg, component, symbol, config);

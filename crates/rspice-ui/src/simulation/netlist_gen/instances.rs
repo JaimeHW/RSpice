@@ -183,6 +183,50 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
+            // Three-terminal MESFET/HFET: Z name D G S model [params].
+            // HFET routing comes from the bound model card (NHFET/PHFET
+            // type or LEVEL=5/6), not the schematic symbol.
+            ComponentType::Nmesfet | ComponentType::Pmesfet => {
+                let nodes = self.format_nodes(&node_names, 3);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_mesfet_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
+            }
+
+            // Four/five-terminal BJT: Q name C B E S [dT] model [params].
+            // The thermal variant defaults to a native VBIC card, the only
+            // built-in family that solves the dT node.
+            ComponentType::NpnBjt4 | ComponentType::PnpBjt4 => {
+                let nodes = self.format_nodes(&node_names, 4);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_bjt_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
+            }
+            ComponentType::NpnBjt5 | ComponentType::PnpBjt5 => {
+                let nodes = self.format_nodes(&node_names, 5);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_vbic_bjt_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
+            }
+
+            // Five-terminal SOI MOSFET: M name D G S E P model [params],
+            // bound to a partially-depleted BSIMSOI card with a resistive
+            // body tie by default.
+            ComponentType::NmosSoi | ComponentType::PmosSoi => {
+                let nodes = self.format_nodes(&node_names, 5);
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_soi_mosfet_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
+            }
+
             // Ideal op-amp (3 terminals: in+ in- out) — emitted as a
             // ground-referenced VCVS: E<name> <out> 0 <in+> <in-> <gain>
             ComponentType::OpAmp => {
@@ -251,6 +295,36 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {}", instance_name, nodes, model))
             }
 
+            // Current-controlled switch: W name n+ n- <vsrc> model [ON|OFF].
+            // The sensed current flows through a named V source elsewhere
+            // in the design; the core rejects any other trailing token.
+            ComponentType::ISwitch => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let params = crate::properties::parse_params_string(&component.params);
+                let Some(control) = params
+                    .get("control")
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                else {
+                    self.errors.push(format!(
+                        "I-Switch '{}' needs the name of the current-sensing V source (control property)",
+                        component.name
+                    ));
+                    return None;
+                };
+                let (explicit_model, _) = Self::extract_model_override(component);
+                let model = self.get_iswitch_model(component, explicit_model.as_deref());
+                let state = match params.get("state").map(String::as_str) {
+                    Some("on") => " ON",
+                    Some("off") => " OFF",
+                    _ => "",
+                };
+                Some(format!(
+                    "{} {} {} {}{}",
+                    instance_name, nodes, control, model, state
+                ))
+            }
+
             // Lossless transmission line (4 terminals: a+ a- b+ b-):
             // T name a+ a- b+ b- Z0=<z0> TD=<td>
             ComponentType::TransmissionLine => {
@@ -259,6 +333,57 @@ impl<'a> NetlistGenerator<'a> {
                 let z0 = Self::get_param_owned(&params, "z0", "", "50");
                 let td = Self::get_param_owned(&params, "td", "", "1n");
                 Some(format!("{} {} Z0={} TD={}", instance_name, nodes, z0, td))
+            }
+
+            // Lossy transmission line: O name a+ a- b+ b- <model>, with a
+            // generated LTRA or TXL card carrying the per-length RLGC data.
+            ComponentType::LossyTransmissionLine => {
+                let nodes = self.format_nodes(&node_names, 4);
+                let (explicit_model, _) = Self::extract_model_override(component);
+                let model = self.get_lossy_tline_model(component, explicit_model.as_deref());
+                Some(format!("{} {} {}", instance_name, nodes, model))
+            }
+
+            // Coupled transmission line: P name a1 a2 ar b1 b2 br <model>.
+            // The CPL card carries upper-triangle RLGC matrices plus the
+            // physical length.
+            ComponentType::CoupledTransmissionLine => {
+                let nodes = self.format_nodes(&node_names, 6);
+                let (explicit_model, _) = Self::extract_model_override(component);
+                let model = self.get_cpl_model(component, explicit_model.as_deref());
+                Some(format!("{} {} {}", instance_name, nodes, model))
+            }
+
+            // Memristor: YMEMRISTOR <name> n+ n- <model> (Xyce element;
+            // the TEAM LEVEL=2 card is the executable default).
+            ComponentType::Memristor => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let (explicit_model, _) = Self::extract_model_override(component);
+                let model = self.get_memristor_model(component, explicit_model.as_deref());
+                Some(format!(
+                    "YMEMRISTOR {} {} {}",
+                    instance_name, nodes, model
+                ))
+            }
+
+            // RF port: P name n+ n- PORT=k Z0=r [DC v] [AC mag]. With no
+            // source spec the core lowers it to a Z0 terminator; with one
+            // it becomes a Thevenin source behind Z0.
+            ComponentType::RfPort => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let params = crate::properties::parse_params_string(&component.params);
+                let port = Self::get_param_owned(&params, "port", "", "1");
+                let z0 = Self::get_param_owned(&params, "z0", "", "50");
+                let mut line = format!("{} {} PORT={} Z0={}", instance_name, nodes, port, z0);
+                let dc = Self::get_param_owned(&params, "dc", component.value.trim(), "");
+                if !dc.is_empty() {
+                    line.push_str(&format!(" DC {}", dc));
+                }
+                let ac = Self::get_param_owned(&params, "ac_mag", "", "");
+                if !ac.is_empty() {
+                    line.push_str(&format!(" AC {}", ac));
+                }
+                Some(line)
             }
 
             // Ground - handled separately

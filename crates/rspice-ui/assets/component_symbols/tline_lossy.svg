@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lossy transmission line (LTRA/TXL): coax cylinder with a series-loss
+     zigzag on the center conductor.
+     Box 60x40, pins a+(0,10), a-(0,30), b+(60,10), b-(60,30). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 43,10 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 43,30 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,10 H 43" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,30 H 43" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,10 A 3.5,10 0 0 1 17,30 A 3.5,10 0 0 1 17,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 43,10 A 3.5,10 0 0 1 43,30" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 22,20 l 3,-4.5 3,9 3,-9 3,9 3,-4.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

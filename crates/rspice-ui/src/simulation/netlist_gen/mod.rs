@@ -1486,6 +1486,205 @@ mod tests {
         assert!(netlist.contains(".MODEL a2_model d_srlatch"), "{netlist}");
     }
 
+    /// MESFETs emit the Z element with a generated NMF/PMF card.
+    #[test]
+    fn mesfet_emits_z_element_and_model_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::Nmesfet, Point::origin()).with_name_value("Z1", ""),
+            Component::new(2, ComponentType::Pmesfet, Point::new(200, 0)).with_name_value("Z2", ""),
+        ]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("Z1 "))
+            .expect("mesfet line");
+        assert_eq!(line.split_whitespace().count(), 5, "{netlist}");
+        assert!(line.ends_with(" nmf_Z1"), "{netlist}");
+        assert!(netlist.contains(".MODEL nmf_Z1 NMF"), "{netlist}");
+        assert!(netlist.contains(".MODEL pmf_Z2 PMF"), "{netlist}");
+    }
+
+    /// The current-controlled switch names its sensing V source and emits
+    /// a CSW card; a missing control reference is a hard error.
+    #[test]
+    fn iswitch_emits_w_element_with_named_control() {
+        let mut switch =
+            Component::new(1, ComponentType::ISwitch, Point::origin()).with_name_value("W1", "");
+        switch.params = "control=VSENSE it=2m".to_owned();
+        let netlist = netlist_for(vec![switch]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("W1 "))
+            .expect("switch line");
+        assert!(line.contains(" VSENSE isw_W1"), "{netlist}");
+        assert!(
+            netlist.contains(".MODEL isw_W1 CSW (IT=2m IH=0 RON=1 ROFF=1meg)"),
+            "{netlist}"
+        );
+
+        let mut state = SchematicState::default();
+        state.components =
+            vec![Component::new(1, ComponentType::ISwitch, Point::origin())
+                .with_name_value("W2", "")];
+        let result = generate_netlist(&state);
+        assert!(
+            result.errors.iter().any(|e| e.contains("W2")),
+            "missing control must be a hard error: {:?}",
+            result.errors
+        );
+    }
+
+    /// The lossy line emits an O element with an LTRA card (G=0) by
+    /// default and a TXL card when selected.
+    #[test]
+    fn lossy_line_emits_ltra_or_txl_card() {
+        let mut ltra = Component::new(1, ComponentType::LossyTransmissionLine, Point::origin())
+            .with_name_value("O1", "");
+        ltra.params = "r=12.45 l=8.972n c=0.468p len=16".to_owned();
+        let mut txl = Component::new(2, ComponentType::LossyTransmissionLine, Point::new(200, 0))
+            .with_name_value("O2", "");
+        txl.params = "kind=txl g=1u".to_owned();
+        let netlist = netlist_for(vec![ltra, txl]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("O1 "))
+            .expect("ltra line");
+        assert_eq!(line.split_whitespace().count(), 6, "{netlist}");
+        assert!(line.ends_with(" ltra_O1"), "{netlist}");
+        assert!(
+            netlist.contains(".MODEL ltra_O1 LTRA (R=12.45 L=8.972n C=0.468p G=0 LEN=16)"),
+            "{netlist}"
+        );
+        assert!(
+            netlist.contains(".MODEL txl_O2 TXL (R=1 L=250n G=1u C=100p LENGTH=1)"),
+            "{netlist}"
+        );
+    }
+
+    /// The coupled line emits six nodes plus a CPL card with the three
+    /// upper-triangle matrices and the length.
+    #[test]
+    fn coupled_line_emits_cpl_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::CoupledTransmissionLine, Point::origin())
+                .with_name_value("P1", ""),
+        ]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("P1 "))
+            .expect("cpl line");
+        // name + 6 nodes + model
+        assert_eq!(line.split_whitespace().count(), 8, "{netlist}");
+        assert!(line.ends_with(" cpl_P1"), "{netlist}");
+        assert!(
+            netlist.contains(
+                ".MODEL cpl_P1 CPL R=(0.1 0 0.1) L=(380n 60n 380n) C=(120p -12p 120p) G=(0 0 0) LENGTH=0.1"
+            ),
+            "{netlist}"
+        );
+    }
+
+    /// The memristor emits the Xyce YMEMRISTOR element with a TEAM card.
+    #[test]
+    fn memristor_emits_ymemristor_and_team_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::Memristor, Point::origin()).with_name_value("MR1", ""),
+        ]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("YMEMRISTOR MR1 "))
+            .expect("memristor line");
+        assert!(line.ends_with(" mem_MR1"), "{netlist}");
+        assert!(
+            netlist.contains(".MODEL mem_MR1 MEMRISTOR (LEVEL=2 RON=50 ROFF=1k)"),
+            "{netlist}"
+        );
+    }
+
+    /// The RF port always carries Z0 (which also selects the port parse
+    /// branch); DC/AC excitation is appended only when set.
+    #[test]
+    fn rf_port_emits_port_element() {
+        let plain =
+            Component::new(1, ComponentType::RfPort, Point::origin()).with_name_value("P1", "");
+        let mut driven =
+            Component::new(2, ComponentType::RfPort, Point::new(200, 0)).with_name_value("P2", "");
+        driven.params = "port=2 z0=75 ac_mag=1".to_owned();
+        let netlist = netlist_for(vec![plain, driven]);
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("P1 ") && l.ends_with("PORT=1 Z0=50")),
+            "{netlist}"
+        );
+        assert!(
+            netlist
+                .lines()
+                .any(|l| l.starts_with("P2 ") && l.ends_with("PORT=2 Z0=75 AC 1")),
+            "{netlist}"
+        );
+    }
+
+    /// Substrate and thermal BJTs emit 4/5 nodes; the thermal variant
+    /// binds a native VBIC card so the dT terminal is solved.
+    #[test]
+    fn substrate_and_thermal_bjts_emit_extra_nodes() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::NpnBjt4, Point::origin()).with_name_value("Q1", ""),
+            Component::new(2, ComponentType::PnpBjt5, Point::new(200, 0)).with_name_value("Q2", ""),
+        ]);
+        let q1 = netlist
+            .lines()
+            .find(|l| l.starts_with("Q1 "))
+            .expect("4T bjt line");
+        assert_eq!(q1.split_whitespace().count(), 6, "{netlist}");
+        assert!(netlist.contains(".MODEL npn_Q1 NPN (BF=100"), "{netlist}");
+        let q2 = netlist
+            .lines()
+            .find(|l| l.starts_with("Q2 "))
+            .expect("5T bjt line");
+        assert_eq!(q2.split_whitespace().count(), 7, "{netlist}");
+        assert!(
+            netlist.contains(".MODEL pnp_Q2 PNP (LEVEL=4 IS=1e-16 RTH=50)"),
+            "{netlist}"
+        );
+    }
+
+    /// SOI MOSFETs emit five nodes with a partially-depleted BSIMSOI card.
+    #[test]
+    fn soi_mosfet_emits_five_nodes_and_bsimsoi_card() {
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::NmosSoi, Point::origin()).with_name_value("M1", ""),
+        ]);
+        let line = netlist
+            .lines()
+            .find(|l| l.starts_with("M1 "))
+            .expect("soi line");
+        assert_eq!(line.split_whitespace().count(), 7, "{netlist}");
+        assert!(line.ends_with(" nmossoi_M1"), "{netlist}");
+        assert!(
+            netlist.contains(".MODEL nmossoi_M1 NMOS (LEVEL=57 RBODY=1)"),
+            "{netlist}"
+        );
+    }
+
+    /// A placed K coupling references its windings by name.
+    #[test]
+    fn placed_k_coupling_emits_coupling_line() {
+        let mut coupling = Component::new(3, ComponentType::CoupledInductor, Point::new(400, 0))
+            .with_name_value("K1", "0.9");
+        coupling.params = "inductors=\"L1 L2\"".to_owned();
+        let netlist = netlist_for(vec![
+            Component::new(1, ComponentType::Inductor, Point::origin()).with_name_value("L1", "1u"),
+            Component::new(2, ComponentType::Inductor, Point::new(200, 0))
+                .with_name_value("L2", "1u"),
+            coupling,
+        ]);
+        assert!(
+            netlist.lines().any(|l| l.trim() == "K1 L1 L2 0.9"),
+            "{netlist}"
+        );
+    }
+
     /// A floating label warns instead of silently vanishing.
     #[test]
     fn floating_label_warns() {

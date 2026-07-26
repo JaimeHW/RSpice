@@ -9,6 +9,13 @@ impl PropertyRegistry {
         let pmos = self.create_mosfet_sheet("M1", "pmos");
         self.sheets.insert(ComponentType::Pmos, pmos);
 
+        // SOI devices share the MOSFET instance parameter set; the SOI
+        // physics (SOIMOD, body tie, self-heating) ride on the model card.
+        let nmos_soi = self.create_mosfet_sheet("M1", "nmossoi");
+        self.sheets.insert(ComponentType::NmosSoi, nmos_soi);
+        let pmos_soi = self.create_mosfet_sheet("M1", "pmossoi");
+        self.sheets.insert(ComponentType::PmosSoi, pmos_soi);
+
         self.register_vdmos();
     }
 

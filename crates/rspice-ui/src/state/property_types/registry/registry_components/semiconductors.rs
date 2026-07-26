@@ -3,6 +3,7 @@ use super::*;
 mod bjt;
 mod diode;
 mod jfet;
+mod mesfet;
 mod mosfet;
 
 fn symbol_variant_property(
@@ -36,5 +37,8 @@ impl PropertyRegistry {
 
         // JFET (NJFET/PJFET)
         self.register_jfet();
+
+        // MESFET/HFET (Z element)
+        self.register_mesfet();
     }
 }

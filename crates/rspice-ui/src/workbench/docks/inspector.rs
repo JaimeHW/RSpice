@@ -306,14 +306,26 @@ fn explicit_component_model(component: &Component) -> Option<String> {
     match component.kind {
         ComponentType::NpnBjt
         | ComponentType::PnpBjt
+        | ComponentType::NpnBjt4
+        | ComponentType::PnpBjt4
+        | ComponentType::NpnBjt5
+        | ComponentType::PnpBjt5
         | ComponentType::VSwitch
+        | ComponentType::ISwitch
         | ComponentType::Diode
         | ComponentType::Nmos
         | ComponentType::Pmos
         | ComponentType::NVdmos
         | ComponentType::PVdmos
+        | ComponentType::NmosSoi
+        | ComponentType::PmosSoi
         | ComponentType::Njfet
-        | ComponentType::Pjfet => param_model
+        | ComponentType::Pjfet
+        | ComponentType::Nmesfet
+        | ComponentType::Pmesfet
+        | ComponentType::Memristor
+        | ComponentType::LossyTransmissionLine
+        | ComponentType::CoupledTransmissionLine => param_model
             .or((!value_model.is_empty()).then_some(value_model))
             .map(str::to_owned),
         // The saturable inductor's value field is the inductance, so only
@@ -329,13 +341,29 @@ fn generated_inline_model(component: &Component) -> Option<String> {
         ComponentType::Pmos => "pmos",
         ComponentType::NVdmos => "nvdmos",
         ComponentType::PVdmos => "pvdmos",
-        ComponentType::NpnBjt => "npn",
-        ComponentType::PnpBjt => "pnp",
+        ComponentType::NmosSoi => "nmossoi",
+        ComponentType::PmosSoi => "pmossoi",
+        ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => "npn",
+        ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => "pnp",
         ComponentType::Njfet => "njf",
         ComponentType::Pjfet => "pjf",
+        ComponentType::Nmesfet => "nmf",
+        ComponentType::Pmesfet => "pmf",
         ComponentType::VSwitch => "sw",
+        ComponentType::ISwitch => "isw",
         ComponentType::Diode => "d",
         ComponentType::SaturableInductor => "core",
+        ComponentType::Memristor => "mem",
+        ComponentType::CoupledTransmissionLine => "cpl",
+        ComponentType::LossyTransmissionLine => {
+            let params = crate::properties::parse_params_string(&component.params);
+            let kind = if params.get("kind").is_some_and(|kind| kind == "txl") {
+                "txl"
+            } else {
+                "ltra"
+            };
+            return Some(format!("{kind}_{}", component.name));
+        }
         kind if kind.spice_prefix() == "A" => return Some(format!("{}_model", component.name)),
         _ => return None,
     };

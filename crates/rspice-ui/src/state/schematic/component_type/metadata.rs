@@ -10,13 +10,24 @@ impl ComponentType {
             ComponentType::Transformer => "T",
             ComponentType::CoupledInductor => "K",
             ComponentType::Diode => "D",
-            ComponentType::NpnBjt | ComponentType::PnpBjt => "Q",
+            ComponentType::NpnBjt
+            | ComponentType::PnpBjt
+            | ComponentType::NpnBjt4
+            | ComponentType::PnpBjt4
+            | ComponentType::NpnBjt5
+            | ComponentType::PnpBjt5 => "Q",
             ComponentType::Nmos
             | ComponentType::Pmos
             | ComponentType::NVdmos
-            | ComponentType::PVdmos => "M",
+            | ComponentType::PVdmos
+            | ComponentType::NmosSoi
+            | ComponentType::PmosSoi => "M",
             ComponentType::Njfet | ComponentType::Pjfet => "J",
+            ComponentType::Nmesfet | ComponentType::Pmesfet => "Z",
             ComponentType::SaturableInductor => "L",
+            // The Xyce element keyword is YMEMRISTOR; the designator uses a
+            // distinct MR prefix and the emitter writes the full form.
+            ComponentType::Memristor => "MR",
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc
             | ComponentType::VoltageSourcePulse
@@ -37,7 +48,11 @@ impl ComponentType {
             ComponentType::Cccs => "F",
             ComponentType::BehavioralSource => "B",
             ComponentType::VSwitch => "S",
+            ComponentType::ISwitch => "W",
             ComponentType::TransmissionLine => "T",
+            ComponentType::LossyTransmissionLine => "O",
+            ComponentType::CoupledTransmissionLine => "P",
+            ComponentType::RfPort => "P",
             ComponentType::Ground => "",
             ComponentType::Port => "",
             ComponentType::CellInstance => "X",
@@ -109,13 +124,22 @@ impl ComponentType {
             ComponentType::Diode => "Diode",
             ComponentType::NpnBjt => "NPN BJT",
             ComponentType::PnpBjt => "PNP BJT",
+            ComponentType::NpnBjt4 => "NPN BJT 4T",
+            ComponentType::PnpBjt4 => "PNP BJT 4T",
+            ComponentType::NpnBjt5 => "NPN BJT 5T",
+            ComponentType::PnpBjt5 => "PNP BJT 5T",
             ComponentType::Nmos => "NMOS",
             ComponentType::Pmos => "PMOS",
             ComponentType::Njfet => "N-JFET",
             ComponentType::Pjfet => "P-JFET",
+            ComponentType::Nmesfet => "N-MESFET",
+            ComponentType::Pmesfet => "P-MESFET",
             ComponentType::NVdmos => "N-VDMOS",
             ComponentType::PVdmos => "P-VDMOS",
+            ComponentType::NmosSoi => "NMOS SOI",
+            ComponentType::PmosSoi => "PMOS SOI",
             ComponentType::SaturableInductor => "Saturable L",
+            ComponentType::Memristor => "Memristor",
             ComponentType::VoltageSource => "V DC",
             ComponentType::CurrentSource => "I DC",
             ComponentType::VoltageSourceAc => "V AC",
@@ -137,7 +161,11 @@ impl ComponentType {
             ComponentType::Cccs => "CCCS (F)",
             ComponentType::BehavioralSource => "Behavioral Source",
             ComponentType::VSwitch => "V-Switch (S)",
+            ComponentType::ISwitch => "I-Switch (W)",
             ComponentType::TransmissionLine => "Transmission Line",
+            ComponentType::LossyTransmissionLine => "Lossy T-Line",
+            ComponentType::CoupledTransmissionLine => "Coupled T-Line",
+            ComponentType::RfPort => "RF Port",
             ComponentType::Ground => "Ground",
             ComponentType::Port => "Port",
             ComponentType::CellInstance => "Cell Instance",
@@ -173,6 +201,8 @@ impl ComponentType {
             // The Jiles-Atherton path requires a positive inductance target.
             ComponentType::SaturableInductor => "1m",
             ComponentType::Transformer => "1m",
+            // K element coefficient; the winding names come from properties.
+            ComponentType::CoupledInductor => "0.99",
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc
             | ComponentType::VoltageSourcePulse

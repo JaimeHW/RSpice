@@ -10,17 +10,26 @@ impl ComponentType {
             ComponentType::CellInstance => 2,
             ComponentType::Transformer => 4,
             ComponentType::NpnBjt | ComponentType::PnpBjt => 3,
-            ComponentType::Njfet | ComponentType::Pjfet => 3,
+            ComponentType::NpnBjt4 | ComponentType::PnpBjt4 => 4,
+            ComponentType::NpnBjt5 | ComponentType::PnpBjt5 => 5,
+            ComponentType::Njfet
+            | ComponentType::Pjfet
+            | ComponentType::Nmesfet
+            | ComponentType::Pmesfet => 3,
             ComponentType::OpAmp => 3,
             ComponentType::Nmos
             | ComponentType::Pmos
             | ComponentType::NVdmos
             | ComponentType::PVdmos => 4,
+            ComponentType::NmosSoi | ComponentType::PmosSoi => 5,
             ComponentType::Vcvs
             | ComponentType::Vccs
             | ComponentType::Ccvs
             | ComponentType::Cccs => 4,
-            ComponentType::VSwitch | ComponentType::TransmissionLine => 4,
+            ComponentType::VSwitch
+            | ComponentType::TransmissionLine
+            | ComponentType::LossyTransmissionLine => 4,
+            ComponentType::CoupledTransmissionLine => 6,
             ComponentType::CoupledInductor => 0,
             ComponentType::XspiceSummer
             | ComponentType::XspiceMultiplier
@@ -96,14 +105,62 @@ impl ComponentType {
                 ("S", Point { x: 20, y: 40 }),
                 ("B", Point { x: 20, y: 0 }),
             ],
-            ComponentType::Njfet | ComponentType::Pjfet => &[
+            ComponentType::Njfet
+            | ComponentType::Pjfet
+            | ComponentType::Nmesfet
+            | ComponentType::Pmesfet => &[
                 ("D", Point { x: 20, y: -40 }),
                 ("G", Point { x: -20, y: 0 }),
                 ("S", Point { x: 20, y: 40 }),
             ],
+            // (40, 80): substrate mid-right like the MOS bulk pin, thermal
+            // node at the lower-left corner. Order == Q-element node order.
+            ComponentType::NpnBjt4 => &[
+                ("C", Point { x: 20, y: -40 }),
+                ("B", Point { x: -20, y: 0 }),
+                ("E", Point { x: 20, y: 40 }),
+                ("S", Point { x: 20, y: 0 }),
+            ],
+            ComponentType::PnpBjt4 => &[
+                ("C", Point { x: 20, y: 40 }),
+                ("B", Point { x: -20, y: 0 }),
+                ("E", Point { x: 20, y: -40 }),
+                ("S", Point { x: 20, y: 0 }),
+            ],
+            ComponentType::NpnBjt5 => &[
+                ("C", Point { x: 20, y: -40 }),
+                ("B", Point { x: -20, y: 0 }),
+                ("E", Point { x: 20, y: 40 }),
+                ("S", Point { x: 20, y: 0 }),
+                ("dT", Point { x: -20, y: 40 }),
+            ],
+            ComponentType::PnpBjt5 => &[
+                ("C", Point { x: 20, y: 40 }),
+                ("B", Point { x: -20, y: 0 }),
+                ("E", Point { x: 20, y: -40 }),
+                ("S", Point { x: 20, y: 0 }),
+                ("dT", Point { x: -20, y: 40 }),
+            ],
+            // (40, 80): SOI M-element order D G S E(back gate) P(body tie).
+            ComponentType::NmosSoi | ComponentType::PmosSoi => &[
+                ("D", Point { x: 20, y: -40 }),
+                ("G", Point { x: -20, y: 0 }),
+                ("S", Point { x: 20, y: 40 }),
+                ("E", Point { x: 20, y: 0 }),
+                ("P", Point { x: -20, y: 40 }),
+            ],
             // (40, 20): hw 20
-            ComponentType::SaturableInductor => {
+            ComponentType::SaturableInductor | ComponentType::Memristor => {
                 &[("+", Point { x: -20, y: 0 }), ("-", Point { x: 20, y: 0 })]
+            }
+            // (40, 20): switch path left/right; the sensed current is a
+            // named V source, so there are no control pins.
+            ComponentType::ISwitch => {
+                &[("1", Point { x: -20, y: 0 }), ("2", Point { x: 20, y: 0 })]
+            }
+            // (28, 40): vertical two-pin port like a source.
+            ComponentType::RfPort => {
+                &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })]
             }
             // (40, 40): hw 20, hh/2 10
             ComponentType::Vcvs
@@ -129,11 +186,21 @@ impl ComponentType {
                 ("c-", Point { x: 0, y: 20 }),
             ],
             // (60, 40): hw 30, hh/2 10 — port a left, port b right
-            ComponentType::TransmissionLine => &[
+            ComponentType::TransmissionLine | ComponentType::LossyTransmissionLine => &[
                 ("a+", Point { x: -30, y: -10 }),
                 ("a-", Point { x: -30, y: 10 }),
                 ("b+", Point { x: 30, y: -10 }),
                 ("b-", Point { x: 30, y: 10 }),
+            ],
+            // (60, 60): CPL P-element node order — near conductors then the
+            // shared near reference, far conductors then the far reference.
+            ComponentType::CoupledTransmissionLine => &[
+                ("a1", Point { x: -30, y: -20 }),
+                ("a2", Point { x: -30, y: 0 }),
+                ("ar", Point { x: -30, y: 20 }),
+                ("b1", Point { x: 30, y: -20 }),
+                ("b2", Point { x: 30, y: 0 }),
+                ("br", Point { x: 30, y: 20 }),
             ],
             ComponentType::CoupledInductor => &[],
             // (60, 40): hw 30
@@ -230,22 +297,34 @@ impl ComponentType {
             ComponentType::Port => (20, 20),
             ComponentType::CellInstance => (60, 40),
             ComponentType::Diode => (40, 20),
-            ComponentType::NpnBjt | ComponentType::PnpBjt => (40, 80),
+            ComponentType::NpnBjt
+            | ComponentType::PnpBjt
+            | ComponentType::NpnBjt4
+            | ComponentType::PnpBjt4
+            | ComponentType::NpnBjt5
+            | ComponentType::PnpBjt5 => (40, 80),
             ComponentType::Nmos
             | ComponentType::Pmos
             | ComponentType::Njfet
             | ComponentType::Pjfet
+            | ComponentType::Nmesfet
+            | ComponentType::Pmesfet
             | ComponentType::NVdmos
-            | ComponentType::PVdmos => (40, 80),
-            ComponentType::SaturableInductor => (40, 20),
+            | ComponentType::PVdmos
+            | ComponentType::NmosSoi
+            | ComponentType::PmosSoi => (40, 80),
+            ComponentType::SaturableInductor | ComponentType::Memristor => (40, 20),
+            ComponentType::ISwitch => (40, 20),
+            ComponentType::RfPort => (28, 40),
             ComponentType::Vcvs
             | ComponentType::Vccs
             | ComponentType::Ccvs
             | ComponentType::Cccs => (40, 40),
             ComponentType::OpAmp => (40, 40),
             ComponentType::VSwitch => (40, 40),
-            ComponentType::TransmissionLine => (60, 40),
-            ComponentType::CoupledInductor => (0, 0),
+            ComponentType::TransmissionLine | ComponentType::LossyTransmissionLine => (60, 40),
+            ComponentType::CoupledTransmissionLine => (60, 60),
+            ComponentType::CoupledInductor => (40, 20),
             ComponentType::XspiceGain
             | ComponentType::XspiceSummer
             | ComponentType::XspiceMultiplier
@@ -296,12 +375,20 @@ mod tests {
         ComponentType::CurrentSourceNoise,
         ComponentType::NpnBjt,
         ComponentType::PnpBjt,
+        ComponentType::NpnBjt4,
+        ComponentType::PnpBjt4,
+        ComponentType::NpnBjt5,
+        ComponentType::PnpBjt5,
         ComponentType::Nmos,
         ComponentType::Pmos,
         ComponentType::Njfet,
         ComponentType::Pjfet,
+        ComponentType::Nmesfet,
+        ComponentType::Pmesfet,
         ComponentType::NVdmos,
         ComponentType::PVdmos,
+        ComponentType::NmosSoi,
+        ComponentType::PmosSoi,
         ComponentType::Vcvs,
         ComponentType::Vccs,
         ComponentType::Ccvs,
@@ -309,7 +396,12 @@ mod tests {
         ComponentType::OpAmp,
         ComponentType::BehavioralSource,
         ComponentType::VSwitch,
+        ComponentType::ISwitch,
         ComponentType::TransmissionLine,
+        ComponentType::LossyTransmissionLine,
+        ComponentType::CoupledTransmissionLine,
+        ComponentType::RfPort,
+        ComponentType::Memristor,
         ComponentType::CoupledInductor,
         ComponentType::CellInstance,
         ComponentType::Ground,

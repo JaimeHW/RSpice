@@ -8,9 +8,13 @@ impl ComponentType {
             ComponentType::Resistor
                 | ComponentType::Capacitor
                 | ComponentType::Inductor
+                | ComponentType::SaturableInductor
                 | ComponentType::Transformer
                 | ComponentType::CoupledInductor
                 | ComponentType::TransmissionLine
+                | ComponentType::LossyTransmissionLine
+                | ComponentType::CoupledTransmissionLine
+                | ComponentType::Memristor
         )
     }
 
@@ -21,12 +25,20 @@ impl ComponentType {
             ComponentType::Diode
                 | ComponentType::NpnBjt
                 | ComponentType::PnpBjt
+                | ComponentType::NpnBjt4
+                | ComponentType::PnpBjt4
+                | ComponentType::NpnBjt5
+                | ComponentType::PnpBjt5
                 | ComponentType::Nmos
                 | ComponentType::Pmos
                 | ComponentType::Njfet
                 | ComponentType::Pjfet
+                | ComponentType::Nmesfet
+                | ComponentType::Pmesfet
                 | ComponentType::NVdmos
                 | ComponentType::PVdmos
+                | ComponentType::NmosSoi
+                | ComponentType::PmosSoi
         )
     }
 

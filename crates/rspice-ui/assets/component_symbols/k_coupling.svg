@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- K coupling annotation (no pins): two facing windings across a core
+     with polarity dots. Box 40x20. References inductor instances by
+     name via its properties. -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 15,1.5 A 3,3 0 0 0 15,7.5 A 3,3 0 0 0 15,13.5 A 3,3 0 0 0 15,19.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 25,1.5 A 3,3 0 0 1 25,7.5 A 3,3 0 0 1 25,13.5 A 3,3 0 0 1 25,19.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 19,2 V 19" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 21,2 V 19" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 11.5,2 l 1.2,1.2 -1.2,1.2 -1.2,-1.2 Z" fill="#000000" stroke="none"/>
+  <path d="M 28.5,2 l 1.2,1.2 -1.2,1.2 -1.2,-1.2 Z" fill="#000000" stroke="none"/>
+</svg>

@@ -3,6 +3,7 @@ use super::*;
 mod current_bias;
 mod current_transient;
 mod ground;
+mod rf_port;
 mod shared;
 mod voltage_bias;
 mod voltage_transient;
@@ -25,6 +26,7 @@ impl PropertyRegistry {
         self.register_isource_exp();
         self.register_isource_noise();
 
+        self.register_rf_port();
         self.register_ground();
     }
 }

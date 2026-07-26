@@ -329,47 +329,45 @@ impl PropertyRegistry {
                 .with_order(1)
                 .with_category("DC"),
         );
+        // TRNOISE(NA NT NALPHA NAMP): the transient-noise spec the deck
+        // actually carries. NT must be positive whenever NA or NAMP is
+        // nonzero; 1/f injection needs 0 < NALPHA < 2.
         sheet.add(
-            PropertyDefinition::new("noise_type")
-                .with_display_name("Noise Type")
-                .with_description("Type of noise source")
-                .with_type(PropertyType::Enum)
-                .with_default(PropertyValue::enumeration(
-                    "white",
-                    vec![
-                        "white".to_string(),
-                        "flicker".to_string(),
-                        "shot".to_string(),
-                    ],
-                ))
+            PropertyDefinition::new("na")
+                .with_display_name("White RMS Amplitude")
+                .with_description("Gaussian white-noise RMS amplitude (0 disables)")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression("1n"))
+                .with_unit("A")
                 .with_order(10)
                 .with_category("Noise"),
         );
         sheet.add(
-            PropertyDefinition::new("noiseval")
-                .with_display_name("Noise Value")
-                .with_description("Noise spectral density (A²/Hz)")
+            PropertyDefinition::new("nt")
+                .with_display_name("Sample Interval")
+                .with_description("Noise sample timestep (must be > 0 when noise is enabled)")
                 .with_type(PropertyType::Expression)
-                .with_default(PropertyValue::number(1e-24))
-                .with_unit("A²/Hz")
+                .with_default(PropertyValue::expression("1u"))
+                .with_unit("s")
                 .with_order(11)
                 .with_category("Noise"),
         );
         sheet.add(
-            PropertyDefinition::new("kf")
-                .with_display_name("Flicker Coeff (KF)")
-                .with_description("Flicker noise coefficient")
+            PropertyDefinition::new("nalpha")
+                .with_display_name("1/f Exponent")
+                .with_description("Flicker-noise exponent (0 < NALPHA < 2 when 1/f is enabled)")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_order(12)
                 .with_category("Noise"),
         );
         sheet.add(
-            PropertyDefinition::new("af")
-                .with_display_name("Flicker Exp (AF)")
-                .with_description("Flicker noise exponent")
-                .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(1.0))
+            PropertyDefinition::new("namp")
+                .with_display_name("1/f Amplitude")
+                .with_description("Flicker-noise amplitude (0 disables the 1/f term)")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("A")
                 .with_order(13)
                 .with_category("Noise"),
         );
