@@ -200,12 +200,36 @@ impl PlotView {
     }
 }
 
+/// The A│B cursor tool: armed, a click on a plot places cursor A and then
+/// B; disarmed, plots ignore cursor clicks and the readout strip stands
+/// down, so the tool state and what is on screen can never disagree.
+///
+/// Armed by default — placing a cursor is the first thing anyone does with
+/// a waveform, and an unarmed default would read as a dead plot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorTool(bool);
+
+impl Default for CursorTool {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+impl CursorTool {
+    /// `true` when plot clicks place cursors.
+    pub const fn is_armed(self) -> bool {
+        self.0
+    }
+}
+
 /// Per-session results-workspace state. Only the viewer selection persists;
 /// caches and cursors are transient.
 #[derive(Debug, Clone, Default)]
 pub struct ResultsState {
     /// Active viewer tab.
     pub viewer: ResultViewer,
+    /// The A│B cursor tool.
+    pub cursor_tool: CursorTool,
     /// A/B cursors (data-space X of the strip they live on).
     pub cursors: CursorPair,
     /// Which strip (analysis index) the cursors were placed on.
@@ -314,6 +338,21 @@ impl ResultsState {
     pub fn clear_cursors(&mut self) {
         self.cursors.clear();
         self.cursor_strip = None;
+    }
+
+    /// Arm or disarm the A│B tool. Disarming clears the pair, because a
+    /// cursor nobody can move or read is not a cursor.
+    pub fn toggle_cursor_tool(&mut self) {
+        self.cursor_tool = CursorTool(!self.cursor_tool.is_armed());
+        if !self.cursor_tool.is_armed() {
+            self.clear_cursors();
+        }
+    }
+
+    /// `true` when the cursor readout has something to say: the tool is
+    /// armed and at least cursor A is placed.
+    pub fn cursor_readout_active(&self) -> bool {
+        self.cursor_tool.is_armed() && self.cursors.any()
     }
 
     pub fn toggle_linked_cursors(&mut self) {
@@ -780,7 +819,31 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if plan_after_docbar != plan_before_docbar {
         app.invalidate_simulation_preflight();
     }
-    show_viewer_well(ui, app);
+
+    // The stage bottom holds at most one thin, single-purpose readout strip.
+    // It is content-fit, so a stage with nothing to read out gives the whole
+    // area back to the document.
+    let strip_height = readout_strip_height(&app.state);
+    let available = ui.available_rect_before_wrap();
+    let well_height = (available.height() - strip_height).max(0.0);
+    ui.allocate_ui(egui::vec2(available.width(), well_height), |ui| {
+        ui.set_min_height(well_height);
+        show_viewer_well(ui, app);
+    });
+    if strip_height > 0.0 {
+        waves::readout_strip(ui, &mut app.state, strip_height);
+    }
+}
+
+/// Height of the stage's readout strip for the active viewer, or zero.
+///
+/// Only the cursor-bearing waveform viewers carry a readout; structured
+/// documents (OP, specs, tables) have no cursor to report.
+fn readout_strip_height(state: &AppState) -> f32 {
+    match state.ui.results.viewer {
+        ResultViewer::Waves => waves::readout_strip_height(state),
+        _ => 0.0,
+    }
 }
 
 pub(crate) fn viewer_is_available(state: &AppState, viewer: ResultViewer) -> bool {
@@ -990,12 +1053,17 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
                     results.hidden_strips.clear();
                 }
             }
-            let on = results.cursors.any();
-            if chip(ui, "cursors A/B", on)
-                .on_hover_text("Click a plot to place A, click again for B; Esc clears")
-                .clicked()
-            {
-                results.clear_cursors();
+            // A│B is a tool, not a clear button: it arms plot clicks and
+            // owns whether the readout strip is on screen at all.
+            let armed = results.cursor_tool.is_armed();
+            let response = chip(ui, "A│B", armed).on_hover_text(if armed {
+                "Cursor tool armed — click a plot to place A, again for B; Esc clears"
+            } else {
+                "Cursor tool off — plots ignore cursor clicks"
+            });
+            response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, armed, "A│B"));
+            if response.clicked() {
+                results.toggle_cursor_tool();
             }
             let linked_label = "Linked A/B cursors";
             let linked = results.linked_cursors;
