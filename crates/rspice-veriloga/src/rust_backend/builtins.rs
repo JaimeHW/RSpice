@@ -467,9 +467,26 @@ fn build_generated_manifest(
     generated_root: &Path,
     source_tree_digest: String,
     generator_digest: String,
-    devices: Vec<GeneratedBuiltinManifestDevice>,
+    mut devices: Vec<GeneratedBuiltinManifestDevice>,
 ) -> BuiltinResult<GeneratedBuiltinManifest> {
     let output = generated_output_fingerprint(generated_root)?;
+    for device in &mut devices {
+        let prefix = format!("{}/", device.folder_name);
+        let mut file_count = 0usize;
+        let mut source_bytes = 0u64;
+        for file in output
+            .files
+            .iter()
+            .filter(|file| file.relative_path.starts_with(&prefix))
+        {
+            file_count += 1;
+            source_bytes = source_bytes
+                .checked_add(file.bytes)
+                .ok_or("generated device output byte count overflowed u64")?;
+        }
+        device.file_count = file_count;
+        device.source_bytes = source_bytes;
+    }
     Ok(GeneratedBuiltinManifest {
         schema_version: GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION,
         source_tree_digest,
@@ -706,6 +723,8 @@ fn generated_workspace_resources(
     let variable_count = parse_generated_usize_const(state, "VARIABLE_COUNT")?;
     let node_count = parse_generated_usize_const(state, "NODE_COUNT")?;
     let branch_count = parse_generated_usize_const(state, "BRANCH_COUNT")?;
+    let ddt_state_count = parse_generated_usize_const(state, "DDT_STATE_COUNT")?;
+    let idt_state_count = parse_generated_usize_const(state, "IDT_STATE_COUNT")?;
     let uses_transient = stamp.contains("&TRANSIENT_SCRATCH_POOL");
     let uses_reactive = stamp.contains("&REACTIVE_SCRATCH_POOL");
     let transient_active_node_rows = parse_optional_workspace_row_count(
@@ -760,6 +779,10 @@ fn generated_workspace_resources(
         .chain(reactive_packed)
         .try_fold(0u128, |total, bytes| total.checked_add(bytes))
         .ok_or("generated packed workspace resource estimate overflowed u128")?;
+    let stamp_state_payload = stamp_state_payload_bytes(ddt_state_count, idt_state_count);
+    let stamp_state_heap_allocations = u64::from(stamp_state_payload != 0);
+    let legacy_stamp_state_heap_allocations =
+        u64::from(ddt_state_count != 0) * 6 + u64::from(idt_state_count != 0) * 3;
 
     Ok(GeneratedBuiltinWorkspaceResources {
         abi_version: 2,
@@ -775,6 +798,12 @@ fn generated_workspace_resources(
             .map_err(|_| "generated packed workspace resource estimate exceeds u64")?,
         legacy_dense_workspace_payload_bytes_per_instance: u64::try_from(legacy_dense)
             .map_err(|_| "generated dense workspace resource estimate exceeds u64")?,
+        stamp_state_payload_bytes_per_instance: u64::try_from(stamp_state_payload)
+            .map_err(|_| "generated stamp-state resource estimate exceeds u64")?,
+        stamp_state_heap_allocations_per_instance: stamp_state_heap_allocations,
+        stamp_state_pointer_slots_per_instance: 1,
+        legacy_stamp_state_heap_allocations_per_instance: legacy_stamp_state_heap_allocations,
+        legacy_stamp_state_pointer_slots_per_instance: 9,
     })
 }
 
@@ -842,6 +871,13 @@ fn derivative_matrix_payload_bytes(
         + active_rows as u128 * axis_count as u128 * 8
         + axis_count as u128 * 8
         + 24
+}
+
+fn stamp_state_payload_bytes(ddt_state_count: usize, idt_state_count: usize) -> u128 {
+    let f64_bytes = (ddt_state_count as u128 * 5 + idt_state_count as u128 * 2) * 8;
+    let bool_bytes = ddt_state_count as u128 + idt_state_count as u128;
+    let bytes = f64_bytes + bool_bytes;
+    if bytes == 0 { 0 } else { (bytes + 7) & !7 }
 }
 
 fn transient_workspace_payload_bytes(
@@ -1433,6 +1469,8 @@ mod tests {
         let folder = root.join("fixture__fixture__12345678");
         fs::create_dir_all(&folder).expect("create generated fixture folder");
         fs::write(folder.join("stamp.rs"), "abc").expect("write generated fixture");
+        fs::write(folder.join(".rspice-veriloga-generated"), "marker")
+            .expect("write generated ownership marker");
         fs::write(root.join("registry.rs"), "registry").expect("write registry fixture");
         fs::write(root.join("kernel_runtime.rs"), "runtime").expect("write runtime fixture");
 
@@ -1457,7 +1495,9 @@ mod tests {
             manifest.schema_version,
             GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION
         );
-        assert_eq!(manifest.file_count, 3);
+        assert_eq!(manifest.file_count, 4);
+        assert_eq!(manifest.devices[0].file_count, 2);
+        assert_eq!(manifest.devices[0].source_bytes, 9);
         validate_generated_manifest_outputs(&root, &manifest)
             .expect("fresh generated output authenticates");
 
@@ -1590,6 +1630,8 @@ mod tests {
                     "pub const VARIABLE_COUNT: usize = 4;",
                     "pub const NODE_COUNT: usize = 2;",
                     "pub const BRANCH_COUNT: usize = 1;",
+                    "pub const DDT_STATE_COUNT: usize = 2;",
+                    "pub const IDT_STATE_COUNT: usize = 1;",
                 ]
                 .join("\n"),
             },
@@ -1619,6 +1661,14 @@ mod tests {
             resources.legacy_dense_workspace_payload_bytes_per_instance,
             464
         );
+        assert_eq!(resources.stamp_state_payload_bytes_per_instance, 104);
+        assert_eq!(resources.stamp_state_heap_allocations_per_instance, 1);
+        assert_eq!(resources.stamp_state_pointer_slots_per_instance, 1);
+        assert_eq!(
+            resources.legacy_stamp_state_heap_allocations_per_instance,
+            9
+        );
+        assert_eq!(resources.legacy_stamp_state_pointer_slots_per_instance, 9);
     }
 
     #[test]

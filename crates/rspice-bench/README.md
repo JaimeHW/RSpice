@@ -58,7 +58,7 @@ target/release/rspice-bench gen
 
 ### `rspice-bench generated-rust`
 
-This deterministic gate reads the v2 generator manifest, authenticates every
+This deterministic gate reads the v3 generator manifest, authenticates every
 generated file, and reports total source bytes/lines, noise-source bytes,
 category totals, and the largest files and models. Optional limits turn each
 metric into a non-zero-exit release budget.
@@ -71,6 +71,7 @@ metric into a non-zero-exit release budget.
 | `--max-model-source-bytes <N>` | unset | Maximum source bytes for any one generated model |
 | `--max-file-count <N>` | unset | Maximum generated-file count |
 | `--max-pooled-workspace-payload-bytes <N>` | unset | Maximum pooled scratch-workspace payload for any model on one worker thread |
+| `--max-stamp-state-payload-bytes <N>` | unset | Maximum persistent DDT/IDT stamp-state payload for any model instance |
 | `--top <N>` | 20 | Largest files and models retained in output |
 | `--out <PATH>` | unset | Optional deterministic JSON report |
 

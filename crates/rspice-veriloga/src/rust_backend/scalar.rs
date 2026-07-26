@@ -96,12 +96,12 @@ impl ScalarStaticCache {
                 OptValueType::Real => {
                     let slot = f64_count;
                     f64_count += 1;
-                    format!("self.scalar_static_f64[{slot}]")
+                    format!("self.scalar_static.f64_values[{slot}]")
                 }
                 OptValueType::Boolean => {
                     let slot = bool_count;
                     bool_count += 1;
-                    format!("self.scalar_static_bool[{slot}]")
+                    format!("self.scalar_static.bool_values[{slot}]")
                 }
             };
             refs.insert(*value_id, reference);
@@ -132,6 +132,10 @@ impl ScalarStaticCache {
         !self.temperature_values.is_empty()
     }
 
+    pub(super) fn has_instance_values(&self) -> bool {
+        !self.instance_values.is_empty()
+    }
+
     fn has_f64_values(&self) -> bool {
         self.f64_count > 0
     }
@@ -159,9 +163,11 @@ fn scalar_static_cache_refs_for_stamp(
         .refs
         .iter()
         .map(|(value, reference)| {
-            let reference = if let Some(suffix) = reference.strip_prefix("self.scalar_static_f64") {
+            let reference = if let Some(suffix) =
+                reference.strip_prefix("self.scalar_static.f64_values")
+            {
                 format!("sf{suffix}")
-            } else if let Some(suffix) = reference.strip_prefix("self.scalar_static_bool") {
+            } else if let Some(suffix) = reference.strip_prefix("self.scalar_static.bool_values") {
                 format!("sb{suffix}")
             } else {
                 reference.clone()
@@ -176,10 +182,10 @@ fn emit_scalar_static_cache_aliases(static_cache: &ScalarStaticCache, out: &mut 
         return;
     }
     if static_cache.has_f64_values() {
-        out.push_str("        let sf=&self.scalar_static_f64;\n");
+        out.push_str("        let sf=&self.scalar_static.f64_values;\n");
     }
     if static_cache.has_bool_values() {
-        out.push_str("        let sb=&self.scalar_static_bool;\n");
+        out.push_str("        let sb=&self.scalar_static.bool_values;\n");
     }
 }
 
@@ -573,6 +579,9 @@ fn generate_stamp_file(
         out.push_str("        let br=self.branches;\n");
         out.push_str("        let branches=br;\n");
     }
+    if static_cache.has_instance_values() {
+        out.push_str("        self.ensure_instance_static();\n");
+    }
     if static_cache.has_temperature_values() {
         out.push_str(
             "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
@@ -596,23 +605,24 @@ fn generate_stamp_file(
     out.push_str("        let multiplicity=m;\n");
     if ddt_slots.len() > 0 || has_idt_slots {
         out.push_str("        let timestep = self.timestep;\n");
+        out.push_str("        let stamp_state = self.stamp_state.as_mut();\n");
     }
     if ddt_slots.len() > 0 {
-        out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
-        out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
-        out.push_str("        let ddt_state_older = self.ddt_state_older.as_mut();\n");
-        out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str("        let ddt_state_current = &mut stamp_state.ddt_current;\n");
+        out.push_str("        let ddt_state_previous = &mut stamp_state.ddt_previous;\n");
+        out.push_str("        let ddt_state_older = &mut stamp_state.ddt_older;\n");
+        out.push_str("        let ddt_state_initialized = &mut stamp_state.ddt_initialized;\n");
         out.push_str(
-            "        let ddt_derivative_current = self.ddt_derivative_current.as_mut();\n",
+            "        let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;\n",
         );
         out.push_str(
-            "        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();\n",
+            "        let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;\n",
         );
     }
     if has_idt_slots {
-        out.push_str("        let idt_state_current = self.idt_state_current.as_mut();\n");
-        out.push_str("        let idt_state_previous = self.idt_state_previous.as_mut();\n");
-        out.push_str("        let idt_state_initialized = self.idt_state_initialized.as_mut();\n");
+        out.push_str("        let idt_state_current = &mut stamp_state.idt_current;\n");
+        out.push_str("        let idt_state_previous = &mut stamp_state.idt_previous;\n");
+        out.push_str("        let idt_state_initialized = &mut stamp_state.idt_initialized;\n");
     }
     if ddt_slots.len() > 0 || has_idt_slots {
         out.push_str("        let ddt_active = self.ddt_coefficients.active;\n");
@@ -695,6 +705,9 @@ fn generate_stamp_file(
         out.push_str("        let nodes=n;\n");
         out.push_str("        let br=self.branches;\n");
         out.push_str("        let branches=br;\n");
+        if static_cache.has_instance_values() {
+            out.push_str("        self.ensure_instance_static();\n");
+        }
         if static_cache.has_temperature_values() {
             out.push_str(
                 "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
@@ -1374,21 +1387,25 @@ pub(super) fn emit_shared_stamp_values_method(
         out.push_str("        let br=self.branches;\n");
         out.push_str("        let branches=br;\n");
     }
+    if static_cache.has_instance_values() {
+        out.push_str("        self.ensure_instance_static();\n");
+    }
     if static_cache.has_temperature_values() {
         out.push_str(
             "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
         );
     }
     if plan.contains_ddt {
-        out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
-        out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
-        out.push_str("        let ddt_state_older = self.ddt_state_older.as_mut();\n");
-        out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str("        let stamp_state = self.stamp_state.as_mut();\n");
+        out.push_str("        let ddt_state_current = &mut stamp_state.ddt_current;\n");
+        out.push_str("        let ddt_state_previous = &mut stamp_state.ddt_previous;\n");
+        out.push_str("        let ddt_state_older = &mut stamp_state.ddt_older;\n");
+        out.push_str("        let ddt_state_initialized = &mut stamp_state.ddt_initialized;\n");
         out.push_str(
-            "        let ddt_derivative_current = self.ddt_derivative_current.as_mut();\n",
+            "        let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;\n",
         );
         out.push_str(
-            "        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();\n",
+            "        let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;\n",
         );
         out.push_str("        let ddt_active = self.ddt_coefficients.active;\n");
         out.push_str("        let ddt_scale = self.ddt_coefficients.derivative_scale;\n");
@@ -1680,6 +1697,9 @@ pub(super) fn scalar_state_extensions(
     push_scalar_limit_state_fields(&mut extensions, limit_slots);
 
     if !static_cache.instance_values.is_empty() {
+        methods.push_str(
+            "\n    #[inline]\n    pub(super) fn ensure_instance_static(&mut self) {\n        if self.scalar_static.instance_dirty {\n            self.recompute_instance_static();\n        }\n    }\n",
+        );
         methods.push_str("\n    #[inline]\n");
         methods.push_str("    fn recompute_instance_static(&mut self) {\n");
         methods.push_str("        let p = &(*self.params);\n");
@@ -1703,13 +1723,11 @@ pub(super) fn scalar_state_extensions(
             })?;
             methods.push_str(&format!("        {target}={expr};\n"));
         }
+        methods.push_str("        self.scalar_static.instance_dirty = false;\n");
         methods.push_str("    }\n");
         extensions
-            .after_new
-            .push_str("        instance.recompute_instance_static();\n");
-        extensions
             .set_parameter_hook
-            .push_str("self.recompute_instance_static();\n");
+            .push_str("self.scalar_static.instance_dirty = true;\n");
     }
 
     if static_cache.has_temperature_values() {
@@ -1769,30 +1787,36 @@ fn push_scalar_limit_state_fields(
         return;
     }
     let count = limit_slots.len();
+    extensions.support_types.push_str(
+        "#[derive(Clone)]\npub(crate) struct ScalarLimitState<const N: usize> {\n    pub(crate) previous: [f64; N],\n    pub(crate) initialized: [bool; N],\n}\n\n",
+    );
+    extensions.support_types.push_str(
+        "impl<const N: usize> ScalarLimitState<N> {\n    fn new_box() -> Box<Self> {\n        let mut boxed = Box::<Self>::new_uninit();\n        unsafe {\n            // SAFETY: every field is an array of f64 or bool; all-zero bytes are valid values.\n            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n            boxed.assume_init()\n        }\n    }\n}\n\n",
+    );
     extensions.instance_fields.push_str(&format!(
-        "    pub(crate) scalar_limit_previous: Box<[f64; {count}]>,\n    pub(crate) scalar_limit_initialized: Box<[bool; {count}]>,\n    pub(crate) scalar_limit_active: bool,\n"
+        "    pub(crate) scalar_limit: Box<ScalarLimitState<{count}>>,\n    pub(crate) scalar_limit_active: bool,\n"
     ));
     extensions.clone_fields.push_str(
-        "            scalar_limit_previous: self.scalar_limit_previous.clone(),\n            scalar_limit_initialized: self.scalar_limit_initialized.clone(),\n            scalar_limit_active: self.scalar_limit_active,\n",
+        "            scalar_limit: self.scalar_limit.clone(),\n            scalar_limit_active: self.scalar_limit_active,\n",
     );
-    extensions.new_initializers.push_str(&format!(
-        "            scalar_limit_previous: boxed_zero_f64_array::<{count}>(),\n            scalar_limit_initialized: boxed_zero_bool_array::<{count}>(),\n            scalar_limit_active: false,\n"
-    ));
-    extensions.restore_destructure_fields.push_str(
-        "            scalar_limit_previous,\n            scalar_limit_initialized,\n            scalar_limit_active,\n",
+    extensions.new_initializers.push_str(
+        "            scalar_limit: ScalarLimitState::new_box(),\n            scalar_limit_active: false,\n",
     );
-    extensions.restore_initializers.push_str(
-        "            scalar_limit_previous,\n            scalar_limit_initialized,\n            scalar_limit_active,\n",
-    );
+    extensions
+        .restore_destructure_fields
+        .push_str("            scalar_limit,\n            scalar_limit_active,\n");
+    extensions
+        .restore_initializers
+        .push_str("            scalar_limit,\n            scalar_limit_active,\n");
     extensions.limiter_converged_expr = "!self.scalar_limit_active".to_string();
     extensions.checkpoint_capture_fields =
-        "            limiter_anchor: self.scalar_limit_previous.to_vec(),\n            limiter_initialized: self.scalar_limit_initialized.to_vec(),\n"
+        "            limiter_anchor: self.scalar_limit.previous.to_vec(),\n            limiter_initialized: self.scalar_limit.initialized.to_vec(),\n"
             .to_string();
     extensions.checkpoint_shape_checks.push_str(&format!(
         "        if state.limiter_anchor.len() != {count} || state.limiter_initialized.len() != {count} {{\n            return Err(format!(\"generated limiter checkpoint shape mismatch: expected {count}, found {{}} / {{}}\", state.limiter_anchor.len(), state.limiter_initialized.len()));\n        }}\n"
     ));
     extensions.checkpoint_restore_fields.push_str(
-        "        self.scalar_limit_previous.copy_from_slice(&state.limiter_anchor);\n        self.scalar_limit_initialized.copy_from_slice(&state.limiter_initialized);\n        self.scalar_limit_active = false;\n",
+        "        self.scalar_limit.previous.copy_from_slice(&state.limiter_anchor);\n        self.scalar_limit.initialized.copy_from_slice(&state.limiter_initialized);\n        self.scalar_limit_active = false;\n",
     );
 }
 
@@ -1810,44 +1834,31 @@ fn push_scalar_static_cache_state_fields(
     extensions: &mut device::StateFileExtensions,
     static_cache: &ScalarStaticCache,
 ) {
-    if static_cache.has_f64_values() {
-        extensions.instance_fields.push_str(&format!(
-            "    pub(crate) scalar_static_f64: Box<[f64; {}]>,\n",
-            static_cache.f64_count
-        ));
-        extensions
-            .clone_fields
-            .push_str("            scalar_static_f64: self.scalar_static_f64.clone(),\n");
-        extensions.new_initializers.push_str(&format!(
-            "            scalar_static_f64: boxed_zero_f64_array::<{}>(),\n",
-            static_cache.f64_count
-        ));
-        extensions
-            .restore_destructure_fields
-            .push_str("            scalar_static_f64,\n");
-        extensions
-            .restore_initializers
-            .push_str("            scalar_static_f64,\n");
+    if static_cache.is_empty() {
+        return;
     }
-    if static_cache.has_bool_values() {
-        extensions.instance_fields.push_str(&format!(
-            "    pub(crate) scalar_static_bool: Box<[bool; {}]>,\n",
-            static_cache.bool_count
-        ));
-        extensions
-            .clone_fields
-            .push_str("            scalar_static_bool: self.scalar_static_bool.clone(),\n");
-        extensions.new_initializers.push_str(&format!(
-            "            scalar_static_bool: boxed_zero_bool_array::<{}>(),\n",
-            static_cache.bool_count
-        ));
-        extensions
-            .restore_destructure_fields
-            .push_str("            scalar_static_bool,\n");
-        extensions
-            .restore_initializers
-            .push_str("            scalar_static_bool,\n");
-    }
+    extensions.support_types.push_str(
+        "#[derive(Clone)]\npub(crate) struct ScalarStaticState<const F64_COUNT: usize, const BOOL_COUNT: usize> {\n    pub(crate) f64_values: [f64; F64_COUNT],\n    pub(crate) bool_values: [bool; BOOL_COUNT],\n    pub(crate) instance_dirty: bool,\n}\n\n",
+    );
+    extensions.support_types.push_str(
+        "impl<const F64_COUNT: usize, const BOOL_COUNT: usize> ScalarStaticState<F64_COUNT, BOOL_COUNT> {\n    fn new_box() -> Box<Self> {\n        let mut boxed = Box::<Self>::new_uninit();\n        unsafe {\n            // SAFETY: every field is an array of f64 or bool, plus bool; all-zero bytes are valid values.\n            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n            let mut boxed = boxed.assume_init();\n            boxed.instance_dirty = true;\n            boxed\n        }\n    }\n}\n\n",
+    );
+    extensions.instance_fields.push_str(&format!(
+        "    pub(crate) scalar_static: Box<ScalarStaticState<{}, {}>>,\n",
+        static_cache.f64_count, static_cache.bool_count
+    ));
+    extensions
+        .clone_fields
+        .push_str("            scalar_static: self.scalar_static.clone(),\n");
+    extensions
+        .new_initializers
+        .push_str("            scalar_static: ScalarStaticState::new_box(),\n");
+    extensions
+        .restore_destructure_fields
+        .push_str("            scalar_static,\n");
+    extensions
+        .restore_initializers
+        .push_str("            scalar_static,\n");
 }
 
 fn push_temperature_cache_state_fields(extensions: &mut device::StateFileExtensions) {
@@ -3553,7 +3564,7 @@ fn emit_value_expr(
                         )
                     })?;
                     format!(
-                        "if ctx.limiting_enabled(){{if self.scalar_limit_initialized[{slot}]{{self.scalar_limit_previous[{slot}]}}else{{{proposed}}}}}else{{{proposed}}}"
+                        "if ctx.limiting_enabled(){{if self.scalar_limit.initialized[{slot}]{{self.scalar_limit.previous[{slot}]}}else{{{proposed}}}}}else{{{proposed}}}"
                     )
                 }
                 DdtEmitMode::ReactiveLinearized => proposed,
@@ -3582,7 +3593,7 @@ fn emit_value_expr(
                         )
                     })?;
                     format!(
-                        "{{let proposed={proposed};if ctx.limiting_enabled(){{let candidate={candidate};self.scalar_limit_active|=candidate!=proposed;self.scalar_limit_previous[{slot}]=candidate;self.scalar_limit_initialized[{slot}]=true;candidate}}else{{proposed}}}}"
+                        "{{let proposed={proposed};if ctx.limiting_enabled(){{let candidate={candidate};self.scalar_limit_active|=candidate!=proposed;self.scalar_limit.previous[{slot}]=candidate;self.scalar_limit.initialized[{slot}]=true;candidate}}else{{proposed}}}}"
                     )
                 }
                 DdtEmitMode::ReactiveLinearized => proposed,

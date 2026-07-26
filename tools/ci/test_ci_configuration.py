@@ -157,6 +157,7 @@ class CiConfigurationTests(unittest.TestCase):
             "--max-model-source-bytes 10100000",
             "--max-file-count 650",
             "--max-pooled-workspace-payload-bytes 650000",
+            "--max-stamp-state-payload-bytes 6200",
         ]:
             self.assertIn(budget, workflow)
         self.assertIn("Test Verilog-A native JIT units (Linux x64)", workflow)

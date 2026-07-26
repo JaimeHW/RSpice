@@ -1,6 +1,6 @@
 use super::RustBackendSelection;
 
-pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 2;
+pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedBuiltinManifestFile {
@@ -34,6 +34,11 @@ pub struct GeneratedBuiltinWorkspaceResources {
     pub retained_workspace_bytes_per_instance: u64,
     pub pooled_workspace_payload_bytes_per_thread: u64,
     pub legacy_dense_workspace_payload_bytes_per_instance: u64,
+    pub stamp_state_payload_bytes_per_instance: u64,
+    pub stamp_state_heap_allocations_per_instance: u64,
+    pub stamp_state_pointer_slots_per_instance: u64,
+    pub legacy_stamp_state_heap_allocations_per_instance: u64,
+    pub legacy_stamp_state_pointer_slots_per_instance: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

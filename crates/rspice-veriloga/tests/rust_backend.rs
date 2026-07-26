@@ -202,11 +202,12 @@ endmodule
         .as_str();
 
     assert!(
-        state.contains("scalar_limit_previous: Box<[f64; 1]>"),
+        state.contains("scalar_limit: Box<ScalarLimitState<1>>"),
         "{state}"
     );
     assert!(
-        state.contains("scalar_limit_initialized: Box<[bool; 1]>"),
+        state.contains("pub(crate) previous: [f64; N]")
+            && state.contains("pub(crate) initialized: [bool; N]"),
         "{state}"
     );
     assert!(
@@ -227,11 +228,11 @@ endmodule
     );
     assert_eq!(
         state
-            .matches("scalar_limit_previous: self.scalar_limit_previous.clone()")
+            .matches("scalar_limit: self.scalar_limit.clone()")
             .count(),
         1
     );
-    assert_eq!(state.matches("scalar_limit_previous,\n").count(), 2);
+    assert_eq!(state.matches("scalar_limit,\n").count(), 2);
     assert!(
         stamp.contains("if ctx.limiting_enabled(){self.scalar_limit_active=false;}"),
         "{stamp}"
@@ -241,11 +242,11 @@ endmodule
         "{stamp}"
     );
     assert!(
-        stamp.contains("self.scalar_limit_previous[0]=candidate"),
+        stamp.contains("self.scalar_limit.previous[0]=candidate"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("self.scalar_limit_initialized[0]=true"),
+        stamp.contains("self.scalar_limit.initialized[0]=true"),
         "{stamp}"
     );
     assert!(
@@ -260,7 +261,7 @@ endmodule
         .split_once("pub fn stamp_reactive")
         .expect("reactive stamp")
         .1;
-    assert!(!reactive.contains("scalar_limit_previous"), "{reactive}");
+    assert!(!reactive.contains("scalar_limit.previous"), "{reactive}");
     assert!(!reactive.contains("scalar_limit_active"), "{reactive}");
     assert_generated_rust_compiles_with_tests(
         &generated,
@@ -284,20 +285,20 @@ fn limiter_probe_modes_are_pure_and_newton_mode_tracks_convergence() {
 
     stamp(&mut instance, &[10.0, 0.0], true);
     assert!(!instance.limiter_converged());
-    let previous = instance.scalar_limit_previous.clone();
-    let initialized = instance.scalar_limit_initialized.clone();
+    let previous = instance.scalar_limit.previous;
+    let initialized = instance.scalar_limit.initialized;
     let active = instance.scalar_limit_active;
 
     let static_current = stamp(&mut instance, &[-10.0, 0.0], false);
     assert!((static_current.abs() - 10.0).abs() <= 1.0e-12, "{static_current}");
-    assert_eq!(instance.scalar_limit_previous.as_ref(), previous.as_ref());
-    assert_eq!(instance.scalar_limit_initialized.as_ref(), initialized.as_ref());
+    assert_eq!(instance.scalar_limit.previous, previous);
+    assert_eq!(instance.scalar_limit.initialized, initialized);
     assert_eq!(instance.scalar_limit_active, active);
 
     let small_signal_current = stamp(&mut instance, &[20.0, 0.0], false);
     assert!((small_signal_current.abs() - 20.0).abs() <= 1.0e-12, "{small_signal_current}");
-    assert_eq!(instance.scalar_limit_previous.as_ref(), previous.as_ref());
-    assert_eq!(instance.scalar_limit_initialized.as_ref(), initialized.as_ref());
+    assert_eq!(instance.scalar_limit.previous, previous);
+    assert_eq!(instance.scalar_limit.initialized, initialized);
     assert_eq!(instance.scalar_limit_active, active);
 
     stamp(&mut instance, &[0.7, 0.0], true);
@@ -325,9 +326,9 @@ fn limiter_probe_modes_are_pure_and_newton_mode_tracks_convergence() {
         .restore_persistent_state(&checkpoint)
         .expect("valid generated persistent state restores");
     assert_eq!(instance.capture_persistent_state(), checkpoint);
-    assert_eq!(instance.ddt_state_current.as_ref(), checkpoint.ddt_previous.as_slice());
-    assert_eq!(instance.ddt_derivative_current.as_ref(), checkpoint.ddt_derivative_previous.as_slice());
-    assert_eq!(instance.idt_state_current.as_ref(), checkpoint.idt_previous.as_slice());
+    assert_eq!(instance.stamp_state.ddt_current.as_ref(), checkpoint.ddt_previous.as_slice());
+    assert_eq!(instance.stamp_state.ddt_derivative_current.as_ref(), checkpoint.ddt_derivative_previous.as_slice());
+    assert_eq!(instance.stamp_state.idt_current.as_ref(), checkpoint.idt_previous.as_slice());
     assert!(!instance.scalar_limit_active);
 
     let mut malformed = checkpoint.clone();
@@ -1161,9 +1162,9 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("self.scalar_static_f64[0]")
-            && stamp.contains("self.scalar_static_f64[1]")
-            && stamp.contains("self.scalar_static_f64[2]"),
+        stamp.contains("self.scalar_static.f64_values[0]")
+            && stamp.contains("self.scalar_static.f64_values[1]")
+            && stamp.contains("self.scalar_static.f64_values[2]"),
         "{stamp}"
     );
     assert!(!stamp.contains("(v3 * v3)"), "{stamp}");
@@ -1271,36 +1272,81 @@ fn scalar_rust_backend_caches_parameter_static_values_outside_stamp() {
         .as_str();
 
     assert!(
-        state.contains("pub(crate) scalar_static_f64: Box<[f64; 3]>"),
+        state.contains("pub(crate) scalar_static: Box<ScalarStaticState<3, 0>>"),
         "{state}"
     );
     assert!(
         state.contains("fn recompute_instance_static(&mut self)"),
         "{state}"
     );
-    assert!(state.contains("self.scalar_static_f64[0]=p.p0;"), "{state}");
     assert!(
-        state.contains("self.scalar_static_f64[1]=(1.0/self.scalar_static_f64[0]);"),
+        state.contains("self.scalar_static.f64_values[0]=p.p0;"),
         "{state}"
     );
     assert!(
-        state.contains("self.scalar_static_f64[2]=(-1.0/self.scalar_static_f64[0]);"),
+        state.contains("self.scalar_static.f64_values[1]=(1.0/self.scalar_static.f64_values[0]);"),
         "{state}"
     );
     assert!(
-        state.contains("self.recompute_instance_static();"),
+        state.contains("self.scalar_static.f64_values[2]=(-1.0/self.scalar_static.f64_values[0]);"),
         "{state}"
     );
-    assert!(stamp.contains("self.scalar_static_f64[0]"), "{stamp}");
-    assert!(stamp.contains("self.scalar_static_f64[1]"), "{stamp}");
-    assert!(stamp.contains("self.scalar_static_f64[2]"), "{stamp}");
+    assert!(
+        state.contains("self.scalar_static.instance_dirty = true;"),
+        "{state}"
+    );
+    assert!(stamp.contains("self.ensure_instance_static();"), "{stamp}");
+    assert!(
+        stamp.contains("self.scalar_static.f64_values[0]"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("self.scalar_static.f64_values[1]"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("self.scalar_static.f64_values[2]"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("let p ="), "{stamp}");
     assert!(!stamp.contains("let v3: f64 = p.p0;"), "{stamp}");
     assert!(!stamp.contains("let v5: f64 = 1.0;"), "{stamp}");
     assert!(!stamp.contains("let v6: f64 = -1.0;"), "{stamp}");
     assert!(!stamp.contains("let v7: f64 = (v5 / v3);"), "{stamp}");
     assert!(!stamp.contains("let v8: f64 = (v6 / v3);"), "{stamp}");
-    assert_generated_rust_compiles(&generated);
+    assert_generated_rust_compiles_with_tests(
+        &generated,
+        r#"
+#[test]
+fn parameter_updates_coalesce_until_the_next_stamp() {
+    use generated_device::Instance;
+    use runtime::{GeneratedEvalContext, GeneratedStamper};
+
+    let mut instance = Instance::new(&[0, 1]);
+    assert!(instance.scalar_static.instance_dirty);
+    assert_eq!(instance.scalar_static.f64_values, [0.0; 3]);
+    instance.set_parameter("r", 200.0).expect("first parameter update");
+    instance.set_parameter("R", 400.0).expect("second parameter update");
+    assert!(instance.scalar_static.instance_dirty);
+    assert_eq!(instance.scalar_static.f64_values, [0.0; 3]);
+
+    let context = GeneratedEvalContext::new(&[1.0, 0.0]);
+    let mut touched = 0.0;
+    instance.stamp(&context, &mut GeneratedStamper { touched: &mut touched });
+    assert!(!instance.scalar_static.instance_dirty);
+    assert_eq!(instance.scalar_static.f64_values[0], 400.0);
+    assert_eq!(instance.scalar_static.f64_values[1], 1.0 / 400.0);
+
+    instance.set_parameter("r", 400.0).expect("idempotent parameter update");
+    assert!(!instance.scalar_static.instance_dirty);
+    instance.set_parameter("r", 800.0).expect("runtime parameter update");
+    assert!(instance.scalar_static.instance_dirty);
+    instance.stamp(&context, &mut GeneratedStamper { touched: &mut touched });
+    assert!(!instance.scalar_static.instance_dirty);
+    assert_eq!(instance.scalar_static.f64_values[0], 800.0);
+}
+"#,
+    );
 }
 
 #[test]
@@ -1350,7 +1396,7 @@ fn scalar_rust_backend_caches_temperature_static_values_outside_stamp() {
         stamp.contains("self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());"),
         "{stamp}"
     );
-    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
+    assert!(stamp.contains("self.scalar_static.f64_values["), "{stamp}");
     assert!(!stamp.contains("300.15"), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
@@ -1387,7 +1433,7 @@ fn rust_backend_auto_selects_scalar_for_supported_algebraic_current() {
         state.contains("fn recompute_instance_static(&mut self)"),
         "{state}"
     );
-    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
+    assert!(stamp.contains("self.scalar_static.f64_values["), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -2432,8 +2478,8 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_named_branch_current_cache() {
     );
     assert!(
         stamp.contains("stamper.stamp_current_reactive_node2_local(")
-            && stamp.contains("self.scalar_static_f64[1]")
-            && stamp.contains("self.scalar_static_f64[2]"),
+            && stamp.contains("self.scalar_static.f64_values[1]")
+            && stamp.contains("self.scalar_static.f64_values[2]"),
         "reactive named-current cache should propagate scalarized derivatives through fixed-arity reactive stamping:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -2700,7 +2746,7 @@ fn rust_backend_auto_scalarizes_numeric_truth_operands() {
         .filter(|c| !c.is_whitespace())
         .collect::<String>();
     assert!(
-        compact_state.matches("!=0.0").count() >= 3 && state.contains("scalar_static_bool"),
+        compact_state.matches("!=0.0").count() >= 3 && state.contains("scalar_static.bool_values"),
         "{state}"
     );
     assert!(
@@ -2866,7 +2912,7 @@ fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
+    assert!(stamp.contains("self.scalar_static.f64_values["), "{stamp}");
     assert!(!stamp.contains("p.p0"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
@@ -2898,7 +2944,7 @@ fn rust_backend_default_transpiler_uses_auto_scalar_path() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
+    assert!(stamp.contains("self.scalar_static.f64_values["), "{stamp}");
     assert!(!stamp.contains("GenericAdValue"), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
@@ -2916,7 +2962,7 @@ fn rust_backend_default_transpiler_uses_auto_scalar_path() {
         .as_str();
 
     assert!(
-        default_stamp.contains("self.scalar_static_f64["),
+        default_stamp.contains("self.scalar_static.f64_values["),
         "{default_stamp}"
     );
     assert!(!default_stamp.contains("GenericAdValue"), "{default_stamp}");
@@ -10492,9 +10538,13 @@ endmodule
         !stamp.contains("var_g"),
         "assignment-fed conductance should be scalarized out of the stamp:\n{stamp}"
     );
-    assert!(state.contains("(1.0/self.scalar_static_f64[0])"), "{state}");
     assert!(
-        stamp.contains("self.scalar_static_f64[") && stamp.contains("stamp_current_node2_local"),
+        state.contains("(1.0/self.scalar_static.f64_values[0])"),
+        "{state}"
+    );
+    assert!(
+        stamp.contains("self.scalar_static.f64_values[")
+            && stamp.contains("stamp_current_node2_local"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
@@ -12019,7 +12069,7 @@ fn rust_backend_scalar_lowers_idt_potential_without_scratch() {
     assert!(state.contains("IDT_STATE_COUNT: usize = 1"), "{state}");
     assert!(stamp.contains("fn eval_idt"), "{stamp}");
     assert!(
-        stamp.contains("let idt_state_current = self.idt_state_current.as_mut();"),
+        stamp.contains("let idt_state_current = &mut stamp_state.idt_current;"),
         "{stamp}"
     );
     assert!(
@@ -13895,7 +13945,25 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         "{state}"
     );
     assert!(
-        state.contains("pub(crate) ddt_state_current: Box<[f64; 0]>"),
+        state.contains("pub(crate) stamp_state: Box<StampState<0, 0>>"),
+        "{state}"
+    );
+    assert_eq!(
+        [
+            "ddt_state_current: Box<",
+            "ddt_state_previous: Box<",
+            "ddt_state_older: Box<",
+            "ddt_state_initialized: Box<",
+            "ddt_derivative_current: Box<",
+            "ddt_derivative_previous: Box<",
+            "idt_state_current: Box<",
+            "idt_state_previous: Box<",
+            "idt_state_initialized: Box<",
+        ]
+        .iter()
+        .filter(|field| state.contains(**field))
+        .count(),
+        0,
         "{state}"
     );
     assert!(
@@ -13919,7 +13987,7 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         "{state}"
     );
     assert!(
-        state.contains("ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>()"),
+        state.contains("stamp_state: StampState::new_box()"),
         "{state}"
     );
     assert!(state.contains("params: self.params.clone()"), "{state}");

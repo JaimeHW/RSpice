@@ -48,6 +48,10 @@ pub struct GeneratedRustArgs {
     #[arg(long, value_name = "BYTES")]
     pub max_pooled_workspace_payload_bytes: Option<u64>,
 
+    /// Fail when any instance's persistent stamp-state payload exceeds this many bytes.
+    #[arg(long, value_name = "BYTES")]
+    pub max_stamp_state_payload_bytes: Option<u64>,
+
     /// Number of largest files and models retained in the report.
     #[arg(long, default_value = "20")]
     pub top: NonZeroUsize,
@@ -70,6 +74,9 @@ struct GeneratedRustReport {
     max_retained_workspace_bytes_per_instance: u64,
     max_pooled_workspace_payload_bytes_per_thread: u64,
     max_legacy_dense_workspace_payload_bytes_per_instance: u64,
+    max_stamp_state_payload_bytes_per_instance: u64,
+    max_stamp_state_heap_allocations_per_instance: u64,
+    max_legacy_stamp_state_heap_allocations_per_instance: u64,
     categories: BTreeMap<String, SourceCategory>,
     largest_models: Vec<ModelSize>,
     largest_files: Vec<FileSize>,
@@ -95,6 +102,9 @@ struct ModelSize {
     retained_workspace_bytes_per_instance: u64,
     pooled_workspace_payload_bytes_per_thread: u64,
     legacy_dense_workspace_payload_bytes_per_instance: u64,
+    stamp_state_payload_bytes_per_instance: u64,
+    stamp_state_heap_allocations_per_instance: u64,
+    legacy_stamp_state_heap_allocations_per_instance: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,6 +122,7 @@ struct ResourceBudgets {
     max_model_source_bytes: Option<u64>,
     max_file_count: Option<usize>,
     max_pooled_workspace_payload_bytes: Option<u64>,
+    max_stamp_state_payload_bytes: Option<u64>,
 }
 
 pub fn run(args: &GeneratedRustArgs) -> Result<ExitCode, BenchError> {
@@ -210,6 +221,15 @@ fn build_report(
             legacy_dense_workspace_payload_bytes_per_instance: device
                 .workspace
                 .legacy_dense_workspace_payload_bytes_per_instance,
+            stamp_state_payload_bytes_per_instance: device
+                .workspace
+                .stamp_state_payload_bytes_per_instance,
+            stamp_state_heap_allocations_per_instance: device
+                .workspace
+                .stamp_state_heap_allocations_per_instance,
+            legacy_stamp_state_heap_allocations_per_instance: device
+                .workspace
+                .legacy_stamp_state_heap_allocations_per_instance,
         })
         .collect::<Vec<_>>();
     largest_models.sort_unstable_by(|left, right| {
@@ -243,6 +263,28 @@ fn build_report(
         })
         .max()
         .unwrap_or(0);
+    let max_stamp_state_payload_bytes_per_instance = manifest
+        .devices
+        .iter()
+        .map(|device| device.workspace.stamp_state_payload_bytes_per_instance)
+        .max()
+        .unwrap_or(0);
+    let max_stamp_state_heap_allocations_per_instance = manifest
+        .devices
+        .iter()
+        .map(|device| device.workspace.stamp_state_heap_allocations_per_instance)
+        .max()
+        .unwrap_or(0);
+    let max_legacy_stamp_state_heap_allocations_per_instance = manifest
+        .devices
+        .iter()
+        .map(|device| {
+            device
+                .workspace
+                .legacy_stamp_state_heap_allocations_per_instance
+        })
+        .max()
+        .unwrap_or(0);
     Ok(GeneratedRustReport {
         schema_version: 1,
         generated_root: args.generated_root.display().to_string(),
@@ -255,6 +297,9 @@ fn build_report(
         max_retained_workspace_bytes_per_instance,
         max_pooled_workspace_payload_bytes_per_thread,
         max_legacy_dense_workspace_payload_bytes_per_instance,
+        max_stamp_state_payload_bytes_per_instance,
+        max_stamp_state_heap_allocations_per_instance,
+        max_legacy_stamp_state_heap_allocations_per_instance,
         categories,
         largest_models,
         largest_files,
@@ -264,6 +309,7 @@ fn build_report(
             max_model_source_bytes: args.max_model_source_bytes,
             max_file_count: args.max_file_count,
             max_pooled_workspace_payload_bytes: args.max_pooled_workspace_payload_bytes,
+            max_stamp_state_payload_bytes: args.max_stamp_state_payload_bytes,
         },
         passed: true,
         failures: Vec::new(),
@@ -339,6 +385,18 @@ fn apply_budgets(args: &GeneratedRustArgs, report: &mut GeneratedRustReport) {
         args.max_pooled_workspace_payload_bytes,
         &mut report.failures,
     );
+    check_u64_budget(
+        "maximum persistent stamp-state payload bytes per instance",
+        report.max_stamp_state_payload_bytes_per_instance,
+        args.max_stamp_state_payload_bytes,
+        &mut report.failures,
+    );
+    if report.max_stamp_state_heap_allocations_per_instance > 1 {
+        report.failures.push(format!(
+            "generated instances use up to {} stamp-state heap allocations; compact ABI requires at most one",
+            report.max_stamp_state_heap_allocations_per_instance
+        ));
+    }
     report.passed = report.failures.is_empty();
 }
 
@@ -352,7 +410,7 @@ fn check_u64_budget(label: &str, measured: u64, limit: Option<u64>, failures: &m
 
 fn print_report(report: &GeneratedRustReport) {
     println!(
-        "generated-rust devices={} files={} source={} bytes lines={} noise={} bytes workspace-retained={} bytes workspace-pooled-max={} bytes legacy-dense-max={} bytes [{}]",
+        "generated-rust devices={} files={} source={} bytes lines={} noise={} bytes workspace-retained={} bytes workspace-pooled-max={} bytes legacy-dense-max={} bytes stamp-state-max={} bytes stamp-state-allocations={}/{} legacy [{}]",
         report.device_count,
         report.file_count,
         report.source_bytes,
@@ -361,6 +419,9 @@ fn print_report(report: &GeneratedRustReport) {
         report.max_retained_workspace_bytes_per_instance,
         report.max_pooled_workspace_payload_bytes_per_thread,
         report.max_legacy_dense_workspace_payload_bytes_per_instance,
+        report.max_stamp_state_payload_bytes_per_instance,
+        report.max_stamp_state_heap_allocations_per_instance,
+        report.max_legacy_stamp_state_heap_allocations_per_instance,
         if report.passed { "ok" } else { "failed" }
     );
     for (name, category) in &report.categories {
@@ -373,11 +434,14 @@ fn print_report(report: &GeneratedRustReport) {
         println!("  largest models:");
         for model in &report.largest_models {
             println!(
-                "    {:<32} {:>12} source {:>10} pooled {:>10} legacy-dense {:>3} files {}",
+                "    {:<32} {:>12} source {:>10} pooled {:>10} legacy-dense {:>8} state {:>1}/{:>1} allocs {:>3} files {}",
                 model.module_name,
                 model.bytes,
                 model.pooled_workspace_payload_bytes_per_thread,
                 model.legacy_dense_workspace_payload_bytes_per_instance,
+                model.stamp_state_payload_bytes_per_instance,
+                model.stamp_state_heap_allocations_per_instance,
+                model.legacy_stamp_state_heap_allocations_per_instance,
                 model.files,
                 model.backend
             );

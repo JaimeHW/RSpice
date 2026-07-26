@@ -4,7 +4,7 @@ use std::env;
 use std::fs;
 use std::path::{Component, Path};
 
-const MANIFEST_SCHEMA_VERSION: u32 = 2;
+const MANIFEST_SCHEMA_VERSION: u32 = 3;
 const MANIFEST_FILE_NAME: &str = "manifest.txt";
 const REGENERATE_COMMAND: &str = "cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins";
 
@@ -45,7 +45,7 @@ fn verify_generated_bundle(generated_root: &Path) -> Result<(), String> {
         .map_err(|error| format!("read '{}': {error}", manifest_path.display()))?;
     let json_start = text
         .find('{')
-        .ok_or_else(|| format!("'{}' is not a v2 JSON manifest", manifest_path.display()))?;
+        .ok_or_else(|| format!("'{}' is not a v3 JSON manifest", manifest_path.display()))?;
     let manifest: GeneratedManifest = serde_json::from_str(&text[json_start..])
         .map_err(|error| format!("parse '{}': {error}", manifest_path.display()))?;
     if manifest.schema_version != MANIFEST_SCHEMA_VERSION {

@@ -15537,6 +15537,7 @@ pub(super) fn generate_mod_file() -> String {
 #[derive(Debug, Clone)]
 pub(super) struct StateFileExtensions {
     pub params_visibility: &'static str,
+    pub support_types: String,
     pub instance_fields: String,
     pub clone_fields: String,
     pub new_initializers: String,
@@ -15555,6 +15556,7 @@ impl Default for StateFileExtensions {
     fn default() -> Self {
         Self {
             params_visibility: "pub",
+            support_types: String::new(),
             instance_fields: String::new(),
             clone_fields: String::new(),
             new_initializers: String::new(),
@@ -15665,6 +15667,30 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n");
     out.push_str("}\n\n");
 
+    out.push_str("#[derive(Clone)]\n");
+    out.push_str("pub(crate) struct StampState<const DDT: usize, const IDT: usize> {\n");
+    out.push_str("    pub(crate) ddt_current: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_previous: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_older: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_derivative_current: [f64; DDT],\n");
+    out.push_str("    pub(crate) ddt_derivative_previous: [f64; DDT],\n");
+    out.push_str("    pub(crate) idt_current: [f64; IDT],\n");
+    out.push_str("    pub(crate) idt_previous: [f64; IDT],\n");
+    out.push_str("    pub(crate) ddt_initialized: [bool; DDT],\n");
+    out.push_str("    pub(crate) idt_initialized: [bool; IDT],\n");
+    out.push_str("}\n\n");
+    out.push_str("impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {\n");
+    out.push_str("    fn new_box() -> Box<Self> {\n");
+    out.push_str("        let mut boxed = Box::<Self>::new_uninit();\n");
+    out.push_str("        unsafe {\n");
+    out.push_str("            // SAFETY: every field is an array of f64 or bool; all-zero bytes are valid values for both.\n");
+    out.push_str("            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n");
+    out.push_str("            boxed.assume_init()\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str(&extensions.support_types);
+
     let node_count = artifact.mir.nodes.len();
     let terminal_count = artifact
         .mir
@@ -15694,31 +15720,7 @@ pub(super) fn generate_state_file_with_extensions(
     ));
     out.push_str("    pub(crate) multiplicity: f64,\n");
     out.push_str(&format!(
-        "    pub(crate) ddt_state_current: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_state_previous: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_state_older: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_state_initialized: Box<[bool; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_derivative_current: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) ddt_derivative_previous: Box<[f64; {ddt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) idt_state_current: Box<[f64; {idt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) idt_state_previous: Box<[f64; {idt_state_count}]>,\n"
-    ));
-    out.push_str(&format!(
-        "    pub(crate) idt_state_initialized: Box<[bool; {idt_state_count}]>,\n"
+        "    pub(crate) stamp_state: Box<StampState<{ddt_state_count}, {idt_state_count}>>,\n"
     ));
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
@@ -15734,15 +15736,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            params: self.params.clone(),\n");
     out.push_str("            param_given: self.param_given.clone(),\n");
     out.push_str("            multiplicity: self.multiplicity,\n");
-    out.push_str("            ddt_state_current: self.ddt_state_current.clone(),\n");
-    out.push_str("            ddt_state_previous: self.ddt_state_previous.clone(),\n");
-    out.push_str("            ddt_state_older: self.ddt_state_older.clone(),\n");
-    out.push_str("            ddt_state_initialized: self.ddt_state_initialized.clone(),\n");
-    out.push_str("            ddt_derivative_current: self.ddt_derivative_current.clone(),\n");
-    out.push_str("            ddt_derivative_previous: self.ddt_derivative_previous.clone(),\n");
-    out.push_str("            idt_state_current: self.idt_state_current.clone(),\n");
-    out.push_str("            idt_state_previous: self.idt_state_previous.clone(),\n");
-    out.push_str("            idt_state_initialized: self.idt_state_initialized.clone(),\n");
+    out.push_str("            stamp_state: self.stamp_state.clone(),\n");
     out.push_str("            time: self.time,\n");
     out.push_str("            timestep: self.timestep,\n");
     out.push_str("            ddt_coefficients: self.ddt_coefficients,\n");
@@ -15806,29 +15800,7 @@ pub(super) fn generate_state_file_with_extensions(
         "            param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),\n",
     );
     out.push_str("            multiplicity: 1.0,\n");
-    out.push_str(
-        "            ddt_state_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            ddt_state_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            ddt_state_older: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str("            ddt_state_initialized: boxed_zero_bool_array::<{ Self::DDT_STATE_COUNT }>(),\n");
-    out.push_str(
-        "            ddt_derivative_current: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            ddt_derivative_previous: boxed_zero_f64_array::<{ Self::DDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            idt_state_current: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str(
-        "            idt_state_previous: boxed_zero_f64_array::<{ Self::IDT_STATE_COUNT }>(),\n",
-    );
-    out.push_str("            idt_state_initialized: boxed_zero_bool_array::<{ Self::IDT_STATE_COUNT }>(),\n");
+    out.push_str("            stamp_state: StampState::new_box(),\n");
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
     out.push_str("            ddt_coefficients: GeneratedDdtCoefficients::inactive(),\n");
@@ -15849,15 +15821,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            params,\n");
     out.push_str("            param_given,\n");
     out.push_str("            multiplicity,\n");
-    out.push_str("            ddt_state_current,\n");
-    out.push_str("            ddt_state_previous,\n");
-    out.push_str("            ddt_state_older,\n");
-    out.push_str("            ddt_state_initialized,\n");
-    out.push_str("            ddt_derivative_current,\n");
-    out.push_str("            ddt_derivative_previous,\n");
-    out.push_str("            idt_state_current,\n");
-    out.push_str("            idt_state_previous,\n");
-    out.push_str("            idt_state_initialized,\n");
+    out.push_str("            stamp_state,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
     out.push_str("            ddt_coefficients,\n");
@@ -15869,15 +15833,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            params,\n");
     out.push_str("            param_given,\n");
     out.push_str("            multiplicity,\n");
-    out.push_str("            ddt_state_current,\n");
-    out.push_str("            ddt_state_previous,\n");
-    out.push_str("            ddt_state_older,\n");
-    out.push_str("            ddt_state_initialized,\n");
-    out.push_str("            ddt_derivative_current,\n");
-    out.push_str("            ddt_derivative_previous,\n");
-    out.push_str("            idt_state_current,\n");
-    out.push_str("            idt_state_previous,\n");
-    out.push_str("            idt_state_initialized,\n");
+    out.push_str("            stamp_state,\n");
     out.push_str("            time,\n");
     out.push_str("            timestep,\n");
     out.push_str("            ddt_coefficients,\n");
@@ -15888,12 +15844,14 @@ pub(super) fn generate_state_file_with_extensions(
         "    pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
     );
     out.push_str("        GeneratedVerilogAPersistentState {\n");
-    out.push_str("            ddt_previous: self.ddt_state_previous.to_vec(),\n");
-    out.push_str("            ddt_older: self.ddt_state_older.to_vec(),\n");
-    out.push_str("            ddt_derivative_previous: self.ddt_derivative_previous.to_vec(),\n");
-    out.push_str("            ddt_initialized: self.ddt_state_initialized.to_vec(),\n");
-    out.push_str("            idt_previous: self.idt_state_previous.to_vec(),\n");
-    out.push_str("            idt_initialized: self.idt_state_initialized.to_vec(),\n");
+    out.push_str("            ddt_previous: self.stamp_state.ddt_previous.to_vec(),\n");
+    out.push_str("            ddt_older: self.stamp_state.ddt_older.to_vec(),\n");
+    out.push_str(
+        "            ddt_derivative_previous: self.stamp_state.ddt_derivative_previous.to_vec(),\n",
+    );
+    out.push_str("            ddt_initialized: self.stamp_state.ddt_initialized.to_vec(),\n");
+    out.push_str("            idt_previous: self.stamp_state.idt_previous.to_vec(),\n");
+    out.push_str("            idt_initialized: self.stamp_state.idt_initialized.to_vec(),\n");
     out.push_str(&extensions.checkpoint_capture_fields);
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -15912,19 +15870,23 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
     out.push_str("    pub(crate) fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        self.validate_persistent_state_shape(state)?;\n");
-    out.push_str("        self.ddt_state_previous.copy_from_slice(&state.ddt_previous);\n");
-    out.push_str("        self.ddt_state_current.copy_from_slice(&state.ddt_previous);\n");
-    out.push_str("        self.ddt_state_older.copy_from_slice(&state.ddt_older);\n");
+    out.push_str("        self.stamp_state.ddt_previous.copy_from_slice(&state.ddt_previous);\n");
+    out.push_str("        self.stamp_state.ddt_current.copy_from_slice(&state.ddt_previous);\n");
+    out.push_str("        self.stamp_state.ddt_older.copy_from_slice(&state.ddt_older);\n");
     out.push_str(
-        "        self.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);\n",
+        "        self.stamp_state.ddt_derivative_previous.copy_from_slice(&state.ddt_derivative_previous);\n",
     );
     out.push_str(
-        "        self.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);\n",
+        "        self.stamp_state.ddt_derivative_current.copy_from_slice(&state.ddt_derivative_previous);\n",
     );
-    out.push_str("        self.ddt_state_initialized.copy_from_slice(&state.ddt_initialized);\n");
-    out.push_str("        self.idt_state_previous.copy_from_slice(&state.idt_previous);\n");
-    out.push_str("        self.idt_state_current.copy_from_slice(&state.idt_previous);\n");
-    out.push_str("        self.idt_state_initialized.copy_from_slice(&state.idt_initialized);\n");
+    out.push_str(
+        "        self.stamp_state.ddt_initialized.copy_from_slice(&state.ddt_initialized);\n",
+    );
+    out.push_str("        self.stamp_state.idt_previous.copy_from_slice(&state.idt_previous);\n");
+    out.push_str("        self.stamp_state.idt_current.copy_from_slice(&state.idt_previous);\n");
+    out.push_str(
+        "        self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);\n",
+    );
     out.push_str(&extensions.checkpoint_restore_fields);
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
@@ -15951,8 +15913,9 @@ pub(super) fn generate_state_file_with_extensions(
         ));
         out.push_str("        };\n");
         out.push_str("        validate_parameter_scalar_metadata(index, value)?;\n");
-        out.push_str("        self.write_parameter_slot(index, value);\n");
-        out.push_str("        self.finish_set_parameter(index);\n");
+        out.push_str("        let was_given = self.param_given[index];\n");
+        out.push_str("        let value_changed = self.write_parameter_slot(index, value);\n");
+        out.push_str("        self.finish_set_parameter(index, value_changed || !was_given);\n");
         out.push_str("        Ok(())\n");
     }
     out.push_str("    }\n");
@@ -15974,25 +15937,33 @@ pub(super) fn generate_state_file_with_extensions(
     }
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
-    out.push_str("    fn write_parameter_slot(&mut self, index: usize, value: f64) {\n");
+    out.push_str("    fn write_parameter_slot(&mut self, index: usize, value: f64) -> bool {\n");
     out.push_str("        debug_assert!(index < Self::PARAMETER_COUNT, \"generated parameter index out of range\");\n");
     out.push_str("        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.\n");
     out.push_str("        unsafe {\n");
     out.push_str("            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;\n");
+    out.push_str("            let changed = (*ptr.add(index)).to_bits() != value.to_bits();\n");
     out.push_str("            *ptr.add(index) = value;\n");
+    out.push_str("            changed\n");
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
-    out.push_str("    fn finish_set_parameter(&mut self, index: usize) {\n");
+    out.push_str(
+        "    fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {\n",
+    );
     out.push_str("        self.mark_param_given(index);\n");
     if !extensions.set_parameter_hook.is_empty() {
+        out.push_str("        if invalidates_caches {\n");
         for line in extensions.set_parameter_hook.lines() {
             if !line.trim().is_empty() {
-                out.push_str("        ");
+                out.push_str("            ");
                 out.push_str(line.trim_end());
                 out.push('\n');
             }
         }
+        out.push_str("        }\n");
+    } else {
+        out.push_str("        let _ = invalidates_caches;\n");
     }
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
@@ -16025,18 +15996,24 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    pub fn accept_timestep(&mut self) {\n");
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
-    out.push_str("            self.ddt_state_older[index] = self.ddt_state_previous[index];\n");
-    out.push_str("            self.ddt_state_previous[index] = self.ddt_state_current[index];\n");
     out.push_str(
-        "            self.ddt_derivative_previous[index] = self.ddt_derivative_current[index];\n",
+        "            self.stamp_state.ddt_older[index] = self.stamp_state.ddt_previous[index];\n",
     );
-    out.push_str("            self.ddt_state_initialized[index] = true;\n");
+    out.push_str(
+        "            self.stamp_state.ddt_previous[index] = self.stamp_state.ddt_current[index];\n",
+    );
+    out.push_str(
+        "            self.stamp_state.ddt_derivative_previous[index] = self.stamp_state.ddt_derivative_current[index];\n",
+    );
+    out.push_str("            self.stamp_state.ddt_initialized[index] = true;\n");
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::IDT_STATE_COUNT {\n");
-    out.push_str("            self.idt_state_previous[index] = self.idt_state_current[index];\n");
-    out.push_str("            self.idt_state_initialized[index] = true;\n");
+    out.push_str(
+        "            self.stamp_state.idt_previous[index] = self.stamp_state.idt_current[index];\n",
+    );
+    out.push_str("            self.stamp_state.idt_initialized[index] = true;\n");
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -16044,31 +16021,31 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("    #[inline]\n");
         out.push_str("    pub(crate) fn eval_ddt(&mut self, slot: usize, value: f64) -> f64 {\n");
         out.push_str("        debug_assert!(slot < Self::DDT_STATE_COUNT, \"generated ddt state slot out of range\");\n");
-        out.push_str("        let previous = if self.ddt_state_initialized[slot] {\n");
-        out.push_str("            self.ddt_state_previous[slot]\n");
+        out.push_str("        let previous = if self.stamp_state.ddt_initialized[slot] {\n");
+        out.push_str("            self.stamp_state.ddt_previous[slot]\n");
         out.push_str("        } else {\n");
         out.push_str("            value\n");
         out.push_str("        };\n");
-        out.push_str("        let older = if self.ddt_state_initialized[slot] {\n");
-        out.push_str("            self.ddt_state_older[slot]\n");
+        out.push_str("        let older = if self.stamp_state.ddt_initialized[slot] {\n");
+        out.push_str("            self.stamp_state.ddt_older[slot]\n");
         out.push_str("        } else {\n");
         out.push_str("            value\n");
         out.push_str("        };\n");
-        out.push_str("        self.ddt_state_current[slot] = value;\n");
+        out.push_str("        self.stamp_state.ddt_current[slot] = value;\n");
         out.push_str("        if self.ddt_coefficients.active {\n");
         out.push_str("            let result = value * self.ddt_coefficients.derivative_scale\n");
         out.push_str("                - previous * self.ddt_coefficients.previous_value_scale\n");
         out.push_str("                - older * self.ddt_coefficients.older_value_scale\n");
-        out.push_str("                - self.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;\n");
-        out.push_str("            self.ddt_derivative_current[slot] = result;\n");
+        out.push_str("                - self.stamp_state.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;\n");
+        out.push_str("            self.stamp_state.ddt_derivative_current[slot] = result;\n");
         out.push_str("            result\n");
         out.push_str("        } else {\n");
-        out.push_str("            self.ddt_state_current[slot] = value;\n");
-        out.push_str("            self.ddt_state_previous[slot] = value;\n");
-        out.push_str("            self.ddt_state_older[slot] = value;\n");
-        out.push_str("            self.ddt_derivative_current[slot] = 0.0;\n");
-        out.push_str("            self.ddt_derivative_previous[slot] = 0.0;\n");
-        out.push_str("            self.ddt_state_initialized[slot] = true;\n");
+        out.push_str("            self.stamp_state.ddt_current[slot] = value;\n");
+        out.push_str("            self.stamp_state.ddt_previous[slot] = value;\n");
+        out.push_str("            self.stamp_state.ddt_older[slot] = value;\n");
+        out.push_str("            self.stamp_state.ddt_derivative_current[slot] = 0.0;\n");
+        out.push_str("            self.stamp_state.ddt_derivative_previous[slot] = 0.0;\n");
+        out.push_str("            self.stamp_state.ddt_initialized[slot] = true;\n");
         out.push_str("            0.0\n");
         out.push_str("        }\n");
         out.push_str("    }\n\n");
@@ -16087,8 +16064,8 @@ pub(super) fn generate_state_file_with_extensions(
             "    pub(crate) fn eval_idt(&mut self, slot: usize, value: f64, ic: f64) -> f64 {\n",
         );
         out.push_str("        debug_assert!(slot < Self::IDT_STATE_COUNT, \"generated idt state slot out of range\");\n");
-        out.push_str("        let previous = if self.idt_state_initialized[slot] {\n");
-        out.push_str("            self.idt_state_previous[slot]\n");
+        out.push_str("        let previous = if self.stamp_state.idt_initialized[slot] {\n");
+        out.push_str("            self.stamp_state.idt_previous[slot]\n");
         out.push_str("        } else {\n");
         out.push_str("            ic\n");
         out.push_str("        };\n");
@@ -16097,10 +16074,10 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        } else {\n");
         out.push_str("            ic\n");
         out.push_str("        };\n");
-        out.push_str("        self.idt_state_current[slot] = current;\n");
+        out.push_str("        self.stamp_state.idt_current[slot] = current;\n");
         out.push_str("        if self.timestep.abs() <= Self::DDT_EPSILON {\n");
-        out.push_str("            self.idt_state_previous[slot] = current;\n");
-        out.push_str("            self.idt_state_initialized[slot] = true;\n");
+        out.push_str("            self.stamp_state.idt_previous[slot] = current;\n");
+        out.push_str("            self.stamp_state.idt_initialized[slot] = true;\n");
         out.push_str("        }\n");
         out.push_str("        current\n");
         out.push_str("    }\n\n");
@@ -17341,6 +17318,9 @@ fn emit_temperature_static_refresh(
     out: &mut String,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
 ) {
+    if scalar_hybrid_plan.is_some_and(|plan| plan.static_cache.has_instance_values()) {
+        out.push_str("        self.ensure_instance_static();\n");
+    }
     if scalar_hybrid_plan.is_some_and(|plan| plan.static_cache.has_temperature_values()) {
         out.push_str("        let scalar_temperature_static_temperature = (ctx).temperature();\n");
         out.push_str(
@@ -31357,22 +31337,25 @@ fn emit_stamp_body(
     } else {
         StampOperatorUsage::transient(ddt_slots)
     };
+    if operator_usage.has_any() {
+        out.push_str("        let stamp_state = self.stamp_state.as_mut();\n");
+    }
     if operator_usage.ddt {
-        out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
-        out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
-        out.push_str("        let ddt_state_older = self.ddt_state_older.as_mut();\n");
-        out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str("        let ddt_state_current = &mut stamp_state.ddt_current;\n");
+        out.push_str("        let ddt_state_previous = &mut stamp_state.ddt_previous;\n");
+        out.push_str("        let ddt_state_older = &mut stamp_state.ddt_older;\n");
+        out.push_str("        let ddt_state_initialized = &mut stamp_state.ddt_initialized;\n");
         out.push_str(
-            "        let ddt_derivative_current = self.ddt_derivative_current.as_mut();\n",
+            "        let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;\n",
         );
         out.push_str(
-            "        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();\n",
+            "        let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;\n",
         );
     }
     if operator_usage.idt {
-        out.push_str("        let idt_state_current = self.idt_state_current.as_mut();\n");
-        out.push_str("        let idt_state_previous = self.idt_state_previous.as_mut();\n");
-        out.push_str("        let idt_state_initialized = self.idt_state_initialized.as_mut();\n");
+        out.push_str("        let idt_state_current = &mut stamp_state.idt_current;\n");
+        out.push_str("        let idt_state_previous = &mut stamp_state.idt_previous;\n");
+        out.push_str("        let idt_state_initialized = &mut stamp_state.idt_initialized;\n");
     }
     if operator_usage.has_any() {
         out.push_str("        let ddt_active = self.ddt_coefficients.active;\n");
