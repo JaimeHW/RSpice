@@ -87751,6 +87751,38 @@ R1 out 0 1k
     }
 
     #[test]
+    fn level9_default_output_executes_checked_in_bug439_formerly_bad_vsrc_oracle() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .join("tests/xyce");
+        let deck_path = root.join(
+            "Netlists/Certification_Tests/BUG_439/formerly-bad-vsrc.cir",
+        );
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let plan = runner
+            .static_tran_plan_for_path_with_purpose(
+                &deck_path,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+            )
+            .expect("checked-in BUG439 LEVEL=9 plan qualifies");
+        assert_eq!(
+            plan.comparison_mode,
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: 12,
+            }
+        );
+        let result = runner.run_test(&deck_path);
+        assert!(result.passed, "checked-in BUG439 oracle failed: {result:?}");
+        assert!(!result.expected_unsupported);
+        assert!(
+            result.mismatches.is_empty(),
+            "unexpected BUG439 mismatches: {result:?}"
+        );
+    }
+
+    #[test]
     fn stepped_xyce_verify_selector_preserves_primary_prn_precision_and_comp() {
         let source = "\
 validated stepped transient verifier
