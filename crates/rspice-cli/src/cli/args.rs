@@ -205,7 +205,7 @@ pub struct RunArgs {
     #[arg(long, value_name = "FILE")]
     pub resume: Option<PathBuf>,
 
-    /// Show progress bar with ETA for transient simulation
+    /// Show a completed-percentage progress bar during transient analysis
     #[arg(long)]
     pub progress: bool,
 
@@ -281,7 +281,7 @@ pub struct RunArgs {
     pub charge_abstol: Option<f64>,
 
     /// Limit exported signals (repeatable; overrides the netlist
-    /// .SAVE/.PROBE/.PRINT selection), e.g. --save "V(out)" --save "I(v1)"
+    /// .SAVE/.PROBE/.PRINT/.PLOT selection), e.g. --save "V(out)" --save "I(v1)"
     #[arg(long = "save", value_name = "SIGNAL")]
     pub saves: Vec<String>,
 
@@ -472,11 +472,11 @@ pub struct CompileVaArgs {
     #[arg(long)]
     pub strict: bool,
 
-    /// Show detailed compilation information
+    /// Also print per-branch stamp and Jacobian entry counts
     #[arg(long)]
     pub detailed: bool,
 
-    /// Generate usage example in output
+    /// Print an example netlist instantiation for the compiled model
     #[arg(long)]
     pub show_usage: bool,
 }
