@@ -454,7 +454,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 668;
     pub const DDT_STATE_COUNT: usize = 1;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "1bbad6912acd7c6ad5f028490360c282d3c206e9c50488a6a32500b0f9673bee";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "b7f597d7ef6fbdf81dbeedf68beaef80c9a24e86b7b6e41132d9f300e687f492";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -632,9 +632,12 @@ impl Instance {
     }
 
     #[inline]
-    pub fn set_multiplicity(&mut self, multiplicity: f64) {
+    pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
         if multiplicity.is_finite() && multiplicity > 0.0 {
             self.multiplicity = multiplicity;
+            Ok(())
+        } else {
+            Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))
         }
     }
 

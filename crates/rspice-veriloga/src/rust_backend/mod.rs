@@ -25,12 +25,15 @@ pub use discover::{
     VERILOGA_COMPILE_PROFILE_FILE_NAME, VERILOGA_DISCOVERY_SKIP_MARKER, VerilogACompileProfile,
     VerilogASourceCandidate, discover_veriloga_sources,
 };
-pub use error::RustBackendError;
+pub use error::{RustBackendError, RustBackendErrorKind};
 pub use files::{
     cleanup_stale_generated_device_folders, write_generated_device, write_text_file_if_changed,
 };
 pub use manifest::{
-    GeneratedBuiltinManifest, parse_generated_builtin_manifest, render_generated_builtin_manifest,
+    GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION, GeneratedBuiltinManifest,
+    GeneratedBuiltinManifestDevice, GeneratedBuiltinManifestFile,
+    GeneratedBuiltinWorkspaceResources, parse_generated_builtin_manifest,
+    render_generated_builtin_manifest,
 };
 pub use names::{RustDeviceNames, sanitize_identifier};
 pub use registry::resolve_generated_registry_model_names;

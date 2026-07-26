@@ -989,7 +989,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1004,7 +1004,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1019,7 +1019,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1034,7 +1034,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1049,7 +1049,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1064,7 +1064,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1079,7 +1079,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1094,7 +1094,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1109,7 +1109,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1124,7 +1124,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1139,7 +1139,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1154,7 +1154,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1169,7 +1169,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1184,7 +1184,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1199,7 +1199,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1214,7 +1214,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1229,7 +1229,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1244,7 +1244,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1259,7 +1259,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1274,7 +1274,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1289,7 +1289,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1304,7 +1304,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1319,7 +1319,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1334,7 +1334,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1349,7 +1349,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1364,7 +1364,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1379,7 +1379,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1394,7 +1394,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1409,7 +1409,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1424,7 +1424,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1439,7 +1439,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1454,7 +1454,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1469,7 +1469,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1484,7 +1484,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1499,7 +1499,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1514,7 +1514,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1529,7 +1529,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1544,7 +1544,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1559,7 +1559,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1574,7 +1574,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1589,7 +1589,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }
@@ -1604,7 +1604,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
                     if name.eq_ignore_ascii_case("m") {
-                        instance.set_multiplicity(*value);
+                        instance.set_multiplicity(*value)?;
                     } else {
                         return Err(error);
                     }

@@ -97,11 +97,82 @@ impl ActiveAxes {
     }
 }
 
+const INACTIVE_DERIVATIVE_ROW: u32 = u32::MAX;
+
+pub(crate) struct DerivativeMatrix<const ROW_COUNT: usize, const AXIS_COUNT: usize> {
+    row_slots: Box<[u32; ROW_COUNT]>,
+    rows: Box<[[f64; AXIS_COUNT]]>,
+    zero: [f64; AXIS_COUNT],
+}
+
+impl<const ROW_COUNT: usize, const AXIS_COUNT: usize> DerivativeMatrix<ROW_COUNT, AXIS_COUNT> {
+    pub(crate) fn new(activity_masks: &'static [u128]) -> Self {
+        assert!(ROW_COUNT < u32::MAX as usize, "generated derivative row count exceeds packed workspace ABI");
+        let valid_mask = if AXIS_COUNT >= u128::BITS as usize { u128::MAX } else if AXIS_COUNT == 0 { 0 } else { (1u128 << AXIS_COUNT) - 1 };
+        let mut active_count = 0usize;
+        let mut row_slots = Box::<[u32; ROW_COUNT]>::new_uninit();
+        unsafe {
+            let slots = row_slots.as_mut_ptr().cast::<u32>();
+            std::ptr::write_bytes(slots, 0xff, ROW_COUNT);
+            for row in 0..ROW_COUNT {
+                let active = AXIS_COUNT != 0 && (AXIS_COUNT > u128::BITS as usize || activity_masks.get(row).map_or(true, |mask| mask & valid_mask != 0));
+                if active {
+                    slots.add(row).write(active_count as u32);
+                    active_count += 1;
+                }
+            }
+            let mut rows = Box::<[[f64; AXIS_COUNT]]>::new_uninit_slice(active_count);
+            std::ptr::write_bytes(rows.as_mut_ptr(), 0, active_count);
+            Self { row_slots: row_slots.assume_init(), rows: rows.assume_init(), zero: [0.0; AXIS_COUNT] }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn active_slot(&self, row: usize) -> Option<usize> {
+        let slot = self.row_slots[row];
+        (slot != INACTIVE_DERIVATIVE_ROW).then_some(slot as usize)
+    }
+
+    #[inline]
+    pub(crate) fn write_row(&mut self, row: usize, value: [f64; AXIS_COUNT]) {
+        if let Some(slot) = self.active_slot(row) { self.rows[slot] = value; }
+    }
+
+    #[inline]
+    pub(crate) fn clear_row(&mut self, row: usize) {
+        if let Some(slot) = self.active_slot(row) { self.rows[slot] = [0.0; AXIS_COUNT]; }
+    }
+
+    #[inline]
+    pub(crate) fn copy_row(&mut self, target: usize, source: usize) {
+        let value = self[source];
+        self.write_row(target, value);
+    }
+
+}
+
+impl<const ROW_COUNT: usize, const AXIS_COUNT: usize> std::ops::Index<usize> for DerivativeMatrix<ROW_COUNT, AXIS_COUNT> {
+    type Output = [f64; AXIS_COUNT];
+
+    #[inline]
+    fn index(&self, row: usize) -> &Self::Output {
+        self.active_slot(row).map_or(&self.zero, |slot| &self.rows[slot])
+    }
+}
+
+impl<const ROW_COUNT: usize, const AXIS_COUNT: usize> std::ops::IndexMut<usize> for DerivativeMatrix<ROW_COUNT, AXIS_COUNT> {
+    #[inline]
+    fn index_mut(&mut self, row: usize) -> &mut Self::Output {
+        let slot = self.active_slot(row).expect("generated kernel wrote an inactive derivative row");
+        &mut self.rows[slot]
+    }
+}
+
 pub(crate) struct Scratch<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: usize> {
     pub(crate) v: [f64; VARIABLE_COUNT],
     pub(crate) b: [bool; VARIABLE_COUNT],
-    pub(crate) dn: [[f64; NODE_COUNT]; VARIABLE_COUNT],
-    pub(crate) db: [[f64; BRANCH_COUNT]; VARIABLE_COUNT],
+    pub(crate) dn: DerivativeMatrix<{ VARIABLE_COUNT }, { NODE_COUNT }>,
+    pub(crate) db: DerivativeMatrix<{ VARIABLE_COUNT }, { BRANCH_COUNT }>,
     derivatives_dirty: [bool; VARIABLE_COUNT],
     activity: DerivativeActivity,
 }
@@ -118,8 +189,13 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn new_box_with_activity(node_masks: &'static [u128], branch_masks: &'static [u128]) -> Box<Self> {
         let mut boxed = Box::<Self>::new_uninit();
         unsafe {
-            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
-            std::ptr::addr_of_mut!((*boxed.as_mut_ptr()).activity).write(DerivativeActivity::new(node_masks, branch_masks));
+            let ptr = boxed.as_mut_ptr();
+            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).v), 0, 1);
+            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).b), 0, 1);
+            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).derivatives_dirty), 0, 1);
+            std::ptr::addr_of_mut!((*ptr).dn).write(DerivativeMatrix::new(node_masks));
+            std::ptr::addr_of_mut!((*ptr).db).write(DerivativeMatrix::new(branch_masks));
+            std::ptr::addr_of_mut!((*ptr).activity).write(DerivativeActivity::new(node_masks, branch_masks));
             boxed.assume_init()
         }
     }
@@ -134,8 +210,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn copy_ad(&mut self, target: usize, source: usize) {
         self.v[target] = self.v[source];
-        self.dn[target] = self.dn[source];
-        self.db[target] = self.db[source];
+        self.dn.copy_row(target, source);
+        self.db.copy_row(target, source);
         self.derivatives_dirty[target] = self.derivatives_dirty[source];
     }
 
@@ -158,17 +234,16 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn clear_derivatives_if_dirty(&mut self, index: usize) {
         if std::mem::replace(&mut self.derivatives_dirty[index], false) {
-            self.dn[index] = [0.0; NODE_COUNT];
-            self.db[index] = [0.0; BRANCH_COUNT];
+            self.dn.clear_row(index);
+            self.db.clear_row(index);
         }
     }
 
     #[inline]
     pub(crate) fn store_ad_value(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.mark_derivatives_dirty(index);
         self.v[index] = value.value;
-        self.dn[index] = value.dn;
-        self.db[index] = value.db;
+        self.dn.write_row(index, value.dn);
+        self.db.write_row(index, value.db);
     }
 
 
@@ -463,8 +538,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         self.v[index] = (pos_value - neg_value) * scale;
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = pos { self.dn[index][node] += scale; }
         if let Some(node) = neg { self.dn[index][node] -= scale; }
     }
@@ -475,8 +550,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         self.v[index] = pos_value - neg_value + offset;
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = pos { self.dn[index][node] += 1.0; }
         if let Some(node) = neg { self.dn[index][node] -= 1.0; }
     }
@@ -509,8 +584,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let raw = (pos_value - neg_value) * scale;
         if raw > 80.0 {
             self.v[index] = LIMEXP_MAX * (1.0 + raw - 80.0);
-            self.dn[index] = [0.0; NODE_COUNT];
-            self.db[index] = [0.0; BRANCH_COUNT];
+            self.dn.clear_row(index);
+            self.db.clear_row(index);
             let derivative_scale = LIMEXP_MAX * scale;
             if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
             if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
@@ -519,8 +594,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         } else {
             let output = raw.exp();
             self.v[index] = output;
-            self.dn[index] = [0.0; NODE_COUNT];
-            self.db[index] = [0.0; BRANCH_COUNT];
+            self.dn.clear_row(index);
+            self.db.clear_row(index);
             let derivative_scale = output * scale;
             if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
             if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
@@ -535,8 +610,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let voltage = pos_value - neg_value;
         let derivative_scale = if voltage >= 0.0 { 1.0 } else { -1.0 };
         self.v[index] = voltage.abs();
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
         if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
     }
@@ -551,8 +626,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let abs_voltage = abs_pos_value - abs_neg_value;
         let abs_derivative_scale = if abs_voltage >= 0.0 { 1.0 } else { -1.0 };
         self.v[index] = left_pos_value - left_neg_value - abs_voltage.abs();
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = left_pos { self.dn[index][node] += 1.0; }
         if let Some(node) = left_neg { self.dn[index][node] -= 1.0; }
         if let Some(node) = abs_pos { self.dn[index][node] -= abs_derivative_scale; }
@@ -854,10 +929,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_ad_value(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.mark_derivatives_dirty(index);
         self.v[index] = value.value + offset;
-        self.dn[index] = value.dn;
-        self.db[index] = value.db;
+        self.dn.write_row(index, value.dn);
+        self.db.write_row(index, value.db);
     }
 
 
@@ -3366,10 +3440,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset(&mut self, index: usize, source: usize, offset: f64) {
-        self.mark_derivatives_dirty(index);
         self.v[index] = self.v[source] + offset;
-        self.dn[index] = self.dn[source];
-        self.db[index] = self.db[source];
+        self.dn.copy_row(index, source);
+        self.db.copy_row(index, source);
     }
 
     #[inline]
@@ -13847,12 +13920,12 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 pub(crate) struct ReactiveScratch<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: usize> {
     pub(crate) v: [f64; VARIABLE_COUNT],
     pub(crate) b: [bool; VARIABLE_COUNT],
-    pub(crate) dn: [[f64; NODE_COUNT]; VARIABLE_COUNT],
-    pub(crate) db: [[f64; BRANCH_COUNT]; VARIABLE_COUNT],
+    pub(crate) dn: DerivativeMatrix<{ VARIABLE_COUNT }, { NODE_COUNT }>,
+    pub(crate) db: DerivativeMatrix<{ VARIABLE_COUNT }, { BRANCH_COUNT }>,
     derivatives_dirty: [bool; VARIABLE_COUNT],
     pub(crate) rv: [f64; VARIABLE_COUNT],
-    pub(crate) rdn: [[f64; NODE_COUNT]; VARIABLE_COUNT],
-    pub(crate) rdb: [[f64; BRANCH_COUNT]; VARIABLE_COUNT],
+    pub(crate) rdn: DerivativeMatrix<{ VARIABLE_COUNT }, { NODE_COUNT }>,
+    pub(crate) rdb: DerivativeMatrix<{ VARIABLE_COUNT }, { BRANCH_COUNT }>,
     activity: DerivativeActivity,
 }
 
@@ -13868,8 +13941,16 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     pub(crate) fn new_box_with_activity(node_masks: &'static [u128], branch_masks: &'static [u128]) -> Box<Self> {
         let mut boxed = Box::<Self>::new_uninit();
         unsafe {
-            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
-            std::ptr::addr_of_mut!((*boxed.as_mut_ptr()).activity).write(DerivativeActivity::new(node_masks, branch_masks));
+            let ptr = boxed.as_mut_ptr();
+            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).v), 0, 1);
+            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).b), 0, 1);
+            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).derivatives_dirty), 0, 1);
+            std::ptr::write_bytes(std::ptr::addr_of_mut!((*ptr).rv), 0, 1);
+            std::ptr::addr_of_mut!((*ptr).dn).write(DerivativeMatrix::new(node_masks));
+            std::ptr::addr_of_mut!((*ptr).db).write(DerivativeMatrix::new(branch_masks));
+            std::ptr::addr_of_mut!((*ptr).rdn).write(DerivativeMatrix::new(node_masks));
+            std::ptr::addr_of_mut!((*ptr).rdb).write(DerivativeMatrix::new(branch_masks));
+            std::ptr::addr_of_mut!((*ptr).activity).write(DerivativeActivity::new(node_masks, branch_masks));
             boxed.assume_init()
         }
     }
@@ -13884,8 +13965,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn copy_ad(&mut self, target: usize, source: usize) {
         self.v[target] = self.v[source];
-        self.dn[target] = self.dn[source];
-        self.db[target] = self.db[source];
+        self.dn.copy_row(target, source);
+        self.db.copy_row(target, source);
         self.derivatives_dirty[target] = self.derivatives_dirty[source];
     }
 
@@ -13908,17 +13989,16 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     #[inline]
     pub(crate) fn clear_derivatives_if_dirty(&mut self, index: usize) {
         if std::mem::replace(&mut self.derivatives_dirty[index], false) {
-            self.dn[index] = [0.0; NODE_COUNT];
-            self.db[index] = [0.0; BRANCH_COUNT];
+            self.dn.clear_row(index);
+            self.db.clear_row(index);
         }
     }
 
     #[inline]
     pub(crate) fn store_ad_value(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.mark_derivatives_dirty(index);
         self.v[index] = value.value;
-        self.dn[index] = value.dn;
-        self.db[index] = value.db;
+        self.dn.write_row(index, value.dn);
+        self.db.write_row(index, value.db);
     }
 
 
@@ -14213,8 +14293,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         self.v[index] = (pos_value - neg_value) * scale;
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = pos { self.dn[index][node] += scale; }
         if let Some(node) = neg { self.dn[index][node] -= scale; }
     }
@@ -14225,8 +14305,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);
         self.v[index] = pos_value - neg_value + offset;
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = pos { self.dn[index][node] += 1.0; }
         if let Some(node) = neg { self.dn[index][node] -= 1.0; }
     }
@@ -14259,8 +14339,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let raw = (pos_value - neg_value) * scale;
         if raw > 80.0 {
             self.v[index] = LIMEXP_MAX * (1.0 + raw - 80.0);
-            self.dn[index] = [0.0; NODE_COUNT];
-            self.db[index] = [0.0; BRANCH_COUNT];
+            self.dn.clear_row(index);
+            self.db.clear_row(index);
             let derivative_scale = LIMEXP_MAX * scale;
             if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
             if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
@@ -14269,8 +14349,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         } else {
             let output = raw.exp();
             self.v[index] = output;
-            self.dn[index] = [0.0; NODE_COUNT];
-            self.db[index] = [0.0; BRANCH_COUNT];
+            self.dn.clear_row(index);
+            self.db.clear_row(index);
             let derivative_scale = output * scale;
             if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
             if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
@@ -14285,8 +14365,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let voltage = pos_value - neg_value;
         let derivative_scale = if voltage >= 0.0 { 1.0 } else { -1.0 };
         self.v[index] = voltage.abs();
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = pos { self.dn[index][node] += derivative_scale; }
         if let Some(node) = neg { self.dn[index][node] -= derivative_scale; }
     }
@@ -14301,8 +14381,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let abs_voltage = abs_pos_value - abs_neg_value;
         let abs_derivative_scale = if abs_voltage >= 0.0 { 1.0 } else { -1.0 };
         self.v[index] = left_pos_value - left_neg_value - abs_voltage.abs();
-        self.dn[index] = [0.0; NODE_COUNT];
-        self.db[index] = [0.0; BRANCH_COUNT];
+        self.dn.clear_row(index);
+        self.db.clear_row(index);
         if let Some(node) = left_pos { self.dn[index][node] += 1.0; }
         if let Some(node) = left_neg { self.dn[index][node] -= 1.0; }
         if let Some(node) = abs_pos { self.dn[index][node] -= abs_derivative_scale; }
@@ -14604,10 +14684,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset_ad_value(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64) {
-        self.mark_derivatives_dirty(index);
         self.v[index] = value.value + offset;
-        self.dn[index] = value.dn;
-        self.db[index] = value.db;
+        self.dn.write_row(index, value.dn);
+        self.db.write_row(index, value.db);
     }
 
 
@@ -17116,10 +17195,9 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
     #[inline]
     pub(crate) fn store_offset(&mut self, index: usize, source: usize, offset: f64) {
-        self.mark_derivatives_dirty(index);
         self.v[index] = self.v[source] + offset;
-        self.dn[index] = self.dn[source];
-        self.db[index] = self.db[source];
+        self.dn.copy_row(index, source);
+        self.db.copy_row(index, source);
     }
 
     #[inline]

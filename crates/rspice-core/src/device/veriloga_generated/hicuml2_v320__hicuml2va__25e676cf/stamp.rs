@@ -5,6 +5,8 @@ use crate::device::veriloga_generated::kernel_runtime::{AdValue as KernelAdValue
 type A = KernelAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
 type Scratch = KernelScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
 type ReactiveScratch = KernelReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;
+const TRANSIENT_NODE_ACTIVE_DERIVATIVE_ROWS: usize = 259;
+const TRANSIENT_BRANCH_ACTIVE_DERIVATIVE_ROWS: usize = 0;
 const TRANSIENT_NODE_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = {
     let mut masks = [0; Instance::VARIABLE_COUNT];
     masks[4]=0x00000000000000000000000000000010;masks[5]=0x00000000000000000000000000000010;masks[10]=0x00000000000000000000000000000010;
@@ -97,6 +99,8 @@ const TRANSIENT_NODE_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = {
     masks
 };
 const TRANSIENT_BRANCH_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = [0; Instance::VARIABLE_COUNT];
+const REACTIVE_NODE_ACTIVE_DERIVATIVE_ROWS: usize = 203;
+const REACTIVE_BRANCH_ACTIVE_DERIVATIVE_ROWS: usize = 0;
 const REACTIVE_NODE_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = {
     let mut masks = [0; Instance::VARIABLE_COUNT];
     masks[4]=0x00000000000000000000000000000010;masks[5]=0x00000000000000000000000000000010;masks[10]=0x00000000000000000000000000000010;
@@ -170,6 +174,44 @@ const REACTIVE_NODE_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = {
     masks
 };
 const REACTIVE_BRANCH_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = [0; Instance::VARIABLE_COUNT];
+use std::cell::RefCell;
+use std::thread::LocalKey;
+
+struct ScratchLease<T: 'static> {
+    value: Option<Box<T>>,
+    pool: &'static LocalKey<RefCell<Vec<Box<T>>>>,
+}
+
+impl<T: 'static> ScratchLease<T> {
+    #[inline]
+    fn acquire(
+        pool: &'static LocalKey<RefCell<Vec<Box<T>>>>,
+        allocate: impl FnOnce() -> Box<T>,
+    ) -> Self {
+        let value = pool.with_borrow_mut(|available| available.pop()).unwrap_or_else(allocate);
+        Self { value: Some(value), pool }
+    }
+
+    #[inline]
+    fn get_mut(&mut self) -> &mut T {
+        self.value.as_deref_mut().expect("scratch lease must own a workspace")
+    }
+}
+
+impl<T: 'static> Drop for ScratchLease<T> {
+    #[inline]
+    fn drop(&mut self) {
+        if let Some(value) = self.value.take() {
+            self.pool.with_borrow_mut(|available| available.push(value));
+        }
+    }
+}
+
+thread_local! {
+    static TRANSIENT_SCRATCH_POOL: RefCell<Vec<Box<Scratch>>> = const { RefCell::new(Vec::new()) };
+    static REACTIVE_SCRATCH_POOL: RefCell<Vec<Box<ReactiveScratch>>> = const { RefCell::new(Vec::new()) };
+}
+
 const LIMEXP_MAX: f64 = 5.54062238439351e34;
 #[path = "stamp_blocks_0.rs"]
 mod stamp_blocks_0;
@@ -257,10 +299,9 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let p = Box::as_ref(&self.params);let nodes = &(*self).nodes;let branches = &(*self).branches;let multiplicity = (*self).multiplicity;let timestep = (*self).timestep;let ddt_state_current = self.ddt_state_current.as_mut();let ddt_state_previous = self.ddt_state_previous.as_mut();let ddt_state_older = self.ddt_state_older.as_mut();let ddt_state_initialized = self.ddt_state_initialized.as_mut();let ddt_derivative_current = self.ddt_derivative_current.as_mut();let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();let ddt_active = self.ddt_coefficients.active;let ddt_scale = self.ddt_coefficients.derivative_scale;let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let s = match &mut self.scratch {
-            Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(Scratch::new_box_with_activity(&TRANSIENT_NODE_DERIVATIVE_ACTIVITY, &TRANSIENT_BRANCH_DERIVATIVE_ACTIVITY)).as_mut(),
-        };Self::stamp_transient_block_0(ctx, s, p, nodes);Self::stamp_transient_block_1(s, p);Self::stamp_transient_block_2(s, p);Self::stamp_transient_block_3(s, p);Self::stamp_transient_block_4(s, p);Self::stamp_transient_block_5(s, p);Self::stamp_transient_block_6(ctx, s, p, nodes);Self::stamp_transient_block_7(s, p);Self::stamp_transient_block_8(s, p);Self::stamp_transient_block_9(s, p);Self::stamp_transient_block_10(s, p);Self::stamp_transient_block_11(s, p);Self::stamp_transient_block_12(s, p);Self::stamp_transient_block_13(s, p);Self::stamp_transient_block_14(s, p);Self::stamp_transient_block_15(s, p);Self::stamp_transient_block_16(s, p);Self::stamp_transient_block_17(s, p);Self::stamp_transient_block_18(s, p);Self::stamp_transient_block_19(s, p);Self::stamp_transient_block_20(s, p);Self::stamp_transient_block_21(ctx, s, p, nodes);Self::stamp_transient_block_22(s, p);Self::stamp_transient_block_23(s, p);Self::stamp_transient_block_24(s, p);Self::stamp_transient_block_25(s, p);Self::stamp_transient_block_26(s, p);Self::stamp_transient_block_27(s, p);Self::stamp_transient_block_28(s, p);Self::stamp_transient_block_29(s, p);Self::stamp_transient_block_30(ctx, s, p, nodes);Self::stamp_transient_block_31(s, p);
+        let mut scratch_lease = ScratchLease::acquire(&TRANSIENT_SCRATCH_POOL, || Scratch::new_box_with_activity(&TRANSIENT_NODE_DERIVATIVE_ACTIVITY, &TRANSIENT_BRANCH_DERIVATIVE_ACTIVITY));
+        let s = scratch_lease.get_mut();
+        Self::stamp_transient_block_0(ctx, s, p, nodes);Self::stamp_transient_block_1(s, p);Self::stamp_transient_block_2(s, p);Self::stamp_transient_block_3(s, p);Self::stamp_transient_block_4(s, p);Self::stamp_transient_block_5(s, p);Self::stamp_transient_block_6(ctx, s, p, nodes);Self::stamp_transient_block_7(s, p);Self::stamp_transient_block_8(s, p);Self::stamp_transient_block_9(s, p);Self::stamp_transient_block_10(s, p);Self::stamp_transient_block_11(s, p);Self::stamp_transient_block_12(s, p);Self::stamp_transient_block_13(s, p);Self::stamp_transient_block_14(s, p);Self::stamp_transient_block_15(s, p);Self::stamp_transient_block_16(s, p);Self::stamp_transient_block_17(s, p);Self::stamp_transient_block_18(s, p);Self::stamp_transient_block_19(s, p);Self::stamp_transient_block_20(s, p);Self::stamp_transient_block_21(ctx, s, p, nodes);Self::stamp_transient_block_22(s, p);Self::stamp_transient_block_23(s, p);Self::stamp_transient_block_24(s, p);Self::stamp_transient_block_25(s, p);Self::stamp_transient_block_26(s, p);Self::stamp_transient_block_27(s, p);Self::stamp_transient_block_28(s, p);Self::stamp_transient_block_29(s, p);Self::stamp_transient_block_30(ctx, s, p, nodes);Self::stamp_transient_block_31(s, p);
         stamper.stamp_potential_branch_local(
             Some(7),
             Some(8),
@@ -300,9 +341,8 @@ impl Instance {
     }
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
         let p = Box::as_ref(&self.params);let nodes = &(*self).nodes;let branches = &(*self).branches;let multiplicity = (*self).multiplicity;
-        let s = match &mut self.reactive_scratch {
-            Some(buf) => buf.as_mut(),
-            slot @ None => slot.insert(ReactiveScratch::new_box_with_activity(&REACTIVE_NODE_DERIVATIVE_ACTIVITY, &REACTIVE_BRANCH_DERIVATIVE_ACTIVITY)).as_mut(),
-        };Self::stamp_reactive_block_0(ctx, s, p, nodes);Self::stamp_reactive_block_1(s, p);Self::stamp_reactive_block_2(s, p);Self::stamp_reactive_block_3(s, p);Self::stamp_reactive_block_4(s, p);Self::stamp_reactive_block_5(ctx, s, p, nodes);Self::stamp_reactive_block_6(s, p);Self::stamp_reactive_block_7(s, p);Self::stamp_reactive_block_8(s, p);Self::stamp_reactive_block_9(s, p);Self::stamp_reactive_block_10(s, p);Self::stamp_reactive_block_11(s, p);Self::stamp_reactive_block_12(s, p);Self::stamp_reactive_block_13(s, p);Self::stamp_reactive_block_14(s, p);Self::stamp_reactive_block_15(s, p);Self::stamp_reactive_block_16(s, p);Self::stamp_reactive_block_17(s, p);Self::stamp_reactive_block_18(s, p);Self::stamp_reactive_block_19(ctx, s, p, nodes);Self::stamp_reactive_block_20(s, p);Self::stamp_reactive_block_21(s, p);Self::stamp_reactive_block_22(s, p);Self::stamp_reactive_block_23(s, p);Self::stamp_reactive_block_24(s, p);Self::stamp_reactive_block_25(s, p);Self::stamp_reactive_block_26(ctx, s, p, nodes);Self::stamp_reactive_equations_block_0(stamper, s, p, multiplicity);Self::stamp_reactive_equations_block_1(stamper, s, p, multiplicity);Self::stamp_reactive_equations_block_2(ctx, stamper, s, p, nodes, multiplicity);Self::stamp_reactive_equations_block_3(ctx, stamper, s, p, nodes, multiplicity);Self::stamp_reactive_equations_block_4(ctx, stamper, s, nodes, multiplicity);Self::stamp_reactive_equations_block_5(ctx, stamper, s, nodes, multiplicity);
+        let mut scratch_lease = ScratchLease::acquire(&REACTIVE_SCRATCH_POOL, || ReactiveScratch::new_box_with_activity(&REACTIVE_NODE_DERIVATIVE_ACTIVITY, &REACTIVE_BRANCH_DERIVATIVE_ACTIVITY));
+        let s = scratch_lease.get_mut();
+        Self::stamp_reactive_block_0(ctx, s, p, nodes);Self::stamp_reactive_block_1(s, p);Self::stamp_reactive_block_2(s, p);Self::stamp_reactive_block_3(s, p);Self::stamp_reactive_block_4(s, p);Self::stamp_reactive_block_5(ctx, s, p, nodes);Self::stamp_reactive_block_6(s, p);Self::stamp_reactive_block_7(s, p);Self::stamp_reactive_block_8(s, p);Self::stamp_reactive_block_9(s, p);Self::stamp_reactive_block_10(s, p);Self::stamp_reactive_block_11(s, p);Self::stamp_reactive_block_12(s, p);Self::stamp_reactive_block_13(s, p);Self::stamp_reactive_block_14(s, p);Self::stamp_reactive_block_15(s, p);Self::stamp_reactive_block_16(s, p);Self::stamp_reactive_block_17(s, p);Self::stamp_reactive_block_18(s, p);Self::stamp_reactive_block_19(ctx, s, p, nodes);Self::stamp_reactive_block_20(s, p);Self::stamp_reactive_block_21(s, p);Self::stamp_reactive_block_22(s, p);Self::stamp_reactive_block_23(s, p);Self::stamp_reactive_block_24(s, p);Self::stamp_reactive_block_25(s, p);Self::stamp_reactive_block_26(ctx, s, p, nodes);Self::stamp_reactive_equations_block_0(stamper, s, p, multiplicity);Self::stamp_reactive_equations_block_1(stamper, s, p, multiplicity);Self::stamp_reactive_equations_block_2(ctx, stamper, s, p, nodes, multiplicity);Self::stamp_reactive_equations_block_3(ctx, stamper, s, p, nodes, multiplicity);Self::stamp_reactive_equations_block_4(ctx, stamper, s, nodes, multiplicity);Self::stamp_reactive_equations_block_5(ctx, stamper, s, nodes, multiplicity);
     }
 }

@@ -1,7 +1,6 @@
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
 use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState};
-use crate::device::veriloga_generated::kernel_runtime::{ReactiveScratch as KernelReactiveScratch, Scratch as KernelScratch};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -2032,8 +2031,6 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) scratch: Option<Box<KernelScratch<3412, 19, 13>>>,
-    pub(crate) reactive_scratch: Option<Box<KernelReactiveScratch<3412, 19, 13>>>,
 }
 
 impl Clone for Instance {
@@ -2057,8 +2054,6 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
-            scratch: None,
-            reactive_scratch: None,
         }
     }
 }
@@ -2074,7 +2069,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 3412;
     pub const DDT_STATE_COUNT: usize = 21;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "74b57a084b224f4ba04a356e2f9f22c855bd93aaac561906fd59e69b2da1f5f9";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6d7ec65ca987586f739c1f36066926b6011709d760c117bd4f672d7b43f6a41d";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -2100,15 +2095,11 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            scratch: None,
-            reactive_scratch: None,
         }
     }
 
     #[inline]
     pub fn restore_from_snapshot(&mut self, snapshot: Self) {
-        let scratch = self.scratch.take();
-        let reactive_scratch = self.reactive_scratch.take();
         let Self {
             nodes,
             branches,
@@ -2127,8 +2118,6 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scratch: _,
-            reactive_scratch: _,
         } = snapshot;
         *self = Self {
             nodes,
@@ -2148,8 +2137,6 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scratch,
-            reactive_scratch,
         };
     }
 
@@ -2190,8 +2177,6 @@ impl Instance {
         self.idt_state_previous.copy_from_slice(&state.idt_previous);
         self.idt_state_current.copy_from_slice(&state.idt_previous);
         self.idt_state_initialized.copy_from_slice(&state.idt_initialized);
-        self.scratch = None;
-        self.reactive_scratch = None;
         Ok(())
     }
 
@@ -2243,9 +2228,12 @@ impl Instance {
     }
 
     #[inline]
-    pub fn set_multiplicity(&mut self, multiplicity: f64) {
+    pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
         if multiplicity.is_finite() && multiplicity > 0.0 {
             self.multiplicity = multiplicity;
+            Ok(())
+        } else {
+            Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))
         }
     }
 

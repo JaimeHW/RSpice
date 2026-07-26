@@ -1,12 +1,14 @@
 use rspice_veriloga::canonical_ir::{InvalidationClass, OptOp, OptValueKind};
 use rspice_veriloga::rust_backend::{
-    GeneratedBuiltinManifest, GeneratedRustDevice, GeneratedRustDeviceReport, GeneratedRustFile,
-    RustBackendError, RustBackendSelection, RustDeviceNames, RustTranspileOptions, RustTranspiler,
-    VERILOGA_COMPILE_PROFILE_FILE_NAME, VERILOGA_DISCOVERY_SKIP_MARKER,
-    cleanup_stale_generated_device_folders, discover_veriloga_sources,
-    generate_generated_builtin_subset_with_progress, parse_generated_builtin_manifest,
-    render_generated_builtin_manifest, render_runtime_support_module,
-    resolve_generated_registry_model_names, write_generated_device, write_text_file_if_changed,
+    GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION, GeneratedBuiltinManifest,
+    GeneratedBuiltinManifestDevice, GeneratedBuiltinManifestFile, GeneratedRustDevice,
+    GeneratedRustDeviceReport, GeneratedRustFile, RustBackendError, RustBackendSelection,
+    RustDeviceNames, RustTranspileOptions, RustTranspiler, VERILOGA_COMPILE_PROFILE_FILE_NAME,
+    VERILOGA_DISCOVERY_SKIP_MARKER, cleanup_stale_generated_device_folders,
+    discover_veriloga_sources, generate_generated_builtin_subset_with_progress,
+    parse_generated_builtin_manifest, render_generated_builtin_manifest,
+    render_runtime_support_module, resolve_generated_registry_model_names, write_generated_device,
+    write_text_file_if_changed,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -412,9 +414,28 @@ fn generated_registry_names_preserve_unique_raw_names_when_suffixes_collide() {
 #[test]
 fn generated_builtin_manifest_round_trips_generation_fingerprints() {
     let manifest = GeneratedBuiltinManifest {
+        schema_version: GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION,
         source_tree_digest: "source-digest".to_string(),
         generator_digest: "generator-digest".to_string(),
-        device_count: 33,
+        bundle_digest: "bundle-digest".to_string(),
+        device_count: 1,
+        file_count: 1,
+        source_bytes: 123,
+        devices: vec![GeneratedBuiltinManifestDevice {
+            module_name: "model".to_string(),
+            public_model_name: "model".to_string(),
+            folder_name: "model__model__12345678".to_string(),
+            backend: RustBackendSelection::ScalarOptIr,
+            fallback_reason: None,
+            file_count: 1,
+            source_bytes: 123,
+            workspace: Default::default(),
+        }],
+        files: vec![GeneratedBuiltinManifestFile {
+            relative_path: "model__model__12345678/stamp.rs".to_string(),
+            bytes: 123,
+            blake3: "file-digest".to_string(),
+        }],
     };
 
     let rendered = render_generated_builtin_manifest(&manifest);
@@ -424,7 +445,7 @@ fn generated_builtin_manifest_round_trips_generation_fingerprints() {
     );
     assert_eq!(parse_generated_builtin_manifest(&rendered), Some(manifest));
     assert_eq!(
-        parse_generated_builtin_manifest("device_count=nope\n"),
+        parse_generated_builtin_manifest("{\"schema_version\":1}\n"),
         None
     );
 }
@@ -2187,7 +2208,14 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_structured_kernels() {
 
     assert!(stamp.contains("::kernel_runtime::"), "{stamp}");
     assert!(stamp.contains("type Scratch = KernelScratch"), "{stamp}");
-    assert!(state.contains("Option<Box<KernelScratch<"), "{state}");
+    assert!(
+        stamp.contains("ScratchLease::acquire(&TRANSIENT_SCRATCH_POOL"),
+        "{stamp}"
+    );
+    assert!(
+        !state.contains("KernelScratch") && !state.contains("scratch:"),
+        "scratch workspaces belong to the thread-local runtime pool, not each device instance:\n{state}"
+    );
     assert!(!stamp.contains("::support::"), "{stamp}");
     assert!(!state.contains("GenericScratch"), "{state}");
     let helpers = generated
@@ -10507,7 +10535,7 @@ fn rust_backend_keeps_reactive_shadow_code_out_of_transient_stamp() {
 }
 
 #[test]
-fn rust_backend_runtime_support_splits_transient_and_reactive_scratch_storage() {
+fn rust_backend_runtime_support_uses_packed_derivative_rows() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(mixed_dynamic_static_source())
         .expect("canonical IR");
@@ -10542,6 +10570,21 @@ fn rust_backend_runtime_support_splits_transient_and_reactive_scratch_storage() 
     assert!(!transient_scratch.contains("pub(crate) rv:"), "{stamp}");
     assert!(!transient_scratch.contains("pub(crate) rdn:"), "{stamp}");
     assert!(reactive_scratch.contains("pub(crate) rv:"), "{stamp}");
+    assert!(
+        transient_scratch.contains("pub(crate) dn: DerivativeMatrix<")
+            && transient_scratch.contains("pub(crate) db: DerivativeMatrix<"),
+        "{transient_scratch}"
+    );
+    assert!(
+        reactive_scratch.contains("pub(crate) rdn: DerivativeMatrix<")
+            && reactive_scratch.contains("pub(crate) rdb: DerivativeMatrix<"),
+        "{reactive_scratch}"
+    );
+    assert!(
+        support.contains("const INACTIVE_DERIVATIVE_ROW: u32 = u32::MAX;")
+            && support.contains("pub(crate) struct DerivativeMatrix<"),
+        "{support}"
+    );
     assert!(
         !stamp.contains("let s = match &mut self.scratch {"),
         "{stamp}"
@@ -10631,7 +10674,7 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
         "partitioned stamp helpers must inherit the generated-identifier lint policy:\n{helper}"
     );
     assert!(
-        stamp.contains("let s = match &mut self.scratch {"),
+        stamp.contains("ScratchLease::acquire(&TRANSIENT_SCRATCH_POOL"),
         "{stamp}"
     );
     assert!(stamp.contains("#[path = \"stamp_blocks_0.rs\"]"), "{stamp}");
@@ -13428,6 +13471,16 @@ fn rust_backend_lowers_simulator_system_functions_to_direct_runtime_access() {
     assert!(state.contains("param_given"), "{state}");
     assert!(state.contains("multiplicity"), "{state}");
     assert!(state.contains("mark_param_given"), "{state}");
+    assert!(
+        state.contains(
+            "pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String>"
+        ),
+        "{state}"
+    );
+    assert!(
+        state.contains("instance multiplicity 'm' must be finite and > 0.0"),
+        "{state}"
+    );
     assert!(stamp.contains("ctx.temperature()"), "{stamp}");
     assert!(stamp.contains("ctx.thermal_voltage()"), "{stamp}");
     assert!(stamp.contains("let time = (*self).time;"), "{stamp}");
@@ -13877,18 +13930,27 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
 }
 
 #[test]
-fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
+fn rust_backend_generates_restore_without_per_instance_scratch_buffers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_assignment_chain_source(320))
         .expect("canonical IR");
-    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
-        .transpile(&artifact)
-        .expect("transpile chunked assignment chain");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile chunked assignment chain");
     let state = generated
         .files
         .iter()
         .find(|file| file.relative_path == "state.rs")
         .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
         .contents
         .as_str();
 
@@ -13897,36 +13959,142 @@ fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
         "{state}"
     );
     assert!(
-        state.contains("pub(crate) scratch: Option<Box<KernelScratch<"),
-        "structured-kernel users should reserve transient scratch storage:\n{state}"
+        !state.contains("KernelScratch") && !state.contains("scratch:"),
+        "structured-kernel instances must not retain per-instance scratch storage:\n{state}"
     );
     assert!(
-        !state.contains("KernelReactiveScratch") && !state.contains("reactive_scratch:"),
-        "fixture should not reserve unused reactive scratch storage:\n{state}"
-    );
-    assert!(
-        state.contains("let scratch = self.scratch.take();"),
+        !state.contains("let scratch = self.scratch.take();")
+            && !state.contains("let reactive_scratch = self.reactive_scratch.take();"),
         "{state}"
     );
     assert!(
-        !state.contains("let reactive_scratch = self.reactive_scratch.take();"),
+        stamp.contains("ScratchLease::acquire(&TRANSIENT_SCRATCH_POOL"),
+        "structured-kernel stamps must lease pooled transient scratch:\n{stamp}"
+    );
+    assert_generated_rust_compiles_with_tests(
+        &generated,
+        r#"
+#[test]
+fn packed_derivative_matrix_stores_only_active_rows() {
+    use runtime::kernel_runtime::DerivativeMatrix;
+
+    static MASKS: [u128; 4] = [0b01, 0, 0b10, 0];
+    let mut matrix = DerivativeMatrix::<4, 2>::new(&MASKS);
+    assert_eq!(matrix.active_row_count(), 2);
+    matrix.write_row(0, [2.0, 3.0]);
+    matrix.write_row(1, [99.0, 99.0]);
+    matrix[2][1] = 7.0;
+    assert_eq!(matrix[0], [2.0, 3.0]);
+    assert_eq!(matrix[1], [0.0, 0.0]);
+    assert_eq!(matrix[2], [0.0, 7.0]);
+    matrix.copy_row(2, 0);
+    assert_eq!(matrix[2], [2.0, 3.0]);
+    matrix.clear_row(0);
+    assert_eq!(matrix[0], [0.0, 0.0]);
+}
+"#,
+    );
+}
+
+#[test]
+fn rust_backend_pools_transient_and_reactive_scratch_workspaces() {
+    let count = 320;
+    let source = chunked_assignment_chain_source(count).replace(
+        &format!("I(p, n) <+ x{};", count - 1),
+        &format!("I(p, n) <+ ddt(x{});", count - 1),
+    );
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("canonical dynamic assignment chain");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile dynamic assignment chain");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("ScratchLease::acquire(&TRANSIENT_SCRATCH_POOL"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("ScratchLease::acquire(&REACTIVE_SCRATCH_POOL"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("thread_local!")
+            && stamp.contains("static TRANSIENT_SCRATCH_POOL")
+            && stamp.contains("static REACTIVE_SCRATCH_POOL"),
+        "{stamp}"
+    );
+    assert!(
+        !state.contains("KernelScratch") && !state.contains("scratch:"),
         "{state}"
     );
-    assert!(
-        state.contains("scratch,"),
-        "restore must preserve the active transient scratch allocation:\n{state}"
+    assert_generated_rust_compiles_with_tests(
+        &generated,
+        r#"
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct CountingAllocator;
+static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+#[test]
+fn pooled_stamps_are_allocation_free_after_warmup() {
+    use generated_device::Instance;
+    use runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
+
+    let mut instance = Instance::new(&[0, 1]);
+    let voltages = [0.25, -0.125];
+    let context = GeneratedEvalContext::new(&voltages);
+    let mut touched = 0.0;
+    instance.stamp(&context, &mut GeneratedStamper { touched: &mut touched });
+    instance.stamp_reactive(
+        &context,
+        &mut GeneratedReactiveStamper { touched: &mut touched },
     );
-    assert!(
-        !state.contains("reactive_scratch,"),
-        "restore must not carry an unused reactive scratch allocation:\n{state}"
-    );
-    assert!(
-        !state.contains("scratch: snapshot.scratch"),
-        "restore must not import snapshot scratch, which clones intentionally strip:\n{state}"
-    );
-    assert!(
-        !state.contains("reactive_scratch: snapshot.reactive_scratch"),
-        "restore must not import snapshot reactive scratch, which clones intentionally strip:\n{state}"
+
+    let before = ALLOCATION_COUNT.load(Ordering::Relaxed);
+    for _ in 0..128 {
+        instance.stamp(&context, &mut GeneratedStamper { touched: &mut touched });
+        instance.stamp_reactive(
+            &context,
+            &mut GeneratedReactiveStamper { touched: &mut touched },
+        );
+    }
+    let after = ALLOCATION_COUNT.load(Ordering::Relaxed);
+    assert_eq!(after, before, "steady-state pooled stamps allocated");
+    assert!(touched.is_finite());
+}
+"#,
     );
 }
 

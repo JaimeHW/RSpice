@@ -4250,6 +4250,7 @@ dependencies = [
 name = "rspice-bench"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "clap",
  "rspice-veriloga",
  "serde",
@@ -4377,6 +4378,7 @@ dependencies = [
  "log",
  "nom",
  "serde",
+ "serde_json",
  "smol_str 0.3.6",
  "thiserror 2.0.18",
  "web-time",

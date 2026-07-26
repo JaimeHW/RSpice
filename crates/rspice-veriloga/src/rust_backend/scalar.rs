@@ -416,7 +416,6 @@ pub fn generate_device(
         ddt_slots.len(),
         ddt_slots.idt_len(),
         potential_branch_count,
-        device::StateScratchUsage::default(),
         &extensions,
     )?;
     let mut files = vec![
