@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- RF port (Z0-terminated Thevenin port). Box 28x40, pins +(14,0),
-     -(14,40). Circle with an incident-wave arrow. -->
+<!-- RF port: Thevenin source behind Z0 — sine source circle with the
+     reference impedance drawn as a series zigzag on the top lead
+     (Cadence port idiom). Box 28x40, pins +(14,0), -(14,40). -->
 <svg viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
-  <path d="M 14,0 V 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 14,40 V 30" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,0 V 1.5 L 17.2,2.7 L 10.8,5 L 17.2,7.3 L 14,8.5 V 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M 14,10 A 10,10 0 0 1 14,30 A 10,10 0 0 1 14,10" fill="none" stroke="#000000" stroke-width="1"/>
-  <path d="M 9.2,24.8 L 16.5,17.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 19.5,14.5 L 18.1,19.1 L 14.9,15.9 Z" fill="#000000" stroke="none"/>
+  <path d="M 9,20 C 10.3,15.6 12.7,15.6 14,20 C 15.3,24.4 17.7,24.4 19,20" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,30 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
 </svg>
