@@ -193,6 +193,57 @@ top. Its `veriloga-builtins` feature is a different path entirely: it
 compiles the pre-generated Rust in `rspice-core/src/device/veriloga_generated/`
 and does not link this compiler at all.
 
+## Generating the built-in device models
+
+The crate ships one binary, `rspice-veriloga-gen`. It walks a tree of
+Verilog-A sources, compiles each module to canonical IR, and emits a Rust
+device folder per module into
+`crates/rspice-core/src/device/veriloga_generated/`, alongside a
+`registry.rs` and a `manifest.txt`. That generated Rust — not this
+compiler — is what `rspice-core`'s `veriloga-builtins` feature builds.
+
+```bash
+# Full regeneration; must rewrite every device, registry.rs and manifest.txt
+cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- \
+    regenerate-builtins [--models PATH] [--out PATH] [--jobs N]
+
+# One model at a time while iterating; writes to target/veriloga-generated-subset
+cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- \
+    generate-builtins-subset --filter FILTER [--models PATH] [--out PATH] [--jobs N]
+
+# Verify the checked-in output is current; no writes
+cargo run -p rspice-veriloga --bin rspice-veriloga-gen -- \
+    check-builtins [--models PATH] [--out PATH]
+```
+
+`--models` defaults to `models/veriloga`. `--jobs` defaults to the
+available parallelism capped at 4, or to
+`RSPICE_VERILOGA_GENERATOR_JOBS` when that is set, and is in any case
+clamped to the number of modules being generated. `--filter` belongs to
+the subset command only: full
+regeneration rejects it, because a partial rewrite would leave the
+registry and manifest describing devices that are no longer there. The
+subset command says so in its output — it deliberately does not rewrite
+`registry.rs` or `manifest.txt`, so its output is for inspection, not for
+committing. The `generator` profile matters: it is release-optimized, and
+compiling the full model corpus under the dev profile is impractically
+slow.
+
+Staleness is detected by two digests recorded in `manifest.txt`. The
+`source_tree_digest` covers the model sources; the `generator_digest` is
+`RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST`, computed in `build.rs` over
+this crate's own sources plus the workspace `Cargo.toml`/`Cargo.lock`, so
+that editing the compiler invalidates its output exactly like editing a
+model does. `check-builtins` compares both and fails with the exact
+regeneration command when either has moved.
+
+Two markers steer discovery inside the model tree: a `.rspice-veriloga-skip`
+file excludes a directory, and a `.rspice-veriloga-profile` file supplies
+the `defines`/`undefines` a source needs to preprocess. Setting
+`RSPICE_RUST_BACKEND_REQUIRE_SCALAR_BUILTINS=1` turns any fallback off the
+direct scalar backend into a hard error, which is how a regression away
+from the fastest backend tier gets caught.
+
 ## Building and testing
 
 ```bash
