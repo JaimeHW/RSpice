@@ -1,14 +1,19 @@
 //! Simulation results Python bindings with NumPy integration
 //!
-//! Provides Python access to simulation results:
-//! - `SimulationResult` - DC operating point results
-//! - `TransientResult` - Time-domain waveforms (voltages and branch currents)
-//! - `AcResult` - Frequency-domain complex phasors
-//! - `DistortionResult` - Harmonic and two-tone Volterra products
-//! - `DcSweepResult` - Collection of DC solutions
-//! - `FourierResult` - Harmonic decomposition / THD of a waveform
-//! - `TransferFunctionResult` - Small-signal gain and impedances
-//! - `Measurement` / `RunReport` - .MEAS verification outcomes
+//! Provides Python access to simulation results, grouped by analysis family:
+//!
+//! - DC: `SimulationResult`, `DcSweepResult`, `DeviceOperatingPoint`
+//! - Transient: `TransientResult`, `CompressedTransientResult`,
+//!   `TransientCheckpoint`, `FourierResult`, `Harmonic`
+//! - Frequency domain: `AcResult`, `DistortionResult`, `TransferFunctionResult`,
+//!   `StbResult`, `PoleZeroResult`, `ComplexValue`, `SParameterResult`
+//! - Noise: `NoiseResult`, `NoiseContribution`, `PeriodicNoiseResult`,
+//!   `PeriodicNoiseContribution`, `OscillatorNoiseResult`
+//! - Periodic/RF: `PssResult`, `HbResult`, `PacResult`
+//! - Statistical and sensitivity: `MonteCarloResult`, `VariableStatistics`,
+//!   `SensitivityResult`, `ElementSensitivity`, `AcSensitivityResult`,
+//!   `AcSensitivity`
+//! - Verification: `Measurement`, `AnalysisRecord`, `RunReport`
 //!
 //! Error discipline: every accessor raises `IndexError` for out-of-range
 //! indices and `KeyError` for unknown node/branch names — silent zeros are
@@ -2925,9 +2930,10 @@ impl PyComplexValue {
 ///
 /// Contains poles and zeros of a circuit's transfer function.
 ///
-/// Note: `run_pz` injects a unit *current* at the input node, so `dc_gain`
-/// is a transimpedance (V/A), not a voltage ratio. Pole/zero locations are
-/// input-independent.
+/// Note: `run_pz` defaults to injecting a unit *current* at the input node,
+/// so `dc_gain` is a transimpedance (V/A) rather than a voltage ratio unless
+/// the call passed `input_type="voltage"`. Pole/zero locations are
+/// input-independent either way.
 ///
 /// Example:
 ///     >>> result = engine.run_pz(netlist, input_node="in", output_node="out")
@@ -2941,7 +2947,8 @@ pub struct PyPoleZeroResult {
     poles: Vec<PyComplexValue>,
     /// System zeros
     zeros: Vec<PyComplexValue>,
-    /// DC transimpedance H(0) in V/A (unit current input)
+    /// DC gain H(0): a transimpedance in V/A for the default unit-current
+    /// input, or a dimensionless voltage ratio for a unit-voltage input
     #[pyo3(get)]
     pub dc_gain: f64,
     /// High-frequency gain H(∞) if finite
@@ -4390,7 +4397,7 @@ pub struct PyMeasurement {
     /// Measurement name (from the .MEAS statement)
     #[pyo3(get)]
     pub name: String,
-    /// Analysis the measurement applies to ("TRAN", "AC", "DC")
+    /// Analysis the measurement applies to ("TRAN", "DC", "AC", "NOISE")
     #[pyo3(get)]
     pub analysis: String,
     /// Measured value, or None if evaluation failed
@@ -4609,7 +4616,9 @@ pub struct PyRunReport {
     /// Fourier results (one per .four output)
     #[pyo3(get)]
     pub fourier: Vec<PyFourierResult>,
-    /// One record per analysis directive in the netlist
+    /// One or more records per analysis directive in the netlist. A `.four`
+    /// contributes one record per output and an `.sp donoise` contributes a
+    /// separate noise record.
     #[pyo3(get)]
     pub records: Vec<PyAnalysisRecord>,
     /// All measurement outcomes
