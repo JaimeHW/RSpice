@@ -2,7 +2,14 @@ use super::*;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 const EPSSIL: Value = 11.7 * 8.854_214_871e-12;
-const CHARGE: Value = 1.602_176_634e-19;
+// MOS2 is a Berkeley/Xyce legacy model.  Xyce 7.10 intentionally retains
+// the historical device constants from N_DEV_Const.h rather than the modern
+// SI values used by the rest of the native device library.  Keep that
+// compatibility local to the canonical MOS2 equations.
+const XYCE_CHARGE: Value = 1.602_191_8e-19;
+const XYCE_BOLTZMANN: Value = 1.380_622_6e-23;
+const XYCE_K_OVER_Q: Value = XYCE_BOLTZMANN / XYCE_CHARGE;
+const PHYSICAL_K_OVER_Q: Value = crate::constants::K_BOLTZMANN / crate::constants::Q_ELECTRON;
 
 #[derive(Debug, Clone, Copy)]
 pub(in crate::device::mosfet::mosfet) struct Mos2Evaluation {
@@ -286,6 +293,11 @@ impl Neg for Dual3 {
 
 impl Mosfet {
     #[inline]
+    fn level2_xyce_thermal_voltage(&self) -> Value {
+        self.vt * (XYCE_K_OVER_Q / PHYSICAL_K_OVER_Q)
+    }
+
+    #[inline]
     pub(in crate::device::mosfet::mosfet) fn level2_effective_length(&self) -> Value {
         (self.l - 2.0 * self.ld).max(1.0e-12)
     }
@@ -509,7 +521,11 @@ impl Mosfet {
         let effective_width = self.w.max(1.0e-18);
         let phi = self.phi.max(1.0e-12);
         let sqrt_phi = phi.sqrt();
-        let phi_min_vbs = (phi - lvbs).max(1.0e-18);
+        // Xyce retains the signed `tPhi-lvbs` value in the MOS2 equations.
+        // The positive-body branch evaluates `sarg` with its rational form,
+        // so clamping this term to zero changes the VMAX root and the
+        // subthreshold current for forward-biased body junctions.
+        let phi_min_vbs = phi - lvbs;
         let cox = self.cox.max(0.0);
         let oxide_cap = cox * effective_length * effective_width;
         let beta = self.kp * effective_width / effective_length;
@@ -734,7 +750,9 @@ impl Mosfet {
         let effective_width = self.w.max(1.0e-18);
         let phi = self.phi.max(1.0e-12);
         let sqrt_phi = phi.sqrt();
-        let phi_min_vbs = (phi - lvbs).max_const(1.0e-18);
+        // Keep the signed Xyce `tPhi-lvbs` term; only the branch-selected
+        // square-root arguments below are guarded where a root is required.
+        let phi_min_vbs = Dual3::constant(phi) - lvbs;
         let cox = self.cox.max(0.0);
         let oxide_cap = cox * effective_length * effective_width;
         let beta = self.kp * effective_width / effective_length;
@@ -762,6 +780,11 @@ impl Mosfet {
         } else {
             Dual3::constant(sqrt_phi) / (1.0 + 0.5 * (lvbs - lvds) / phi)
         };
+        let dbrgdb = if (lvbs - lvds).value <= 0.0 {
+            -0.5 / barg.value
+        } else {
+            -0.5 * barg.value * barg.value / (phi * sqrt_phi)
+        };
 
         let factor = if oxide_cap > 0.0 {
             0.125 * self.mos2_narrow_factor * 2.0 * std::f64::consts::PI * EPSSIL / oxide_cap
@@ -779,9 +802,19 @@ impl Mosfet {
         let fast_surface = self.mos2_fast_surface_state_density != 0.0 && oxide_cap > 0.0;
         let mut argg = Dual3::constant(0.0);
         if fast_surface {
-            if let Some((delta_von, surface_argg)) =
-                self.level2_fast_surface_state_shift_dual(gamasd, sarg, dsrgdb, factor, cox)
-            {
+            if let Some((delta_von, surface_argg)) = self.level2_fast_surface_state_shift_dual(
+                gamasd,
+                sarg,
+                barg.value,
+                lvbs.value,
+                lvds.value,
+                dsrgdb,
+                dbrgdb,
+                factor,
+                cox,
+                effective_length,
+                xd,
+            ) {
                 von = von + delta_von;
                 argg = surface_argg;
             }
@@ -818,7 +851,34 @@ impl Mosfet {
         } else {
             vdsat = ((vgsx - vbin) / eta).max_const(0.0);
         }
+        // Xyce deliberately treats the fast-surface-state `vgsx` clamp as a
+        // value clamp only.  Its analytic VDSAT sensitivities still use the
+        // canonical Grove--Frohman derivatives below, even when `vgsx` is
+        // pinned to `Von` in subthreshold operation.  The ordinary Dual3
+        // derivative follows the clamp and therefore cannot be used for this
+        // branch.
         let mut vmax_vdsat_derivatives = (vdsat.derivative[0], vdsat.derivative[2]);
+        if fast_surface {
+            vmax_vdsat_derivatives = if gammad_vdsat.value > 0.0 {
+                let argv = (vgsx.value - vbin.value) / eta + phi_min_vbs.value;
+                if argv > 0.0 {
+                    let arg1 =
+                        (1.0 + 4.0 * argv / (gammad_vdsat.value * gammad_vdsat.value)).sqrt();
+                    let dsdvgs = (1.0 - 1.0 / arg1) / eta;
+                    let dsdvbs = (gammad_vdsat.value * (1.0 - arg1)
+                        + 2.0 * argv / (gammad_vdsat.value * arg1))
+                        / eta
+                        * gamasd.derivative[2]
+                        + 1.0 / arg1
+                        + factor * dsdvgs;
+                    (dsdvgs, dsdvbs)
+                } else {
+                    (0.0, 0.0)
+                }
+            } else {
+                (1.0, 0.0)
+            };
+        }
         if self.mos2_max_drift_vel > 0.0 {
             // VMAX given: velocity saturation lowers vdsat (Baum quartic).
             // The root is found at value level; ngspice's analytic
@@ -837,32 +897,37 @@ impl Mosfet {
                     sarg3.value,
                     xv,
                 ) {
-                    let (dsdvgs, dsdvbs) = self.level2_vmax_vdsat_derivatives(
-                        sat,
-                        vgsx.value,
-                        vbin.value,
-                        eta,
-                        // Xyce resets gammad=gamasd before evaluating the
-                        // VMAX channel-length derivative block.  The
-                        // normalized value is only used by the VDSAT root.
-                        gamasd.value,
-                        lvbs.value,
-                        phi,
-                        sqrt_phi,
-                        phi_min_vbs.value,
-                        sarg.value,
-                        sarg3.value,
-                        dsrgdb,
-                        gamasd.derivative[2],
-                        factor,
-                        ueff,
-                    );
-                    vmax_vdsat_derivatives = (dsdvgs, dsdvbs);
                     vdsat = Dual3 {
                         value: sat,
-                        derivative: [dsdvgs, 0.0, dsdvbs],
+                        derivative: vdsat.derivative,
                     };
                 }
+                // Xyce evaluates the analytic VMAX sensitivities even when
+                // its quartic root search keeps the ordinary Grove--Frohman
+                // VDSAT.  The derivative block therefore uses the final
+                // scalar VDSAT, whether or not the optional root was found.
+                let (dsdvgs, dsdvbs) = self.level2_vmax_vdsat_derivatives(
+                    vdsat.value,
+                    vgsx.value,
+                    vbin.value,
+                    eta,
+                    // Xyce resets gammad=gamasd before evaluating the
+                    // VMAX channel-length derivative block.  The
+                    // normalized value is only used by the VDSAT root.
+                    gamasd.value,
+                    lvbs.value,
+                    phi,
+                    sqrt_phi,
+                    phi_min_vbs.value,
+                    sarg.value,
+                    sarg3.value,
+                    dsrgdb,
+                    gamasd.derivative[2],
+                    factor,
+                    ueff,
+                );
+                vmax_vdsat_derivatives = (dsdvgs, dsdvbs);
+                vdsat.derivative = [dsdvgs, 0.0, dsdvbs];
             }
         }
 
@@ -961,6 +1026,35 @@ impl Mosfet {
             return Mos2ForwardOperatingPoint::channel_conductance(gds.value);
         }
 
+        if fast_surface && lvgs.value <= von.value {
+            return self.level2_fast_surface_state_operating_point(
+                lvgs.value,
+                lvds.value,
+                lvbs.value,
+                von.value,
+                vbin.value,
+                vdsat.value,
+                argg.value,
+                eta,
+                factor,
+                beta1.value,
+                clfact.value,
+                xlamda.value,
+                gamasd.value,
+                sarg.value,
+                barg.value,
+                body.value,
+                dsrgdb,
+                dbrgdb,
+                gamasd.derivative[2],
+                gamasd.derivative[1],
+                channel_length_derivatives,
+                xd,
+                effective_length,
+                vmax_vdsat_derivatives,
+            );
+        }
+
         let cdrain = if fast_surface && lvgs.value <= von.value {
             if vdsat.value <= 0.0 {
                 Dual3::constant(0.0)
@@ -986,6 +1080,136 @@ impl Mosfet {
         };
 
         Mos2ForwardOperatingPoint::from_dual(cdrain)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn level2_fast_surface_state_operating_point(
+        &self,
+        lvgs: Value,
+        lvds: Value,
+        lvbs: Value,
+        von: Value,
+        vbin: Value,
+        vdsat: Value,
+        argg: Value,
+        eta: Value,
+        factor: Value,
+        beta1: Value,
+        clfact: Value,
+        xlamda: Value,
+        gamasd: Value,
+        sarg: Value,
+        barg: Value,
+        body: Value,
+        dsrgdb: Value,
+        dbrgdb: Value,
+        dgdvbs: Value,
+        dgdvds: Value,
+        channel_length_derivatives: Option<[Value; 3]>,
+        xd: Value,
+        effective_length: Value,
+        vdsat_derivatives: (Value, Value),
+    ) -> Mos2ForwardOperatingPoint {
+        if vdsat <= 0.0 {
+            return Mos2ForwardOperatingPoint::from_dual(0.0);
+        }
+
+        let phi = self.phi.max(1.0e-12);
+        let sqrt_phi = phi.sqrt();
+        let phi_min_vbs = phi - lvbs;
+        let d2sdb2 = if lvbs <= 0.0 {
+            0.5 * dsrgdb / phi_min_vbs
+        } else {
+            -dsrgdb * sarg / (phi * sqrt_phi)
+        };
+        let d2bdb2 = if lvds - lvbs >= 0.0 {
+            0.5 * dbrgdb / (phi_min_vbs + lvds).max(1.0e-18)
+        } else {
+            -dbrgdb * barg / (phi * sqrt_phi)
+        };
+        let dgddb2 = if self.mos2_junction_depth > 0.0 && xd > 0.0 {
+            let junction_scale = 2.0 / self.mos2_junction_depth;
+            let argxs = (1.0 + xd * sarg * junction_scale).max(1.0e-18);
+            let argxd = (1.0 + xd * barg * junction_scale).max(1.0e-18);
+            let args = argxs.sqrt();
+            let argd = argxd.sqrt();
+            let dasdb2 = -xd * (d2sdb2 + dsrgdb * dsrgdb * xd / (self.mos2_junction_depth * argxs))
+                / (effective_length * args);
+            let daddb2 = -xd * (d2bdb2 + dbrgdb * dbrgdb * xd / (self.mos2_junction_depth * argxd))
+                / (effective_length * argd);
+            -0.5 * self.gamma * (dasdb2 + daddb2)
+        } else {
+            0.0
+        };
+        let dxndvb = 2.0 * dgdvbs * dsrgdb + gamasd * d2sdb2 + dgddb2 * sarg;
+        let dxndvd = dgdvds * dsrgdb;
+        let vt = self.level2_xyce_thermal_voltage();
+        let dodvbs = -factor + dgdvbs * sarg + gamasd * dsrgdb + vt * dxndvb;
+        let dodvds = dgdvds * sarg + vt * dxndvd;
+
+        // `channel_length_derivatives` stores Xyce's signed sensitivities:
+        // they are the negatives of the corresponding derivatives of
+        // `clfact`, as used by the beta derivative terms below.
+        let [_, dldvds, dldvbs] = channel_length_derivatives.unwrap_or_else(|| {
+            if lvds != 0.0 {
+                [0.0, -xlamda, 0.0]
+            } else {
+                [0.0; 3]
+            }
+        });
+
+        let (vdson, body_for_vdson, barg_for_vdson, gdbdv) = if lvds > vdsat {
+            let bsarg_input = (vdsat + phi_min_vbs).max(1.0e-18);
+            let bsarg = if lvbs - vdsat <= 0.0 {
+                bsarg_input.sqrt()
+            } else {
+                sqrt_phi / (1.0 + 0.5 * (lvbs - vdsat) / phi)
+            };
+            let dbsrdb = if lvbs - vdsat <= 0.0 {
+                -0.5 / bsarg
+            } else {
+                -0.5 * bsarg * bsarg / (phi * sqrt_phi)
+            };
+            let bodys = bsarg * bsarg * bsarg - sarg * sarg * sarg;
+            let gdbdvs = 2.0 * gamasd * (bsarg * bsarg * dbsrdb - sarg * sarg * dsrgdb);
+            (vdsat, bodys, bsarg, gdbdvs)
+        } else {
+            (
+                lvds,
+                body,
+                barg,
+                2.0 * gamasd * (barg * barg * dbrgdb - sarg * sarg * dsrgdb),
+            )
+        };
+        let cdson =
+            beta1 * ((von - vbin - eta * vdson * 0.5) * vdson - gamasd * body_for_vdson / 1.5);
+        let didvds = beta1 * (von - vbin - eta * vdson - gamasd * barg_for_vdson);
+        let mut gdson = -cdson * dldvds / clfact - beta1 * dgdvds * body_for_vdson / 1.5;
+        if lvds < vdsat {
+            gdson += didvds;
+        }
+        let mut gbson = -cdson * dldvbs / clfact
+            + beta1 * (dodvbs * vdson + factor * vdson - dgdvbs * body_for_vdson / 1.5 - gdbdv);
+        let (dsdvgs, dsdvbs) = vdsat_derivatives;
+        if lvds > vdsat {
+            gbson += didvds * dsdvbs;
+        }
+        let expg = (argg * (lvgs - von)).exp();
+        let cdrain = cdson * expg;
+        let gmw = cdrain * argg;
+        let mut gm = gmw;
+        if lvds > vdsat {
+            gm += didvds * dsdvgs * expg;
+        }
+        let xn = if vt != 0.0 && argg != 0.0 {
+            1.0 / (vt * argg)
+        } else {
+            1.0
+        };
+        let tmp = gmw * (lvgs - von) / xn;
+        let gds = gdson * expg - gm * dodvds - tmp * dxndvd;
+        let gmbs = gbson * expg - gm * dodvbs - tmp * dxndvb;
+        Mos2ForwardOperatingPoint { gm, gds, gmb: gmbs }
     }
 
     #[inline]
@@ -1043,10 +1267,10 @@ impl Mosfet {
             return None;
         }
 
-        let cfs = CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
+        let cfs = XYCE_CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
         let cdonco = -(gamasd * dsrgdb + dgddvb * sarg) + factor;
         let xn = 1.0 + cfs / cox + cdonco;
-        let thermal_slope = self.vt * xn;
+        let thermal_slope = self.level2_xyce_thermal_voltage() * xn;
         if thermal_slope.is_finite() && thermal_slope > 0.0 {
             Some((thermal_slope, 1.0 / thermal_slope))
         } else {
@@ -1059,20 +1283,72 @@ impl Mosfet {
         &self,
         gamasd: Dual3,
         sarg: Dual3,
+        barg: Value,
+        lvbs: Value,
+        lvds: Value,
         dsrgdb: Value,
+        dbrgdb: Value,
         factor: Value,
         cox: Value,
+        effective_length: Value,
+        xd: Value,
     ) -> Option<(Dual3, Dual3)> {
         if self.mos2_fast_surface_state_density == 0.0 || cox <= 0.0 {
             return None;
         }
 
-        let cfs = CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
+        let cfs = XYCE_CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
         let cdonco = -(gamasd.value * dsrgdb + gamasd.derivative[2] * sarg.value) + factor;
         let xn = 1.0 + cfs / cox + cdonco;
-        let thermal_slope = self.vt * xn;
+        let thermal_slope = self.level2_xyce_thermal_voltage() * xn;
         if thermal_slope.is_finite() && thermal_slope > 0.0 {
-            let slope = Dual3::constant(thermal_slope);
+            // Xyce's MOS2 load evaluates the fast-surface-state threshold
+            // shift as part of the Newton Jacobian.  The scalar value above
+            // is not sufficient: `xn` depends on the body and drain biases
+            // through the short-channel gamma and depletion-width terms.
+            // Preserve those canonical first derivatives so transient
+            // Newton steps see the same threshold sensitivity as Xyce.
+            let phi = self.phi.max(1.0e-12);
+            let sqrt_phi = phi.sqrt();
+            let phi_min_vbs = phi - lvbs;
+            let d2sdb2 = if lvbs <= 0.0 {
+                0.5 * dsrgdb / phi_min_vbs
+            } else {
+                -dsrgdb * sarg.value / (phi * sqrt_phi)
+            };
+            let d2bdb2 = if lvds - lvbs >= 0.0 {
+                0.5 * dbrgdb / (phi_min_vbs + lvds).max(1.0e-18)
+            } else {
+                -dbrgdb * barg / (phi * sqrt_phi)
+            };
+            let dgddb2 = if self.mos2_junction_depth > 0.0 && xd > 0.0 {
+                let junction_scale = 2.0 / self.mos2_junction_depth;
+                let argxs = (1.0 + xd * sarg.value * junction_scale).max(1.0e-18);
+                let argxd = (1.0 + xd * barg * junction_scale).max(1.0e-18);
+                let args = argxs.sqrt();
+                let argd = argxd.sqrt();
+                let dasdb2 = -xd
+                    * (d2sdb2 + dsrgdb * dsrgdb * xd / (self.mos2_junction_depth * argxs))
+                    / (effective_length * args);
+                let daddb2 = -xd
+                    * (d2bdb2 + dbrgdb * dbrgdb * xd / (self.mos2_junction_depth * argxd))
+                    / (effective_length * argd);
+                -0.5 * self.gamma * (dasdb2 + daddb2)
+            } else {
+                0.0
+            };
+            let dgdvbs = gamasd.derivative[2];
+            let dgdvds = gamasd.derivative[1];
+            let dxndvb = 2.0 * dgdvbs * dsrgdb + gamasd.value * d2sdb2 + dgddb2 * sarg.value;
+            let dxndvd = dgdvds * dsrgdb;
+            let slope = Dual3 {
+                value: thermal_slope,
+                derivative: [
+                    0.0,
+                    self.level2_xyce_thermal_voltage() * dxndvd,
+                    self.level2_xyce_thermal_voltage() * dxndvb,
+                ],
+            };
             Some((slope, 1.0 / slope))
         } else {
             None
@@ -1114,7 +1390,12 @@ impl Mosfet {
         }
 
         let nsub_m3 = self.mos2_substrate_doping * 1.0e6;
-        let denom = CHARGE * nsub_m3;
+        // The Rust model's temperature-normalized substrate geometry is
+        // derived from the SI parameter set used by construction.  Keep that
+        // geometric depletion width on the physical charge constant; the
+        // legacy Xyce charge constant remains localized to the explicitly
+        // Xyce-defined surface-state charge path above.
+        let denom = crate::constants::Q_ELECTRON * nsub_m3;
         if denom <= 0.0 {
             0.0
         } else {

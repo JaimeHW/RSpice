@@ -28184,7 +28184,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         {
             Self::xyce_transient_solver_max_step(&tran)
         } else {
-            Self::transient_oracle_solver_max_step(&tran)
+            Self::transient_oracle_solver_max_step_for_netlist(&netlist, &tran)
         };
         let locked_max_step = locked_solver_max_step.max(max_step);
 
@@ -35194,7 +35194,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         tran: &XyceTranAnalysis,
     ) -> Result<Value, String> {
-        let solver_max_step = Self::transient_oracle_solver_max_step(tran);
+        let solver_max_step = Self::transient_oracle_solver_max_step_for_netlist(netlist, tran);
         // A lossless transmission line already contributes its propagation
         // delay as an accepted-time breakpoint.  Capping the global ceiling
         // to an arbitrary number of samples across a source edge (for
@@ -35283,6 +35283,29 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
     /// reference grid still provide the required local resolution.
     fn transient_oracle_solver_max_step(tran: &XyceTranAnalysis) -> Value {
         Self::xyce_transient_solver_max_step(tran)
+    }
+
+    /// Resolve the solver ceiling for a structurally qualified legacy MOS2
+    /// transient.  The Berkeley MOS2 evaluator couples depletion charge,
+    /// surface-state charge, and the VMAX channel-shortening derivatives;
+    /// using the native 10%-of-window ceiling lets a single accepted step
+    /// span that coupled transition and changes the companion history.
+    /// The fine envelope is therefore part of the absolute MOS2 qualification
+    /// contract, not a deck-specific exception.  Authored `DTMAX` remains
+    /// authoritative for every model family.
+    fn transient_oracle_solver_max_step_for_netlist(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+    ) -> Value {
+        let solver_max_step = Self::transient_oracle_solver_max_step(tran);
+        if tran.max_step.is_none()
+            && Self::netlist_is_native_transient_level2_mosfet_network(netlist)
+        {
+            let window = (tran.stop - tran.start.unwrap_or(0.0)).max(f64::MIN_POSITIVE);
+            solver_max_step.min((window / 1000.0).max(f64::MIN_POSITIVE))
+        } else {
+            solver_max_step
+        }
     }
 
     fn transient_family_result_to_prn_table(
@@ -50179,7 +50202,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             netlist,
             tran,
             reference_step,
-            Self::transient_oracle_solver_max_step(tran),
+            Self::transient_oracle_solver_max_step_for_netlist(netlist, tran),
             true,
         )
     }
