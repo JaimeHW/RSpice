@@ -57473,7 +57473,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let is_legacy = model.starts_with("xyce_legacy_d_");
         if !matches!(
             model.as_str(),
-            "d_add"
+            "d_dff"
+                | "d_dlatch"
+                | "d_jkff"
+                | "d_add"
                 | "d_and"
                 | "d_buffer"
                 | "d_inverter"
@@ -57492,6 +57495,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 | "xyce_legacy_d_or"
                 | "xyce_legacy_d_xnor"
                 | "xyce_legacy_d_xor"
+                | "xyce_d_dff"
+                | "xyce_d_dlatch"
+                | "xyce_d_jkff"
         ) {
             return false;
         }

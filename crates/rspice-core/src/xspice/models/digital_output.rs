@@ -1893,7 +1893,6 @@ impl XyceDLegacyGate {
             let mut state = XyceDTff::input_logic_state(voltage, previous_state, params);
             let mut transition_time = ctx.state_prev(transition_index);
             let changed = previous_state.is_some() && previous_state != state;
-
             if ctx.is_dc() {
                 state = XyceDTff::input_logic_state(voltage, None, params);
                 transition_time = 0.0;
@@ -2678,6 +2677,7 @@ impl XyceDLegacyDff {
         pending_index: usize,
         pending_time_index: usize,
         pending_start_index: usize,
+        reschedule_pending: bool,
     ) -> (Option<bool>, Value, Option<bool>) {
         let previous_q = q_state(ctx.state_prev(q_index));
         let mut q = previous_q;
@@ -2715,6 +2715,21 @@ impl XyceDLegacyDff {
             pending_start = f64::NAN;
         } else {
             let mut pending_applied = false;
+            if reschedule_pending
+                && let Some(pending_target) = pending_q
+                && pending_time.is_finite()
+                && desired == Some(pending_target)
+            {
+                // Xyce recomputes the output event from the latest input
+                // transition on every trial.  A later input transition can
+                // therefore move an already scheduled event forward while
+                // the truth-table target remains unchanged.
+                let event_time = last_input_transition_time + event_delay;
+                if event_time.is_finite() && event_time > pending_time + 1.0e-18 {
+                    pending_time = event_time;
+                    pending_start = event_time;
+                }
+            }
             if let Some(pending_target) = pending_q
                 && deferred_until.is_finite()
                 && pending_time.is_finite()
@@ -2726,13 +2741,11 @@ impl XyceDLegacyDff {
             }
             if let Some(target) = pending_q
                 && pending_time.is_finite()
-                    // Xyce's next-state vector can carry the scheduled output
+                // Xyce's next-state vector can carry the scheduled output
                 // transition through the exact breakpoint evaluation while
-                // the current-state vector remains unchanged.  Preserve the
-                // pending state at equality and activate it on the next
-                // accepted point strictly after the event time.
-                && pending_time < ctx.time - 1.0e-18
-                && ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
+                // the current-state vector remains unchanged.  Activate the
+                // finite-output transition at the scheduled event time.
+                && pending_time <= ctx.time + 1.0e-18
             {
                 transition_from = q;
                 q = Some(target);
@@ -2745,6 +2758,20 @@ impl XyceDLegacyDff {
                 pending_time = f64::NAN;
                 pending_start = f64::NAN;
                 pending_applied = true;
+            }
+
+            // Re-issue a scheduled output event from every committed model
+            // evaluation.  The transient engine intentionally discards
+            // rollback-only breakpoint requests, so retaining the pending
+            // state alone is insufficient to guarantee that the accepted
+            // solution lands on the delayed DIG transition.
+            if !pending_applied
+                && ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
+                && pending_q.is_some()
+                && pending_time.is_finite()
+                && pending_time > ctx.time + 1.0e-18
+            {
+                ctx.request_breakpoint(pending_time);
             }
 
             if !pending_applied {
@@ -2954,6 +2981,7 @@ impl CodeModel for XyceDLegacyDff {
             Self::Q_PENDING,
             Self::Q_PENDING_TIME,
             Self::Q_PENDING_START,
+            false,
         );
         let (qbar, qbar_start, qbar_from) = Self::update_output(
             ctx,
@@ -2968,6 +2996,7 @@ impl CodeModel for XyceDLegacyDff {
             Self::QB_PENDING,
             Self::QB_PENDING_TIME,
             Self::QB_PENDING_START,
+            false,
         );
         for index in 0..Self::INPUT_COUNT {
             XyceDLegacyGate::stamp_input_load(
@@ -3058,6 +3087,879 @@ impl CodeModel for XyceDLegacyDff {
             return Vec::new();
         };
         Self::output_ac_partials(
+            ctx,
+            output_port,
+            frequency,
+            state_index,
+            from_index,
+            start_index,
+            params,
+        )
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("q") || output_port.eq_ignore_ascii_case("qbar")
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> crate::xspice::XspiceCheckpointSupport {
+        crate::xspice::XspiceCheckpointSupport::Serializable
+    }
+}
+
+/// Finite-output implementations of the PSpice U-device sequential models.
+///
+/// PSpice's `DFF`, `JKFF`, and `DLTCH` U-devices are lowered by the netlist
+/// frontend to an analog-vector XSPICE instance.  The native XSPICE models
+/// (`d_dff`, `d_jkff`, and `d_dlatch`) expose ideal digital outputs, which is
+/// not the interface implemented by Xyce's DIG device.  This model keeps the
+/// canonical Xyce truth tables while using the same two-rail finite-output
+/// stamping, input loading, transition scheduling, and checkpoint layout as
+/// the already-qualified Xyce TFF and legacy Y-device models.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceDSequentialKind {
+    Dff,
+    Jkff,
+    Dlatch,
+}
+
+impl XyceDSequentialKind {
+    fn input_count(self) -> usize {
+        match self {
+            Self::Dff | Self::Dlatch => 4,
+            Self::Jkff => 5,
+        }
+    }
+
+    fn event_input(self) -> usize {
+        match self {
+            // PSpice U-device port order is data/clock/set/reset.
+            Self::Dff => 1,
+            // PSpice U-device port order is J/K/clock/set/reset.
+            Self::Jkff => 2,
+            // A latch's enable input is the event-producing control.
+            Self::Dlatch => 1,
+        }
+    }
+
+    fn model_name(self) -> &'static str {
+        match self {
+            Self::Dff => "xyce_d_dff",
+            Self::Jkff => "xyce_d_jkff",
+            Self::Dlatch => "xyce_d_dlatch",
+        }
+    }
+}
+
+/// Shared finite-output sequential XSPICE code model.
+#[derive(Debug, Clone, Copy)]
+pub struct XyceDSequential {
+    kind: XyceDSequentialKind,
+}
+
+impl XyceDSequential {
+    pub const fn dff() -> Self {
+        Self {
+            kind: XyceDSequentialKind::Dff,
+        }
+    }
+
+    pub const fn jkff() -> Self {
+        Self {
+            kind: XyceDSequentialKind::Jkff,
+        }
+    }
+
+    pub const fn dlatch() -> Self {
+        Self {
+            kind: XyceDSequentialKind::Dlatch,
+        }
+    }
+
+    const Q_STATE: usize = 0;
+    const Q_TRANSITION_START: usize = 1;
+    const Q_TRANSITION_FROM: usize = 2;
+    const Q_PENDING: usize = 3;
+    const Q_PENDING_TIME: usize = 4;
+    const Q_PENDING_START: usize = 5;
+    const Q_PREV_LOW_VOLTAGE: usize = 6;
+    const Q_PREV_HIGH_VOLTAGE: usize = 7;
+    const Q_PREV_PREV_LOW_VOLTAGE: usize = 8;
+    const Q_PREV_PREV_HIGH_VOLTAGE: usize = 9;
+    const Q_PREV_LOW_CURRENT: usize = 10;
+    const Q_PREV_HIGH_CURRENT: usize = 11;
+    const QB_STATE: usize = 12;
+    const QB_TRANSITION_START: usize = 13;
+    const QB_TRANSITION_FROM: usize = 14;
+    const QB_PENDING: usize = 15;
+    const QB_PENDING_TIME: usize = 16;
+    const QB_PENDING_START: usize = 17;
+    const QB_PREV_LOW_VOLTAGE: usize = 18;
+    const QB_PREV_HIGH_VOLTAGE: usize = 19;
+    const QB_PREV_PREV_LOW_VOLTAGE: usize = 20;
+    const QB_PREV_PREV_HIGH_VOLTAGE: usize = 21;
+    const QB_PREV_LOW_CURRENT: usize = 22;
+    const QB_PREV_HIGH_CURRENT: usize = 23;
+    const INPUT_BASE: usize = 24;
+    const INPUT_STRIDE: usize = 3;
+    const INPUT_STATE: usize = 0;
+    const INPUT_VOLTAGE: usize = 1;
+    const INPUT_TRANSITION_TIME: usize = 2;
+    const INPUT_CAPACITY: usize = 5;
+    const TRANSIENT_INITIALIZED: usize =
+        Self::INPUT_BASE + Self::INPUT_CAPACITY * Self::INPUT_STRIDE;
+    const STATE_COUNT: usize = Self::TRANSIENT_INITIALIZED + 1;
+
+    fn input_state_index(index: usize, field: usize) -> usize {
+        Self::INPUT_BASE + index * Self::INPUT_STRIDE + field
+    }
+
+    fn ports(kind: XyceDSequentialKind) -> &'static [PortSpec] {
+        use std::sync::OnceLock;
+
+        fn output(name: &str, description: &str) -> PortSpec {
+            PortSpec {
+                name: name.to_string(),
+                direction: PortDirection::InOut,
+                default_type: PortType::Conductance,
+                allowed_types: vec![PortType::Conductance, PortType::DifferentialConductance],
+                is_vector: false,
+                null_allowed: false,
+                vector_min_len: None,
+                vector_max_len: None,
+                description: description.to_string(),
+            }
+        }
+
+        match kind {
+            XyceDSequentialKind::Dff => {
+                static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+                PORTS
+                    .get_or_init(|| {
+                        vec![
+                            PortSpec::input("dpwr", PortType::Voltage)
+                                .with_description("Positive digital power rail"),
+                            PortSpec::input("dgnd", PortType::Voltage)
+                                .with_description("Digital ground/reference rail"),
+                            PortSpec::vector_input("in", PortType::Voltage)
+                                .with_vector_min_len(4)
+                                .with_vector_max_len(4)
+                                .with_description(
+                                    "Analog D, rising-edge clock, PREB, and CLRB inputs",
+                                ),
+                            output("q", "Finite-impedance analog Q output"),
+                            output("qbar", "Finite-impedance analog complemented Q output"),
+                        ]
+                    })
+                    .as_slice()
+            }
+            XyceDSequentialKind::Jkff => {
+                static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+                PORTS
+                    .get_or_init(|| {
+                        vec![
+                            PortSpec::input("dpwr", PortType::Voltage)
+                                .with_description("Positive digital power rail"),
+                            PortSpec::input("dgnd", PortType::Voltage)
+                                .with_description("Digital ground/reference rail"),
+                            PortSpec::vector_input("in", PortType::Voltage)
+                                .with_vector_min_len(5)
+                                .with_vector_max_len(5)
+                                .with_description(
+                                    "Analog J, K, falling-edge clock, PREB, and CLRB inputs",
+                                ),
+                            output("q", "Finite-impedance analog Q output"),
+                            output("qbar", "Finite-impedance analog complemented Q output"),
+                        ]
+                    })
+                    .as_slice()
+            }
+            XyceDSequentialKind::Dlatch => {
+                static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+                PORTS
+                    .get_or_init(|| {
+                        vec![
+                            PortSpec::input("dpwr", PortType::Voltage)
+                                .with_description("Positive digital power rail"),
+                            PortSpec::input("dgnd", PortType::Voltage)
+                                .with_description("Digital ground/reference rail"),
+                            PortSpec::vector_input("in", PortType::Voltage)
+                                .with_vector_min_len(4)
+                                .with_vector_max_len(4)
+                                .with_description(
+                                    "Analog D, enable, PREB, and CLRB inputs for a level latch",
+                                ),
+                            output("q", "Finite-impedance analog Q output"),
+                            output("qbar", "Finite-impedance analog complemented Q output"),
+                        ]
+                    })
+                    .as_slice()
+            }
+        }
+    }
+
+    fn parameters() -> &'static [ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS
+            .get_or_init(|| {
+                let mut params = q_parameters().to_vec();
+                params.push(ParamSpec::real("vref", 0.0));
+                params.push(ParamSpec::real("vlo", 0.0));
+                params.push(ParamSpec::real("vhi", 0.0));
+                params.push(ParamSpec::real("ic1", f64::NAN));
+                params.push(ParamSpec::real("ic2", f64::NAN));
+                params
+            })
+            .as_slice()
+    }
+
+    fn initial_state(value: Value) -> Value {
+        XyceDLegacyDff::initial_state(value)
+    }
+
+    fn commit_state(ctx: &mut CmContext, index: usize, value: Value) {
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            ctx.set_state(index, value);
+        }
+    }
+
+    fn sample_inputs(
+        &self,
+        ctx: &mut CmContext,
+        params: DigParams,
+        vref: Value,
+    ) -> (Vec<Option<bool>>, Value, bool, Option<bool>, Value) {
+        let width = self.kind.input_count();
+        let voltages: Vec<Value> = ctx
+            .input_analog_vector_values("in")
+            .map(|values| values.iter().map(|value| value.value - vref).collect())
+            .unwrap_or_default();
+        let mut states = Vec::with_capacity(width);
+        let mut last_transition_time: Value = 0.0;
+        let mut event_changed = false;
+        let mut event_state = None;
+        let mut deferred_until = f64::NAN;
+        let transient_start =
+            !ctx.is_dc() && !ctx.state_prev(Self::TRANSIENT_INITIALIZED).is_finite();
+
+        for index in 0..width {
+            let state_index = Self::input_state_index(index, Self::INPUT_STATE);
+            let voltage_index = Self::input_state_index(index, Self::INPUT_VOLTAGE);
+            let transition_index = Self::input_state_index(index, Self::INPUT_TRANSITION_TIME);
+            let voltage = voltages.get(index).copied().unwrap_or(f64::NAN);
+            let previous_state = q_state(ctx.state_prev(state_index));
+            let transition = ctx.input_analog_vector_transition("in", index);
+            if let Some(transition) = transition
+                && transition.transition_start.is_finite()
+                && transition.transition_start > 0.0
+                && transition.transition_end.is_finite()
+            {
+                deferred_until = if deferred_until.is_finite() {
+                    deferred_until.min(transition.transition_end)
+                } else {
+                    transition.transition_end
+                };
+            }
+
+            // The U-device receives an analog voltage.  Resolve its logic
+            // state from the solved voltage and Schmitt thresholds; upstream
+            // transition metadata is used only to carry a causal end time,
+            // never to override the receiver's analog decision.
+            let mut state = XyceDTff::input_logic_state(voltage, previous_state, params);
+            let mut transition_time = ctx.state_prev(transition_index);
+            let metadata_changed = transition
+                .filter(|transition| {
+                    previous_state.is_some() && previous_state != Some(transition.state)
+                })
+                .is_some();
+            let changed = previous_state.is_some() && previous_state != state;
+
+            if metadata_changed && changed {
+                deferred_until = deferred_until.max(
+                    transition
+                        .map(|transition| transition.transition_end)
+                        .unwrap_or(f64::NAN),
+                );
+            }
+
+            if ctx.is_dc() {
+                state = XyceDTff::input_logic_state(voltage, None, params);
+                transition_time = 0.0;
+            } else if changed {
+                // Xyce linearly interpolates the analog receiver's Schmitt
+                // threshold crossing inside the accepted solver interval.
+                transition_time = XyceDTff::input_transition_time(
+                    ctx,
+                    ctx.state_prev(voltage_index),
+                    voltage,
+                    state.unwrap_or(false),
+                    params,
+                );
+            }
+
+            if index == self.kind.event_input() {
+                event_changed = changed;
+                event_state = state;
+            }
+            if let Some(state) = state {
+                Self::commit_state(ctx, state_index, if state { Q_HIGH } else { Q_LOW });
+            }
+            if voltage.is_finite() {
+                Self::commit_state(ctx, voltage_index, voltage);
+            }
+            if transition_time.is_finite() {
+                Self::commit_state(ctx, transition_index, transition_time);
+                last_transition_time = last_transition_time.max(transition_time);
+            }
+            states.push(state);
+        }
+
+        if transient_start {
+            Self::commit_state(ctx, Self::TRANSIENT_INITIALIZED, 1.0);
+        }
+        (
+            states,
+            last_transition_time,
+            event_changed,
+            event_state,
+            deferred_until,
+        )
+    }
+
+    fn async_targets(
+        prebar: bool,
+        clrbar: bool,
+        q: Option<bool>,
+        qbar: Option<bool>,
+        fallback: Option<bool>,
+    ) -> (Option<bool>, Option<bool>) {
+        if prebar && !clrbar {
+            return (Some(false), Some(true));
+        }
+        if !prebar && clrbar {
+            return (Some(true), Some(false));
+        }
+        if !prebar && !clrbar {
+            return (Some(true), Some(true));
+        }
+
+        let qbar = qbar.or_else(|| q.map(|value| !value));
+        if q.is_none() && qbar.is_none() {
+            (fallback, fallback.map(|value| !value))
+        } else if q.is_some() && qbar == q {
+            (q, q.map(|value| !value))
+        } else {
+            (q, qbar)
+        }
+    }
+
+    fn targets(
+        &self,
+        ctx: &CmContext,
+        inputs: &[Option<bool>],
+        q: Option<bool>,
+        qbar: Option<bool>,
+        event_changed: bool,
+        event_state: Option<bool>,
+    ) -> (Option<bool>, Option<bool>) {
+        match self.kind {
+            XyceDSequentialKind::Dff => {
+                let [Some(data), Some(_clock), Some(prebar), Some(clrbar)] = inputs else {
+                    return (None, None);
+                };
+                if ctx.is_dc() {
+                    return Self::async_targets(*prebar, *clrbar, None, None, Some(*data));
+                }
+                if event_changed {
+                    if *prebar && *clrbar && event_state == Some(true) {
+                        return (Some(*data), Some(!*data));
+                    }
+                    return (q, qbar);
+                }
+                Self::async_targets(*prebar, *clrbar, q, qbar, Some(*data))
+            }
+            XyceDSequentialKind::Jkff => {
+                let [Some(j), Some(k), Some(_clock), Some(prebar), Some(clrbar)] = inputs else {
+                    return (None, None);
+                };
+                if ctx.is_dc() {
+                    return Self::async_targets(*prebar, *clrbar, None, None, Some(*j));
+                }
+                if event_changed {
+                    if *prebar && *clrbar && event_state == Some(false) {
+                        let next = match (*j, *k) {
+                            (false, false) => q,
+                            (false, true) => Some(false),
+                            (true, false) => Some(true),
+                            (true, true) => q.map(|value| !value),
+                        };
+                        return (next, next.map(|value| !value));
+                    }
+                    return (q, qbar);
+                }
+                Self::async_targets(*prebar, *clrbar, q, qbar, Some(*j))
+            }
+            XyceDSequentialKind::Dlatch => {
+                let [Some(data), Some(enable), Some(prebar), Some(clrbar)] = inputs else {
+                    return (None, None);
+                };
+                if ctx.is_dc() {
+                    return Self::async_targets(*prebar, *clrbar, None, None, Some(*data));
+                }
+                if *prebar && *clrbar && *enable {
+                    return (Some(*data), Some(!*data));
+                }
+                Self::async_targets(*prebar, *clrbar, q, qbar, Some(*data))
+            }
+        }
+    }
+
+    fn initialize(&self, ctx: &mut CmContext) -> CmResult<()> {
+        dig_params(ctx)?;
+        let (vref, _vlo, _vhi) = XyceDLegacyGate::rails(ctx)?;
+        let _ = vref;
+        if ctx.port_width("in") != self.kind.input_count() {
+            return Err(CmError::InvalidPortConnection(format!(
+                "{} requires {} analog sequential inputs",
+                self.kind.model_name(),
+                self.kind.input_count()
+            )));
+        }
+        ctx.allocate_states(Self::STATE_COUNT);
+        ctx.set_initial_state(Self::Q_STATE, Self::initial_state(ctx.param("ic1")));
+        ctx.set_initial_state(Self::Q_TRANSITION_START, 0.0);
+        ctx.set_initial_state(Self::Q_TRANSITION_FROM, f64::NAN);
+        ctx.set_initial_state(Self::Q_PENDING, Q_PENDING_NONE);
+        ctx.set_initial_state(Self::Q_PENDING_TIME, f64::NAN);
+        ctx.set_initial_state(Self::Q_PENDING_START, f64::NAN);
+        ctx.set_initial_state(Self::QB_STATE, Self::initial_state(ctx.param("ic2")));
+        ctx.set_initial_state(Self::QB_TRANSITION_START, 0.0);
+        ctx.set_initial_state(Self::QB_TRANSITION_FROM, f64::NAN);
+        ctx.set_initial_state(Self::QB_PENDING, Q_PENDING_NONE);
+        ctx.set_initial_state(Self::QB_PENDING_TIME, f64::NAN);
+        ctx.set_initial_state(Self::QB_PENDING_START, f64::NAN);
+        for index in [
+            Self::Q_PREV_LOW_VOLTAGE,
+            Self::Q_PREV_HIGH_VOLTAGE,
+            Self::Q_PREV_PREV_LOW_VOLTAGE,
+            Self::Q_PREV_PREV_HIGH_VOLTAGE,
+            Self::QB_PREV_LOW_VOLTAGE,
+            Self::QB_PREV_HIGH_VOLTAGE,
+            Self::QB_PREV_PREV_LOW_VOLTAGE,
+            Self::QB_PREV_PREV_HIGH_VOLTAGE,
+        ] {
+            ctx.set_initial_state(index, f64::NAN);
+        }
+        for index in [
+            Self::Q_PREV_LOW_CURRENT,
+            Self::Q_PREV_HIGH_CURRENT,
+            Self::QB_PREV_LOW_CURRENT,
+            Self::QB_PREV_HIGH_CURRENT,
+        ] {
+            ctx.set_initial_state(index, 0.0);
+        }
+        for index in 0..Self::INPUT_CAPACITY {
+            ctx.set_initial_state(Self::input_state_index(index, Self::INPUT_STATE), f64::NAN);
+            ctx.set_initial_state(Self::input_state_index(index, Self::INPUT_VOLTAGE), f64::NAN);
+            ctx.set_initial_state(
+                Self::input_state_index(index, Self::INPUT_TRANSITION_TIME),
+                0.0,
+            );
+        }
+        ctx.set_initial_state(Self::TRANSIENT_INITIALIZED, f64::NAN);
+        Ok(())
+    }
+
+    fn stamp_output(
+        ctx: &mut CmContext,
+        port_name: &str,
+        state: Option<bool>,
+        previous_low_voltage_state: usize,
+        previous_high_voltage_state: usize,
+        previous_previous_low_voltage_state: usize,
+        previous_previous_high_voltage_state: usize,
+        previous_low_current_state: usize,
+        previous_high_current_state: usize,
+        params: DigParams,
+        transition_start: Value,
+        transition_from: Option<bool>,
+    ) {
+        let output_pair = ctx.port_node_pair(port_name).unwrap_or((0, 0));
+        let low_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
+        let high_pair = ctx.port_node_pair("dpwr").unwrap_or((0, 0));
+        let resistances =
+            interpolated_resistances(state, transition_from, transition_start, ctx.time, params);
+        let g_low = 1.0 / resistances.low;
+        let g_high = 1.0 / resistances.high;
+        if ctx.is_ac() {
+            ctx.set_output_with_partial(port_name, 0.0, g_low + g_high);
+            return;
+        }
+
+        let static_scale = if ctx.is_transient()
+            && ctx.xyce_one_step_order2()
+            && ctx.evaluation_phase() != EvaluationPhase::AcceptedStep
+        {
+            0.5
+        } else {
+            1.0
+        };
+        stamp_between(ctx, output_pair, low_pair, static_scale * g_low);
+        stamp_between(ctx, output_pair, high_pair, static_scale * g_high);
+        queue_between_static(ctx, output_pair, low_pair, g_low);
+        queue_between_static(ctx, output_pair, high_pair, g_high);
+
+            let current_voltage = ctx.input(port_name);
+            let low_rail = ctx.input("dgnd");
+            let high_rail = ctx.input("dpwr");
+        if ctx.is_transient() && ctx.time == 0.0 {
+            if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+                ctx.set_initial_state(
+                    previous_low_voltage_state,
+                    current_voltage - low_rail,
+                );
+                ctx.set_initial_state(
+                    previous_high_voltage_state,
+                    current_voltage - high_rail,
+                );
+                ctx.set_initial_state(
+                    previous_previous_low_voltage_state,
+                    current_voltage - low_rail,
+                );
+                ctx.set_initial_state(
+                    previous_previous_high_voltage_state,
+                    current_voltage - high_rail,
+                );
+                ctx.set_initial_state(previous_low_current_state, 0.0);
+                ctx.set_initial_state(previous_high_current_state, 0.0);
+            }
+        }
+
+        if ctx.is_transient() && ctx.timestep.is_finite() && ctx.timestep > 0.0 {
+            let previous_low_voltage = ctx.state_prev(previous_low_voltage_state);
+            let previous_high_voltage = ctx.state_prev(previous_high_voltage_state);
+            let previous_previous_low_voltage =
+                ctx.state_prev(previous_previous_low_voltage_state);
+            let previous_previous_high_voltage =
+                ctx.state_prev(previous_previous_high_voltage_state);
+            let previous_low_current = ctx.state_prev(previous_low_current_state);
+            let previous_high_current = ctx.state_prev(previous_high_current_state);
+            let initial_point = ctx.time == 0.0 && ctx.time_prev == 0.0;
+            let current_low_voltage = current_voltage - low_rail;
+            let current_high_voltage = current_voltage - high_rail;
+            let history_low = if !previous_low_voltage.is_finite() || initial_point {
+                current_low_voltage
+            } else {
+                previous_low_voltage
+            };
+            let history_high = if !previous_high_voltage.is_finite() || initial_point {
+                current_high_voltage
+            } else {
+                previous_high_voltage
+            };
+            let older_history_low =
+                if !previous_previous_low_voltage.is_finite() || initial_point {
+                    history_low
+                } else {
+                    previous_previous_low_voltage
+                };
+            let older_history_high =
+                if !previous_previous_high_voltage.is_finite() || initial_point {
+                    history_high
+                } else {
+                    previous_previous_high_voltage
+                };
+            let history_current_low = if previous_low_current.is_finite() {
+                previous_low_current
+            } else {
+                0.0
+            };
+            let history_current_high = if previous_high_current.is_finite() {
+                previous_high_current
+            } else {
+                0.0
+            };
+            let dt = ctx.timestep;
+            let coefficients = ctx.transient_companion_coefficients();
+            let g_cap_low = coefficients.capacitor_geq(params.clo, dt);
+            let g_cap_high = coefficients.capacitor_geq(params.chi, dt);
+            let i_eq_low = coefficients.capacitor_ieq(
+                params.clo,
+                dt,
+                history_low,
+                older_history_low,
+                history_current_low,
+            );
+            let i_eq_high = coefficients.capacitor_ieq(
+                params.chi,
+                dt,
+                history_high,
+                older_history_high,
+                history_current_high,
+            );
+            stamp_between(ctx, output_pair, low_pair, g_cap_low);
+            stamp_between_rhs(ctx, output_pair, low_pair, -i_eq_low);
+            stamp_between(ctx, output_pair, high_pair, g_cap_high);
+            stamp_between_rhs(ctx, output_pair, high_pair, -i_eq_high);
+            Self::commit_state(
+                ctx,
+                previous_low_voltage_state,
+                current_low_voltage,
+            );
+            Self::commit_state(
+                ctx,
+                previous_high_voltage_state,
+                current_high_voltage,
+            );
+            Self::commit_state(
+                ctx,
+                previous_previous_low_voltage_state,
+                history_low,
+            );
+            Self::commit_state(
+                ctx,
+                previous_previous_high_voltage_state,
+                history_high,
+            );
+            Self::commit_state(
+                ctx,
+                previous_low_current_state,
+                g_cap_low * current_low_voltage - i_eq_low,
+            );
+            Self::commit_state(
+                ctx,
+                previous_high_current_state,
+                g_cap_high * current_high_voltage - i_eq_high,
+            );
+        }
+        ctx.set_output_with_partial(port_name, 0.0, 0.0);
+    }
+
+    fn stamp_input_load(
+        ctx: &mut CmContext,
+        index: usize,
+        voltage_state_index: usize,
+        params: DigParams,
+    ) {
+        if ctx.is_ac() {
+            return;
+        }
+
+        let input_pair = ctx.port_vector_node_pair("in", index).unwrap_or((0, 0));
+        let dgnd_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
+        let static_scale = if ctx.xyce_one_step_order2()
+            && ctx.evaluation_phase() != EvaluationPhase::AcceptedStep
+        {
+            0.5
+        } else {
+            1.0
+        };
+        let g_load = 1.0 / params.rload;
+        stamp_between(ctx, input_pair, dgnd_pair, static_scale * g_load);
+        queue_between_static(ctx, input_pair, dgnd_pair, g_load);
+
+        if !ctx.is_transient() || !ctx.timestep.is_finite() || ctx.timestep <= 0.0 {
+            return;
+        }
+
+        let current_voltage = ctx
+            .input_analog_vector_values("in")
+            .and_then(|values| values.get(index).copied())
+            .map(|value| value.value)
+            .unwrap_or(0.0);
+        let dgnd_voltage = ctx.input("dgnd");
+        let current_relative = current_voltage - dgnd_voltage;
+        let previous_relative = ctx.state_prev(voltage_state_index);
+        let initial_point = ctx.time == 0.0 && ctx.time_prev == 0.0;
+        let history = if !previous_relative.is_finite() || initial_point {
+            current_relative
+        } else {
+            previous_relative
+        };
+        let coefficients = ctx.transient_companion_coefficients();
+        let conductance = coefficients.capacitor_geq(params.cload, ctx.timestep);
+        let current = coefficients.capacitor_ieq(
+            params.cload,
+            ctx.timestep,
+            history,
+            history,
+            0.0,
+        );
+        stamp_between(ctx, input_pair, dgnd_pair, conductance);
+        stamp_between_rhs(ctx, input_pair, dgnd_pair, -current);
+    }
+
+    fn evaluate_kind(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let params = dig_params(ctx)?;
+        let (vref, _vlo, _vhi) = XyceDLegacyGate::rails(ctx)?;
+        let (inputs, last_input_transition_time, event_changed, event_state, deferred_until) =
+            self.sample_inputs(ctx, params, vref);
+        let previous_q = q_state(ctx.state_prev(Self::Q_STATE));
+        let previous_qbar = q_state(ctx.state_prev(Self::QB_STATE));
+        let (q_target, qbar_target) = self.targets(
+            ctx,
+            &inputs,
+            previous_q,
+            previous_qbar,
+            event_changed,
+            event_state,
+        );
+        let output_event_time = if self.kind == XyceDSequentialKind::Dlatch
+            && inputs.get(1).copied().flatten() == Some(false)
+            && q_target == previous_q
+            && qbar_target == Some(false)
+            && previous_qbar == Some(true)
+        {
+            // With the latch closed, Xyce resolves the complementary output
+            // when an asynchronous control releases an unstable state.  That
+            // transition is timestamped at the accepted solver landing point,
+            // rather than at an earlier analog threshold interpolation.
+            last_input_transition_time.max(ctx.time)
+        } else {
+            last_input_transition_time
+        };
+        let (q, q_start, q_from) = XyceDLegacyDff::update_output(
+            ctx,
+            q_target,
+            output_event_time,
+            deferred_until,
+            params.delay,
+            transition_duration(q_target.unwrap_or(false), params),
+            Self::Q_STATE,
+            Self::Q_TRANSITION_START,
+            Self::Q_TRANSITION_FROM,
+            Self::Q_PENDING,
+            Self::Q_PENDING_TIME,
+            Self::Q_PENDING_START,
+            self.kind == XyceDSequentialKind::Jkff,
+        );
+        let (qbar, qbar_start, qbar_from) = XyceDLegacyDff::update_output(
+            ctx,
+            qbar_target,
+            output_event_time,
+            deferred_until,
+            params.delay,
+            transition_duration(qbar_target.unwrap_or(false), params),
+            Self::QB_STATE,
+            Self::QB_TRANSITION_START,
+            Self::QB_TRANSITION_FROM,
+            Self::QB_PENDING,
+            Self::QB_PENDING_TIME,
+            Self::QB_PENDING_START,
+            self.kind == XyceDSequentialKind::Jkff,
+        );
+        for index in 0..self.kind.input_count() {
+            Self::stamp_input_load(
+                ctx,
+                index,
+                Self::input_state_index(index, Self::INPUT_VOLTAGE),
+                params,
+            );
+        }
+        Self::stamp_output(
+            ctx,
+            "q",
+            q,
+            Self::Q_PREV_LOW_VOLTAGE,
+            Self::Q_PREV_HIGH_VOLTAGE,
+            Self::Q_PREV_PREV_LOW_VOLTAGE,
+            Self::Q_PREV_PREV_HIGH_VOLTAGE,
+            Self::Q_PREV_LOW_CURRENT,
+            Self::Q_PREV_HIGH_CURRENT,
+            params,
+            q_start,
+            q_from,
+        );
+        Self::stamp_output(
+            ctx,
+            "qbar",
+            qbar,
+            Self::QB_PREV_LOW_VOLTAGE,
+            Self::QB_PREV_HIGH_VOLTAGE,
+            Self::QB_PREV_PREV_LOW_VOLTAGE,
+            Self::QB_PREV_PREV_HIGH_VOLTAGE,
+            Self::QB_PREV_LOW_CURRENT,
+            Self::QB_PREV_HIGH_CURRENT,
+            params,
+            qbar_start,
+            qbar_from,
+        );
+        for (port_name, state, transition_start) in [
+            ("q", q, q_start),
+            ("qbar", qbar, qbar_start),
+        ] {
+            if let Some(state) = state {
+                let event_time = if transition_start.is_finite() && transition_start > 0.0 {
+                    (transition_start - params.delay).max(0.0)
+                } else {
+                    0.0
+                };
+                ctx.set_output_analog_transition(
+                    port_name,
+                    AnalogTransition {
+                        state,
+                        event_time,
+                        transition_start,
+                        transition_end: transition_time_for_state(state, transition_start, params)
+                            .unwrap_or(transition_start),
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+impl CodeModel for XyceDSequential {
+    fn name(&self) -> &str {
+        self.kind.model_name()
+    }
+
+    fn description(&self) -> &str {
+        "Xyce DIG-compatible finite-output PSpice sequential device"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        Self::ports(self.kind)
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        Self::parameters()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        self.initialize(ctx)
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        self.evaluate_kind(ctx)
+    }
+
+    fn output_input_ac_partials(
+        &self,
+        ctx: &CmContext,
+        output_port: &str,
+        frequency: Value,
+    ) -> Vec<(String, Complex64)> {
+        let (state_index, from_index, start_index) = if output_port.eq_ignore_ascii_case("q") {
+            (
+                Self::Q_STATE,
+                Self::Q_TRANSITION_FROM,
+                Self::Q_TRANSITION_START,
+            )
+        } else if output_port.eq_ignore_ascii_case("qbar") {
+            (
+                Self::QB_STATE,
+                Self::QB_TRANSITION_FROM,
+                Self::QB_TRANSITION_START,
+            )
+        } else {
+            return Vec::new();
+        };
+        let Ok(params) = dig_params(ctx) else {
+            return Vec::new();
+        };
+        XyceDLegacyDff::output_ac_partials(
             ctx,
             output_port,
             frequency,

@@ -1587,7 +1587,10 @@ fn pspice_u_dig_model_params(
     let is_xyce_dig_model = model.eq_ignore_ascii_case("xyce_d_tff")
         || matches!(
             model.to_ascii_lowercase().as_str(),
-            "d_and"
+            "d_dff"
+                | "d_dlatch"
+                | "d_jkff"
+                | "d_and"
                 | "d_add"
                 | "d_buffer"
                 | "d_inverter"
@@ -1613,6 +1616,9 @@ fn pspice_u_dig_model_params(
                 | "xyce_legacy_d_xnor"
                 | "xyce_legacy_d_xor"
                 | "xyce_legacy_d_dff"
+                | "xyce_d_dff"
+                | "xyce_d_dlatch"
+                | "xyce_d_jkff"
         );
     if !is_xyce_dig_model {
         return Vec::new();
@@ -1641,6 +1647,9 @@ fn pspice_u_dig_gate_model(
     }
 
     match model.to_ascii_lowercase().as_str() {
+        "d_dff" => Some("xyce_d_dff"),
+        "d_dlatch" => Some("xyce_d_dlatch"),
+        "d_jkff" => Some("xyce_d_jkff"),
         "xyce_legacy_d_dff" => Some("xyce_legacy_d_dff"),
         "xyce_legacy_d_and" => Some("xyce_legacy_d_and"),
         "xyce_legacy_d_inverter" => Some("xyce_legacy_d_inverter"),
@@ -1670,35 +1679,65 @@ fn pspice_u_dig_gate_ports(
     let model_lower = model.to_ascii_lowercase();
     let is_legacy = model_lower.starts_with("xyce_legacy_d_");
     let is_legacy_dff = model_lower == "xyce_legacy_d_dff";
-    let (inputs, outputs) = if is_legacy_dff {
+    let sequential_input_count = match model_lower.as_str() {
+        "d_dff" | "d_dlatch" => Some(4),
+        "d_jkff" => Some(5),
+        _ => None,
+    };
+    let (inputs, outputs): (Vec<XspicePort>, Vec<XspicePort>) = if let Some(input_count) =
+        sequential_input_count
+    {
+        if ports.len() != input_count + 2 {
+            return None;
+        }
+        (ports[..input_count].to_vec(), ports[input_count..].to_vec())
+    } else if is_legacy_dff {
         let [inputs, q, qbar] = ports else {
             return None;
         };
-        (inputs, vec![q, qbar])
+        (vec![inputs.clone()], vec![q.clone(), qbar.clone()])
     } else if is_legacy {
         let [inputs, output] = ports else {
             return None;
         };
-        (inputs, vec![output])
+        (vec![inputs.clone()], vec![output.clone()])
     } else if model.eq_ignore_ascii_case("d_add") {
         let [inputs, sum, carry] = ports else {
             return None;
         };
-        (inputs, vec![sum, carry])
+        (vec![inputs.clone()], vec![sum.clone(), carry.clone()])
     } else {
         let [inputs, output] = ports else {
             return None;
         };
-        (inputs, vec![output])
+        (vec![inputs.clone()], vec![output.clone()])
     };
-    let analog_inputs = match inputs {
-        XspicePort::Digital(node)
-        | XspicePort::ExplicitDigital(node)
-        | XspicePort::Analog(node) => XspicePort::Analog(node.clone()),
-        XspicePort::DigitalVector(nodes) | XspicePort::AnalogVector(nodes) => {
-            XspicePort::AnalogVector(nodes.clone())
+    let analog_inputs = if sequential_input_count.is_some() {
+        let nodes = inputs
+            .iter()
+            .map(|input| match input {
+                // The active-low marker is a digital-domain semantic.  The
+                // finite-output model receives the physical analog voltage
+                // and applies the PREB/CLRB truth table itself.
+                XspicePort::Digital(node)
+                | XspicePort::DigitalInverted(node)
+                | XspicePort::ExplicitDigital(node)
+                | XspicePort::Analog(node) => Some(node.clone()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        XspicePort::AnalogVector(nodes)
+    } else {
+        let input = inputs.first()?;
+        match input {
+            XspicePort::Digital(node)
+            | XspicePort::ExplicitDigital(node)
+            | XspicePort::Analog(node) => XspicePort::Analog(node.clone()),
+            XspicePort::DigitalVector(nodes) | XspicePort::AnalogVector(nodes) => {
+                XspicePort::AnalogVector(nodes.clone())
+            }
+            _ => return None,
         }
-        _ => return None,
     };
     let mut effective_ports = if is_legacy {
         vec![analog_inputs]

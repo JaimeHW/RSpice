@@ -1579,6 +1579,53 @@ fn parse_pspice_u_gate_ic_value(
     }
 }
 
+fn parse_pspice_u_sequential_ic_params(
+    tokens: &[String],
+    name: &str,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<Vec<(String, Value)>, ParseError> {
+    let mut values = Vec::new();
+    for token in tokens {
+        let Some((raw_name, raw_value)) = token.split_once('=') else {
+            continue;
+        };
+        let key = raw_name.trim().to_ascii_uppercase();
+        let canonical = match key.as_str() {
+            "IC" | "IC1" => "ic1",
+            "IC2" => "ic2",
+            _ => continue,
+        };
+        let expression = strip_wrapping_expression_delimiters(raw_value).trim();
+        let upper = expression.to_ascii_uppercase();
+        let value = match upper.as_str() {
+            "FALSE" | "LOW" => 0.0,
+            "TRUE" | "HIGH" => 1.0,
+            _ => params
+                .get(expression)
+                .or_else(|| crate::netlist::lexer::parse_spice_value(expression).ok())
+                .ok_or_else(|| ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "PSpice sequential U-device '{}' IC parameter '{}' requires a finite numeric or logic-state value",
+                        name, raw_value
+                    ),
+                })?,
+        };
+        if !value.is_finite() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "PSpice sequential U-device '{}' IC parameter '{}' is not finite",
+                    name, raw_value
+                ),
+            });
+        }
+        values.push((canonical.to_string(), value));
+    }
+    Ok(values)
+}
+
 fn parse_pspice_u_constraint(
     name: &str,
     fields: &[String],
@@ -1679,7 +1726,16 @@ fn parse_pspice_u_dff(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let clk = pspice_u_required_digital_port(&pins[2], "clock", fields, line_num, elements)?;
-    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num)
+        .map(|mut timing| {
+            timing.power_pins = Some((
+                normalize_pspice_u_node(&fields[2]),
+                normalize_pspice_u_node(&fields[3]),
+            ));
+            timing
+        });
+    let instance_params =
+        parse_pspice_u_sequential_ic_params(&pins[required..], name, line_num, params)?;
     let d_offset = 3;
     let q_offset = d_offset + count;
     let qb_offset = q_offset + count;
@@ -1696,11 +1752,12 @@ fn parse_pspice_u_dff(
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![data, clk.clone(), prebar.clone(), clrbar.clone(), q, qb];
-        push_pspice_u_xspice_element_with_timing(
+        push_pspice_u_xspice_element_with_params(
             elements,
             instance_name,
             "d_dff",
             ports,
+            instance_params.clone(),
             pspice_u_timing.clone(),
         );
     }
@@ -1733,8 +1790,14 @@ fn parse_pspice_u_tff(
     let clock = pspice_u_required_digital_port(&pins[1], "clock", fields, line_num, elements)?;
     let output = pspice_u_nullable_conductance_output_port(&pins[2]);
     let inverted_output = pspice_u_nullable_conductance_output_port(&pins[3]);
-    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
-
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num)
+        .map(|mut timing| {
+            timing.power_pins = Some((
+                normalize_pspice_u_node(&fields[2]),
+                normalize_pspice_u_node(&fields[3]),
+            ));
+            timing
+        });
     push_pspice_u_xspice_element_with_timing(
         elements,
         name.to_string(),
@@ -1800,7 +1863,14 @@ fn parse_pspice_u_vector_gate_array(
     }
 
     let output_offset = input_total;
-    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num)
+        .map(|mut timing| {
+            timing.power_pins = Some((
+                normalize_pspice_u_node(&fields[2]),
+                normalize_pspice_u_node(&fields[3]),
+            ));
+            timing
+        });
     for gate_index in 0..gate_count {
         let input_start = gate_index * input_count;
         let inputs = pins[input_start..input_start + input_count]
@@ -3197,7 +3267,16 @@ fn parse_pspice_u_jkff(
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let clkbar =
         pspice_u_required_inverted_digital_port(&pins[2], "clock", fields, line_num, elements)?;
-    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num)
+        .map(|mut timing| {
+            timing.power_pins = Some((
+                normalize_pspice_u_node(&fields[2]),
+                normalize_pspice_u_node(&fields[3]),
+            ));
+            timing
+        });
+    let instance_params =
+        parse_pspice_u_sequential_ic_params(&pins[required..], name, line_num, params)?;
     let j_offset = 3;
     let k_offset = j_offset + count;
     let q_offset = k_offset + count;
@@ -3222,11 +3301,12 @@ fn parse_pspice_u_jkff(
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![j, k, clkbar.clone(), prebar.clone(), clrbar.clone(), q, qb];
-        push_pspice_u_xspice_element_with_timing(
+        push_pspice_u_xspice_element_with_params(
             elements,
             instance_name,
             "d_jkff",
             ports,
+            instance_params.clone(),
             pspice_u_timing.clone(),
         );
     }
@@ -3267,7 +3347,16 @@ fn parse_pspice_u_dlatch(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let enable = pspice_u_required_digital_port(&pins[2], "enable", fields, line_num, elements)?;
-    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num)
+        .map(|mut timing| {
+            timing.power_pins = Some((
+                normalize_pspice_u_node(&fields[2]),
+                normalize_pspice_u_node(&fields[3]),
+            ));
+            timing
+        });
+    let instance_params =
+        parse_pspice_u_sequential_ic_params(&pins[required..], name, line_num, params)?;
     let d_offset = 3;
     let q_offset = d_offset + count;
     let qb_offset = q_offset + count;
@@ -3284,11 +3373,12 @@ fn parse_pspice_u_dlatch(
         let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
         let instance_name = pspice_u_lowered_instance_name(name, count, index);
         let ports = vec![data, enable.clone(), prebar.clone(), clrbar.clone(), q, qb];
-        push_pspice_u_xspice_element_with_timing(
+        push_pspice_u_xspice_element_with_params(
             elements,
             instance_name,
             "d_dlatch",
             ports,
+            instance_params.clone(),
             pspice_u_timing.clone(),
         );
     }
