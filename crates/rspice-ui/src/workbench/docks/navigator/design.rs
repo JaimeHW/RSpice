@@ -15,7 +15,9 @@ use crate::ui::tokens::{self, Tokens};
 
 use super::super::super::design_system::{PANEL_TABS_H, WorkbenchIcon, section_header};
 use super::super::super::state::DesignPanel;
-use super::{nav_row, nav_row_indented, nav_row_indented_mono, panel_search};
+use super::{
+    empty_navigator_row, nav_row, nav_row_indented, nav_row_indented_mono, panel_search,
+};
 
 const PRIMITIVE_GROUPS: [(&str, &[&str]); 4] = [
     ("Passives", &["Passives"]),
@@ -344,23 +346,6 @@ fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
     primitive_matches + library_matches
 }
 
-fn empty_navigator_row(ui: &mut Ui, message: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width().max(1.0), t.metrics.row_h.max(29.0)),
-        egui::Sense::hover(),
-    );
-    ui.painter().text(
-        egui::pos2(rect.left() + 10.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        message,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message)
-    });
-}
 
 fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
     panel_search(

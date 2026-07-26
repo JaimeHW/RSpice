@@ -905,7 +905,10 @@ impl Command {
                 active_schematic_editor(app)
                     && state.schematic.selection.single_component().is_some()
             }
-            Self::RunChecks => active_schematic_editor(app),
+            // A symbol cellview checks its pin contract. The editor's own
+            // keyboard route always did this; the command must agree, or the
+            // toolbar shows a dead control beside a working shortcut.
+            Self::RunChecks => active_schematic_editor(app) || active_symbol_editor(app),
             Self::CheckAndSave => {
                 active_schematic_editor(app)
                     && !state.schematic.read_only
@@ -1557,6 +1560,9 @@ impl Command {
             }
             Self::DescendHierarchy => {
                 app.state.open_selected_instance_master();
+            }
+            Self::RunChecks if active_symbol_editor(app) => {
+                app.state.run_active_symbol_pin_checks();
             }
             Self::RunChecks => crate::common::menu_bar::run_design_rule_check(&mut app.state),
             Self::CheckAndSave => {

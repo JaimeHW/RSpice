@@ -5,7 +5,7 @@ use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, TopBottomPanel, Vec2};
 
 use crate::common::RSpiceApp;
-use crate::state::Tool;
+use crate::state::{Tool, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
@@ -13,6 +13,7 @@ use super::super::RouteTransitionSource;
 use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
+use super::super::session::SymbolTool;
 use super::super::state::{Drawer, Workspace};
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
@@ -22,6 +23,40 @@ const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon); 5] = [
     (Command::PlaceBus, WorkbenchIcon::Bus),
     (Command::PlaceLabel, WorkbenchIcon::Label),
     (Command::PlaceProbe, WorkbenchIcon::Probe),
+];
+
+/// Authoring tools of the symbol document, in the order the editor's
+/// keyboard shortcuts declare them. A symbol cellview is a design document,
+/// so its tools live in the shared workspace toolbar rather than in a bar
+/// of the editor's own.
+const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 7] = [
+    (Command::SelectTool, WorkbenchIcon::Select, SymbolTool::Select),
+    (
+        Command::SymbolPinTool,
+        WorkbenchIcon::Probe,
+        SymbolTool::PlacePin,
+    ),
+    (
+        Command::SymbolPolylineTool,
+        WorkbenchIcon::Wire,
+        SymbolTool::Polyline,
+    ),
+    (
+        Command::SymbolCircleTool,
+        WorkbenchIcon::Target,
+        SymbolTool::Circle,
+    ),
+    (
+        Command::SymbolArcTool,
+        WorkbenchIcon::Refresh,
+        SymbolTool::Arc,
+    ),
+    (
+        Command::SymbolArrowTool,
+        WorkbenchIcon::ArrowLeft,
+        SymbolTool::Arrow,
+    ),
+    (Command::SymbolDotTool, WorkbenchIcon::Label, SymbolTool::Dot),
 ];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -300,6 +335,9 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
     match workspace {
         Workspace::Project => project_tools(ui, app, layout),
+        Workspace::Design if app.state.workspace.active_view_type() == ViewType::Symbol => {
+            symbol_tools(ui, app, layout);
+        }
         Workspace::Design => design_tools(ui, app, layout),
         Workspace::Simulate => simulation_tools(ui, app, layout),
         Workspace::Results => results_tools(ui, app, layout),
@@ -388,6 +426,32 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Command::RunChecks,
         WorkbenchIcon::Check,
         "Run schematic checks",
+        layout,
+    );
+}
+
+/// Toolbar of an open symbol cellview.
+///
+/// Symbol geometry has its own undo stack, so undo and redo route through
+/// the symbol document rather than the schematic's.
+fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let active = app.state.ui.symbol.tool;
+    for (command, icon, tool) in SYMBOL_DIRECT_TOOLBAR_COMMANDS {
+        toolbar_icon_command_selected(ui, app, command, icon, active == tool, layout);
+    }
+    context_separator(ui, layout);
+    toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
+    toolbar_icon_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
+    context_separator(ui, layout);
+    toolbar_icon_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
+    toolbar_icon_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
+    toolbar_icon_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
+    toolbar_text_command(
+        ui,
+        app,
+        Command::RunChecks,
+        WorkbenchIcon::Check,
+        "Run pin checks",
         layout,
     );
 }
