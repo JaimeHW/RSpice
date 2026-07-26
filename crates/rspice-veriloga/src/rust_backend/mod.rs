@@ -679,10 +679,14 @@ endmodule
             "{noise}"
         );
         assert!(
-            noise.contains("Result<GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError>"),
+            noise.contains("Result<(), GeneratedNoiseEvaluationError>"),
             "{noise}"
         );
-        assert!(noise.contains("let table_operands = vec![]"), "{noise}");
+        assert!(noise.contains("let table_operands = []"), "{noise}");
+        assert!(noise.contains("visitor.visit(0"), "{noise}");
+        assert!(noise.contains("visitor.visit(1"), "{noise}");
+        assert!(!noise.contains("source_index"), "{noise}");
+        assert!(!noise.contains("vec!["), "{noise}");
         assert!(!noise.contains("evaluate_noise_table_operand"), "{noise}");
         assert!(!noise.contains("pub struct GeneratedNoise"), "{noise}");
         assert!(!noise.contains("pub enum GeneratedNoise"), "{noise}");
@@ -727,18 +731,18 @@ endmodule
             .as_str();
 
         let initial = noise
-            .find("noise_variable_0 = 1.0")
+            .find("w[0] = 1.0")
             .expect("accumulator initialization must be retained");
         let loop_start = noise
             .find("loop {")
             .expect("dependency loop must be retained");
         let update = noise[loop_start..]
-            .find("noise_variable_0 =")
+            .find("w[0] =")
             .map(|update| loop_start + update)
             .expect("loop-carried accumulator update must be retained");
         assert!(initial < loop_start && loop_start < update, "{noise}");
-        assert!(noise.contains("noise_variable_1 = 0.0"), "{noise}");
-        assert!(noise.contains("noise_variable_1 ="), "{noise}");
+        assert!(noise.contains("w[1] = 0.0"), "{noise}");
+        assert!(noise.contains("w[1] ="), "{noise}");
         assert!(noise.contains("WHITE_P_N_LOOPED"), "{noise}");
     }
 
@@ -780,8 +784,8 @@ endmodule
             .contents
             .as_str();
         assert!(noise.contains("loop {"), "{noise}");
-        assert!(noise.matches("noise_variable_0 =").count() >= 3, "{noise}");
-        assert!(noise.matches("noise_variable_1 =").count() >= 3, "{noise}");
+        assert!(noise.matches("w[0] =").count() >= 2, "{noise}");
+        assert!(noise.matches("w[1] =").count() >= 2, "{noise}");
     }
 
     #[test]
@@ -820,16 +824,14 @@ endmodule
             .expect("noise ABI file")
             .contents
             .as_str();
-        let first_loop = noise.find("loop {").expect("activation loop");
-        let reset = noise[first_loop..]
-            .find("noise_variable_0 = 0.0;")
-            .map(|position| first_loop + position)
-            .expect("metadata phase reset");
-        let second_loop = noise[reset..]
-            .find("loop {")
-            .map(|position| reset + position)
-            .expect("metadata loop");
-        assert!(first_loop < reset && reset < second_loop, "{noise}");
+        let activation = noise
+            .find("self.noise_activation_schedule_part_0")
+            .expect("activation helper call");
+        let reset = noise.find("w.fill(0.0);").expect("metadata phase reset");
+        let metadata = noise
+            .find("self.noise_metadata_schedule_part_0")
+            .expect("metadata helper call");
+        assert!(activation < reset && reset < metadata, "{noise}");
     }
 
     #[test]
@@ -895,17 +897,14 @@ endmodule
             .expect("noise ABI file")
             .contents
             .as_str();
-        let inactive = noise
-            .find("active: false")
-            .expect("inactive evaluation return");
-        let invalid_assignment = noise[inactive..]
-            .find("noise_variable_0 =")
-            .map(|position| inactive + position)
-            .expect("invalid PSD dependency assignment");
-        assert!(inactive < invalid_assignment, "{noise}");
-        assert!(noise.contains("matches!(source_index, 0)"), "{noise}");
-        assert!(noise.contains("matches!(source_index, 1)"), "{noise}");
-        assert!(!noise.contains("matches!(source_index, 0 | 1)"), "{noise}");
+        assert!(noise.contains("if (active[0] & 0x1) != 0 {"), "{noise}");
+        assert!(noise.contains("if (active[0] & 0x2) != 0 {"), "{noise}");
+        assert!(!noise.contains("(active[0] & 0x3) != 0"), "{noise}");
+        assert!(
+            noise.contains("if !noise_source_active[0]"),
+            "inactive source must bypass its PSD validation:\n{noise}"
+        );
+        assert!(!noise.contains("source_index"), "{noise}");
         assert!(noise.contains("ctx.node_voltage"), "{noise}");
         assert!(
             super::noise::noise_liveness_expression_walks(&artifact)

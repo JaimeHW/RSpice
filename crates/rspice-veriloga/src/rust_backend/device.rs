@@ -15527,7 +15527,7 @@ pub(super) fn generate_mod_file() -> String {
         "pub mod state;",
         "mod stamp;",
         "",
-        "pub use noise::{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseKind, NOISE_SOURCES};",
+        "pub use noise::{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor, NOISE_SOURCES};",
         "pub use state::{Instance, Parameters};",
         "",
     ]

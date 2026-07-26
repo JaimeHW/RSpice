@@ -152,9 +152,9 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         for budget in [
-            "--max-source-bytes 125000000",
-            "--max-noise-source-bytes 71000000",
-            "--max-model-source-bytes 10100000",
+            "--max-source-bytes 113000000",
+            "--max-noise-source-bytes 59000000",
+            "--max-model-source-bytes 8800000",
             "--max-file-count 650",
             "--max-pooled-workspace-payload-bytes 650000",
             "--max-stamp-state-payload-bytes 6200",

@@ -105,6 +105,93 @@ fn generated_veriloga_devices_use_the_partitioned_kernel_runtime() {
     );
 }
 
+#[test]
+fn generated_veriloga_noise_is_one_pass_and_allocation_free() {
+    let generated_root = generated_veriloga_root();
+    let mut noise_files = 0usize;
+    let mut failures = Vec::new();
+
+    scan_generated_rust(&generated_root, &mut |path, source| {
+        if !path.file_name().is_some_and(|name| name == "noise.rs") {
+            return;
+        }
+        noise_files += 1;
+        if !source.contains("pub fn evaluate_noise_sources(") {
+            failures.push(format!(
+                "{} does not expose the one-pass noise ABI",
+                display_path(path)
+            ));
+        }
+        for marker in [
+            "pub fn evaluate_noise_source(",
+            "source_index",
+            "noise_variable_",
+            "Vec::new()",
+            "vec![",
+            "matches!(source_index",
+        ] {
+            if source.contains(marker) {
+                failures.push(format!("{} contains `{marker}`", display_path(path)));
+            }
+        }
+    });
+
+    assert!(noise_files > 0, "generated bundle has no noise translation units");
+    assert!(
+        failures.is_empty(),
+        "generated Verilog-A noise evaluation must traverse once and allocate no heap storage:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn generated_veriloga_noise_uses_bounded_helpers_and_a_compact_workspace() {
+    const MAX_ATOMIC_HELPER_LINES: usize = 2_500;
+
+    let generated_root = generated_veriloga_root();
+    let mut partitioned_noise_files = 0usize;
+    let mut failures = Vec::new();
+
+    scan_generated_rust(&generated_root, &mut |path, source| {
+        if !path.file_name().is_some_and(|name| name == "noise.rs")
+            || !source.contains("let mut w = [0.0;")
+        {
+            return;
+        }
+        if !source.contains("w.fill(0.0);") {
+            failures.push(format!(
+                "{} does not reset its fixed noise workspace in one operation",
+                display_path(path)
+            ));
+        }
+
+        let helper_marker = "    #[inline(never)]\n    fn noise_";
+        for helper in source.split(helper_marker).skip(1) {
+            partitioned_noise_files += 1;
+            let lines = helper.lines().count();
+            if lines > MAX_ATOMIC_HELPER_LINES {
+                let name = helper
+                    .split_once('(')
+                    .map_or("<unknown>", |(name, _)| name);
+                failures.push(format!(
+                    "{} helper `{name}` has {lines} lines (limit {MAX_ATOMIC_HELPER_LINES})",
+                    display_path(path)
+                ));
+            }
+        }
+    });
+
+    assert!(
+        partitioned_noise_files > 0,
+        "expected generated noise schedules to use bounded helper methods"
+    );
+    assert!(
+        failures.is_empty(),
+        "generated Verilog-A noise helpers must remain bounded and use compact workspaces:\n{}",
+        failures.join("\n")
+    );
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

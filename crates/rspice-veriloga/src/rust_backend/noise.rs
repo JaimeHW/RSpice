@@ -15,6 +15,8 @@ use super::{GeneratedRustFile, RustBackendError, RustTranspileOptions};
 type StatementKey = (u32, u32, u32, u32);
 type LoopKey = (u32, u32, u32);
 
+const MAX_NOISE_HELPER_SOURCE_LINES: usize = 512;
+
 #[derive(Default)]
 struct NoiseScheduleSelection {
     assignments: HashSet<StatementKey>,
@@ -98,6 +100,7 @@ pub(super) fn generate_noise_file(
     let branch_unknowns = noise_branch_unknowns(artifact);
     let guarded_replay_safety = guarded_assignment_replay_safety(artifact);
     let mut liveness = NoiseLivenessIndex::new(artifact);
+    let mut helper_methods = String::new();
     let mut out = String::new();
     // Noise schedules conservatively initialize every replayed Verilog-A variable before
     // source-specific control flow. Some source paths provably overwrite those values before
@@ -108,7 +111,7 @@ pub(super) fn generate_noise_file(
     out.push_str("use super::state::Instance;\n");
     writeln!(
         out,
-        "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseKind}};\n",
+        "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor}};\n",
         options.runtime_path, options.runtime_path
     )
     .expect("write generated noise imports");
@@ -142,8 +145,8 @@ pub(super) fn generate_noise_file(
     out.push_str("];\n\nimpl Instance {\n");
     if artifact.noise_sources.sources.is_empty() {
         out.push_str(
-            "    pub fn evaluate_noise_source(&self, source_index: usize, _ctx: &GeneratedEvalContext<'_>) -> Result<GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError> {\n\
-             \x20       Err(GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index: source_index, count: 0 })\n\
+            "    pub fn evaluate_noise_sources(&self, _ctx: &GeneratedEvalContext<'_>, _visitor: &mut dyn GeneratedNoiseVisitor) -> Result<(), GeneratedNoiseEvaluationError> {\n\
+             \x20       Ok(())\n\
              \x20   }\n\
              }\n",
         );
@@ -153,15 +156,18 @@ pub(super) fn generate_noise_file(
         });
     }
     out.push_str(
-        "    pub fn evaluate_noise_source(&self, source_index: usize, ctx: &GeneratedEvalContext<'_>) -> Result<GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError> {\n\
-         \x20       if source_index >= NOISE_SOURCES.len() {\n\
-         \x20           return Err(GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index: source_index, count: NOISE_SOURCES.len() });\n\
-         \x20       }\n\
+        "    pub fn evaluate_noise_sources(&self, ctx: &GeneratedEvalContext<'_>, visitor: &mut dyn GeneratedNoiseVisitor) -> Result<(), GeneratedNoiseEvaluationError> {\n\
          \x20       if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {\n\
          \x20           return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });\n\
          \x20       }\n\
          \x20       let params = &*self.params;\n",
     );
+    writeln!(
+        out,
+        "        let mut w = [0.0; {}];",
+        artifact.hir.variables.len()
+    )
+    .expect("write noise workspace");
     let mut activation_schedule = MergedNoiseSchedule::default();
     let mut metadata_schedule = MergedNoiseSchedule::default();
     for (index, source) in artifact.noise_sources.sources.iter().enumerate() {
@@ -185,21 +191,22 @@ pub(super) fn generate_noise_file(
         );
     }
     debug_assert!(liveness.expression_walks <= artifact.hir.expressions.len());
-    emit_noise_schedule(
+    emit_partitioned_noise_schedule(
         &mut out,
+        &mut helper_methods,
         artifact,
         &parameter_fields,
         &variables,
         &branch_unknowns,
         &activation_schedule,
         &guarded_replay_safety,
-        true,
-        8,
         "noise_activation_schedule",
+        None,
     )?;
-    out.push_str("        let noise_source_active = match source_index {\n");
+    let mut activation_values = Vec::with_capacity(artifact.noise_sources.sources.len());
     for (index, source) in artifact.noise_sources.sources.iter().enumerate() {
-        writeln!(out, "            {index} => {{").expect("write noise activation arm");
+        writeln!(out, "        let noise_source_{index}_active = {{")
+            .expect("write noise activation");
         if let Some(activation) = &source.activation {
             let activation = lower_noise_value_expr(
                 artifact,
@@ -209,37 +216,65 @@ pub(super) fn generate_noise_file(
                 &variables,
                 &branch_unknowns,
             )?;
-            emit_lines(&mut out, &activation.lines, 16);
-            writeln!(out, "                {} != 0.0", activation.value)
+            emit_lines(&mut out, &activation.lines, 12);
+            writeln!(out, "            {} != 0.0", activation.value)
                 .expect("write noise activation value");
         } else {
-            out.push_str("                true\n");
+            out.push_str("            true\n");
         }
-        out.push_str("            }\n");
+        out.push_str("        };\n");
+        activation_values.push(format!("noise_source_{index}_active"));
     }
-    out.push_str(
-        "            _ => unreachable!(\"noise source index was range checked\"),\n        };\n",
-    );
-    out.push_str("        if !noise_source_active { return Ok(GeneratedNoiseEvaluation { active: false, psd: 0.0, exponent: None, table_operands: Vec::new() }); }\n");
-    for (index, _) in artifact.hir.variables.iter().enumerate() {
-        writeln!(out, "        noise_variable_{index} = 0.0;")
-            .expect("reset noise metadata variable");
-    }
-    emit_noise_schedule(
+    writeln!(
+        out,
+        "        let noise_source_active = [{}];",
+        activation_values.join(", ")
+    )
+    .expect("write noise activation array");
+    let active_mask_chunks = activation_values
+        .chunks(128)
+        .map(|values| {
+            values
+                .iter()
+                .enumerate()
+                .map(|(bit, value)| {
+                    if bit == 0 {
+                        format!("({value} as u128)")
+                    } else {
+                        format!("(({value} as u128) << {bit})")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        })
+        .collect::<Vec<_>>();
+    writeln!(
+        out,
+        "        let noise_source_active_mask = [{}];",
+        active_mask_chunks.join(", ")
+    )
+    .expect("write packed noise activation mask");
+    out.push_str("        w.fill(0.0);\n");
+    emit_partitioned_noise_schedule(
         &mut out,
+        &mut helper_methods,
         artifact,
         &parameter_fields,
         &variables,
         &branch_unknowns,
         &metadata_schedule,
         &guarded_replay_safety,
-        false,
-        8,
         "noise_metadata_schedule",
+        Some("noise_source_active_mask"),
     )?;
-    out.push_str("        match source_index {\n");
     for (index, source) in artifact.noise_sources.sources.iter().enumerate() {
-        writeln!(out, "            {index} => {{").expect("write noise evaluator arm");
+        writeln!(
+            out,
+            "        if !noise_source_active[{index}] {{\n\
+             \x20           if !visitor.visit({index}, GeneratedNoiseEvaluationRef {{ active: false, psd: 0.0, exponent: None, table_operands: &[] }}) {{ return Ok(()); }}\n\
+             \x20       }} else {{"
+        )
+        .expect("write inactive noise result");
         let psd = lower_noise_value_expr(
             artifact,
             source.psd.id,
@@ -248,7 +283,7 @@ pub(super) fn generate_noise_file(
             &variables,
             &branch_unknowns,
         )?;
-        emit_lines(&mut out, &psd.lines, 16);
+        emit_lines(&mut out, &psd.lines, 12);
         let exponent = if let Some(exponent) = &source.exponent {
             let exponent = lower_noise_value_expr(
                 artifact,
@@ -258,25 +293,21 @@ pub(super) fn generate_noise_file(
                 &variables,
                 &branch_unknowns,
             )?;
-            emit_lines(&mut out, &exponent.lines, 16);
+            emit_lines(&mut out, &exponent.lines, 12);
             format!("Some({})", exponent.value)
         } else {
             "None".to_string()
         };
-        writeln!(out, "                let psd = {};", psd.value)
-            .expect("write noise PSD evaluation");
-        emit_finite_check(&mut out, index, "psd", "psd", 16);
+        writeln!(out, "            let psd = {};", psd.value).expect("write noise PSD evaluation");
+        emit_finite_check(&mut out, index, "psd", "psd", 12);
         writeln!(
             out,
-            "                if psd < 0.0 {{ return Err(GeneratedNoiseEvaluationError::NegativePower {{ index: {index}, value: psd }}); }}"
+            "            if psd < 0.0 {{ return Err(GeneratedNoiseEvaluationError::NegativePower {{ index: {index}, value: psd }}); }}"
         )
         .expect("write nonnegative PSD validation");
-        writeln!(
-            out,
-            "                let exponent: Option<f64> = {exponent};"
-        )
-        .expect("write noise exponent evaluation");
-        emit_optional_finite_check(&mut out, index, "exponent", "exponent", 16);
+        writeln!(out, "            let exponent: Option<f64> = {exponent};")
+            .expect("write noise exponent evaluation");
+        emit_optional_finite_check(&mut out, index, "exponent", "exponent", 12);
         let mut table_values = Vec::new();
         if let Some(table) = &source.table {
             for (operand_index, operand) in table.operands.iter().enumerate() {
@@ -288,40 +319,43 @@ pub(super) fn generate_noise_file(
                     &variables,
                     &branch_unknowns,
                 )?;
-                emit_lines(&mut out, &value.lines, 16);
+                emit_lines(&mut out, &value.lines, 12);
                 let local = format!("noise_table_operand_{operand_index}");
-                writeln!(out, "                let {local} = {};", value.value)
+                writeln!(out, "            let {local} = {};", value.value)
                     .expect("write noise table operand");
                 emit_finite_check(
                     &mut out,
                     index,
                     &format!("table operand {operand_index}"),
                     &local,
-                    16,
+                    12,
                 );
                 table_values.push(local);
             }
         }
         writeln!(
             out,
-            "                let table_operands = vec![{}];",
+            "            let table_operands = [{}];",
             table_values.join(", ")
         )
-        .expect("write owned noise table operands");
+        .expect("write stack noise table operands");
         let scaled_psd = if source.is_current {
             "psd * self.multiplicity"
         } else {
             "psd / self.multiplicity"
         };
-        writeln!(out, "                let psd = {scaled_psd};")
-            .expect("write multiplicity scaling");
-        emit_finite_check(&mut out, index, "scaled psd", "psd", 16);
-        out.push_str(
-            "                Ok(GeneratedNoiseEvaluation { active: true, psd, exponent, table_operands })\n",
-        );
-        out.push_str("            }\n");
+        writeln!(out, "            let psd = {scaled_psd};").expect("write multiplicity scaling");
+        emit_finite_check(&mut out, index, "scaled psd", "psd", 12);
+        writeln!(
+            out,
+            "            if !visitor.visit({index}, GeneratedNoiseEvaluationRef {{ active: true, psd, exponent, table_operands: &table_operands }}) {{ return Ok(()); }}"
+        )
+        .expect("write active noise visitor");
+        out.push_str("        }\n");
     }
-    out.push_str("            _ => unreachable!(\"noise source index was range checked\"),\n        }\n    }\n}\n");
+    out.push_str("        Ok(())\n    }\n");
+    out.push_str(&helper_methods);
+    out.push_str("}\n");
 
     Ok(GeneratedRustFile {
         relative_path: "noise.rs".to_string(),
@@ -330,37 +364,77 @@ pub(super) fn generate_noise_file(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_noise_schedule(
+fn emit_partitioned_noise_schedule(
     out: &mut String,
+    helper_methods: &mut String,
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     variables: &HashMap<String, LoweredVariable>,
     branch_unknowns: &HashMap<String, BranchCurrentSlot>,
     schedule: &MergedNoiseSchedule,
     guarded_replay_safety: &HashMap<StatementKey, bool>,
-    declare_variables: bool,
-    indentation: usize,
     prefix: &str,
+    active_sources: Option<&str>,
 ) -> Result<(), RustBackendError> {
-    let padding = " ".repeat(indentation);
-    if declare_variables {
-        for (index, _) in artifact.hir.variables.iter().enumerate() {
-            writeln!(out, "{padding}let mut noise_variable_{index} = 0.0;")
-                .expect("write noise variable");
+    let mut helper_bodies = Vec::new();
+    let mut body = String::new();
+    let mut body_lines = 0usize;
+    for (index, statement) in artifact.hir.statements.iter().enumerate() {
+        let mut fragment = String::new();
+        emit_noise_statements(
+            &mut fragment,
+            artifact,
+            std::slice::from_ref(statement),
+            parameter_fields,
+            variables,
+            branch_unknowns,
+            schedule,
+            guarded_replay_safety,
+            8,
+            &format!("{prefix}_{index}"),
+            active_sources.map(|_| "active"),
+        )?;
+        if fragment.is_empty() {
+            continue;
         }
+        let fragment_lines = fragment.lines().count();
+        if !body.is_empty() && body_lines + fragment_lines > MAX_NOISE_HELPER_SOURCE_LINES {
+            helper_bodies.push(std::mem::take(&mut body));
+            body_lines = 0;
+        }
+        body.push_str(&fragment);
+        body_lines += fragment_lines;
     }
-    emit_noise_statements(
-        out,
-        artifact,
-        &artifact.hir.statements,
-        parameter_fields,
-        variables,
-        branch_unknowns,
-        schedule,
-        guarded_replay_safety,
-        indentation,
-        prefix,
-    )
+    if !body.is_empty() {
+        helper_bodies.push(body);
+    }
+
+    let variable_count = artifact.hir.variables.len();
+    let active_mask_chunks = artifact.noise_sources.sources.len().div_ceil(128);
+    for (index, body) in helper_bodies.into_iter().enumerate() {
+        let helper_name = format!("{prefix}_part_{index}");
+        write!(out, "        self.{helper_name}(ctx, &mut w").expect("write noise helper call");
+        if active_sources.is_some() {
+            out.push_str(", &noise_source_active_mask");
+        }
+        out.push_str(");\n");
+
+        writeln!(helper_methods, "\n    #[inline(never)]")
+            .expect("write noise helper inline policy");
+        write!(
+            helper_methods,
+            "    fn {helper_name}(&self, ctx: &GeneratedEvalContext<'_>, w: &mut [f64; {variable_count}]"
+        )
+        .expect("write noise helper signature");
+        if active_sources.is_some() {
+            write!(helper_methods, ", active: &[u128; {active_mask_chunks}]")
+                .expect("write noise helper activity parameter");
+        }
+        helper_methods.push_str(") {\n        let params = &*self.params;\n");
+        helper_methods.push_str(&body);
+        helper_methods.push_str("    }\n");
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -375,6 +449,7 @@ fn emit_noise_statements(
     guarded_replay_safety: &HashMap<StatementKey, bool>,
     indentation: usize,
     prefix: &str,
+    active_sources: Option<&str>,
 ) -> Result<(), RustBackendError> {
     let padding = " ".repeat(indentation);
     for (index, statement) in statements.iter().enumerate() {
@@ -416,38 +491,49 @@ fn emit_noise_statements(
                     variables,
                     branch_unknowns,
                 )?;
+                if let Some(active_sources) = active_sources {
+                    writeln!(
+                        out,
+                        "{padding}if {} {{",
+                        active_source_expr(active_sources, sources)
+                    )
+                    .expect("write noise assignment activity guard");
+                }
+                let body_indentation = indentation + usize::from(active_sources.is_some()) * 4;
+                emit_lines(out, &lowered.lines, body_indentation);
                 writeln!(
                     out,
-                    "{padding}if matches!(source_index, {}) {{",
-                    source_pattern(sources)
-                )
-                .expect("write noise assignment source guard");
-                emit_lines(out, &lowered.lines, indentation + 4);
-                writeln!(
-                    out,
-                    "{padding}    noise_variable_{} = {};",
+                    "{}w[{}] = {};",
+                    " ".repeat(body_indentation),
                     assignment.target.index(),
                     lowered.value
                 )
                 .expect("write noise assignment");
-                writeln!(out, "{padding}}}").expect("write noise assignment source guard end");
+                if active_sources.is_some() {
+                    writeln!(out, "{padding}}}")
+                        .expect("write noise assignment activity guard end");
+                }
             }
             HirStatement::Loop(loop_statement) => {
                 let Some(sources) = schedule.loops.get(&loop_key(loop_statement)) else {
                     continue;
                 };
+                if let Some(active_sources) = active_sources {
+                    writeln!(
+                        out,
+                        "{padding}if {} {{",
+                        active_source_expr(active_sources, sources)
+                    )
+                    .expect("write noise loop activity guard");
+                }
+                let body_indentation = indentation + usize::from(active_sources.is_some()) * 4;
+                let body_padding = " ".repeat(body_indentation);
                 writeln!(
                     out,
-                    "{padding}if matches!(source_index, {}) {{",
-                    source_pattern(sources)
-                )
-                .expect("write noise loop source guard");
-                writeln!(
-                    out,
-                    "{padding}    let mut {statement_prefix}_iterations = 0usize;"
+                    "{body_padding}let mut {statement_prefix}_iterations = 0usize;"
                 )
                 .expect("write noise loop counter");
-                writeln!(out, "{padding}    loop {{").expect("write noise loop");
+                writeln!(out, "{body_padding}loop {{").expect("write noise loop");
                 let condition = lower_noise_value_expr(
                     artifact,
                     loop_statement.condition.id,
@@ -456,10 +542,10 @@ fn emit_noise_statements(
                     variables,
                     branch_unknowns,
                 )?;
-                emit_lines(out, &condition.lines, indentation + 8);
+                emit_lines(out, &condition.lines, body_indentation + 4);
                 writeln!(
                     out,
-                    "{padding}        if {} == 0.0 {{ break; }}",
+                    "{body_padding}    if {} == 0.0 {{ break; }}",
                     condition.value
                 )
                 .expect("write noise loop condition");
@@ -472,18 +558,21 @@ fn emit_noise_statements(
                     branch_unknowns,
                     schedule,
                     guarded_replay_safety,
-                    indentation + 8,
+                    body_indentation + 4,
                     &format!("{statement_prefix}_body"),
+                    active_sources,
                 )?;
-                writeln!(out, "{padding}        {statement_prefix}_iterations += 1;")
+                writeln!(out, "{body_padding}    {statement_prefix}_iterations += 1;")
                     .expect("write noise loop increment");
                 writeln!(
                     out,
-                    "{padding}        assert!({statement_prefix}_iterations <= Self::MAX_ANALOG_LOOP_ITERATIONS, \"generated Verilog-A noise evaluation loop exceeded iteration limit\");"
+                    "{body_padding}    assert!({statement_prefix}_iterations <= Self::MAX_ANALOG_LOOP_ITERATIONS, \"generated Verilog-A noise evaluation loop exceeded iteration limit\");"
                 )
                 .expect("write noise loop bound");
-                writeln!(out, "{padding}    }}").expect("write noise loop end");
-                writeln!(out, "{padding}}}").expect("write noise loop source guard end");
+                writeln!(out, "{body_padding}}}").expect("write noise loop end");
+                if active_sources.is_some() {
+                    writeln!(out, "{padding}}}").expect("write noise loop activity guard end");
+                }
             }
         }
     }
@@ -884,7 +973,7 @@ fn noise_variables(artifact: &CanonicalIrArtifact) -> HashMap<String, LoweredVar
             (
                 variable.name.to_string(),
                 LoweredVariable {
-                    value: format!("noise_variable_{index}"),
+                    value: format!("w[{index}]"),
                     condition: None,
                     derivatives: node_zeros.clone(),
                     branch_derivatives: branch_zeros.clone(),
@@ -920,12 +1009,21 @@ fn emit_lines(out: &mut String, lines: &[String], indentation: usize) {
     }
 }
 
-fn source_pattern(sources: &[usize]) -> String {
-    sources
-        .iter()
-        .map(usize::to_string)
+fn active_source_expr(active_sources: &str, sources: &[usize]) -> String {
+    let mut chunk_masks = Vec::<(usize, u128)>::new();
+    for &source in sources {
+        let chunk = source / 128;
+        let bit = source % 128;
+        match chunk_masks.last_mut() {
+            Some((last_chunk, mask)) if *last_chunk == chunk => *mask |= 1u128 << bit,
+            _ => chunk_masks.push((chunk, 1u128 << bit)),
+        }
+    }
+    chunk_masks
+        .into_iter()
+        .map(|(chunk, mask)| format!("({active_sources}[{chunk}] & 0x{mask:x}) != 0"))
         .collect::<Vec<_>>()
-        .join(" | ")
+        .join(" || ")
 }
 
 fn emit_finite_check(
