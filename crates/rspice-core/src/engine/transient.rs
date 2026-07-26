@@ -2379,6 +2379,31 @@ impl Engine {
                 None => breakpoints.limit_step(t, timestep.dt()),
             };
             let mut dt = dt.min(tstop - t); // Don't overshoot tstop
+            let mut locked_replay_hidden_attempt = false;
+            if locked_grid.is_some()
+                && retry_count < 8
+                && let (Some(grid), Some(steps)) =
+                    (locked_grid.as_ref(), locked_step_sizes.as_ref())
+                && let (Some(&target), Some(&scheduled_dt)) =
+                    (grid.get(locked_cursor), steps.get(locked_cursor))
+                && !breakpoints.at_breakpoint(target)
+                && !circuit.next_xspice_event_time().is_some_and(|event_time| {
+                    let tolerance = (target.abs() * 1.0e-12).max(1.0e-18);
+                    (event_time - target).abs() <= tolerance
+                })
+                && scheduled_dt.is_finite()
+                && scheduled_dt > 0.0
+                && timestep.dt() > scheduled_dt * (1.0 + 1.0e-12)
+            {
+                // A paired reference grid records accepted intervals, not the
+                // adaptive candidates rejected before them. When the current
+                // controller proposal exceeds a non-breakpoint reference
+                // interval, replay that proposal as a hidden trial so the
+                // nonlinear rollback and predictor history follow the
+                // producing run before landing on the prescribed target.
+                dt = timestep.dt().min(max_step);
+                locked_replay_hidden_attempt = dt > scheduled_dt;
+            }
             let mut expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
             if locked_grid.is_none() {
                 let interior_source_delta = if at_breakpoint && dt.is_finite() && dt > 0.0 {
@@ -4293,7 +4318,11 @@ impl Engine {
             // Xyce CONSTSTEP still evaluates LTE for integration-order
             // selection, but the estimate cannot reject or resize a
             // prescribed grid step.
-            let accept = locked_grid.is_some() || lte_accept;
+            let accept = if locked_replay_hidden_attempt {
+                false
+            } else {
+                locked_grid.is_some() || lte_accept
+            };
             let xyce_order_two_trial_eligible = lte_estimator.uses_accepted_solution_reference()
                 && accept
                 && !first_accepted_transient_step
