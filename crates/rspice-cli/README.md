@@ -69,7 +69,7 @@ HSPICE `.ALTER` and `.DATA` constructs expand into a plan of concrete decks, eac
 
 - **TRAN** against the transient result — node voltages, branch currents as `I(name)`, and the time axis as `TIME`, so `FIND TIME WHEN V(out)=...` works
 - **DC** against the sweep, with the swept value as the abscissa
-- **AC** against the derived real series — `V(x)`/`VM(x)` magnitude, `VDB(x)`, `VP(x)` phase in degrees, `VR(x)`/`VI(x)` — with the frequency axis addressable as `FREQUENCY`, `FREQ`, or `TIME`
+- **AC** against the derived real series — `V(x)`/`VM(x)` magnitude, `VDB(x)`, `VP(x)` phase in degrees, `VR(x)`/`VI(x)`, and the matching `I…` forms for branch currents — with the frequency axis addressable as `FREQUENCY`, `FREQ`, or `TIME`
 - **NOISE** against the spectral densities `ONOISE`/`INOISE` (also `*_SPECTRUM`)
 
 Any statement may add `GOAL=value [TOL=value]`: a computed value that misses its goal fails the measurement (TOL defaults to max(1% of |goal|, 1e-12)). Results print under `--meas` and are always collected for report files.
@@ -368,7 +368,13 @@ Available on every subcommand:
 `rspice --version` reports the crate version, build target, profile, and exact
 source commit. The same commit appears in health documents, structured fatal
 diagnostics, and run summaries so operators can correlate an installed binary
-with its release provenance.
+with its release provenance. The commit is read from `git rev-parse HEAD` at
+build time; set `RSPICE_BUILD_COMMIT` to a full 40-character hash to stamp
+provenance when building from a source archive with no git checkout.
+
+Every JSON document the CLI emits — health, fatal diagnostics, `--summary`,
+`--log-format json` records — carries the process `run_id`, so one run's logs,
+failure, and summary can be correlated after the fact.
 
 ## Configuration File
 
@@ -449,7 +455,7 @@ The exit status is the verification contract — a deck whose measurements fail,
 | :--- | :--- |
 | 0 | Success: simulation ran and every check passed |
 | 1 | Simulation error (convergence failure, non-finite results, Verilog-A compile failure, conversion failure) |
-| 2 | Usage error (invalid arguments) |
+| 2 | Usage error (invalid arguments, or warnings under `check --strict`) |
 | 3 | Verification failure: a `.MEAS` failed or did not evaluate, or `compare` found mismatches |
 | 65 | Input format error (netlist parse failure, singular topology from `check`) |
 | 66 | Input file not found |
