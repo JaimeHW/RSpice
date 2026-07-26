@@ -4432,6 +4432,43 @@ impl XyceFileCompareTolerance {
     };
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticHbOutputFormat {
+    StdPrn,
+    GnuplotPrn,
+}
+
+impl XyceStaticHbOutputFormat {
+    fn for_format(format: Option<&str>) -> Result<Self, String> {
+        match format.unwrap_or("STD").trim().to_ascii_uppercase().as_str() {
+            "STD" => Ok(Self::StdPrn),
+            // Xyce's HB GNUPLOT writer uses the ordinary whitespace PRN
+            // representation for the numerical artifacts.  Keep this
+            // contract explicit so other format selectors cannot silently
+            // inherit PRN semantics without a matching oracle parser.
+            "GNUPLOT" => Ok(Self::GnuplotPrn),
+            normalized => Err(format!(
+                "native HB oracle does not cover FORMAT={normalized}"
+            )),
+        }
+    }
+
+    fn reference_extension(self) -> &'static str {
+        match self {
+            Self::StdPrn | Self::GnuplotPrn => "HB.FD.prn",
+        }
+    }
+
+    fn result_contract(self, wrapper: bool) -> &'static str {
+        match (wrapper, self) {
+            (true, Self::StdPrn) => "wrapper_static_prn_hb",
+            (true, Self::GnuplotPrn) => "wrapper_static_gnuplot_prn_hb",
+            (false, Self::StdPrn) => "static_prn_hb",
+            (false, Self::GnuplotPrn) => "static_gnuplot_prn_hb",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct XyceStaticHbPlan {
     deck_path: PathBuf,
@@ -4442,6 +4479,7 @@ struct XyceStaticHbPlan {
     fd_reference_path: PathBuf,
     td_reference_path: PathBuf,
     ic_reference_path: PathBuf,
+    output_format: XyceStaticHbOutputFormat,
     wrapper: bool,
 }
 
@@ -19336,17 +19374,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         if request.file.is_some() {
             return Err("static HB does not combine the three canonical outputs with FILE= side destinations".to_string());
         }
-        if !request
-            .format
-            .as_deref()
-            .unwrap_or("STD")
-            .eq_ignore_ascii_case("STD")
-        {
-            return Err(format!(
-                "static HB currently requires PRN/STD output, found FORMAT={}",
-                request.format.as_deref().unwrap_or("STD")
-            ));
-        }
+        let output_format = XyceStaticHbOutputFormat::for_format(request.format.as_deref())
+            .map_err(|err| format!("static HB output contract rejected the request: {err}"))?;
         if source.lines().any(|line| {
             Self::strip_netlist_comment(line)
                 .trim_start()
@@ -19453,7 +19482,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         }
 
         let fd_reference_path = self
-            .static_output_reference_path(&deck.path, "HB.FD.prn")
+            .static_output_reference_path(&deck.path, output_format.reference_extension())
             .ok_or_else(|| "HB deck is not under tests/xyce/Netlists".to_string())?;
         let td_reference_path = self
             .static_output_reference_path(&deck.path, "HB.TD.prn")
@@ -19494,6 +19523,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             fd_reference_path,
             td_reference_path,
             ic_reference_path,
+            output_format,
             wrapper: self.requires_upstream_wrapper(&deck.relative_path),
         })
     }
@@ -24750,11 +24780,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         plan: XyceStaticHbPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = if plan.wrapper {
-            "wrapper_static_prn_hb"
-        } else {
-            "static_prn_hb"
-        };
+        let contract = plan.output_format.result_contract(plan.wrapper);
         let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
@@ -24767,7 +24793,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 );
             }
         };
-        let fd_reference = match Self::parse_ac_comparator_prn_file(&plan.fd_reference_path) {
+        let fd_reference_result = match plan.output_format {
+            XyceStaticHbOutputFormat::StdPrn | XyceStaticHbOutputFormat::GnuplotPrn => {
+                Self::parse_ac_comparator_prn_file(&plan.fd_reference_path)
+            }
+        };
+        let fd_reference = match fd_reference_result {
             Ok(reference) => reference,
             Err(err) => {
                 return self.failure_result(
