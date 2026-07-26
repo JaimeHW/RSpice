@@ -45,6 +45,7 @@ use self::preview::draw_interaction_previews;
 use self::resolved_symbol_render::resolved_symbol_world_bounds;
 use self::scene::draw_scene;
 
+pub(crate) use self::interaction::toggle_probe_with_feedback;
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet;
 

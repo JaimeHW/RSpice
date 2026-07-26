@@ -1420,7 +1420,17 @@ fn waveform_visible(state: &AppState, name: &str) -> bool {
 
 /// Toggle a probed waveform and confirm via toast: plotted / hidden / not
 /// available yet. The console gets the same line for the record.
-fn toggle_probe_with_feedback(ui: &Ui, state: &mut AppState, name: &str, display: &str) {
+/// Show or hide a net's trace, reporting the outcome exactly.
+///
+/// The canvas probe tool and the inspector's plot action commit the same
+/// transaction, so a net can never be "plotted" by one surface and absent
+/// from the other. Fails closed with a warning when no waveform exists.
+pub(crate) fn toggle_probe_with_feedback(
+    ui: &Ui,
+    state: &mut AppState,
+    name: &str,
+    display: &str,
+) {
     let toggled = state.simulation.toggle_waveform_visibility(name);
     if toggled {
         let visible = waveform_visible(state, name);
