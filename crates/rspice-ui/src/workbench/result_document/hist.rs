@@ -96,6 +96,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             label: format!("µ {}", fmt_si(stats.mean, "", 2)),
             drop_line: true,
             label_dy: 0.0,
+            shape: plot::MarkerShape::Point,
         });
     }
 
@@ -113,6 +114,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 label: format!("LSL {}", fmt_si(lsl, "", 2)),
                 drop_line: true,
                 label_dy: 0.0,
+                shape: plot::MarkerShape::Point,
             });
         }
         if let Some(usl) = yield_result.spec.max
@@ -127,6 +129,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 label: format!("USL {}", fmt_si(usl, "", 2)),
                 drop_line: true,
                 label_dy: 0.0,
+                shape: plot::MarkerShape::Point,
             });
         }
     }

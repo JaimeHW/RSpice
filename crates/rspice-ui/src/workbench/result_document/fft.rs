@@ -193,6 +193,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             label: format!("f₀ {:.1} dBV", db0),
             drop_line: false,
             label_dy: 0.0,
+            shape: plot::MarkerShape::Point,
         });
     }
     for (i, &(order, f, dbc)) in model.harmonics.iter().take(4).enumerate() {
@@ -206,6 +207,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             drop_line: false,
             // Stagger alternating tags so neighbours never collide.
             label_dy: if i % 2 == 0 { -14.0 } else { 26.0 },
+            shape: plot::MarkerShape::Point,
         });
     }
 

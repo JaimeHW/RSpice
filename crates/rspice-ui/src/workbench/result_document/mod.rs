@@ -222,6 +222,83 @@ impl CursorTool {
     }
 }
 
+/// What a result marker asserts, and therefore how it draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MarkerKind {
+    /// A freeform annotation on a sample.
+    #[default]
+    Note,
+    /// A called-out extremum or feature of the curve.
+    Peak,
+    /// A limit the design is measured against. Drawn as a limit line,
+    /// because a spec constrains the axis position, not one curve.
+    Spec,
+}
+
+impl MarkerKind {
+    /// Every kind, in cycle order.
+    pub const ALL: [MarkerKind; 3] = [MarkerKind::Note, MarkerKind::Peak, MarkerKind::Spec];
+
+    /// Short label used on the chip and in the marker list.
+    pub const fn label(self) -> &'static str {
+        match self {
+            MarkerKind::Note => "note",
+            MarkerKind::Peak => "peak",
+            MarkerKind::Spec => "spec",
+        }
+    }
+
+    /// The next kind in the cycle (the marker row's kind control).
+    pub const fn next(self) -> Self {
+        match self {
+            MarkerKind::Note => MarkerKind::Peak,
+            MarkerKind::Peak => MarkerKind::Spec,
+            MarkerKind::Spec => MarkerKind::Note,
+        }
+    }
+
+    /// A spec marker constrains the X position alone and so carries no
+    /// trace value in the readout.
+    pub const fn rides_a_trace(self) -> bool {
+        !matches!(self, MarkerKind::Spec)
+    }
+}
+
+/// A user-placed marker on a waveform strip.
+///
+/// The anchor is a *signal*, not one solve of it: `y` is resampled from the
+/// trace every frame, so a marker survives zoom, pan, and re-simulation and
+/// can never drift off the curve it annotates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResultMarker {
+    /// Stable per-session id. Renders as `M{id}`.
+    pub id: u32,
+    /// The strip (analysis index) this marker lives on.
+    pub analysis_index: usize,
+    /// Run-independent identity of the trace the marker rides.
+    pub anchor: u64,
+    /// Display name of the anchored trace, for the marker list.
+    pub trace_name: String,
+    /// Anchor position in the strip's X data space.
+    pub x: f64,
+    pub kind: MarkerKind,
+    /// Free text shown after the id on the tag. May be empty.
+    pub note: String,
+}
+
+/// The marker tool: armed, a plot click drops a marker on the nearest
+/// visible trace. Off by default — unlike cursors, annotating is a
+/// deliberate act, and an always-armed default would litter the plot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MarkerTool(bool);
+
+impl MarkerTool {
+    /// `true` when plot clicks place markers.
+    pub const fn is_armed(self) -> bool {
+        self.0
+    }
+}
+
 /// Per-session results-workspace state. Only the viewer selection persists;
 /// caches and cursors are transient.
 #[derive(Debug, Clone, Default)]
@@ -230,6 +307,15 @@ pub struct ResultsState {
     pub viewer: ResultViewer,
     /// The A│B cursor tool.
     pub cursor_tool: CursorTool,
+    /// The marker tool.
+    pub marker_tool: MarkerTool,
+    /// User-placed markers across every waveform strip.
+    pub markers: Vec<ResultMarker>,
+    /// Id allocator for `markers`. Monotonic within a session so a marker
+    /// label never silently changes meaning after a deletion.
+    next_marker_id: u32,
+    /// Marker whose note is being edited in the readout strip, if any.
+    pub editing_marker: Option<u32>,
     /// A/B cursors (data-space X of the strip they live on).
     pub cursors: CursorPair,
     /// Which strip (analysis index) the cursors were placed on.
@@ -357,6 +443,56 @@ impl ResultsState {
 
     pub fn toggle_linked_cursors(&mut self) {
         self.linked_cursors = !self.linked_cursors;
+    }
+
+    /// Arm or disarm the marker tool. Disarming keeps the markers — they are
+    /// document content, not a transient readout like the A/B pair.
+    pub fn toggle_marker_tool(&mut self) {
+        self.marker_tool = MarkerTool(!self.marker_tool.is_armed());
+        if !self.marker_tool.is_armed() {
+            self.editing_marker = None;
+        }
+    }
+
+    /// Place a marker and return its id.
+    pub fn add_marker(
+        &mut self,
+        analysis_index: usize,
+        anchor: u64,
+        trace_name: String,
+        x: f64,
+    ) -> u32 {
+        self.next_marker_id += 1;
+        let id = self.next_marker_id;
+        self.markers.push(ResultMarker {
+            id,
+            analysis_index,
+            anchor,
+            trace_name,
+            x,
+            kind: MarkerKind::default(),
+            note: String::new(),
+        });
+        id
+    }
+
+    pub fn marker_mut(&mut self, id: u32) -> Option<&mut ResultMarker> {
+        self.markers.iter_mut().find(|marker| marker.id == id)
+    }
+
+    /// Remove one marker, and with it any note edit it owned.
+    pub fn remove_marker(&mut self, id: u32) {
+        self.markers.retain(|marker| marker.id != id);
+        if self.editing_marker == Some(id) {
+            self.editing_marker = None;
+        }
+    }
+
+    /// Markers on one strip, in placement order.
+    pub fn strip_markers(&self, analysis_index: usize) -> impl Iterator<Item = &ResultMarker> {
+        self.markers
+            .iter()
+            .filter(move |marker| marker.analysis_index == analysis_index)
     }
 
     fn set_sample_selection(&mut self, selection: Option<SourceSampleSelection>) {
@@ -1065,6 +1201,26 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
             if response.clicked() {
                 results.toggle_cursor_tool();
             }
+            // Markers are annotation, not readout: the tool arms deliberately
+            // and the markers it placed outlive disarming it.
+            let marking = results.marker_tool.is_armed();
+            let marker_count = results.markers.len();
+            let marker_label = if marker_count == 0 {
+                "MARK".to_owned()
+            } else {
+                format!("MARK {marker_count}")
+            };
+            let response = chip(ui, &marker_label, marking).on_hover_text(if marking {
+                "Marker tool armed — click a plot to mark the nearest trace"
+            } else {
+                "Marker tool off — click to arm; existing markers stay on their plots"
+            });
+            response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::Button, true, marking, marker_label.as_str())
+            });
+            if response.clicked() {
+                results.toggle_marker_tool();
+            }
             let linked_label = "Linked A/B cursors";
             let linked = results.linked_cursors;
             let linked_tooltip = if linked {
@@ -1163,6 +1319,14 @@ fn compact_result_actions(ui: &mut Ui, state: &mut AppState) {
                 }
                 if ui.button("Clear cursors A/B").clicked() {
                     state.ui.results.clear_cursors();
+                    ui.close();
+                }
+                // The readout strip edits markers one row at a time; this is
+                // the way out when there are more of them than rows.
+                let markers = state.ui.results.markers.len();
+                if markers > 0 && ui.button(format!("Remove all {markers} markers")).clicked() {
+                    state.ui.results.markers.clear();
+                    state.ui.results.editing_marker = None;
                     ui.close();
                 }
                 let mut linked = state.ui.results.linked_cursors;

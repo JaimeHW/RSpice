@@ -259,6 +259,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             label: format!("UGF {}", quantity_policy.format_frequency(ugf, 1)),
             drop_line: true,
             label_dy: 0.0,
+            shape: plot::MarkerShape::Point,
         });
         if let (Some(pm), Some(phase)) = (m.pm_deg, &model.phase_deg) {
             spec.markers.push(plot::Marker {
@@ -269,6 +270,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 label: format!("PM {}", quantity_policy.format_angle(pm.to_radians(), 1)),
                 drop_line: false,
                 label_dy: 30.0,
+                shape: plot::MarkerShape::Point,
             });
         }
     }
@@ -281,6 +283,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             label: format!("GM {gm:.1} dB"),
             drop_line: true,
             label_dy: 0.0,
+            shape: plot::MarkerShape::Point,
         });
     }
 

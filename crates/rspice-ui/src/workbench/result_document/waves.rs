@@ -23,7 +23,7 @@ use crate::ui::plot::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::section_header;
+use crate::ui::widgets::{chip, section_header};
 use crate::workbench::visualization_family::{
     FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
 };
@@ -33,8 +33,8 @@ use crate::workbench::{
 
 use super::strip::{LegendChip, StripHeader};
 use super::{
-    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, ResultsState, WaveformSeriesResult,
-    waveform_color, well_hint,
+    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, MarkerKind, ResultMarker, ResultsState,
+    WaveformSeriesResult, waveform_color, well_hint,
 };
 
 /// How a trace's Y values are interpreted.
@@ -927,16 +927,22 @@ fn displayed_phase_series(
 /// measurement caches. Phase traces fold in the wrapped/continuous choice
 /// so a toggle never serves stale envelopes, ranges, or stats.
 fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
+    run_mixed_key(anchor_key(model, trace), trace.run_id, trace.overlay)
+}
+
+/// Run-independent identity of a trace: what a marker anchors to.
+///
+/// Every solve of the same signal shares this key, which is exactly the
+/// difference from [`trace_key`] — a decimation envelope must not outlive
+/// the run that produced it, while a marker is a statement about the
+/// signal and is meant to survive re-simulation.
+fn anchor_key(model: &StripModel, trace: &StripTrace) -> u64 {
     let continuous = (trace.kind.is_phase() && model.phase_continuous) as u64;
     let base = (model.analysis_index as u64) << 44
         | continuous << 43
         | (trace.waveform_index as u64) << 3
         | trace.kind as u64;
-    run_mixed_key(
-        base ^ trace.presentation_key.rotate_left(11),
-        trace.run_id,
-        trace.overlay,
-    )
+    base ^ trace.presentation_key.rotate_left(11)
 }
 
 /// Y range of the visible traces on one axis side, padded 8 %. Per-trace
@@ -1909,6 +1915,25 @@ fn append_copied_cursor(
     }
 }
 
+/// Kind owns the marker's colour: a spec limit reads as a bound to meet,
+/// a peak as a called-out feature, a note as neutral annotation.
+fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
+    match kind {
+        MarkerKind::Note => t.color.text,
+        MarkerKind::Peak => t.color.accent,
+        MarkerKind::Spec => t.color.warn,
+    }
+}
+
+/// Tag text: the id always, the note only when the user wrote one.
+fn marker_label(marker: &ResultMarker) -> String {
+    if marker.note.trim().is_empty() {
+        format!("M{}", marker.id)
+    } else {
+        format!("M{} · {}", marker.id, marker.note.trim())
+    }
+}
+
 fn show_strip_plot(
     ui: &mut Ui,
     state: &mut AppState,
@@ -2057,6 +2082,37 @@ fn show_strip_plot(
         ));
     }
 
+    // Markers ride their anchored trace: Y is resampled here rather than
+    // stored, so zoom, pan, and a re-run all leave the tag on the curve.
+    for marker in state.ui.results.strip_markers(model.analysis_index) {
+        let color = marker_color(marker.kind, &t);
+        let label = marker_label(marker);
+        if marker.kind == MarkerKind::Spec {
+            spec.markers
+                .push(plot::Marker::limit_line(marker.x, color, label));
+            continue;
+        }
+        let anchored = model
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay && anchor_key(model, trace) == marker.anchor);
+        // A marker whose trace is hidden or gone stays out of the plot
+        // rather than snapping to an unrelated curve; the readout strip
+        // still lists it, so it can be found and deleted.
+        let Some(trace) = anchored.filter(|trace| trace.visible) else {
+            continue;
+        };
+        let y = sample_at_with(&trace.x, &trace.y, marker.x, interpolation);
+        if !y.is_finite() {
+            continue;
+        }
+        let mut plot_marker = plot::Marker::point(marker.x, y, color, label);
+        if trace.kind.is_phase() {
+            plot_marker.side = plot::YSide::Right;
+        }
+        spec.markers.push(plot_marker);
+    }
+
     let model_cursor_domain = model.cursor_domain();
     let cursor_domain_matches = linked_cursor_domain == Some(&model_cursor_domain);
     let cursors = (state.ui.results.cursor_strip == Some(model.analysis_index)
@@ -2093,7 +2149,44 @@ fn show_strip_plot(
         Some(&readout),
     );
 
+    // The marker tool takes the click when armed: one click cannot both
+    // annotate and move a cursor, and the armed chip says which it will do.
     if let Some(clicked_x) = response.clicked_x
+        && state.ui.results.marker_tool.is_armed()
+    {
+        let right_range = spec.y_right.as_ref().map(|(axis, _)| (axis.min, axis.max));
+        let pointer_y = response.response.interact_pointer_pos().map(|pos| pos.y);
+        let plot_rect = response.plot_rect;
+        // "Nearest" has to mean what the eye sees, so each trace is measured
+        // in screen space against the axis it actually draws on.
+        let screen_y = |value: f64, right: bool| -> Option<f32> {
+            let (lo, hi) = if right { right_range? } else { (y0, y1) };
+            (value.is_finite() && hi > lo).then(|| {
+                plot_rect.bottom() - ((value - lo) / (hi - lo)) as f32 * plot_rect.height()
+            })
+        };
+        let nearest = model
+            .traces
+            .iter()
+            .filter(|trace| trace.visible && !trace.overlay)
+            .filter_map(|trace| {
+                let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
+                let y = screen_y(value, trace.kind.is_phase())?;
+                Some((trace, pointer_y.map_or(0.0, |pointer| (pointer - y).abs())))
+            })
+            .min_by(|(_, a), (_, b)| a.total_cmp(b));
+        if let Some((trace, _)) = nearest {
+            let anchor = anchor_key(model, trace);
+            let name = trace.name.clone();
+            let id = state
+                .ui
+                .results
+                .add_marker(model.analysis_index, anchor, name, clicked_x);
+            // Focus the new marker's note field: placing one is normally the
+            // first half of saying what it means.
+            state.ui.results.editing_marker = Some(id);
+        }
+    } else if let Some(clicked_x) = response.clicked_x
         && state.ui.results.cursor_tool.is_armed()
     {
         let results = &mut state.ui.results;
@@ -2150,15 +2243,57 @@ fn readout_trace_count(state: &AppState) -> usize {
         })
 }
 
-/// Exact height the cursor readout strip needs, or zero when it stands down.
+/// Height of one marker row.
+const MARKER_ROW_H: f32 = 22.0;
+/// Most marker rows the strip will show before it stops growing.
+const MARKER_ROW_LIMIT: usize = 4;
+
+/// Analysis indices whose strips are on screen right now.
+///
+/// A marker on a closed or un-maximized strip has nothing to point at, so
+/// it must not hold the readout strip open.
+fn on_screen_strips(state: &AppState) -> Vec<usize> {
+    let Some(run) = state.simulation.active_run() else {
+        return Vec::new();
+    };
+    let results = &state.ui.results;
+    let present = |index: usize| index < run.analyses.len();
+    match results.maximized_strip {
+        Some(max_index) if present(max_index) => vec![max_index],
+        _ => (0..run.analyses.len())
+            .filter(|index| !results.hidden_strips.contains(index))
+            .collect(),
+    }
+}
+
+/// Markers the strip will list, in placement order.
+fn visible_markers(state: &AppState) -> Vec<&ResultMarker> {
+    let strips = on_screen_strips(state);
+    state
+        .ui
+        .results
+        .markers
+        .iter()
+        .filter(|marker| strips.contains(&marker.analysis_index))
+        .collect()
+}
+
+/// Exact height the readout strip needs, or zero when it stands down.
 ///
 /// The strip is content-fit by design: it is a readout, not a dock, so it
-/// never reserves space for rows it has nothing to put in.
+/// never reserves space for rows it has nothing to put in. Three states are
+/// reachable — the full cursor readout, a markers-only strip when markers
+/// exist without cursors, and no strip at all.
 pub fn readout_strip_height(state: &AppState) -> f32 {
-    if !state.ui.results.cursor_readout_active() {
-        return 0.0;
+    let mut height = 0.0;
+    if state.ui.results.cursor_readout_active() {
+        height += READOUT_HEADER_H + readout_trace_count(state) as f32 * READOUT_ROW_H;
     }
-    READOUT_HEADER_H + readout_trace_count(state) as f32 * READOUT_ROW_H
+    let markers = visible_markers(state).len();
+    if markers > 0 {
+        height += READOUT_HEADER_H + markers.min(MARKER_ROW_LIMIT) as f32 * MARKER_ROW_H;
+    }
+    height
 }
 
 /// The cursor readout: one X row naming A, B and Δ, then the value each
@@ -2178,6 +2313,35 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
     ui.painter()
         .hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
 
+    let cursor_bottom = cursor_readout_section(ui, state, rect);
+    let marker_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), cursor_bottom),
+        egui::pos2(rect.right(), rect.bottom()),
+    );
+    if marker_rect.height() > 1.0 {
+        if cursor_bottom > rect.top() {
+            ui.painter().hline(
+                rect.x_range(),
+                cursor_bottom,
+                egui::Stroke::new(1.0, c.border),
+            );
+        }
+        marker_section(ui, state, marker_rect);
+    }
+}
+
+/// The A/B half of the strip. Returns the Y the marker section starts at,
+/// which equals the strip top when there is no cursor readout to draw.
+fn cursor_readout_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    if !state.ui.results.cursor_readout_active() {
+        return rect.top();
+    }
+    // Read the reserved height from the same source as `readout_strip_height`
+    // so the marker section can never start off the end of the strip.
+    let section_bottom =
+        rect.top() + READOUT_HEADER_H + readout_trace_count(state) as f32 * READOUT_ROW_H;
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
@@ -2193,11 +2357,11 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
         .cursor_strip
         .and_then(|index| models.iter().find(|model| model.analysis_index == index))
     else {
-        return;
+        return rect.top();
     };
     let cursors = state.ui.results.cursors;
     let Some(a) = cursors.a else {
-        return;
+        return rect.top();
     };
 
     // Header: the X positions and their separation.
@@ -2208,7 +2372,8 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
     let painter = ui.painter().with_clip_rect(header);
     let mut x = header.left() + READOUT_PAD_X;
     let mut chip = |text: String, color: egui::Color32, painter: &egui::Painter| {
-        let galley = painter.layout_no_wrap(text, theme::mono(tokens::FS_0, FontWeight::Regular), color);
+        let galley =
+            painter.layout_no_wrap(text, theme::mono(tokens::FS_0, FontWeight::Regular), color);
         painter.galley(
             egui::pos2(x, header.center().y - galley.size().y * 0.5),
             galley.clone(),
@@ -2248,11 +2413,7 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
             chip(format!("slope  {slope}"), c.text_dim, &painter);
         }
     } else {
-        chip(
-            "click again to place B".to_owned(),
-            c.text_faint,
-            &painter,
-        );
+        chip("click again to place B".to_owned(), c.text_faint, &painter);
     }
 
     // Per-trace values at A, at B, and their difference.
@@ -2300,6 +2461,194 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
         if let Some(deltas) = deltas.as_ref() {
             cell(deltas.get(index).map_or("", String::as_str), c.text_dim);
         }
+    }
+    section_bottom
+}
+
+/// The marker half of the strip: one editable row per marker.
+///
+/// Markers are document content, so their row is the place they are named,
+/// re-kinded and removed — there is no second marker list elsewhere to
+/// disagree with this one.
+fn marker_section(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &t,
+    );
+
+    let shown: Vec<u32> = visible_markers(state)
+        .into_iter()
+        .take(MARKER_ROW_LIMIT)
+        .map(|marker| marker.id)
+        .collect();
+    let total = visible_markers(state).len();
+    if shown.is_empty() {
+        return;
+    }
+
+    let header = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.right(), rect.top() + READOUT_HEADER_H),
+    );
+    let painter = ui.painter().with_clip_rect(header);
+    painter.text(
+        egui::pos2(header.left() + READOUT_PAD_X, header.center().y),
+        egui::Align2::LEFT_CENTER,
+        "MARKERS",
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.text_faint,
+    );
+    if total > shown.len() {
+        painter.text(
+            egui::pos2(header.right() - READOUT_PAD_X, header.center().y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{} of {total}", shown.len()),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.text_faint,
+        );
+    }
+
+    let mut remove: Option<u32> = None;
+    for (index, id) in shown.iter().copied().enumerate() {
+        let top = header.bottom() + index as f32 * MARKER_ROW_H;
+        let row = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + READOUT_PAD_X, top),
+            egui::pos2(rect.right() - READOUT_PAD_X, top + MARKER_ROW_H),
+        );
+        // Everything the row reports is derived here, from the same model
+        // the plot drew, so a row can never describe a marker the plot
+        // placed somewhere else.
+        let Some(marker) = state.ui.results.markers.iter().find(|m| m.id == id) else {
+            continue;
+        };
+        let kind = marker.kind;
+        let anchor = marker.anchor;
+        let marker_x = marker.x;
+        let analysis_index = marker.analysis_index;
+        let trace_name = marker.trace_name.clone();
+        let model = models
+            .iter()
+            .find(|model| model.analysis_index == analysis_index);
+        let position = model.map_or_else(
+            || fmt_si_significant(marker_x, "", significant_digits),
+            |model| {
+                format!(
+                    "{} = {}",
+                    model.x_label(),
+                    model.format_x(marker_x, significant_digits, quantity_policy)
+                )
+            },
+        );
+        // A spec marker constrains the X position alone; reporting a curve
+        // value against it would assert a reading it does not make.
+        let value = kind.rides_a_trace().then(|| {
+            model
+                .and_then(|model| {
+                    let trace = model
+                        .traces
+                        .iter()
+                        .find(|trace| !trace.overlay && anchor_key(model, trace) == anchor)?;
+                    let sampled = sample_at_with(&trace.x, &trace.y, marker_x, interpolation);
+                    Some(model.format_trace_value(
+                        trace,
+                        sampled,
+                        significant_digits,
+                        quantity_policy,
+                    ))
+                })
+                .unwrap_or_else(|| "trace unavailable".to_owned())
+        });
+
+        let mut row_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row_ui.set_clip_rect(row);
+        row_ui.spacing_mut().item_spacing.x = 8.0;
+        let color = marker_color(kind, &t);
+        row_ui.label(
+            egui::RichText::new(format!("M{id}"))
+                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                .color(color),
+        );
+        if chip(&mut row_ui, kind.label(), false)
+            .on_hover_text("Cycle marker kind: note → peak → spec")
+            .clicked()
+            && let Some(marker) = state.ui.results.marker_mut(id)
+        {
+            marker.kind = kind.next();
+        }
+        if row_ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("×")
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .color(c.text_dim),
+                )
+                .frame(false),
+            )
+            .on_hover_text("Remove this marker")
+            .clicked()
+        {
+            remove = Some(id);
+        }
+        row_ui.label(
+            egui::RichText::new(trace_name)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(if kind.rides_a_trace() {
+                    c.text_dim
+                } else {
+                    c.text_faint
+                }),
+        );
+        row_ui.label(
+            egui::RichText::new(position)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(c.text),
+        );
+        if let Some(value) = value {
+            row_ui.label(
+                egui::RichText::new(value)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text),
+            );
+        }
+        // The note field takes what is left of the row.
+        let note_width = row_ui.available_width().max(60.0);
+        let mut note = state
+            .ui
+            .results
+            .markers
+            .iter()
+            .find(|m| m.id == id)
+            .map_or_else(String::new, |m| m.note.clone());
+        let response = row_ui.add(
+            egui::TextEdit::singleline(&mut note)
+                .desired_width(note_width)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .hint_text("note…"),
+        );
+        if state.ui.results.editing_marker == Some(id) {
+            response.request_focus();
+            state.ui.results.editing_marker = None;
+        }
+        if response.changed()
+            && let Some(marker) = state.ui.results.marker_mut(id)
+        {
+            marker.note = note;
+        }
+    }
+    if let Some(id) = remove {
+        state.ui.results.remove_marker(id);
     }
 }
 
@@ -2681,6 +3030,187 @@ mod tests {
                 ],
                 failed_corners: 0,
             })
+    }
+
+    /// A one-analysis transient run with a single ramp on `V(out)`.
+    fn marker_fixture() -> AppState {
+        let mut state = AppState::default();
+        state.simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            ]),
+        );
+        state
+    }
+
+    #[test]
+    fn a_marker_reattaches_to_its_signal_after_a_re_run() {
+        let waveforms = || {
+            vec![WaveformData::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 5.0],
+                "#fff",
+            )]
+        };
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms()),
+        );
+        let mut derived = DerivedSeries::default();
+        let first = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+        let anchor = anchor_key(&first[0], &first[0].traces[0]);
+
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms()),
+        );
+        let mut derived = DerivedSeries::default();
+        let second = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+        let reattached = second[0]
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay && anchor_key(&second[0], trace) == anchor)
+            .expect("the marker's anchor still names the signal after a re-run");
+        let anchor = anchor_key(&second[0], reattached);
+
+        // Every run of a signal shares its anchor — a marker names the
+        // signal, not one solve of it — while the decimation key an overlay
+        // run draws under stays separated, so two runs' envelopes can never
+        // serve each other.
+        assert_eq!(run_mixed_key(anchor, 7, false), anchor);
+        assert_ne!(run_mixed_key(anchor, 7, true), anchor);
+    }
+
+    #[test]
+    fn markers_alone_keep_a_compact_readout_strip_on_screen() {
+        let mut state = marker_fixture();
+        assert_eq!(readout_strip_height(&state), 0.0);
+
+        state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        assert_eq!(
+            readout_strip_height(&state),
+            READOUT_HEADER_H + MARKER_ROW_H,
+            "markers-only strip: the marker header and its one row"
+        );
+
+        // A closed strip takes its markers off screen with it.
+        state.ui.results.hidden_strips.insert(0);
+        assert_eq!(readout_strip_height(&state), 0.0);
+    }
+
+    #[test]
+    fn the_strip_carries_cursors_and_markers_together() {
+        let mut state = marker_fixture();
+        state.ui.results.cursors.place(0.5);
+        state.ui.results.cursor_strip = Some(0);
+        let cursors_only = readout_strip_height(&state);
+        assert!(cursors_only > 0.0);
+
+        state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        assert_eq!(
+            readout_strip_height(&state),
+            cursors_only + READOUT_HEADER_H + MARKER_ROW_H
+        );
+    }
+
+    #[test]
+    fn markers_outlive_the_tool_that_placed_them() {
+        let mut state = marker_fixture();
+        assert!(
+            !state.ui.results.marker_tool.is_armed(),
+            "annotating is deliberate — the tool is off until asked for"
+        );
+        state.ui.results.toggle_marker_tool();
+        let id = state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        state.ui.results.toggle_marker_tool();
+
+        assert!(!state.ui.results.marker_tool.is_armed());
+        assert_eq!(state.ui.results.markers.len(), 1);
+
+        // Cursors are a readout and clear; markers are content and do not.
+        state.ui.results.clear_cursors();
+        assert_eq!(state.ui.results.markers.len(), 1);
+        assert_eq!(state.ui.results.markers[0].id, id);
+    }
+
+    #[test]
+    fn removing_a_marker_takes_its_open_note_editor_with_it() {
+        let mut state = marker_fixture();
+        let first = state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.5);
+        state.ui.results.editing_marker = Some(first);
+
+        state.ui.results.remove_marker(first);
+
+        assert!(state.ui.results.markers.is_empty());
+        assert_eq!(state.ui.results.editing_marker, None);
+
+        // Ids are not recycled: M1 must not come back meaning something else.
+        let second = state
+            .ui
+            .results
+            .add_marker(0, 0x51, "V(out)".to_owned(), 0.9);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn only_a_spec_marker_declines_to_report_a_trace_value() {
+        assert!(MarkerKind::Note.rides_a_trace());
+        assert!(MarkerKind::Peak.rides_a_trace());
+        assert!(
+            !MarkerKind::Spec.rides_a_trace(),
+            "a spec constrains the axis position, not one curve"
+        );
+
+        let mut kind = MarkerKind::Note;
+        for _ in 0..MarkerKind::ALL.len() {
+            kind = kind.next();
+        }
+        assert_eq!(kind, MarkerKind::Note, "the kind control cycles");
+    }
+
+    #[test]
+    fn a_marker_tag_names_the_note_only_when_there_is_one() {
+        let mut marker = ResultMarker {
+            id: 3,
+            analysis_index: 0,
+            anchor: 0x51,
+            trace_name: "V(out)".to_owned(),
+            x: 0.0,
+            kind: MarkerKind::Note,
+            note: String::new(),
+        };
+        assert_eq!(marker_label(&marker), "M3");
+
+        marker.note = "  settling  ".to_owned();
+        assert_eq!(marker_label(&marker), "M3 · settling");
     }
 
     #[test]

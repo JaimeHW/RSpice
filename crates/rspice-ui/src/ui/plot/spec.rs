@@ -243,6 +243,17 @@ impl<'a> Trace<'a> {
     }
 }
 
+/// How a [`Marker`] draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarkerShape {
+    /// A hollow dot sitting on the curve at (`x`, `y`), tag beside it.
+    #[default]
+    Point,
+    /// A dashed limit line spanning the plot height at `x`, tag at the top.
+    /// `y` is ignored — the callout is about the X position alone.
+    LimitLine,
+}
+
 /// An analysis marker: a hollow dot on the curve plus a bordered tag, with
 /// an optional drop line to the X axis (UGF, HDn, µ, LSL …).
 #[derive(Debug, Clone)]
@@ -261,6 +272,39 @@ pub struct Marker {
     pub drop_line: bool,
     /// Vertical tag offset in points (to stagger near-colliding tags).
     pub label_dy: f32,
+    /// Geometry. Defaults to [`MarkerShape::Point`].
+    pub shape: MarkerShape,
+}
+
+impl Marker {
+    /// A dot-and-tag marker on the left axis.
+    pub fn point(x: f64, y: f64, color: Color32, label: impl Into<String>) -> Self {
+        Self {
+            x,
+            y,
+            side: YSide::Left,
+            color,
+            label: label.into(),
+            drop_line: false,
+            label_dy: 0.0,
+            shape: MarkerShape::Point,
+        }
+    }
+
+    /// A dashed vertical limit line at `x`, tagged at the top of the plot.
+    pub fn limit_line(x: f64, color: Color32, label: impl Into<String>) -> Self {
+        Self {
+            shape: MarkerShape::LimitLine,
+            ..Self::point(x, 0.0, color, label)
+        }
+    }
+
+    /// Draw a dashed drop line from the dot down to the X axis.
+    #[must_use]
+    pub fn drop_line(mut self) -> Self {
+        self.drop_line = true;
+        self
+    }
 }
 
 /// A horizontal dashed reference line (0 dB, thresholds).

@@ -10,7 +10,7 @@ use crate::ui::tokens::Tokens;
 
 use super::cursor::CursorPair;
 use super::decimate::{DecimationCache, DisplayDecimation};
-use super::spec::{PlotSpec, YSide};
+use super::spec::{MarkerShape, PlotSpec, YSide};
 
 /// Interaction contract selected by the owning result surface.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -641,27 +641,47 @@ pub fn show(
     let tag_font = theme::mono(9.5, FontWeight::Regular);
     for marker in &spec.markers {
         let px = mx(marker.x);
-        let py = map_y(marker.y, marker.side);
-        if marker.drop_line {
+        let limit_line = marker.shape == MarkerShape::LimitLine;
+        // A limit line is a callout about the X position alone, so it spans
+        // the plot and tags at the top; its `y` carries no meaning.
+        let py = if limit_line {
+            plot_rect.top()
+        } else {
+            map_y(marker.y, marker.side)
+        };
+        if limit_line {
             painter.extend(Shape::dashed_line(
-                &[pos2(px, py), pos2(px, plot_rect.bottom())],
-                ref_stroke,
+                &[pos2(px, plot_rect.top()), pos2(px, plot_rect.bottom())],
+                Stroke::new(1.0, marker.color),
+                5.0,
                 4.0,
-                3.0,
             ));
+        } else {
+            if marker.drop_line {
+                painter.extend(Shape::dashed_line(
+                    &[pos2(px, py), pos2(px, plot_rect.bottom())],
+                    ref_stroke,
+                    4.0,
+                    3.0,
+                ));
+            }
+            painter.circle(
+                pos2(px, py),
+                3.0,
+                c.canvas_bg,
+                Stroke::new(1.5, marker.color),
+            );
         }
-        painter.circle(
-            pos2(px, py),
-            3.0,
-            c.canvas_bg,
-            Stroke::new(1.5, marker.color),
-        );
 
         let galley = painter.layout_no_wrap(marker.label.clone(), tag_font.clone(), marker.color);
         let (pad, tag_h) = (6.0, 16.0);
         let tag_w = galley.size().x + pad * 2.0;
         let mut tx = px + 9.0;
-        let mut ty = py - tag_h - 7.0 + marker.label_dy;
+        let mut ty = if limit_line {
+            plot_rect.top() + 4.0 + marker.label_dy
+        } else {
+            py - tag_h - 7.0 + marker.label_dy
+        };
         if tx + tag_w > plot_rect.right() - 4.0 {
             tx = px - tag_w - 9.0;
         }
@@ -998,6 +1018,7 @@ mod tests {
             label: "UGF".to_owned(),
             drop_line: true,
             label_dy: 0.0,
+            shape: MarkerShape::Point,
         });
 
         let label = plot_accessibility_label(
