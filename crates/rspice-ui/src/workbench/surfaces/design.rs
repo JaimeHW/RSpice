@@ -197,10 +197,41 @@ fn check_note_content(state: &AppState) -> (String, CheckNoteTone) {
             CheckNoteTone::Warning,
         );
     }
+    if let Some(run) = historical_annotation_run(state) {
+        return (
+            format!("Checks current · Run {run} annotations historical"),
+            CheckNoteTone::Warning,
+        );
+    }
     (
         "Checks and annotations current".to_owned(),
         CheckNoteTone::Ok,
     )
+}
+
+/// The run whose retained operating point no longer annotates this drawing.
+///
+/// Canvas annotations fail closed: the cross-probe point map is rejected as
+/// soon as it stops matching the open cell and topology, so the drawing is
+/// silently unannotated. Checks can be re-run without re-simulating, which
+/// would otherwise leave an all-clear note over a schematic that carries no
+/// operating point at all.
+fn historical_annotation_run(state: &AppState) -> Option<u64> {
+    if state.schematic.document_policy.operating_point_annotations
+        == crate::state::OperatingPointAnnotationPolicy::Hidden
+    {
+        return None;
+    }
+    let run = state.simulation.active_run()?;
+    let solved = state
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| analysis.dc_op.is_some());
+    let annotates_this_drawing = state.simulation.cross_probe.is_current_for(
+        &state.workspace.active_view,
+        state.schematic.topology_version(),
+    );
+    (solved && !annotates_this_drawing).then_some(run.id)
 }
 
 #[cfg(test)]
@@ -218,6 +249,30 @@ mod tests {
 
         state.dialogs.drc_checked_version = state.schematic.topology_version().wrapping_sub(1);
         assert_eq!(check_note_content(&state).1, CheckNoteTone::Warning);
+    }
+
+    #[test]
+    fn a_solved_run_that_no_longer_annotates_the_drawing_is_never_an_all_clear() {
+        let mut state = AppState::default();
+        state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        assert_eq!(check_note_content(&state).1, CheckNoteTone::Ok);
+
+        // A run that solved an operating point, whose cross-probe map was
+        // never built for this drawing, must read as historical.
+        let mut run = crate::state::SimulationRun::new(41);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::DcOp, "OP")
+                .with_dc_op(crate::state::DcOpResult::default()),
+        );
+        state.simulation.runs.insert(0, run);
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+
+        let (message, tone) = check_note_content(&state);
+        assert_eq!(tone, CheckNoteTone::Warning);
+        assert!(message.contains("Run 41"), "message was {message}");
+        assert!(message.contains("historical"), "message was {message}");
     }
 }
 
