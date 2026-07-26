@@ -1,12 +1,16 @@
 //! Configuration File Support
 //!
-//! Handles loading and merging configuration from:
+//! Handles loading and merging configuration from, in increasing priority:
 //! 1. Default values
-//! 2. System-wide config (/etc/rspice/config.toml on Unix)
-//! 3. User config (~/.config/rspice/config.toml or ~/.rspicerc)
-//! 4. Project config (./.rspicerc)
-//! 5. Environment variables (RSPICE_*)
-//! 6. Command-line arguments (highest priority)
+//! 2. User config (~/.config/rspice/config.toml, else ~/.rspicerc)
+//! 3. Project config (./.rspicerc)
+//! 4. Environment variables (RSPICE_*)
+//! 5. Command-line arguments (highest priority)
+//!
+//! `--config <FILE>` replaces layers 2 and 3 with that single file.
+//!
+//! Scalar keys override; the `[paths]` lists accumulate across layers, so a
+//! project file adds search directories rather than discarding the user's.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

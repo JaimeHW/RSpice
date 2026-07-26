@@ -2,11 +2,18 @@
 //!
 //! This module contains the implementation logic for each CLI subcommand:
 //! - `run` - Execute simulations
+//! - `health` - Probe backend liveness and numerical readiness
 //! - `info` - Display netlist information
 //! - `compile_va` - Compile Verilog-A models
 //! - `check` - Validate netlists
 //! - `convert` - Convert output formats
 //! - `compare` - Golden file regression testing
+//!
+//! (`completions` needs the whole clap command tree, so it stays in `main`.)
+//!
+//! The helpers below are the ingestion path every netlist-taking command
+//! shares: `-` means stdin, the same resource policy bounds both stdin and
+//! files, and core parse errors keep their typed context on the way out.
 
 pub mod check;
 pub mod compare;

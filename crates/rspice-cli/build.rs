@@ -1,8 +1,16 @@
+//! Build metadata for `rspice --version`, health documents, structured fatal
+//! diagnostics, and run summaries.
+//!
+//! Emits `RSPICE_BUILD_TARGET`, `RSPICE_BUILD_PROFILE`, and
+//! `RSPICE_BUILD_COMMIT`. The commit comes from `git rev-parse HEAD`, or from
+//! a `RSPICE_BUILD_COMMIT` environment variable (exactly 40 hex characters)
+//! so source-tarball and reproducible builds can pin provenance without a git
+//! checkout. It falls back to `unknown` when neither is available.
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    // Surface build metadata for `rspice --version`.
     println!(
         "cargo:rustc-env=RSPICE_BUILD_TARGET={}",
         std::env::var("TARGET").unwrap_or_default()

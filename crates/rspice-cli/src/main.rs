@@ -1,13 +1,17 @@
 //! RSpice CLI - High-performance SPICE circuit simulator
 //!
 //! Usage:
-//!   rspice run <netlist.sp>          Run simulation
-//!   rspice info <netlist.sp>         Show netlist info
-//!   rspice check <netlist.sp>        Validate netlist
-//!   rspice compile-va <model.va>     Compile Verilog-A
-//!   rspice convert <in> <out>        Convert formats
-//!   rspice compare <result> <golden> Compare for CI/CD
-//!   rspice --help                    Show help
+//!   rspice run <netlist.sp>           Run the analyses a deck requests
+//!   rspice health                     Probe backend liveness or readiness
+//!   rspice info <netlist.sp>          Summarize a netlist without simulating
+//!   rspice check <netlist.sp>         Validate syntax, topology, and outputs
+//!   rspice compile-va <model.va>      Compile a Verilog-A model
+//!   rspice convert <in> <out>         Convert between result formats
+//!   rspice compare <result> <golden>  Golden-file regression check
+//!   rspice completions <shell>        Emit a shell completion script
+//!   rspice --help                     Show help
+//!
+//! See `README.md` for flags, exit codes, and configuration.
 
 use clap::Parser;
 use std::process::ExitCode;
