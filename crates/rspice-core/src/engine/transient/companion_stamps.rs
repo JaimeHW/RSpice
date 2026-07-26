@@ -273,6 +273,10 @@ impl Engine {
                 response.mutual_conductance(),
             );
         }
+        if response.mutual_current_coefficient() != 0.0 {
+            matrix.add(br1 - 1, br2 - 1, response.mutual_current_coefficient());
+            matrix.add(br2 - 1, br1 - 1, response.mutual_current_coefficient());
+        }
 
         rhs[br1 - 1] = response.i_eq_port1();
         rhs[br2 - 1] = response.i_eq_port2();

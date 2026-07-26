@@ -6750,18 +6750,21 @@ impl Engine {
                     let txl_lossless_branch = model_params
                         .map(|params| params.uses_txl_lossless_branch())
                         .unwrap_or(false);
+                    let finite_rc_ltra = model_params
+                        .map(|params| params.is_finite_rc())
+                        .unwrap_or(false);
                     let zero_length_pass_through = model_params
                         .map(|params| params.is_zero_length_rc_rg())
                         .unwrap_or(false);
                     let attenuation = model_params.and_then(|p| {
-                        if txl_lossless_branch {
+                        if txl_lossless_branch || finite_rc_ltra {
                             None
                         } else {
                             tline_model_attenuation(p, z0_eff)
                         }
                     });
                     let loss_time_constant = model_params.and_then(|p| {
-                        if txl_lossless_branch {
+                        if txl_lossless_branch || finite_rc_ltra {
                             None
                         } else {
                             tline_model_loss_time_constant(p)
@@ -6857,6 +6860,18 @@ impl Engine {
                             tline.set_txl_branch_ordinals(branch1, branch2);
                         }
                         if !native_txl
+                            && !txl_lossless_branch
+                            && let Some(params) = model_params
+                            && finite_rc_ltra
+                            && let (Some(r), Some(c), Some(len)) = (params.r, params.c, params.len)
+                        {
+                            tline.set_distributed_rc(r, c, len);
+                            tline.set_ltra_history_compaction(
+                                try_to_compact,
+                                compact_reltol,
+                                compact_abstol,
+                            );
+                        } else if !native_txl
                             && !txl_lossless_branch
                             && let Some(params) = model_params
                             && let (Some(l), Some(c), Some(len)) = (params.l, params.c, params.len)

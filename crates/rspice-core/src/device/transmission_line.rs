@@ -51,7 +51,8 @@ mod txl;
 
 use delay::DelayBuffer;
 use distributed::{
-    DistributedRlcKernel, distributed_rlc_coefficients, distributed_rlc_max_safe_step,
+    DistributedRcKernel, DistributedRlcKernel, distributed_rc_coefficients,
+    distributed_rlc_coefficients, distributed_rlc_max_safe_step,
 };
 pub use line::TransmissionLine;
 pub use lossy::LossyTransmissionLine;

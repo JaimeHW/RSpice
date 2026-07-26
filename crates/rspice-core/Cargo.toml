@@ -41,6 +41,7 @@ thiserror.workspace = true
 log.workspace = true
 nom.workspace = true
 num-complex.workspace = true
+libm = "0.2"
 rustfft.workspace = true
 rustc-hash.workspace = true
 serde = { workspace = true, optional = true }

@@ -90,6 +90,18 @@ impl TransmissionLineModelParams {
             self.g.is_some_and(|g| g.is_finite() && g > 0.0) && c_zero.is_finite() && c_zero == 0.0;
         rc || rg
     }
+
+    /// Return whether this is the finite-length RC special case implemented
+    /// by the native scalar LTRA convolution runtime.
+    #[inline]
+    pub(in crate::engine::builder) fn is_finite_rc(self) -> bool {
+        self.kind == TransmissionLineModelKind::Ltra
+            && self.r.is_some_and(|r| r.is_finite() && r > 0.0)
+            && self.c.is_some_and(|c| c.is_finite() && c > 0.0)
+            && self.len.is_some_and(|len| len.is_finite() && len > 0.0)
+            && self.l.is_none_or(|l| l.is_finite() && l == 0.0)
+            && self.g.is_none_or(|g| g.is_finite() && g == 0.0)
+    }
 }
 
 fn resolve_ltra_interpolation_mode(params: &[(String, f64)]) -> LtraInterpolationMode {
@@ -285,6 +297,10 @@ pub(crate) fn validate_native_xyce_ltra_model_contract(
         return Ok(());
     }
 
+    if params.is_finite_rc() {
+        return Ok(());
+    }
+
     let (Some(r), Some(l), Some(c), Some(len), Some(z0), Some(td)) = (
         params.r, params.l, params.c, params.len, params.z0, params.td,
     ) else {
@@ -403,6 +419,11 @@ fn finalize_ltra_model_params(
         // The special-case predicate already enforces the exact finite RC/RG
         // value domain (including R>0 and LEN=0).  Keep the shared optional
         // validation for the remaining tolerance controls below.
+    } else if params.is_finite_rc() {
+        // Finite RC cards intentionally carry L=0 (or omit L) and G=0 (or
+        // omit G).  The predicate enforces the strict R>0/C>0/LEN>0 domain.
+        validate_optional_ltra_positive(model_name, "C", params.c)?;
+        validate_optional_ltra_positive(model_name, "LENGTH", params.len)?;
     } else {
         validate_optional_ltra_positive(model_name, "L", params.l)?;
         validate_optional_ltra_positive(model_name, "C", params.c)?;

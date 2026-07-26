@@ -4,6 +4,7 @@ use super::*;
 pub(crate) struct TlineTransientResponse {
     self_conductance: Value,
     mutual_conductance: Value,
+    mutual_current_coefficient: Value,
     i_eq_port1: Value,
     i_eq_port2: Value,
 }
@@ -18,6 +19,24 @@ impl TlineTransientResponse {
         Self {
             self_conductance: conductance,
             mutual_conductance: 0.0,
+            mutual_current_coefficient: 0.0,
+            i_eq_port1,
+            i_eq_port2,
+        }
+    }
+
+    #[inline]
+    pub(in crate::device::transmission_line) fn ltra_rc(
+        self_conductance: Value,
+        mutual_conductance: Value,
+        mutual_current_coefficient: Value,
+        i_eq_port1: Value,
+        i_eq_port2: Value,
+    ) -> Self {
+        Self {
+            self_conductance,
+            mutual_conductance,
+            mutual_current_coefficient,
             i_eq_port1,
             i_eq_port2,
         }
@@ -31,6 +50,11 @@ impl TlineTransientResponse {
     #[inline]
     pub(crate) fn mutual_conductance(self) -> Value {
         self.mutual_conductance
+    }
+
+    #[inline]
+    pub(crate) fn mutual_current_coefficient(self) -> Value {
+        self.mutual_current_coefficient
     }
 
     #[inline]

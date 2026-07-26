@@ -71,6 +71,8 @@ pub struct TransmissionLine {
     state_history: VecDeque<TlineStateSample>,
     /// Optional distributed RLC transient kernel configuration.
     distributed_rlc: Option<DistributedRlcKernel>,
+    /// Optional distributed RC transient kernel configuration.
+    distributed_rc: Option<DistributedRcKernel>,
     /// Cached transient companion response for the current candidate time.
     distributed_rlc_cache: Cell<Option<(Value, TlineTransientResponse)>>,
     /// Interpolation mode selected by ngspice LTRA model flags.
@@ -294,6 +296,7 @@ impl TransmissionLine {
             initial_state: None,
             state_history: VecDeque::new(),
             distributed_rlc: None,
+            distributed_rc: None,
             distributed_rlc_cache: Cell::new(None),
             ltra_interpolation_mode: DelayedInterpolationMode::Quadratic,
             lossless_interpolation_mode: DelayedInterpolationMode::Quadratic,
@@ -354,6 +357,7 @@ impl TransmissionLine {
         self.zero_length_pass_through = true;
         self.txl = None;
         self.distributed_rlc = None;
+        self.distributed_rc = None;
         self.distributed_rlc_cache.set(None);
     }
 
@@ -386,7 +390,9 @@ impl TransmissionLine {
     /// Return LTRA RLC branch ordinals, if this line uses branch-current history.
     #[inline]
     pub fn ltra_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
-        self.distributed_rlc.as_ref()?;
+        if self.distributed_rlc.is_none() && self.distributed_rc.is_none() {
+            return None;
+        }
         self.txl.is_none().then_some(())?;
         self.ltra_branch_ordinals
     }
@@ -401,7 +407,9 @@ impl TransmissionLine {
     /// Return linked LTRA RLC branch matrix indices.
     #[inline]
     pub fn ltra_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
-        self.distributed_rlc.as_ref()?;
+        if self.distributed_rlc.is_none() && self.distributed_rc.is_none() {
+            return None;
+        }
         self.txl.is_none().then_some(())?;
         self.ltra_branch_ordinals?;
         Some((self.branch1?, self.branch2?))
@@ -427,6 +435,7 @@ impl TransmissionLine {
         if let Some(runtime) = txl::TxlRuntime::setup(r, l, g, c, len) {
             self.txl = Some(runtime);
             self.distributed_rlc = None;
+            self.distributed_rc = None;
             self.distributed_rlc_cache.set(None);
             true
         } else {
@@ -530,7 +539,7 @@ impl TransmissionLine {
 
     #[inline]
     pub fn has_distributed_rlgc(&self) -> bool {
-        self.distributed_rlc.is_some()
+        self.distributed_rlc.is_some() || self.distributed_rc.is_some()
     }
 
     /// Use ngspice LTRA linear interpolation for delayed port states.
@@ -607,7 +616,7 @@ impl TransmissionLine {
     /// un-compacted three-point history.
     pub(crate) fn compact_ltra_history_if_straight(&mut self) -> bool {
         if !self.ltra_history_compaction
-            || self.distributed_rlc.is_none()
+            || !self.has_distributed_rlgc()
             || self.state_history.len() < 3
         {
             return false;
@@ -666,6 +675,52 @@ impl TransmissionLine {
         );
     }
 
+    /// Configure the finite-length RC special case of a scalar LTRA model.
+    ///
+    /// RC lines have no finite propagation delay.  They therefore use the
+    /// exact diffusion convolution rather than the delayed-wave/RLC kernel.
+    pub fn set_distributed_rc(&mut self, r: Value, c: Value, len: Value) {
+        if !r.is_finite()
+            || !c.is_finite()
+            || !len.is_finite()
+            || r <= 0.0
+            || c <= 0.0
+            || len <= 0.0
+        {
+            self.distributed_rc = None;
+            self.distributed_rlc_cache.set(None);
+            return;
+        }
+
+        let c_by_r = c / r;
+        let rc_len_squared = r * c * len * len;
+        let total_resistance = r * len;
+        let total_capacitance = c * len;
+        if ![c_by_r, rc_len_squared, total_resistance, total_capacitance]
+            .into_iter()
+            .all(Value::is_finite)
+        {
+            self.distributed_rc = None;
+            self.distributed_rlc_cache.set(None);
+            return;
+        }
+
+        self.distributed_rlc = None;
+        self.distributed_rc = Some(DistributedRcKernel {
+            c_by_r,
+            rc_len_squared,
+            total_resistance,
+            total_capacitance,
+        });
+        self.distributed_rlc_cache.set(None);
+    }
+
+    /// Return whether this line uses the finite-length RC LTRA kernel.
+    #[inline]
+    pub fn is_distributed_rc(&self) -> bool {
+        self.distributed_rc.is_some()
+    }
+
     /// Configure a distributed-RLC kernel with ngspice-style straight-line
     /// compaction tolerances for its safe-step estimate.
     pub fn set_distributed_rlgc_with_compaction(
@@ -689,6 +744,7 @@ impl TransmissionLine {
             || g.abs() > 1e-18
         {
             self.distributed_rlc = None;
+            self.distributed_rc = None;
             self.distributed_rlc_cache.set(None);
             return;
         }
@@ -708,6 +764,7 @@ impl TransmissionLine {
             int_h3dash: if alpha > 0.0 { -attenuation } else { 0.0 },
             max_safe_step,
         });
+        self.distributed_rc = None;
         self.attenuation = attenuation;
         self.distributed_rlc_cache.set(None);
     }
@@ -718,14 +775,22 @@ impl TransmissionLine {
     /// `Ctot = TD/Z0`, `Rtot = 2*alpha*Ltot` (ngspice LTRAtemp, G = 0).
     /// Used by the exact small-signal load (ltraacld.c form).
     pub(crate) fn ltra_ac_total_rlc(&self) -> Option<(Value, Value, Value)> {
-        let kernel = self.distributed_rlc.as_ref()?;
         if self.txl.is_some() {
             return None;
         }
+        if let Some(kernel) = self.distributed_rc {
+            return Some((0.0, kernel.total_capacitance, kernel.total_resistance));
+        }
+        let kernel = self.distributed_rlc.as_ref()?;
         let ltot = self.z0 * self.td;
         let ctot = self.td / self.z0;
         let rtot = 2.0 * kernel.alpha * ltot;
-        (ltot.is_finite() && ctot.is_finite() && rtot.is_finite() && ltot > 0.0 && ctot > 0.0)
+        (ltot.is_finite()
+            && ctot.is_finite()
+            && rtot.is_finite()
+            && ltot > 0.0
+            && ctot > 0.0
+            && rtot >= 0.0)
             .then_some((ltot, ctot, rtot))
     }
 
@@ -1074,6 +1139,96 @@ impl TransmissionLine {
             .unwrap_or_else(|| wave(&initial))
     }
 
+    fn distributed_rc_response(
+        &self,
+        kernel: &DistributedRcKernel,
+        time: Value,
+    ) -> TlineTransientResponse {
+        let Some(last) = self.state_history.back().copied() else {
+            return TlineTransientResponse::uncoupled(self.dc_series_conductance(), 0.0, 0.0);
+        };
+        if !(time.is_finite() && time > last.time) {
+            // The operating-point companion is the only well-defined RC
+            // response at the initial history point.  Transient candidates
+            // normally satisfy time > last.time; this guard keeps startup and
+            // repeated residual probes nonsingular without fabricating delay.
+            return TlineTransientResponse::uncoupled(self.dc_series_conductance(), 0.0, 0.0);
+        }
+
+        let initial = self.initial_state();
+        let time_list = self
+            .state_history
+            .iter()
+            .map(|sample| sample.time)
+            .collect::<Vec<_>>();
+        let coeffs = distributed_rc_coefficients(
+            kernel.c_by_r,
+            kernel.rc_len_squared,
+            time,
+            &time_list,
+            DISTRIBUTED_RLC_CHOP_RELTOL,
+        );
+
+        let mut input1 = 0.0;
+        let mut input2 = 0.0;
+
+        // h1dash convolution with v1 and v2.  Xyce's RC equations have no
+        // characteristic admittance multiplier on this term.
+        let mut dummy1 = 0.0;
+        let mut dummy2 = 0.0;
+        for (idx, sample) in self.state_history.iter().enumerate().skip(1) {
+            let coeff = coeffs.h1dash.get(idx).copied().unwrap_or(0.0);
+            if coeff != 0.0 {
+                dummy1 += coeff * (sample.v1 - initial.v1);
+                dummy2 += coeff * (sample.v2 - initial.v2);
+            }
+        }
+        dummy1 -= initial.v1 * coeffs.h1dash_first;
+        dummy2 -= initial.v2 * coeffs.h1dash_first;
+        input1 -= dummy1;
+        input2 -= dummy2;
+
+        // h2 convolution with i2 and i1.
+        dummy1 = 0.0;
+        dummy2 = 0.0;
+        for (idx, sample) in self.state_history.iter().enumerate().skip(1) {
+            let coeff = coeffs.h2.get(idx).copied().unwrap_or(0.0);
+            if coeff != 0.0 {
+                dummy1 += coeff * (sample.i2 - initial.i2);
+                dummy2 += coeff * (sample.i1 - initial.i1);
+            }
+        }
+        dummy1 += initial.i2;
+        dummy2 += initial.i1;
+        dummy1 -= initial.i2 * coeffs.h2_first;
+        dummy2 -= initial.i1 * coeffs.h2_first;
+        input1 += dummy1;
+        input2 += dummy2;
+
+        // h3dash convolution with v2 and v1.
+        dummy1 = 0.0;
+        dummy2 = 0.0;
+        for (idx, sample) in self.state_history.iter().enumerate().skip(1) {
+            let coeff = coeffs.h3dash.get(idx).copied().unwrap_or(0.0);
+            if coeff != 0.0 {
+                dummy1 += coeff * (sample.v2 - initial.v2);
+                dummy2 += coeff * (sample.v1 - initial.v1);
+            }
+        }
+        dummy1 -= initial.v2 * coeffs.h3dash_first;
+        dummy2 -= initial.v1 * coeffs.h3dash_first;
+        input1 += dummy1;
+        input2 += dummy2;
+
+        TlineTransientResponse::ltra_rc(
+            coeffs.h1dash_first,
+            -coeffs.h3dash_first,
+            -coeffs.h2_first,
+            input1,
+            input2,
+        )
+    }
+
     fn distributed_rlc_response(
         &self,
         kernel: &DistributedRlcKernel,
@@ -1182,6 +1337,16 @@ impl TransmissionLine {
 
     /// Return the transient companion conductance and equivalent currents.
     pub(crate) fn transient_port_response(&self, time: Value) -> TlineTransientResponse {
+        if let Some(kernel) = &self.distributed_rc {
+            if let Some((cached_time, response)) = self.distributed_rlc_cache.get()
+                && (cached_time - time).abs() < 1e-18
+            {
+                return response;
+            }
+            let response = self.distributed_rc_response(kernel, time);
+            self.distributed_rlc_cache.set(Some((time, response)));
+            return response;
+        }
         if let Some(kernel) = &self.distributed_rlc {
             if let Some((cached_time, response)) = self.distributed_rlc_cache.get()
                 && (cached_time - time).abs() < 1e-18
@@ -1217,7 +1382,7 @@ impl TransmissionLine {
         // Distributed LTRA uses the absolute terminal-state history below;
         // its convolution is not horizon-limited. Ordinary lossless lines use
         // these bounded traveling-wave delay buffers instead.
-        if self.distributed_rlc.is_none() {
+        if self.distributed_rlc.is_none() && self.distributed_rc.is_none() {
             self.history_forward.push(time, self.launched_forward);
             self.history_backward.push(time, self.launched_backward);
         }
@@ -1232,7 +1397,7 @@ impl TransmissionLine {
             self.initial_state = self.state_history.front().copied();
         }
         self.distributed_rlc_cache.set(None);
-        if self.distributed_rlc.is_none() {
+        if self.distributed_rlc.is_none() && self.distributed_rc.is_none() {
             let history_horizon = self.td * 1.5;
             while let Some(sample) = self.state_history.front() {
                 if time - sample.time > history_horizon {

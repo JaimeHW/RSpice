@@ -4289,6 +4289,7 @@ dependencies = [
  "faer",
  "getrandom 0.2.17",
  "libloading 0.9.0",
+ "libm",
  "log",
  "nom",
  "num-complex",

@@ -21,6 +21,29 @@ pub(in crate::device::transmission_line) struct DistributedRlcCoefficients {
     pub(in crate::device::transmission_line) h3dash: Vec<Value>,
 }
 
+/// Parameters for the finite-length RC special case of an LTRA model.
+///
+/// Unlike the RLC kernel, an RC line has no finite propagation delay.  Its
+/// terminal equations are the direct diffusion-limit convolution described by
+/// Xyce's `LTRA_MOD_RC` path (and ngspice's `LTRArcCoeffsSetup`).
+#[derive(Debug, Clone, Copy)]
+pub(in crate::device::transmission_line) struct DistributedRcKernel {
+    pub(in crate::device::transmission_line) c_by_r: Value,
+    pub(in crate::device::transmission_line) rc_len_squared: Value,
+    pub(in crate::device::transmission_line) total_resistance: Value,
+    pub(in crate::device::transmission_line) total_capacitance: Value,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::device::transmission_line) struct DistributedRcCoefficients {
+    pub(in crate::device::transmission_line) h1dash_first: Value,
+    pub(in crate::device::transmission_line) h2_first: Value,
+    pub(in crate::device::transmission_line) h3dash_first: Value,
+    pub(in crate::device::transmission_line) h1dash: Vec<Value>,
+    pub(in crate::device::transmission_line) h2: Vec<Value>,
+    pub(in crate::device::transmission_line) h3dash: Vec<Value>,
+}
+
 #[inline]
 pub(in crate::device::transmission_line) fn intlinfunc(
     lolimit: Value,
@@ -128,6 +151,156 @@ pub(in crate::device::transmission_line) fn bessel_i1_over_x(x: Value) -> Value 
             + y * (-0.03988024
                 + y * (-0.00362018 + y * (0.00163801 + y * (-0.01031555 + y * tail))));
         poly * (ax.exp() / (ax * ax.sqrt()))
+    }
+}
+
+#[inline]
+fn complementary_error_function(x: Value) -> Value {
+    // Xyce and ngspice both use the standard double-precision complementary
+    // error function for the RC impulse response.  libm supplies the same
+    // correctly-rounded implementation on native and WASM targets.
+    libm::erfc(x)
+}
+
+#[inline]
+fn distributed_rc_h1dash_twice_integral(time: Value, c_by_r: Value) -> Value {
+    (4.0 * c_by_r * time / std::f64::consts::PI).sqrt()
+}
+
+#[inline]
+fn distributed_rc_h2_twice_integral(time: Value, rc_len_squared: Value) -> Value {
+    if time == 0.0 {
+        return 0.0;
+    }
+    let temp = rc_len_squared / (4.0 * time);
+    let erfc = complementary_error_function(temp.sqrt());
+    (time + 0.5 * rc_len_squared) * erfc
+        - (time * rc_len_squared / std::f64::consts::PI).sqrt() * (-temp).exp()
+}
+
+#[inline]
+fn distributed_rc_h3dash_twice_integral(
+    time: Value,
+    c_by_r: Value,
+    rc_len_squared: Value,
+) -> Value {
+    if time == 0.0 {
+        return 0.0;
+    }
+    let temp = rc_len_squared / (4.0 * time);
+    let erfc = complementary_error_function(temp.sqrt());
+    let value =
+        2.0 * (time / std::f64::consts::PI).sqrt() * (-temp).exp() - rc_len_squared.sqrt() * erfc;
+    c_by_r.sqrt() * value
+}
+
+/// Build the piecewise-linear RC convolution coefficients for one candidate
+/// time.  This is a direct translation of Xyce 7.10 `Model::rcCoeffsSetup_`
+/// and ngspice `LTRArcCoeffsSetup`: the stored integrals are differenced over
+/// each accepted-history interval, then differentiated once more to obtain
+/// the coefficients used by the companion equations.
+pub(in crate::device::transmission_line) fn distributed_rc_coefficients(
+    c_by_r: Value,
+    rc_len_squared: Value,
+    current_time: Value,
+    time_list: &[Value],
+    reltol: Value,
+) -> DistributedRcCoefficients {
+    let time_index = time_list.len().saturating_sub(1);
+    let mut h1dash = vec![0.0; time_index + 1];
+    let mut h2 = vec![0.0; time_index + 1];
+    let mut h3dash = vec![0.0; time_index + 1];
+
+    if time_list.is_empty() {
+        return DistributedRcCoefficients {
+            h1dash_first: 0.0,
+            h2_first: 0.0,
+            h3dash_first: 0.0,
+            h1dash,
+            h2,
+            h3dash,
+        };
+    }
+
+    let delta_first = current_time - time_list[time_index];
+    if !(delta_first.is_finite() && delta_first > 0.0) {
+        return DistributedRcCoefficients {
+            h1dash_first: 0.0,
+            h2_first: 0.0,
+            h3dash_first: 0.0,
+            h1dash,
+            h2,
+            h3dash,
+        };
+    }
+
+    let mut h1_hivalue = distributed_rc_h1dash_twice_integral(delta_first, c_by_r);
+    let mut h1_dummy = h1_hivalue / delta_first;
+    let h1dash_first = h1_dummy;
+    let h1_relval = (h1_dummy * reltol).abs();
+
+    let mut h2_hivalue = distributed_rc_h2_twice_integral(delta_first, rc_len_squared);
+    let mut h2_dummy = h2_hivalue / delta_first;
+    let h2_first = h2_dummy;
+    let h2_relval = (h2_dummy * reltol).abs();
+
+    let mut h3_hivalue = distributed_rc_h3dash_twice_integral(delta_first, c_by_r, rc_len_squared);
+    let mut h3_dummy = h3_hivalue / delta_first;
+    let h3dash_first = h3_dummy;
+    let h3_relval = (h3_dummy * reltol).abs();
+
+    let mut do_h1 = true;
+    let mut do_h2 = true;
+    let mut do_h3 = true;
+
+    for i in (1..=time_index).rev() {
+        let delta = time_list[i] - time_list[i - 1];
+        if !(delta.is_finite() && delta > 0.0) {
+            h1dash[i] = 0.0;
+            h2[i] = 0.0;
+            h3dash[i] = 0.0;
+            continue;
+        }
+        let hi = current_time - time_list[i - 1];
+        if do_h1 {
+            let h1_previous_hivalue = h1_hivalue;
+            let h1_previous_dummy = h1_dummy;
+            h1_hivalue = distributed_rc_h1dash_twice_integral(hi, c_by_r);
+            h1_dummy = (h1_hivalue - h1_previous_hivalue) / delta;
+            h1dash[i] = h1_dummy - h1_previous_dummy;
+            if h1dash[i].abs() < h1_relval {
+                do_h1 = false;
+            }
+        }
+        if do_h2 {
+            let h2_previous_hivalue = h2_hivalue;
+            let h2_previous_dummy = h2_dummy;
+            h2_hivalue = distributed_rc_h2_twice_integral(hi, rc_len_squared);
+            h2_dummy = (h2_hivalue - h2_previous_hivalue) / delta;
+            h2[i] = h2_dummy - h2_previous_dummy;
+            if h2[i].abs() < h2_relval {
+                do_h2 = false;
+            }
+        }
+        if do_h3 {
+            let h3_previous_hivalue = h3_hivalue;
+            let h3_previous_dummy = h3_dummy;
+            h3_hivalue = distributed_rc_h3dash_twice_integral(hi, c_by_r, rc_len_squared);
+            h3_dummy = (h3_hivalue - h3_previous_hivalue) / delta;
+            h3dash[i] = h3_dummy - h3_previous_dummy;
+            if h3dash[i].abs() < h3_relval {
+                do_h3 = false;
+            }
+        }
+    }
+
+    DistributedRcCoefficients {
+        h1dash_first,
+        h2_first,
+        h3dash_first,
+        h1dash,
+        h2,
+        h3dash,
     }
 }
 
