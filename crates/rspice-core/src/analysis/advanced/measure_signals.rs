@@ -1,7 +1,7 @@
 //! Shared .MEAS evaluation harness over simulation results.
 //!
-//! Builds the signal-name table the [`MeasureEngine`](super::MeasureEngine)
-//! expects and evaluates a netlist's measurement statements against
+//! Builds the signal-name table the [`MeasureEngine`] expects and evaluates
+//! a netlist's measurement statements against
 //! transient or DC-sweep data. Both the CLI and the Python bindings consume
 //! this module so measurement semantics cannot drift between frontends.
 //!

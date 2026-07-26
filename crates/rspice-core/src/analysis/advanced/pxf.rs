@@ -532,8 +532,8 @@ impl PxfAnalyzer {
 
     /// Analyze transfer function using conversion matrix from PAC
     ///
-    /// The conversion matrix H[n,m] gives the transfer from input sideband m
-    /// to output sideband n.
+    /// The conversion matrix `H[n,m]` gives the transfer from input sideband
+    /// `m` to output sideband `n`.
     pub fn analyze_from_conversion_matrix(
         &self,
         frequencies: &[Value],

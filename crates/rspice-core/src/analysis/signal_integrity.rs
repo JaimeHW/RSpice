@@ -86,7 +86,7 @@ impl EyeConfig {
 pub struct EyeDiagram {
     /// Configuration used
     pub config: EyeConfig,
-    /// 2D histogram [time_bin][voltage_bin] -> hit count
+    /// 2D histogram indexed `[time_bin][voltage_bin]`, holding hit counts.
     pub histogram: Vec<Vec<usize>>,
     /// Total number of samples
     pub total_samples: usize,

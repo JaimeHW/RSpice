@@ -165,7 +165,7 @@ impl AbortSignal for AtomicAbort {
     }
 }
 
-/// Implement AbortSignal for Arc<AtomicAbort> for convenience
+/// Share one flag across threads without borrowing it.
 impl AbortSignal for Arc<AtomicAbort> {
     #[inline(always)]
     fn is_aborted(&self) -> bool {
@@ -173,7 +173,7 @@ impl AbortSignal for Arc<AtomicAbort> {
     }
 }
 
-/// Implement AbortSignal for Arc<AtomicBool> for direct use with std atomics
+/// Drive aborts from a plain `std` atomic a frontend already owns.
 impl AbortSignal for Arc<AtomicBool> {
     #[inline(always)]
     fn is_aborted(&self) -> bool {
@@ -181,7 +181,7 @@ impl AbortSignal for Arc<AtomicBool> {
     }
 }
 
-/// Implement AbortSignal for references to trait objects
+/// Forward through a borrow so `&dyn AbortSignal` satisfies the trait too.
 impl<T: AbortSignal + ?Sized> AbortSignal for &T {
     #[inline(always)]
     fn is_aborted(&self) -> bool {
@@ -189,7 +189,7 @@ impl<T: AbortSignal + ?Sized> AbortSignal for &T {
     }
 }
 
-/// Implement AbortSignal for Box<dyn AbortSignal>
+/// Accept an owned, type-erased signal.
 impl AbortSignal for Box<dyn AbortSignal> {
     #[inline(always)]
     fn is_aborted(&self) -> bool {
@@ -197,7 +197,7 @@ impl AbortSignal for Box<dyn AbortSignal> {
     }
 }
 
-/// Implement AbortSignal for Arc<dyn AbortSignal>
+/// Accept a shared, type-erased signal.
 impl AbortSignal for Arc<dyn AbortSignal> {
     #[inline(always)]
     fn is_aborted(&self) -> bool {

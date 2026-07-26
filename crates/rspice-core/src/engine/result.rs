@@ -74,14 +74,14 @@ pub struct TransientResult {
     /// alongside the rounded absolute times makes deterministic grid replay
     /// preserve the producing run's integration coefficients.
     pub step_sizes: Vec<Value>,
-    /// Voltage waveforms: [node_index][time_index]
+    /// Voltage waveforms, indexed `[node_index][time_index]`.
     pub voltages: Vec<Vec<Value>>,
-    /// Branch current waveforms: [branch_index][time_index]
+    /// Branch current waveforms, indexed `[branch_index][time_index]`.
     pub branch_currents: Vec<Vec<Value>>,
     /// Number of nodes
     pub num_nodes: usize,
     /// Node names from the netlist (maps index to original name like "N001", "out", etc.)
-    /// Index 0 corresponds to voltages[0], which is node 1 (not ground)
+    /// Index 0 corresponds to `voltages[0]`, which is node 1 (not ground)
     pub node_names: Vec<String>,
     /// Branch names aligned with `branch_currents`
     pub branch_names: Vec<String>,

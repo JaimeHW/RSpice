@@ -54,7 +54,7 @@ pub struct SimulationResult {
     /// Node voltages indexed by node ID (0 = ground = 0V)
     pub node_voltages: Vec<Value>,
     /// Node names indexed by node ID (index 0 = "0" for ground)
-    /// This allows mapping node_voltages[i] to actual net names from netlist
+    /// This allows mapping `node_voltages[i]` to actual net names from netlist
     pub node_names: Vec<String>,
     /// Branch currents for voltage sources/inductors
     pub branch_currents: Vec<Value>,
@@ -74,7 +74,7 @@ pub struct SimulationResult {
     dc_observable_index: HashMap<String, Value>,
     /// Time points (for transient analysis)
     pub time_points: Vec<Value>,
-    /// Voltage waveforms: waveforms[node_id][time_index]
+    /// Voltage waveforms, indexed `[node_id][time_index]`.
     pub voltage_waveforms: Vec<Vec<Value>>,
 }
 

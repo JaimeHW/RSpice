@@ -758,7 +758,7 @@ impl Engine {
     /// Trapezoidal integration is used normally for efficiency, but switches
     /// to Gear2/BDF2 when oscillations are detected for stability.
     ///
-    /// For cancellable simulations, use [`run_tran_with_abort`] instead.
+    /// For cancellable simulations, use [`Self::run_tran_with_abort`] instead.
     pub fn run_tran(
         &self,
         netlist: &Netlist,

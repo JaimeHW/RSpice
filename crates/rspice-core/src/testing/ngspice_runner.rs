@@ -66,7 +66,7 @@ pub enum AnalysisSpec {
         outer_stop: Value,
         outer_step: Value,
     },
-    /// Transient analysis (.tran tstep tstop [tstart] [tmax])
+    /// Transient analysis (`.tran tstep tstop [tstart] [tmax]`)
     Transient {
         tstep: Value,
         tstop: Value,
@@ -90,7 +90,7 @@ pub enum AnalysisSpec {
         compute_poles: bool,
         compute_zeros: bool,
     },
-    /// Noise analysis (.noise v(out[,ref]) input dec|oct|lin points fstart fstop)
+    /// Noise analysis (`.noise v(out[,ref]) input dec|oct|lin points fstart fstop`)
     Noise {
         output_pos: String,
         output_neg: Option<String>,
@@ -100,13 +100,13 @@ pub enum AnalysisSpec {
         fstart: Value,
         fstop: Value,
     },
-    /// Sensitivity analysis (.sens v(out[,ref]) [ac dec|oct|lin points fstart fstop])
+    /// Sensitivity analysis (`.sens v(out[,ref]) [ac dec|oct|lin points fstart fstop]`)
     Sensitivity {
         output_pos: String,
         output_neg: Option<String>,
         sweep: Option<(AcSweepType, usize, Value, Value)>,
     },
-    /// Transfer-function analysis (.tf v(out[,ref])|i(dev) source)
+    /// Transfer-function analysis (`.tf v(out[,ref])|i(dev) source`)
     TransferFunction {
         output: String,
         input_source: String,

@@ -15,10 +15,10 @@ use std::f64::consts::PI;
 /// Phase noise solver state
 #[derive(Debug)]
 pub struct PnoiseState {
-    /// Carrier frequency [Hz]
+    /// Carrier frequency `Hz`
     pub carrier_freq: Value,
 
-    /// Period [s]
+    /// Period `s`
     pub period: Value,
 
     /// Number of nodes in circuit
@@ -27,7 +27,7 @@ pub struct PnoiseState {
     /// Periodic steady-state waveform samples (per node)
     pub pss_waveforms: Vec<Vec<Value>>,
 
-    /// Time points for waveform samples [s]
+    /// Time points for waveform samples `s`
     pub time_points: Vec<Value>,
 
     /// Floquet analyzer instance
@@ -91,7 +91,7 @@ pub struct DeviceNoise {
     pub nodes: Vec<usize>,
 
     /// Noise power spectral density function
-    /// Returns PSD [A²/Hz] or [V²/Hz] at given frequency
+    /// Returns PSD `A²/Hz` or `V²/Hz` at given frequency
     pub psd: NoisePsd,
 }
 

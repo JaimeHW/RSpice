@@ -17,7 +17,7 @@
 //!
 //! For a mixer with LO frequency f₀:
 //! - Input at f₀ + Δf (RF) appears at output as DC + Δf (IF)
-//! - The conversion matrix element H[-1,0](Δf) is the conversion gain
+//! - The conversion matrix element `H[-1,0](Δf)` is the conversion gain
 //!
 //! # Algorithm
 //!

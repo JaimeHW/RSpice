@@ -72,13 +72,13 @@ impl std::error::Error for HbError {}
 /// Harmonic Balance solver state
 #[derive(Debug)]
 pub struct HbSolverState {
-    /// Spectral voltage solution [node][harmonic]
+    /// Spectral voltage solution, indexed `[node][harmonic]`.
     pub x: Vec<Vec<Complex64>>,
 
-    /// Residual vector [node][harmonic]
+    /// Residual vector, indexed `[node][harmonic]`.
     pub residual: Vec<Vec<Complex64>>,
 
-    /// Per-row current scale [node][harmonic]: the sum of the magnitudes of
+    /// Per-row current scale, indexed `[node][harmonic]`: the sum of the magnitudes of
     /// every individual current contribution into the row, accumulated
     /// alongside the residual. Convergence is judged per row against
     /// abstol + reltol * scale (the SPICE KCL criterion), which a global
@@ -284,7 +284,7 @@ pub struct HbSolver {
     /// Node names
     node_names: Vec<String>,
 
-    /// Current source spectra [node][harmonic]
+    /// Current source spectra, indexed `[node][harmonic]`.
     source_spectra: Vec<Vec<Complex64>>,
 
     /// Registered nonlinear devices for Newton iteration

@@ -55,7 +55,7 @@ pub enum TokenKind {
     Star,
     /// Forward slash (division)
     Slash,
-    /// At sign (for device parameter references @device[param])
+    /// At sign (for device parameter references `@device[param]`)
     AtSign,
     /// Tilde (for inverted XSPICE digital event ports)
     Tilde,

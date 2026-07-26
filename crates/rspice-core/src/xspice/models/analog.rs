@@ -231,7 +231,7 @@ impl CodeModel for Gain {
 // Summer
 //=============================================================================
 
-/// Analog summer: out = out_gain * sum(in_gain[i] * (in[i] + in_offset[i])) + out_offset
+/// Analog summer: `out = out_gain * sum(in_gain[i] * (in[i] + in_offset[i])) + out_offset`
 ///
 /// # Parameters
 /// - `in_offset` - Offset for each input (default: 0.0)
@@ -440,7 +440,7 @@ fn validate_analog_vector_params(ctx: &CmContext, model_name: &str) -> CmResult<
 // Multiplier
 //=============================================================================
 
-/// Analog multiplier: out = out_gain * product(in_gain[i] * (in[i] + in_offset[i])) + out_offset
+/// Analog multiplier: `out = out_gain * product(in_gain[i] * (in[i] + in_offset[i])) + out_offset`
 ///
 /// # Parameters
 /// - `in_offset` - Offset for each input (default: 0.0)

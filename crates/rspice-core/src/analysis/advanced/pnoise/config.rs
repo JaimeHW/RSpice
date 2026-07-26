@@ -27,7 +27,7 @@ pub struct PnoiseConfig {
     /// If None, uses fundamental from PSS/HB
     pub reference_freq: Option<Value>,
 
-    /// Integration limits for RMS jitter calculation [Hz]
+    /// Integration limits for RMS jitter calculation `Hz`
     pub jitter_integration: Option<(Value, Value)>,
 
     /// Number of points per decade for log sweep

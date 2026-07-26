@@ -356,9 +356,9 @@ pub struct MultiWindingTransformer {
     /// Branch indices
     pub branches: Vec<Option<NodeId>>,
     /// Coupling matrix (symmetric, diagonal is 1.0)
-    /// k[i][j] = coupling between winding i and j
+    /// `k[i][j]` = coupling between winding `i` and `j`
     pub coupling_matrix: Vec<Vec<Value>>,
-    /// Inductance matrix (L[i][j] = k[i][j] * sqrt(Li * Lj))
+    /// Inductance matrix (`L[i][j] = k[i][j] * sqrt(Li * Lj)`)
     inductance_matrix: Vec<Vec<Value>>,
     /// Previous currents
     currents_prev: Vec<Value>,

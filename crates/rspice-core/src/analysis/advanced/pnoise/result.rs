@@ -41,16 +41,16 @@ pub struct PnoiseResult {
     /// Phase noise spectral density at each offset frequency
     pub spectral_points: Vec<PhaseNoisePoint>,
 
-    /// Carrier/reference frequency [Hz]
+    /// Carrier/reference frequency `Hz`
     pub carrier_freq: Value,
 
     /// Individual noise contributors (device-by-device breakdown)
     pub contributors: Vec<NoiseContributor>,
 
-    /// RMS phase jitter within integration bandwidth [seconds]
+    /// RMS phase jitter within integration bandwidth `seconds`
     pub rms_jitter: Option<Value>,
 
-    /// RMS phase error within integration bandwidth [radians]
+    /// RMS phase error within integration bandwidth `radians`
     pub rms_phase_error: Option<Value>,
 
     /// Integration bandwidth used for jitter calculation
@@ -157,7 +157,7 @@ impl PnoiseResult {
         summary
     }
 
-    /// Get total integrated noise power [dBc] over frequency range
+    /// Get total integrated noise power `dBc` over frequency range
     pub fn integrated_noise_power(&self, f_start: Value, f_stop: Value) -> Option<Value> {
         if self.spectral_points.len() < 2 {
             return None;
@@ -217,19 +217,19 @@ impl PnoiseResult {
 /// Single phase noise measurement point
 #[derive(Debug, Clone)]
 pub struct PhaseNoisePoint {
-    /// Offset frequency from carrier [Hz]
+    /// Offset frequency from carrier `Hz`
     pub offset_freq: Value,
 
-    /// Phase noise spectral density [dBc/Hz]
+    /// Phase noise spectral density `dBc/Hz`
     pub pn_dbc_hz: Value,
 
-    /// Amplitude noise contribution [dBc/Hz] (if separated)
+    /// Amplitude noise contribution `dBc/Hz` (if separated)
     pub am_noise: Option<Value>,
 
-    /// Phase noise contribution from upper sideband [dBc/Hz]
+    /// Phase noise contribution from upper sideband `dBc/Hz`
     pub upper_sideband: Option<Value>,
 
-    /// Phase noise contribution from lower sideband [dBc/Hz]
+    /// Phase noise contribution from lower sideband `dBc/Hz`
     pub lower_sideband: Option<Value>,
 }
 
@@ -277,7 +277,7 @@ pub struct NoiseContributor {
     /// Device type (e.g., "resistor", "mosfet", "bjt")
     pub device_type: String,
 
-    /// Noise contribution at each offset frequency [dBc/Hz]
+    /// Noise contribution at each offset frequency `dBc/Hz`
     pub contributions: Vec<(Value, Value)>, // (offset_freq, contribution)
 
     /// Percentage of total noise at reference offset

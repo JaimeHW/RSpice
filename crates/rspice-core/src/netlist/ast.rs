@@ -470,7 +470,7 @@ pub enum ElementKind {
     //-------------------------------------------------------------------------
     // XSPICE Code Models
     //-------------------------------------------------------------------------
-    /// XSPICE code model instance: A1 [in] out model_name [PARAM=val...]
+    /// XSPICE code model instance: `A1 [in] out model_name [PARAM=val...]`
     ///
     /// XSPICE provides mixed-signal simulation capability through code models.
     /// Port connections use bracket syntax to distinguish port types:
@@ -1420,7 +1420,7 @@ pub enum SourceSpec {
     /// AC magnitude and phase
     Ac { magnitude: Value, phase: Value },
 
-    /// Combined DC and AC specification (common SPICE syntax: DC x AC y [phase])
+    /// Combined DC and AC specification (common SPICE syntax: `DC x AC y [phase]`)
     DcAc {
         dc_value: Value,
         ac_magnitude: Value,
@@ -1852,7 +1852,7 @@ pub enum AnalysisCommand {
     /// basis in the engine.
     Hb { frequencies: Vec<Value> },
 
-    /// S-parameter analysis: .SP DEC|LIN|OCT np fstart fstop [donoise]
+    /// S-parameter analysis: `.SP DEC|LIN|OCT np fstart fstop [donoise]`
     Sp {
         variation: FreqVariation,
         points: usize,
@@ -1878,7 +1878,7 @@ pub enum AnalysisCommand {
         probe: String,
     },
 
-    /// Distortion analysis: .DISTO DEC|LIN|OCT np fstart fstop [f2overf1]
+    /// Distortion analysis: `.DISTO DEC|LIN|OCT np fstart fstop [f2overf1]`
     Disto {
         variation: FreqVariation,
         points: usize,
@@ -1887,7 +1887,7 @@ pub enum AnalysisCommand {
         f2_over_f1: Option<Value>,
     },
 
-    /// Transient analysis: .TRAN tstep tstop [tstart [tmaxstep]] [UIC]
+    /// Transient analysis: `.TRAN tstep tstop [tstart [tmaxstep]] [UIC]`
     Tran {
         step: Value,
         stop: Value,
@@ -1942,7 +1942,7 @@ pub enum AnalysisCommand {
         ac_sweep: Option<SensitivityAcSweep>,
     },
 
-    /// DC small-signal transfer function: .TF V(out[,ref]) insrc
+    /// DC small-signal transfer function: `.TF V(out[,ref]) insrc`
     /// or .TF I(element) insrc — gain, input resistance, output resistance.
     Tf {
         /// Output node for `V(...)` probes, element name for `I(...)`.
@@ -1955,7 +1955,7 @@ pub enum AnalysisCommand {
         input_source: String,
     },
 
-    /// Fourier analysis: .FOUR freq [num_harmonics] output1 [output2...]
+    /// Fourier analysis: `.FOUR freq [num_harmonics] output1 [output2...]`
     Four {
         fundamental: Value,
         outputs: Vec<String>,
@@ -2073,7 +2073,7 @@ pub enum StepSweep {
     },
     /// List of specific values: LIST v1 v2 v3...
     List(Vec<Value>),
-    /// Row-wise parameter table reference: DATA=<table-name>
+    /// Row-wise parameter table reference: `DATA=<table-name>`
     Data { table_name: String },
 }
 
@@ -3152,7 +3152,7 @@ pub struct IncludeDirective {
     pub path: String,
 }
 
-/// Library directive: .LIB "filename" [section]
+/// Library directive: `.LIB "filename" [section]`
 #[derive(Debug, Clone)]
 pub struct LibDirective {
     /// File path

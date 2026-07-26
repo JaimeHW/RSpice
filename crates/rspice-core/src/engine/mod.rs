@@ -4,19 +4,33 @@
 //!
 //! # Architecture
 //!
-//! The engine is organized into focused submodules:
+//! The engine is organized into focused submodules. They are private: the
+//! public surface is [`Engine`] plus the configuration, result, and error
+//! types re-exported below.
 //!
-//! - [`core`] - public `Engine` type and shared orchestration helpers
-//! - [`config`] - simulation and convergence configuration
-//! - [`result`] - public result structures returned by engine runs
-//! - [`builder`] - circuit construction from netlist
-//! - [`matrix`] - matrix topology building
-//! - [`stamping`] - DC stamping functions
-//! - [`convergence`] - Newton-Raphson and convergence helpers
-//! - [`dc`] - DC operating point and sweep analysis
-//! - [`transient`] - Time-domain transient simulation
-//! - [`ac`] - Frequency-domain AC analysis
-//! - [`advanced`] - Noise, Monte Carlo, pole-zero, sensitivity analysis
+//! Orchestration and setup:
+//!
+//! - `core` - the [`Engine`] type itself and shared orchestration helpers
+//! - `builder` - circuit construction from a parsed netlist
+//! - `config`, `config_resolver` - simulation/convergence configuration and
+//!   the precedence rules that resolve it
+//! - `matrix`, `stamping` - MNA topology reservation and DC stamping
+//! - `source_values` - independent-source value evaluation over time/frequency
+//! - `convergence` - Newton driver plus the GMIN/source/pseudo-transient aids
+//! - `result`, `error`, `health` - result structures, typed errors, and the
+//!   [`EngineHealthReport`] diagnostics summary
+//!
+//! Analysis drivers, one per family:
+//!
+//! - `dc` - operating point and DC sweep
+//! - `ac` - frequency-domain small-signal sweep
+//! - `transient` - time-domain integration, including checkpoint/resume
+//! - `distortion` - third-order Volterra distortion (`.DISTO`)
+//! - `hb` - harmonic balance
+//! - `pss`, `pss_noise` - periodic steady state and periodic noise
+//! - `stb` - loop-gain stability
+//! - `transfer` - small-signal transfer function (`.TF`)
+//! - `advanced` - noise, Monte Carlo, pole-zero, sensitivity, and `.STEP`
 
 mod ac;
 mod advanced;

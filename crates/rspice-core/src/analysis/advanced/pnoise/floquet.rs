@@ -52,10 +52,10 @@ use std::f64::consts::PI;
 /// circuit noise sources using Floquet theory and the Hajimiri-Lee ISF model.
 #[derive(Debug)]
 pub struct FloquetAnalyzer {
-    /// Period of the steady-state solution [s]
+    /// Period of the steady-state solution `s`
     period: Value,
 
-    /// Carrier frequency = 1/period [Hz]
+    /// Carrier frequency = 1/period `Hz`
     carrier_freq: Value,
 
     /// Number of harmonics in harmonic balance representation
@@ -120,12 +120,12 @@ impl FloquetAnalyzer {
         }
     }
 
-    /// Get the period [s]
+    /// Get the period `s`
     pub fn period(&self) -> Value {
         self.period
     }
 
-    /// Get carrier frequency [Hz]
+    /// Get carrier frequency `Hz`
     pub fn carrier_freq(&self) -> Value {
         self.carrier_freq
     }
@@ -670,7 +670,7 @@ impl FloquetAnalyzer {
     /// S_φ(Δf) = Γ_rms² * S_in / (2 * q_max² * (2π*Δf)²)
     ///
     /// Arguments:
-    /// - offset_freq: Offset from carrier [Hz]
+    /// - offset_freq: Offset from carrier `Hz`
     /// - noise_psd: Device noise power spectral density [A²/Hz or V²/Hz]
     /// - node_idx: Circuit node where noise is injected
     ///
@@ -799,11 +799,11 @@ pub enum FloquetModeType {
 /// Transfer function result
 #[derive(Debug, Clone)]
 pub struct TransferFunction {
-    /// Offset frequency [Hz]
+    /// Offset frequency `Hz`
     pub offset_freq: Value,
     /// Magnitude |H(f)|
     pub magnitude: Value,
-    /// Phase angle [rad]
+    /// Phase angle `rad`
     pub phase: Value,
 }
 

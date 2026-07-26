@@ -329,7 +329,7 @@ impl WaveformRecorder {
         &self.values[channel]
     }
 
-    /// Get all stored values (values[channel][point])
+    /// Get all stored values, indexed `[channel][point]`.
     pub fn all_values(&self) -> &[Vec<Value>] {
         &self.values
     }
@@ -373,7 +373,7 @@ pub struct TransientResultCompressed {
     /// Time points (non-uniform due to compression)
     pub time: Vec<Value>,
 
-    /// Voltage waveforms: voltages[node][point]
+    /// Voltage waveforms, indexed `[node][point]`.
     pub voltages: Vec<Vec<Value>>,
 
     /// Number of nodes
