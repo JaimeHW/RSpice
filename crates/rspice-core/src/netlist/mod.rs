@@ -7079,6 +7079,54 @@ mod tests {
         }
     }
 
+    /// Grounded (numeric) extra terminals are everyday SPICE: a BJT with
+    /// its substrate and thermal nodes tied to ground, and an SOI MOSFET
+    /// with a grounded body contact in the 5th slot.
+    #[test]
+    fn bjt_and_mosfet_accept_grounded_extra_terminal_nodes() {
+        let netlist = Netlist::parse(
+            "grounded extra terminals\n\
+             Q1 c b e 0 0 qmod\n\
+             M1 d g s e 0 mmod\n\
+             .model qmod NPN (IS=1e-16)\n\
+             .model mmod NMOS (LEVEL=57)\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("numeric substrate/thermal and SOI tail nodes must parse");
+
+        let bjt = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("Q1"))
+            .expect("bjt element");
+        assert_eq!(bjt.nodes, ["C", "B", "E", "0", "0"]);
+
+        let mosfet = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("mosfet element");
+        assert_eq!(mosfet.nodes, ["D", "G", "S", "E", "0"]);
+    }
+
+    /// A trailing numeric token can never silently become the MOS model.
+    #[test]
+    fn mosfet_trailing_numeric_token_is_still_rejected() {
+        let err = Netlist::parse(
+            "bad mosfet tail\n\
+             M1 d g s b mmod 2\n\
+             .model mmod NMOS (LEVEL=1)\n\
+             .op\n\
+             .end\n",
+        )
+        .expect_err("positional numeric MOS values must be rejected");
+        assert!(
+            err.to_string().contains("Unsupported MOSFET instance token"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn coupling_coefficient_outside_physical_range_is_rejected() {
         for coefficient in ["-0.5", "1.2"] {

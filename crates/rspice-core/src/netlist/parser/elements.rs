@@ -3914,10 +3914,16 @@ pub(super) fn parse_bjt(
 
     // BJT can have optional substrate node: Q1 C B E [S] model
     // We need to peek ahead to determine if next is substrate or model
+    let mut numeric_thermal = None;
     let (substrate, mut model) = match &stream.peek().kind {
         TokenKind::Number(_) => {
             // It's a numeric node (substrate like "0")
             let substrate = expect_node(stream, line_num)?;
+            // A second numeric node is a grounded thermal terminal:
+            // Q1 C B E 0 0 model
+            if matches!(stream.peek().kind, TokenKind::Number(_)) {
+                numeric_thermal = Some(expect_node(stream, line_num)?);
+            }
             let model = expect_ident(stream, line_num)?;
             (Some(substrate), model)
         }
@@ -3992,8 +3998,8 @@ pub(super) fn parse_bjt(
         }
     };
 
-    let mut thermal = None;
-    if substrate.is_some() {
+    let mut thermal = numeric_thermal;
+    if substrate.is_some() && thermal.is_none() {
         if let TokenKind::Ident(next_model) = &stream.peek().kind {
             let next_upper = next_model.to_ascii_uppercase();
             if !matches!(stream.peek_n(1).kind, TokenKind::Equals) && next_upper != "OFF" {
@@ -4167,6 +4173,13 @@ pub(super) fn parse_mosfet(
             tail_tokens.push(expect_node(stream, line_num)?);
             continue;
         }
+        // Numeric tail tokens are grounded/numeric extra node references
+        // (e.g. the SOI body contact in `M1 d g s e 0 model`) — MOS
+        // instance values are always NAME=value, never positional.
+        if matches!(&stream.peek().kind, TokenKind::Number(_)) {
+            tail_tokens.push(expect_node(stream, line_num)?);
+            continue;
+        }
         break;
     }
 
@@ -4178,6 +4191,20 @@ pub(super) fn parse_mosfet(
     {
         tail_tokens.pop();
         tail_off_flag = true;
+    }
+
+    // The model name is the last bare token and must be an identifier; a
+    // trailing numeric token would silently become the "model" otherwise.
+    if let Some(last) = tail_tokens.last()
+        && last.parse::<f64>().is_ok()
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Unsupported MOSFET instance token '{}'; expected NAME=value or OFF",
+                last
+            ),
+        });
     }
 
     let (bulk, model, compact_syntax) = if let Some(model) = tail_tokens.pop() {
