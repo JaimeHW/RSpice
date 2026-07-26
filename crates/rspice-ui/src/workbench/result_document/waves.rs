@@ -336,6 +336,64 @@ impl StripModel {
         self.analysis_index
     }
 
+    /// The unit one trace is measured in.
+    fn trace_unit(&self, trace: &StripTrace) -> &'static str {
+        signal_unit(&trace.base_name, trace.kind, self.y_unit)
+    }
+
+    /// The strip's panes: visible traces grouped by unit, in the order the
+    /// units first appear so a strip's layout is stable across frames.
+    ///
+    /// Phase does not take a pane of its own while a magnitude pane exists
+    /// to read it against — splitting a Bode pair across two stacked panes
+    /// would break the one reading they are drawn together for.
+    pub(super) fn unit_panes(&self) -> Vec<UnitPane> {
+        let mut panes: Vec<UnitPane> = Vec::new();
+        let mut phase: Vec<usize> = Vec::new();
+        for (index, trace) in self.traces.iter().enumerate() {
+            if !trace.visible {
+                continue;
+            }
+            if trace.kind.is_phase() {
+                phase.push(index);
+                continue;
+            }
+            let unit = self.trace_unit(trace);
+            match panes.iter_mut().find(|pane| pane.unit == unit) {
+                Some(pane) => pane.traces.push(index),
+                None => panes.push(UnitPane {
+                    unit,
+                    traces: vec![index],
+                    right: Vec::new(),
+                }),
+            }
+        }
+        if phase.is_empty() {
+            return panes;
+        }
+        // Attach phase to the magnitude pane it belongs to; with no
+        // magnitude on screen it becomes a pane in its own right.
+        let host = panes
+            .iter()
+            .position(|pane| pane.unit == "dB")
+            .or_else(|| (!panes.is_empty()).then_some(0));
+        match host.and_then(|index| panes.get_mut(index)) {
+            Some(pane) => pane.right = phase,
+            None => {
+                let unit = self
+                    .traces
+                    .get(phase[0])
+                    .map_or("°", |trace| self.trace_unit(trace));
+                panes.push(UnitPane {
+                    unit,
+                    traces: phase,
+                    right: Vec::new(),
+                });
+            }
+        }
+        panes
+    }
+
     /// Total trace count, including overlay runs.
     pub(super) fn trace_count(&self) -> usize {
         self.traces.len()
@@ -1030,16 +1088,79 @@ fn anchor_key(model: &StripModel, trace: &StripTrace) -> u64 {
     base ^ trace.presentation_key.rotate_left(11)
 }
 
+/// Case-insensitive prefix test for a signal-name accessor (`V(`, `i(`).
+fn starts_with_accessor(name: &str, accessor: &str) -> bool {
+    name.len() >= accessor.len() && name[..accessor.len()].eq_ignore_ascii_case(accessor)
+}
+
+/// Peel the derived-projection wrappers off a display name so the
+/// underlying accessor is visible: `re(V(out))` is still volts.
+fn unwrap_projection(name: &str) -> &str {
+    let name = name.trim_start();
+    for wrapper in ["re(", "im(", "mag(", "abs("] {
+        if starts_with_accessor(name, wrapper) {
+            return name[wrapper.len()..].trim_start();
+        }
+    }
+    name.strip_prefix('|').unwrap_or(name)
+}
+
+/// The engineering unit a trace is measured in.
+///
+/// This is the axis model: a signal owns its unit, and the analysis default
+/// applies only where the name carries no accessor to read it from. Without
+/// this, a transient strip carrying `V(out)` and `I(R1)` would label both
+/// against the analysis' nominal volts and quietly misreport the current.
+fn signal_unit(name: &str, kind: TraceKind, analysis_unit: &'static str) -> &'static str {
+    match kind {
+        TraceKind::MagnitudeDb => "dB",
+        TraceKind::PhaseDeg => "°",
+        TraceKind::PhaseRad => "rad",
+        TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+            let name = unwrap_projection(name);
+            if starts_with_accessor(name, "i(") {
+                "A"
+            } else if starts_with_accessor(name, "v(") {
+                "V"
+            } else if starts_with_accessor(name, "p(") {
+                "W"
+            } else {
+                analysis_unit
+            }
+        }
+    }
+}
+
+/// One Y axis of a strip: the traces measured in a single unit.
+///
+/// Panes of a strip always share the strip's X domain — they are one
+/// measurement read against several scales, not several plots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct UnitPane {
+    /// The unit every trace on this pane's left axis is measured in.
+    pub unit: &'static str,
+    /// Trace indices on the left axis.
+    pub traces: Vec<usize>,
+    /// Trace indices on this pane's right axis — phase read against the
+    /// magnitude it belongs to, which is what keeps a Bode pair together.
+    pub right: Vec<usize>,
+}
+
 /// Y range of the visible traces on one axis side, padded 8 %. Per-trace
 /// extremes are cached on the data version — never rescanned per frame.
-fn y_range(derived: &mut DerivedSeries, model: &StripModel, phase: bool) -> Option<(f64, f64)> {
+/// Y range of one pane's traces, padded 8 %. Per-trace extremes are cached
+/// on the data version — never rescanned per frame.
+///
+/// The fit is per pane because each pane carries its own unit: fitting
+/// volts and amps to one range would flatten whichever is smaller.
+fn pane_y_range(
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    indices: &[usize],
+) -> Option<(f64, f64)> {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
-    for trace in &model.traces {
-        let is_phase = trace.kind.is_phase();
-        if is_phase != phase || !trace.visible {
-            continue;
-        }
+    for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
         let extremes =
             derived.range_or(trace_key(model, trace), || super::finite_extremes(&trace.y));
         if let Some((lo, hi)) = extremes {
@@ -1232,8 +1353,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         let zoomed = state
                             .ui
                             .results
-                            .plot_view(super::ResultViewer::Waves, model.analysis_index)
-                            .is_zoomed();
+                            .strip_is_zoomed(super::ResultViewer::Waves, model.analysis_index);
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
                             .maximized(maximized)
                             .closable(!maximized && n > 1)
@@ -2019,6 +2139,11 @@ fn marker_label(marker: &ResultMarker) -> String {
     }
 }
 
+/// One strip, drawn as one pane per unit.
+///
+/// Signals route to the pane that owns their unit; the panes stack and
+/// share the strip's X domain, so a strip stays one measurement read
+/// against as many scales as it genuinely needs.
 fn show_strip_plot(
     ui: &mut Ui,
     state: &mut AppState,
@@ -2026,27 +2151,79 @@ fn show_strip_plot(
     linked_cursor_domain: Option<&CursorDomain>,
 ) {
     let t = Tokens::get(ui.ctx());
+    let Some(x_domain) = x_range(model) else {
+        well_hint(ui, "No data");
+        return;
+    };
+    let panes = model.unit_panes();
+    if panes.is_empty() {
+        well_hint(ui, "No visible traces — enable one in the legend");
+        return;
+    }
+
+    // Expression traces participate in the first pane's automatic fit.
+    let exprs = resolve_strip_exprs(state, model, &t);
+    let available = ui.available_rect_before_wrap();
+    let count = panes.len();
+    let seams = count.saturating_sub(1) as f32;
+    let pane_height = ((available.height() - seams) / count as f32).max(56.0);
+
+    for (ordinal, pane) in panes.iter().enumerate() {
+        if ordinal > 0 {
+            let (seam, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+            ui.painter()
+                .rect_filled(seam, 0.0, t.color.canvas_grid);
+        }
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), pane_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_height(pane_height);
+                show_unit_pane(
+                    ui,
+                    state,
+                    model,
+                    pane,
+                    ordinal,
+                    x_domain,
+                    // Only the first pane carries the strip's expressions:
+                    // an expression has no declared unit, so it cannot be
+                    // routed to a unit-owning pane on the evidence available.
+                    if ordinal == 0 { &exprs } else { &[] },
+                    linked_cursor_domain,
+                );
+            },
+        );
+    }
+}
+
+fn show_unit_pane(
+    ui: &mut Ui,
+    state: &mut AppState,
+    model: &StripModel,
+    pane: &UnitPane,
+    ordinal: usize,
+    x_domain: (f64, f64),
+    exprs: &[ResolvedExpr],
+    linked_cursor_domain: Option<&CursorDomain>,
+) {
+    let t = Tokens::get(ui.ctx());
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let Some((x0, x1)) = x_range(model) else {
-        well_hint(ui, "No data");
-        return;
-    };
+    let (x0, x1) = x_domain;
 
-    // Expression traces participate in the automatic fit alongside the
-    // run's visible traces.
-    let exprs = resolve_strip_exprs(state, model, &t);
-    let model_range = y_range(&mut state.ui.results.derived, model, false);
+    let pane_range = pane_y_range(&mut state.ui.results.derived, model, &pane.traces);
     let auto_y = {
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
-        if let Some((a, b)) = model_range {
+        if let Some((a, b)) = pane_range {
             lo = a;
             hi = b;
         }
-        for expr in &exprs {
+        for expr in exprs {
             if let Some((a, b)) = expr.y_extremes {
                 lo = lo.min(a);
                 hi = hi.max(b);
@@ -2065,11 +2242,12 @@ fn show_strip_plot(
         return;
     };
 
-    // User zoom/pan overrides the automatic fit per axis.
-    let view = state
-        .ui
-        .results
-        .plot_view(super::ResultViewer::Waves, model.analysis_index);
+    // User zoom/pan overrides the automatic fit per axis, per pane.
+    let view =
+        state
+            .ui
+            .results
+            .plot_view_pane(super::ResultViewer::Waves, model.analysis_index, ordinal);
     let (x0, x1) = view.x.unwrap_or((x0, x1));
     let (y0, y1) = view.y.unwrap_or((y0, y1));
 
@@ -2082,20 +2260,20 @@ fn show_strip_plot(
         let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
         x_axis = x_axis.with_display_transform(scale, offset, unit);
     }
-    let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, model.y_unit))
+    let mut spec = PlotSpec::new(x_axis, model.x_scale, Axis::linear(y0, y1, pane.unit))
         .accessible_name("Waveform plot");
     spec.display_decimation = display_decimation(presentation.large_dataset_display());
 
-    // Right (phase) axis when phase traces are visible.
-    let has_phase = model
-        .traces
-        .iter()
-        .any(|trace| trace.kind.is_phase() && trace.visible);
-    if has_phase && let Some((p0, p1)) = y_range(&mut state.ui.results.derived, model, true) {
-        let displays_radians = model
-            .traces
+    // Right (phase) axis when this pane hosts phase traces.
+    let has_phase = !pane.right.is_empty();
+    if has_phase
+        && let Some((p0, p1)) = pane_y_range(&mut state.ui.results.derived, model, &pane.right)
+    {
+        let displays_radians = pane
+            .right
             .iter()
-            .any(|trace| trace.kind == TraceKind::PhaseRad && trace.visible);
+            .filter_map(|index| model.traces.get(*index))
+            .any(|trace| trace.kind == TraceKind::PhaseRad);
         let axis = match (view.y_right, displays_radians) {
             (Some((z0, z1)), true) => Axis::linear_with(z0, z1, "rad", 5),
             (None, true) => Axis::linear_with(p0, p1, "rad", 5),
@@ -2124,23 +2302,23 @@ fn show_strip_plot(
         };
         spec.y_right = Some((axis, t.color.traces[2]));
     }
-    // 0 dB reference on log-magnitude strips.
-    if model.y_unit == "dB" && y0 < 0.0 && y1 > 0.0 {
+    // 0 dB reference on a log-magnitude pane.
+    if pane.unit == "dB" && y0 < 0.0 && y1 > 0.0 {
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
 
     // Run owns weight: overlay traces keep the signal hue at reduced alpha
     // and stroke, painted first so the active run draws at full strength
     // on top.
-    let draw_order = model
-        .traces
+    let pane_indices = pane.traces.iter().chain(pane.right.iter()).copied();
+    let pane_traces: Vec<(usize, &StripTrace)> = pane_indices
+        .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
+        .collect();
+    let draw_order = pane_traces
         .iter()
-        .filter(|trace| trace.overlay)
-        .chain(model.traces.iter().filter(|trace| !trace.overlay));
-    for trace in draw_order {
-        if !trace.visible {
-            continue;
-        }
+        .filter(|(_, trace)| trace.overlay)
+        .chain(pane_traces.iter().filter(|(_, trace)| !trace.overlay));
+    for (index, trace) in draw_order {
         let color = if trace.overlay {
             trace.color.gamma_multiply(0.40)
         } else {
@@ -2153,12 +2331,12 @@ fn show_strip_plot(
         if trace.overlay {
             plot_trace = plot_trace.thin();
         }
-        if trace.kind.is_phase() {
+        if pane.right.contains(index) {
             plot_trace = plot_trace.right().dashed();
         }
         spec.traces.push(plot_trace);
     }
-    for expr in &exprs {
+    for expr in exprs {
         spec.traces.push(apply_family_trace_style(
             Trace::new(&expr.x, &expr.y, expr.color)
                 .thin()
@@ -2173,18 +2351,18 @@ fn show_strip_plot(
         let color = marker_color(marker.kind, &t);
         let label = marker_label(marker);
         if marker.kind == MarkerKind::Spec {
+            // A spec constrains the X position, which every pane of the
+            // strip shares — so it draws on all of them.
             spec.markers
                 .push(plot::Marker::limit_line(marker.x, color, label));
             continue;
         }
-        let anchored = model
-            .traces
-            .iter()
-            .find(|trace| !trace.overlay && anchor_key(model, trace) == marker.anchor);
-        // A marker whose trace is hidden or gone stays out of the plot
-        // rather than snapping to an unrelated curve; the readout strip
-        // still lists it, so it can be found and deleted.
-        let Some(trace) = anchored.filter(|trace| trace.visible) else {
+        // A marker belongs to the pane that owns its trace's unit; the
+        // other panes are a different scale and would misplace it.
+        let anchored = pane_traces.iter().find(|(_, trace)| {
+            !trace.overlay && anchor_key(model, trace) == marker.anchor
+        });
+        let Some((index, trace)) = anchored else {
             continue;
         };
         let y = sample_at_with(&trace.x, &trace.y, marker.x, interpolation);
@@ -2192,7 +2370,7 @@ fn show_strip_plot(
             continue;
         }
         let mut plot_marker = plot::Marker::point(marker.x, y, color, label);
-        if trace.kind.is_phase() {
+        if pane.right.contains(index) {
             plot_marker.side = plot::YSide::Right;
         }
         spec.markers.push(plot_marker);
@@ -2209,7 +2387,7 @@ fn show_strip_plot(
             model.x_label().to_owned(),
             model.format_x(x, significant_digits, quantity_policy),
         )];
-        for trace in model.traces.iter().filter(|t| t.visible).take(6) {
+        for (_, trace) in pane_traces.iter().take(6) {
             let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
             rows.push((
                 trace.name.clone(),
@@ -2250,13 +2428,12 @@ fn show_strip_plot(
                 plot_rect.bottom() - ((value - lo) / (hi - lo)) as f32 * plot_rect.height()
             })
         };
-        let nearest = model
-            .traces
+        let nearest = pane_traces
             .iter()
-            .filter(|trace| trace.visible && !trace.overlay)
-            .filter_map(|trace| {
+            .filter(|(_, trace)| !trace.overlay)
+            .filter_map(|(index, trace)| {
                 let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
-                let y = screen_y(value, trace.kind.is_phase())?;
+                let y = screen_y(value, pane.right.contains(index))?;
                 Some((trace, pointer_y.map_or(0.0, |pointer| (pointer - y).abs())))
             })
             .min_by(|(_, a), (_, b)| a.total_cmp(b));
@@ -2288,7 +2465,7 @@ fn show_strip_plot(
         state
             .ui
             .results
-            .plot_view_mut(super::ResultViewer::Waves, model.analysis_index)
+            .plot_view_pane_mut(super::ResultViewer::Waves, model.analysis_index, ordinal)
             .apply(&response.view);
     }
 }
@@ -3296,6 +3473,199 @@ mod tests {
 
         marker.note = "  settling  ".to_owned();
         assert_eq!(marker_label(&marker), "M3 · settling");
+    }
+
+    #[test]
+    fn a_signal_owns_its_unit_rather_than_inheriting_the_analysis_default() {
+        // The accessor in the name is authoritative where there is one.
+        assert_eq!(signal_unit("V(out)", TraceKind::Value, "V"), "V");
+        assert_eq!(signal_unit("I(R1)", TraceKind::Value, "V"), "A");
+        assert_eq!(signal_unit("i(vsense)", TraceKind::Value, "V"), "A");
+        assert_eq!(signal_unit("P(M1)", TraceKind::Value, "V"), "W");
+
+        // Derived projections keep the underlying signal's unit.
+        assert_eq!(signal_unit("re(V(out))", TraceKind::Real, ""), "V");
+        assert_eq!(signal_unit("im(I(R1))", TraceKind::Imaginary, ""), "A");
+
+        // The analysis default applies only where the name carries nothing
+        // to read a unit from.
+        assert_eq!(signal_unit("onoise", TraceKind::Value, "V^2/Hz"), "V^2/Hz");
+
+        // Derived kinds have their own units regardless of the source.
+        assert_eq!(signal_unit("V(out)", TraceKind::MagnitudeDb, "V"), "dB");
+        assert_eq!(signal_unit("V(out)", TraceKind::PhaseDeg, "V"), "°");
+    }
+
+    #[test]
+    fn mixed_units_on_one_analysis_become_separate_panes() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+                WaveformData::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
+                WaveformData::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            ]),
+        );
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(panes.len(), 2, "volts and amps cannot share an axis");
+        assert_eq!(panes[0].unit, "V");
+        assert_eq!(
+            panes[0].traces.len(),
+            2,
+            "both voltages belong to the volt pane"
+        );
+        assert_eq!(panes[1].unit, "A");
+        assert_eq!(panes[1].traces.len(), 1);
+    }
+
+    #[test]
+    fn one_unit_stays_one_pane() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+                WaveformData::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            ]),
+        );
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(panes.len(), 1, "a strip does not split without a reason to");
+        assert_eq!(panes[0].unit, "V");
+        assert!(panes[0].right.is_empty());
+    }
+
+    #[test]
+    fn a_hidden_trace_takes_its_pane_with_it() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+                WaveformData::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
+            ]),
+        );
+        if let Some(run) = simulation.active_run_mut()
+            && let Some(analysis) = run.analyses.get_mut(0)
+            && let Some(current) = analysis.waveforms.get_mut(1)
+        {
+            current.visible = false;
+        }
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].unit, "V", "the amp axis goes with its only trace");
+    }
+
+    #[test]
+    fn phase_rides_the_magnitude_pane_rather_than_taking_its_own() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+                WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
+                WaveformData::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
+            ]),
+        );
+        let mut derived = DerivedSeries::default();
+        let models = build_models(
+            &simulation,
+            &mut derived,
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+
+        let panes = models[0].unit_panes();
+        assert_eq!(
+            panes.len(),
+            1,
+            "a Bode pair is one reading — splitting it across stacked panes breaks it"
+        );
+        assert_eq!(panes[0].unit, "dB");
+        assert_eq!(panes[0].right.len(), 1, "phase goes to the right axis");
+    }
+
+    #[test]
+    fn fitting_a_strip_fits_every_pane_of_it() {
+        let mut state = AppState::default();
+        let viewer = super::super::ResultViewer::Waves;
+        state
+            .ui
+            .results
+            .plot_view_pane_mut(viewer, 0, 0)
+            .y = Some((0.0, 1.0));
+        state
+            .ui
+            .results
+            .plot_view_pane_mut(viewer, 0, 1)
+            .y = Some((0.0, 2.0));
+        state
+            .ui
+            .results
+            .plot_view_pane_mut(viewer, 1, 0)
+            .y = Some((0.0, 3.0));
+        assert!(state.ui.results.strip_is_zoomed(viewer, 0));
+
+        state.ui.results.reset_plot_view(viewer, 0);
+
+        assert!(
+            !state.ui.results.strip_is_zoomed(viewer, 0),
+            "leaving one pane zoomed would make the strip's panes disagree"
+        );
+        assert!(
+            state.ui.results.strip_is_zoomed(viewer, 1),
+            "fitting one strip does not reach into another"
+        );
+    }
+
+    #[test]
+    fn each_pane_keeps_its_own_y_viewport() {
+        let mut state = AppState::default();
+        let viewer = super::super::ResultViewer::Waves;
+        state.ui.results.plot_view_pane_mut(viewer, 0, 0).y = Some((-5.0, 5.0));
+        state.ui.results.plot_view_pane_mut(viewer, 0, 1).y = Some((0.0, 1.0e-3));
+
+        // One zoom factor across volts and amps would mean nothing, so the
+        // panes never share a Y override.
+        assert_eq!(
+            state.ui.results.plot_view_pane(viewer, 0, 0).y,
+            Some((-5.0, 5.0))
+        );
+        assert_eq!(
+            state.ui.results.plot_view_pane(viewer, 0, 1).y,
+            Some((0.0, 1.0e-3))
+        );
     }
 
     #[test]

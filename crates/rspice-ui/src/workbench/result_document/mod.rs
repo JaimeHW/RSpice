@@ -359,7 +359,7 @@ pub struct ResultsState {
     /// Zoom/pan overrides per plot, keyed by (viewer, strip index). Survives
     /// re-runs on purpose — keeping the zoomed window across parameter
     /// tweaks is how engineers compare iterations.
-    pub views: std::collections::HashMap<(ResultViewer, usize), PlotView>,
+    pub views: std::collections::HashMap<(ResultViewer, usize, usize), PlotView>,
     /// User expression traces per waves strip (analysis index), evaluated by
     /// the calculator against that analysis' waveforms.
     pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
@@ -545,22 +545,52 @@ impl ResultsState {
         };
     }
 
-    /// The zoom/pan override for one plot (copy; default = automatic view).
+    /// The zoom/pan override for a single-pane plot.
     pub fn plot_view(&self, viewer: ResultViewer, index: usize) -> PlotView {
+        self.plot_view_pane(viewer, index, 0)
+    }
+
+    /// The zoom/pan override for one pane of one plot.
+    ///
+    /// Y is per pane because each pane carries its own unit — one zoom
+    /// factor across volts and amps would mean nothing.
+    pub fn plot_view_pane(&self, viewer: ResultViewer, index: usize, pane: usize) -> PlotView {
         self.views
-            .get(&(viewer, index))
+            .get(&(viewer, index, pane))
             .copied()
             .unwrap_or_default()
     }
 
-    /// Mutable zoom/pan override for one plot.
-    pub fn plot_view_mut(&mut self, viewer: ResultViewer, index: usize) -> &mut PlotView {
-        self.views.entry((viewer, index)).or_default()
+    /// Mutable zoom/pan override for one pane of one plot.
+    pub fn plot_view_pane_mut(
+        &mut self,
+        viewer: ResultViewer,
+        index: usize,
+        pane: usize,
+    ) -> &mut PlotView {
+        self.views.entry((viewer, index, pane)).or_default()
     }
 
-    /// Drop the zoom/pan override for one plot (FIT action).
+    /// Mutable zoom/pan override for a single-pane plot.
+    pub fn plot_view_mut(&mut self, viewer: ResultViewer, index: usize) -> &mut PlotView {
+        self.plot_view_pane_mut(viewer, index, 0)
+    }
+
+    /// Drop the zoom/pan override for one plot, every pane (FIT action).
+    /// Fitting a strip fits all of it — leaving one pane zoomed would make
+    /// the strip's panes disagree about the window they show.
     pub fn reset_plot_view(&mut self, viewer: ResultViewer, index: usize) {
-        self.views.remove(&(viewer, index));
+        self.views
+            .retain(|(key_viewer, key_index, _), _| (*key_viewer, *key_index) != (viewer, index));
+    }
+
+    /// Whether any pane of one plot is zoomed away from the automatic view.
+    pub fn strip_is_zoomed(&self, viewer: ResultViewer, index: usize) -> bool {
+        self.views
+            .iter()
+            .any(|((key_viewer, key_index, _), view)| {
+                (*key_viewer, *key_index) == (viewer, index) && view.is_zoomed()
+            })
     }
 }
 
