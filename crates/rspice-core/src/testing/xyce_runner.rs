@@ -34683,17 +34683,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Self::netlist_is_native_transient_level3_mosfet_network(netlist)
     }
 
-    /// The production solver may choose any step below Xyce's true ceiling,
-    /// but oracle comparison needs enough accepted samples to reproduce
-    /// stateful switching and continuous-measure event ordering. In the
-    /// absence of authored DTMAX, keep at least 1,000 verification intervals
-    /// across the requested window. An explicit DTMAX remains authoritative
-    /// and is never minimized against this harness-only sampling bound.
+    /// Preserve Xyce's native transient solver ceiling for oracle runs.
+    ///
+    /// The reference time grid is an accepted-step/output contract, so adding
+    /// a harness-only sampling ceiling changes the history path that produces
+    /// stateful quantities (including trapezoidal ringing and behavioral
+    /// trajectories).  Xyce's authored `DELMAX`, or its 10%-of-window default,
+    /// must remain the sole global ceiling; source breakpoints and the
+    /// reference grid still provide the required local resolution.
     fn transient_oracle_solver_max_step(tran: &XyceTranAnalysis) -> Value {
-        tran.max_step.unwrap_or_else(|| {
-            let window = (tran.stop - tran.start.unwrap_or(0.0)).max(f64::MIN_POSITIVE);
-            Self::xyce_transient_solver_max_step(tran).min((window / 1000.0).max(f64::MIN_POSITIVE))
-        })
+        Self::xyce_transient_solver_max_step(tran)
     }
 
     fn transient_family_result_to_prn_table(
@@ -75630,8 +75629,8 @@ R3 1 0 {RVAL}
         );
         assert_eq!(
             XyceTestRunner::transient_oracle_solver_max_step(&tran).to_bits(),
-            5.0e-6f64.to_bits(),
-            "the pointwise oracle cadence is a harness constraint, not Xyce's solver ceiling"
+            5.0e-4f64.to_bits(),
+            "the oracle must preserve Xyce's native solver ceiling"
         );
 
         tran.max_step = Some(2.5e-5);
