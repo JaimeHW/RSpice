@@ -50723,6 +50723,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     "reference TIME column is not monotonic at row {row_index}"
                 ));
             }
+            if previous.is_some_and(|previous_time| time == previous_time) {
+                // Xyce's fixed-width PRN writer can round adjacent accepted
+                // points to the same printed TIME.  The simulator retains
+                // the first row when reconstructing a solver grid; preserve
+                // that Release 7.10 behavior for the pointwise fallback too.
+                continue;
+            }
             grid.push(time);
             previous = Some(time);
         }
