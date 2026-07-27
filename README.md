@@ -95,7 +95,7 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Junction | Diode, JFET level 1 and native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`, default/best-available), an internal Xyce modified-Shockley JFET2 compatibility mode, MES/MESA/HFET-family `Z` devices, GaN HEMT |
 | Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |
 | Transmission lines | Ideal, lossy (LTRA, TXL), coupled (CPL) |
-| Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL file sources |
+| Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `PAT`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL file sources |
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
 | Mixed-signal | XSPICE-style analog/digital elements, tri-state drivers, A/D–D/A bridges |
 | Verilog-A | Compiled behavioral modules (below) |
@@ -123,7 +123,7 @@ ASM-HEMT and MVSG-CMC devices are present but not yet oracle-qualified.
 
 ### Netlist dialect
 
-`.SUBCKT` subcircuits (flattened during elaboration), `.PARAM` with expression evaluation, `.INCLUDE` and `.LIB`, `.OPTIONS`, `.TEMP`, and the usual engineering suffixes. Starter `.lib` device libraries — diodes, MOSFETs, transistors, op-amps — ship under [crates/rspice-core/models/spice/](crates/rspice-core/models/spice/).
+`.SUBCKT` subcircuits (flattened during elaboration), `.PARAM`/`.CSPARAM` and `.FUNC` with expression evaluation, `.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF` conditionals, `.INCLUDE` and `.LIB`, `.MODEL`, `.GLOBAL`, `.IC` and `.NODESET`, `.SAVE`/`.PROBE` and `.PRINT`/`.PLOT`, `.OPTIONS`, `.TEMP`, and the usual engineering suffixes. Unrecognized dot-commands are reported as diagnostics rather than silently dropped. Starter `.lib` device libraries — diodes, MOSFETs, transistors, op-amps — ship under [crates/rspice-core/models/spice/](crates/rspice-core/models/spice/).
 
 ## Interfaces
 
