@@ -1,4 +1,6 @@
-use rspice_veriloga::canonical_ir::{InvalidationClass, OptOp, OptValueKind};
+use rspice_veriloga::canonical_ir::{
+    DerivativeLane, InvalidationClass, NodeId, OptEvalInputs, OptOp, OptValueKind,
+};
 use rspice_veriloga::rust_backend::{
     GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION, GeneratedBuiltinManifest,
     GeneratedBuiltinManifestDevice, GeneratedBuiltinManifestFile, GeneratedRustDevice,
@@ -14272,6 +14274,107 @@ fn generated_compact_parameter_state_rust_compiles_with_runtime_stub() {
     .expect("transpile compact parameter-state device");
 
     assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn scalar_generated_rust_matches_the_opt_ir_reference_over_a_nonlinear_grid() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module differential_kernel(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) * V(p, n)
+            + exp(0.1 * V(p, n))
+            + ((V(p, n) > 0.0) ? 0.5 * V(p, n) : -0.25 * V(p, n));
+    end
+endmodule
+"#,
+        )
+        .expect("canonical nonlinear differential fixture");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile nonlinear differential fixture");
+
+    let mut equation_root = None;
+    for schedule in &artifact.opt.schedules {
+        if schedule.invalidation != InvalidationClass::NewtonIteration {
+            continue;
+        }
+        let mut pending = None;
+        for op in &schedule.ops {
+            match *op {
+                OptOp::ComputeValue { value } => pending = Some(value),
+                OptOp::EvaluateEquation { .. } => {
+                    equation_root = pending.take();
+                    break;
+                }
+            }
+        }
+    }
+    let equation_root = equation_root.expect("single scalar equation root");
+
+    let mut rendered_cases = String::new();
+    for &(pos, neg) in &[
+        (-1.25, 0.4),
+        (-0.1, -0.3),
+        (0.0, 0.0),
+        (0.2, -0.15),
+        (1.75, 0.5),
+    ] {
+        let snapshot = artifact
+            .opt
+            .evaluate(&OptEvalInputs {
+                parameters: Vec::new(),
+                node_potentials: vec![pos, neg],
+                branch_flows: Vec::new(),
+            })
+            .expect("reference OptIR evaluation");
+        let expected = snapshot.real(equation_root).expect("real equation value")
+            + snapshot
+                .derivative(equation_root, DerivativeLane::node(NodeId::new(0)))
+                .unwrap_or(0.0)
+            + snapshot
+                .derivative(equation_root, DerivativeLane::node(NodeId::new(1)))
+                .unwrap_or(0.0);
+        use std::fmt::Write as _;
+        writeln!(
+            &mut rendered_cases,
+            "    ({pos:.17e}, {neg:.17e}, {expected:.17e}),"
+        )
+        .expect("render differential case");
+    }
+
+    assert_generated_rust_compiles_with_tests(
+        &generated,
+        &format!(
+            r#"
+#[test]
+fn generated_stamp_matches_reference_grid() {{
+    use generated_device::Instance;
+    use runtime::{{GeneratedEvalContext, GeneratedStamper}};
+
+    const CASES: &[(f64, f64, f64)] = &[
+{rendered_cases}    ];
+    let mut instance = Instance::new(&[0, 1]);
+    for &(pos, neg, expected) in CASES {{
+        let voltages = [pos, neg];
+        let context = GeneratedEvalContext::new(&voltages);
+        let mut actual = 0.0;
+        instance.stamp(&context, &mut GeneratedStamper {{ touched: &mut actual }});
+        let tolerance = 2.0e-12 * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "generated/reference mismatch at ({{pos}}, {{neg}}): actual={{actual:.17e}} expected={{expected:.17e}}"
+        );
+    }}
+}}
+"#
+        ),
+    );
 }
 
 fn assert_bool_condition_locals_are_not_reused_for_different_expressions(stamp: &str) {
