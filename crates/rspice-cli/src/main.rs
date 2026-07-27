@@ -126,6 +126,7 @@ fn main() -> ExitCode {
         Commands::Run(args) => commands::run(args, &config, cli.verbose, cli.quiet),
         Commands::Health(args) => commands::health(args, &config, cli.verbose, cli.quiet),
         Commands::Info(args) => commands::info(args, &config, cli.verbose, cli.quiet),
+        Commands::Models(args) => commands::models(args, cli.verbose, cli.quiet),
         Commands::CompileVa(args) => commands::compile_va(args, &config, cli.verbose, cli.quiet),
         Commands::Check(args) => commands::check(args, &config, cli.verbose, cli.quiet),
         Commands::Convert(args) => commands::convert(args, cli.verbose, cli.quiet),
