@@ -6,6 +6,7 @@
 
 use crate::Value;
 use crate::solver::{ComplexMatrix, CscIndex, StaticMatrix};
+#[cfg(feature = "veriloga-builtins-base")]
 use std::sync::Arc;
 
 pub(crate) mod limiting;
@@ -101,6 +102,7 @@ pub(crate) struct GeneratedVerilogAPersistentState {
 /// deliberately excluded. Generated models pack only their DDT/IDT and limiter
 /// state into these two contiguous buffers.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg(feature = "veriloga-builtins-base")]
 pub(crate) struct GeneratedVerilogARollbackState {
     pub values: Vec<Value>,
     pub flags: Vec<bool>,
@@ -1518,6 +1520,7 @@ struct GeneratedStaticStampSlots {
 impl GeneratedStaticStampSlots {
     const MAX_DENSE_LOGICAL_LEN: usize = 1_024;
 
+    #[cfg(feature = "veriloga-builtins-base")]
     #[inline]
     fn clear(&mut self) {
         self.logical_len = 0;
@@ -1615,6 +1618,7 @@ impl GeneratedStaticStampCache {
         self.slots.linked_len()
     }
 
+    #[cfg(feature = "veriloga-builtins-base")]
     #[inline]
     fn axis_indices_match(&self, nodes: &[usize], branches: &[usize], num_nodes: usize) -> bool {
         let axis_count = nodes.len() + branches.len();
@@ -6051,9 +6055,9 @@ impl<'a> GeneratedReactiveStamper<'a> {
 mod tests {
     use super::{
         GeneratedAnalysisKind, GeneratedEvalContext, GeneratedEvaluationError,
-        GeneratedEvaluationMode,
-        GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseInjection,
-        GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedSimulationParameters,
+        GeneratedEvaluationMode, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint,
+        GeneratedNoiseInjection, GeneratedNoiseKind, GeneratedNoiseTopologyError,
+        GeneratedSimulationParameters,
     };
 
     #[cfg(feature = "veriloga-builtins-base")]
