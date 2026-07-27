@@ -907,6 +907,21 @@ impl BuiltinVerilogAInstance {
                     source,
                 }
             })?;
+        // Analog-loop limits are recorded on the context rather than returned,
+        // because generated noise schedules are split into helpers that cannot
+        // propagate a `Result`. A limit means the operating point the PSDs were
+        // evaluated at never settled, so it outranks any per-source problem the
+        // visitor saw.
+        if let Some(GeneratedEvaluationError::AnalogLoopLimit {
+            iterations, limit, ..
+        }) = ctx.take_evaluation_error()
+        {
+            return Err(BuiltinNoiseEvaluationError::Evaluation {
+                index: 0,
+                mechanism: "<analog loop>",
+                source: GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations, limit },
+            });
+        }
         if let Some(error) = visitor_error {
             return Err(error);
         }

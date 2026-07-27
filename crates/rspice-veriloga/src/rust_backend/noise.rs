@@ -577,7 +577,7 @@ fn emit_noise_statements(
                     .expect("write noise loop increment");
                 writeln!(
                     out,
-                    "{body_padding}    if {statement_prefix}_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS {{ return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit {{ iterations: {statement_prefix}_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }}); }}"
+                    "{body_padding}    if {statement_prefix}_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS {{ ctx.report_analog_loop_limit(\"noise\", {statement_prefix}_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }}"
                 )
                 .expect("write noise loop bound");
                 writeln!(out, "{body_padding}}}").expect("write noise loop end");
