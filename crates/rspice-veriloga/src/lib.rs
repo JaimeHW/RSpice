@@ -5,13 +5,25 @@
 //!
 //! ## Architecture
 //!
-//! The compiler is organized into the following stages:
+//! Source text is lowered through a fixed front end and then fans out to
+//! three independent backends:
 //!
-//! 1. **Lexical Analysis** ([`lexer`]) - Tokenizes Verilog-A/AMS source code
-//! 2. **Parsing** ([`parser`]) - Produces Abstract Syntax Tree from tokens
-//! 3. **Semantic Analysis** ([`semantic`]) - Type checking and symbol resolution
-//! 4. **IR Generation** ([`ir`]) - Device equations and auto-differentiation
-//! 5. **Code Generation** ([`codegen`]) - Generates simulator-ready device models
+//! 1. **Preprocessing** ([`preprocessor`]) - `` `include ``/`` `define ``
+//!    expansion, with the standard VAMS headers built in ([`stdlib`])
+//! 2. **Lexical Analysis** ([`lexer`]) - Tokenizes Verilog-A/AMS source code
+//! 3. **Parsing** ([`parser`]) - Produces an Abstract Syntax Tree ([`ast`])
+//! 4. **Semantic Analysis** ([`semantic`]) - Type checking, symbol and
+//!    discipline resolution
+//! 5. **IR Generation** ([`ir`], [`expr_converter`]) - Device equations plus
+//!    forward-mode symbolic derivatives, so Jacobians are analytic
+//! 6. **Canonical IR** ([`canonical_ir`]) - The validated, content-digested
+//!    HIR/MIR/OptIR artifact that the backends consume
+//!
+//! The backends are [`codegen`], emitting a bytecode [`CompiledModel`] run by
+//! [`vm`]; `native`, a JIT behind the `native` feature; and [`rust_backend`],
+//! an offline emitter that turns canonical IR into Rust source compiled
+//! directly into `rspice-core`. The first two are driven in-process through
+//! [`device::VerilogADevice`]; the third runs ahead of the build.
 //!
 //! ## Usage
 //!
@@ -32,38 +44,19 @@
 //! let model = compiler.compile(source)?;
 //! ```
 //!
-//! ## Verilog-A Language Support
+//! [`VerilogACompiler`] has three further families of entry point:
+//! `compile_canonical_ir*` for the canonical artifact alone, `compile_runtime`
+//! / `compile_file_runtime_with_metadata` for both artifacts from a single
+//! parse, and `compile_virtual_runtime*` for sealed [`VirtualSourceBundle`]s
+//! that never touch the file system.
 //!
-//! Targets the Verilog-A subset of the Verilog-AMS LRM 2.4. Currently
-//! supported:
+//! ## Verilog-A language support
 //!
-//! - Analog operators: `ddt`, `idt`, `idtmod` (backward Euler), `ddx`,
-//!   `limexp`, `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
-//!   `zi_nd/zp/zd/np` (sampled-data), `$limit`, `$table_model`
-//! - Noise sources (`white_noise`, `flicker_noise`, `noise_table`,
-//!   `noise_table_log`) injected into `.noise` with amplitude scaling and
-//!   mode gating
-//! - Indirect contributions (`V(x): lhs == rhs`) as constraint rows on a
-//!   branch unknown
-//! - System functions: `$temperature`, `$vt`, `$abstime`, `$simparam`,
-//!   `$param_given`, `$port_connected`, `$mfactor` (with automatic
-//!   multiplicity scaling), `$bound_step`, `$discontinuity`
-//! - 1-D array variables (compile-time and runtime indexes, shadowed
-//!   derivatives), runtime-bounded loops
-//! - Parameters with dependent defaults, ranges, and exclusions;
-//!   localparams; attribute instances (`(* desc, units *)`)
-//! - Internal nodes, named branches, ground nets, user disciplines
-//!   (thermal, mechanical, ...), ANSI and non-ANSI port styles
-//! - Control flow lowered to guarded dataflow: if/else, case,
-//!   compile-time-bounded for/repeat loops, event controls
-//!   (`initial_step`, `cross`, `above`, `timer`)
-//! - User-defined analog functions (inlined)
-//!
-//! Known limitations (clean compile errors, never silent):
-//!
-//! - `noise_table` file input (inline the pair list), correlated noise
-//! - Parameter-dependent `zi_*` sample periods
-//! - Multi-dimensional arrays; array locals in analog functions
+//! The supported subset, the constructs that are accepted but inert, and the
+//! constructs that are rejected outright are enumerated in the crate README.
+//! Unsupported input is always a [`CompileError`] naming the construct and its
+//! span — the compiler does not silently drop what it cannot lower, and
+//! [`semantic`] carries tests pinning that.
 
 #![allow(
     clippy::assertions_on_constants,
