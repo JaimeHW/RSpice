@@ -1,0 +1,1304 @@
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0E221MCL4GB_v100.lib
+*  Part Number          : PCF0E221MCL4GB
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0E221MCL4GB 1 2
+L1 1 3 5.0716e-010
+R1 3 4 0.013864
+C1 4 2 0.00018032
+R2 4 5 0.081791
+C2 5 2 2.979e-005
+R3 5 6 1.1101e-008
+C3 6 2 1.0314e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J101MCL1GS_v100.lib
+*  Part Number          : PCF0J101MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J101MCL1GS 1 2
+L1 1 3 8.7522e-010
+R1 3 4 0.013126
+C1 4 2 8.3426e-005
+R2 4 5 0.2545
+C2 5 2 1.2191e-005
+R3 5 6 7.7669
+C3 6 2 4.3801e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J101MCL4GB_v100.lib
+*  Part Number          : PCF0J101MCL4GB
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J101MCL4GB 1 2
+L1 1 3 7.8638e-011
+R1 3 4 1.224987e-002
+C1 4 2 7.4457e-005
+R2 4 5 0.079435
+C2 5 2 2.1721e-005
+R3 5 6 9.2634
+C3 6 2 3.9931e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J101MCL6GS_v100.lib
+*  Part Number          : PCF0J101MCL6GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J101MCL6GS 1 2
+L1 1 3 2.4549e-010
+R1 3 4 0.014086
+C1 4 2 7.9915e-005
+R2 4 5 0.39886
+C2 5 2 4.9435e-006
+R3 5 6 4.8952e-006
+C3 6 2 1.0422e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J121MCL1GS_v100.lib
+*  Part Number          : PCF0J121MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J121MCL1GS 1 2
+L1 1 3 6.6069e-010
+R1 3 4 0.012033
+C1 4 2 9.6454e-005
+R2 4 5 0.3136
+C2 5 2 1.624e-005
+R3 5 6 2.6547e-007
+C3 6 2 7.328e-014
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J221MCL1GS_v100.lib
+*  Part Number          : PCF0J221MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J221MCL1GS 1 2
+L1 1 3 9.021e-010
+R1 3 4 0.01374
+C1 4 2 0.00016668
+R2 4 5 0.28414
+C2 5 2 8.7515e-007
+R3 5 6 6.8949e-007
+C3 6 2 3.9488e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J331MCL1GS_v100.lib
+*  Part Number          : PCF0J331MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J331MCL1GS 1 2
+L1 1 3 1.7855e-009
+R1 3 4 0.0089257
+C1 4 2 0.00019423
+R2 4 5 0.046261
+C2 5 2 0.00010655
+R3 5 6 11.2772
+C3 6 2 1.2394e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J471MCL1GS_v100.lib
+*  Part Number          : PCF0J471MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J471MCL1GS 1 2
+L1 1 3 1.6393e-009
+R1 3 4 0.0077176
+C1 4 2 0.00027359
+R2 4 5 0.022396
+C2 5 2 2.2513e-006
+R3 5 6 0.00012748
+C3 6 2 0.00017681
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J471MCL4GS_v100.lib
+*  Part Number          : PCF0J471MCL4GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J471MCL4GS 1 2
+L1 1 3 1.0464e-009
+R1 3 4 0.0056632
+C1 4 2 0.00039053
+R2 4 5 0.13423
+C2 5 2 5.8168e-005
+R3 5 6 4.9246
+C3 6 2 1.9034e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF0J471MCL6GS_v100.lib
+*  Part Number          : PCF0J471MCL6GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF0J471MCL6GS 1 2
+L1 1 3 2.2072e-009
+R1 3 4 0.010268
+C1 4 2 0.00030128
+R2 4 5 0.048743
+C2 5 2 0.00013231
+R3 5 6 2.5907
+C3 6 2 2.9943e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A121MCL1GS_v100.lib
+*  Part Number          : PCF1A121MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A121MCL1GS 1 2
+L1 1 3 6.3e-010
+R1 3 4 0.01152
+C1 4 2 9.5701e-005
+R2 4 5 0.94309
+C2 5 2 1.6248e-005
+R3 5 6 401.7561
+C3 6 2 1.5726e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A151MCL1GS_v100.lib
+*  Part Number          : PCF1A151MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A151MCL1GS 1 2
+L1 1 3 1.7142e-009
+R1 3 4 0.011276
+C1 4 2 0.0001458
+R2 4 5 1.1805
+C2 5 2 1.4746e-005
+R3 5 6 108.0839
+C3 6 2 4.2671e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 12/11/2015
+*  File Name            : PCF1A151MCL6GS_v100.lib
+*  Part Number          : PCF1A151MCL6GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 12/11/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A151MCL6GS 1 2
+L1 1 3 7.1376e-010
+R1 3 4 0.010243
+C1 4 2 0.00013663
+R2 4 5 0.65484
+C2 5 2 1.0325e-005
+R3 5 6 51.7959
+C3 6 2 3.1955e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A271MCL1GS_v100.lib
+*  Part Number          : PCF1A271MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A271MCL1GS 1 2
+L1 1 3 1.4819e-009
+R1 3 4 0.013448
+C1 4 2 0.00017789
+R2 4 5 0.085796
+C2 5 2 8.1982e-005
+R3 5 6 41.5017
+C3 6 2 1.3527e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A271MCL4GS_v100.lib
+*  Part Number          : PCF1A271MCL4GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A271MCL4GS 1 2
+L1 1 3 1.0E-009
+R1 3 4 0.0061
+C1 4 2 0.00025065
+R2 4 5 1.88
+C2 5 2 2.1293e-005
+R3 5 6 145.729
+C3 6 2 5.1277e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A331MCL1GS_v100.lib
+*  Part Number          : PCF1A331MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A331MCL1GS 1 2
+L1 1 3 1.47e-009
+R1 3 4 0.0112
+C1 4 2 0.00028
+R2 4 5 0.21271
+C2 5 2 4.6914e-005
+R3 5 6 39.3931
+C3 6 2 1.0919e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A331MCL4GS_v100.lib
+*  Part Number          : PCF1A331MCL4GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A331MCL4GS 1 2
+L1 1 3 1.151e-009
+R1 3 4 0.0058022
+C1 4 2 0.00029
+R2 4 5 0.79526
+C2 5 2 2.5611e-005
+R3 5 6 60.6339
+C3 6 2 7.5238e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 06/10/2016
+*  File Name            : PCF1A470MCL1GS_v110.lib
+*  Part Number          : PCF1A470MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.10
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 12/11/2015
+* Ver.1.10 06/10/2016
+*********************************************************************
+*$
+.SUBCKT PCF1A470MCL1GS 1 2
+L1 1 3 4.578552e-011
+R1 3 4 1.428537e-002
+C1 4 2 3.66e-005
+R2 4 5 3.509976e-001
+C2 5 2 8.679075e-006
+R3 5 6 9.815003e+000
+C3 6 2 2.981014e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 12/11/2015
+*  File Name            : PCF1A470MCL6GS_v100.lib
+*  Part Number          : PCF1A470MCL6GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 12/11/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A470MCL6GS 1 2
+L1 1 3 8.8739e-010
+R1 3 4 0.013271
+C1 4 2 4.235e-005
+R2 4 5 0.42451
+C2 5 2 5.1685e-006
+R3 5 6 9.3054
+C3 6 2 2.1085e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A471MCL1GS_v100.lib
+*  Part Number          : PCF1A471MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A471MCL1GS 1 2
+L1 1 3 1.1e-009
+R1 3 4 0.0096206
+C1 4 2 0.00036
+R2 4 5 0.18118
+C2 5 2 7.8062e-005
+R3 5 6 38.7554
+C3 6 2 2.0968e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A471MCL9GS_v100.lib
+*  Part Number          : PCF1A471MCL9GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A471MCL9GS 1 2
+L1 1 3 1.7244e-009
+R1 3 4 0.007511
+C1 4 2 0.00039
+R2 4 5 0.19502
+C2 5 2 5.0384e-005
+R3 5 6 38.7602
+C3 6 2 1.6722e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 1/17/2015
+*  File name            : PCF1A560MCL1GS_v100.lib
+*  Part Number          : PCF1A560MCL1GS
+*  Simulator            : pspice
+*  Model Type           : RC-ladder 7 Elements capacitor Model
+*  Parameter ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 1/17/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A560MCL1GS 1 2
+L1 1 3 2.77E-009
+R1 3 4 0.01565
+C1 4 2 4.713E-005
+R2 4 5 2.75
+C2 5 2 5.375E-006
+R3 5 6 453.5
+C3 6 2 2.055E-006
+.ENDS
+*$
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 06/10/2016
+*  File Name            : PCF1A560MCL4GB_v110.lib
+*  Part Number          : PCF1A560MCL4GB
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.10
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 12/11/2015
+* Ver.1.10 06/10/2016
+*********************************************************************
+*$
+.SUBCKT PCF1A560MCL4GB 1 2
+L1 1 3 4.578552e-011
+R1 3 4 0.013
+C1 4 2 4.86e-005
+R2 4 5 0.39
+C2 5 2 4.7e-006
+R3 5 6 6
+C3 6 2 3.1e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A561MCL1GS_v100.lib
+*  Part Number          : PCF1A561MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A561MCL1GS 1 2
+L1 1 3 1.3965e-009
+R1 3 4 0.0069032
+C1 4 2 0.00046993
+R2 4 5 0.59544
+C2 5 2 4.9474e-005
+R3 5 6 39.4538
+C3 6 2 1.4067e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1A561MCL9GS_v100.lib
+*  Part Number          : PCF1A561MCL9GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1A561MCL9GS 1 2
+L1 1 3 1.6648e-009
+R1 3 4 0.0072293
+C1 4 2 0.00049995
+R2 4 5 0.83223
+C2 5 2 4.4959e-005
+R3 5 6 40.2635
+C3 6 2 1.6622e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 7/31/2015
+*  File Name            : PCF1C101MCL1GS_v100.lib
+*  Part Number          : PCF1C101MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 7/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C101MCL1GS 1 2
+L1 1 3 1.4301e-009
+R1 3 4 0.012363
+C1 4 2 7.681e-005
+R2 4 5 0.19389
+C2 5 2 1.7566e-005
+R3 5 6 48.5322
+C3 6 2 2.744e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 7/31/2015
+*  File Name            : PCF1C151MCL1GS_v100.lib
+*  Part Number          : PCF1C151MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 7/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C151MCL1GS 1 2
+L1 1 3 1.5105e-009
+R1 3 4 0.022252
+C1 4 2 0.00011419
+R2 4 5 0.10964
+C2 5 2 3.3189e-005
+R3 5 6 14.3149
+C3 6 2 5.8277e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 7/31/2015
+*  File Name            : PCF1C181MCL1GS_v100.lib
+*  Part Number          : PCF1C181MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 7/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C181MCL1GS 1 2
+L1 1 3 1.5861e-009
+R1 3 4 0.011725
+C1 4 2 0.00016385
+R2 4 5 0.27503
+C2 5 2 1.8007e-005
+R3 5 6 14.2076
+C3 6 2 5.0995e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 7/31/2015
+*  File Name            : PCF1C181MCL4GS_v100.lib
+*  Part Number          : PCF1C181MCL4GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 7/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C181MCL4GS 1 2
+L1 1 3 8.8681e-010
+R1 3 4 0.0076
+C1 4 2 0.00015541
+R2 4 5 0.22328
+C2 5 2 9.8501e-006
+R3 5 6 9.6794
+C3 6 2 6.1131e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 7/31/2015
+*  File name            : PCF1C220MCL1GS_v120.lib
+*  Part Number          : PCF1C220MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter ver.       : Ver.1.20
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/26/2015
+* Ver.1.10 7/6/2015
+* Ver.1.20 7/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C220MCL1GS 1 2
+L1 1 3 1e-009
+R1 3 4 0.017282
+C1 4 2 1.54e-005
+R2 4 5 0.27921
+C2 5 2 4.3521e-006
+R3 5 6 6.65
+C3 6 2 1.576e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 7/31/2015
+*  File Name            : PCF1C221MCL1GS_v100.lib
+*  Part Number          : PCF1C221MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 7/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C221MCL1GS 1 2
+L1 1 3 1.141e-009
+R1 3 4 0.00814
+C1 4 2 0.00018009
+R2 4 5 0.2992
+C2 5 2 1.4694e-005
+R3 5 6 10.0472
+C3 6 2 6.6787e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 12/11/2015
+*  File Name            : PCF1C221MCL9GS_v100.lib
+*  Part Number          : PCF1C221MCL9GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 12/11/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C221MCL9GS 1 2
+L1 1 3 2.4263e-009
+R1 3 4 0.0078322
+C1 4 2 0.00021511
+R2 4 5 9.1863
+C2 5 2 1.275e-005
+R3 5 6 12.2789
+C3 6 2 3.0872e-008
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 8/31/2015
+*  File Name            : PCF1C330MCL1GS_v100.lib
+*  Part Number          : PCF1C330MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+* Ver.1.10 8/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C330MCL1GS 1 2
+L1 1 3 4.821e-010
+R1 3 4 0.014535
+C1 4 2 2.5e-005
+R2 4 5 0.17508
+C2 5 2 5.8198e-006
+R3 5 6 6.0066
+C3 6 2 1.8724e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 8/31/2015
+*  File Name            : PCF1C331MCL1GS_v110.lib
+*  Part Number          : PCF1C331MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 7/31/2015
+* Ver.1.10 8/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C331MCL1GS 1 2
+L1 1 3 2.1e-009
+R1 3 4 0.0094539
+C1 4 2 0.00026662
+R2 4 5 0.1569
+C2 5 2 2.8878e-005
+R3 5 6 2.7914
+C3 6 2 3.6897e-005
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1C390MCL1GS_v100.lib
+*  Part Number          : PCF1C390MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C390MCL1GS 1 2
+L1 1 3 4.3012e-010
+R1 3 4 0.015893
+C1 4 2 3.14e-005
+R2 4 5 0.62826
+C2 5 2 8.528e-006
+R3 5 6 549.9067
+C3 6 2 1.0641e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 8/31/2015
+*  File Name            : PCF1C390MCL4GB_v100.lib
+*  Part Number          : PCF1C390MCL4GB
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+* Ver.1.10 8/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C390MCL4GB 1 2
+L1 1 3 4.00e-010
+R1 3 4 0.017161
+C1 4 2 3.78e-005
+R2 4 5 1.5247
+C2 5 2 3.2267e-006
+R3 5 6 59.0191
+C3 6 2 5.1277e-007
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 12/11/2015
+*  File Name            : PCF1C3R3MCL1GB_v100.lib
+*  Part Number          : PCF1C3R3MCL1GB
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 12/11/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C3R3MCL1GB 1 2
+L1 1 3 7.7875e-010
+R1 3 4 0.040306
+C1 4 2 2.5362e-006
+R2 4 5 1.5978
+C2 5 2 6.1176e-007
+R3 5 6 32.4456
+C3 6 2 2.1935e-007
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 6/30/2015
+*  File Name            : PCF1C560MCL1GS_v100.lib
+*  Part Number          : PCF1C560MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 6/30/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C560MCL1GS 1 2
+L1 1 3 6.1e-010
+R1 3 4 0.015225
+C1 4 2 5.4035e-005
+R2 4 5 5.4081
+C2 5 2 4.7265e-006
+R3 5 6 496.734
+C3 6 2 1.9603e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 7/31/2015
+*  File Name            : PCF1C820MCL1GS_v100.lib
+*  Part Number          : PCF1C820MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 7/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1C820MCL1GS 1 2
+L1 1 3 5.666e-010
+R1 3 4 0.012402
+C1 4 2 7.041e-005
+R2 4 5 0.17775
+C2 5 2 9.7531e-006
+R3 5 6 18.2018
+C3 6 2 2.2e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 8/31/2015
+*  File Name            : PCF1D100MCL1GS_v100.lib
+*  Part Number          : PCF1D100MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 8/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1D100MCL1GS 1 2
+L1 1 3 1.04e-009
+R1 3 4 0.023505
+C1 4 2 7.7141e-006
+R2 4 5 0.77124
+C2 5 2 1.6655e-006
+R3 5 6 12.8743
+C3 6 2 6.8346e-007
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF1D101MCL1GS_v100.lib
+*  Part Number          : PCF1D101MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF1D101MCL1GS 1 2
+L1 1 3 1.3242e-009
+R1 3 4 0.011231
+C1 4 2 8.7141e-005
+R2 4 5 0.95451
+C2 5 2 9.9459e-006
+R3 5 6 25.9127
+C3 6 2 3.7591e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF1D151MCL1GS_v100.lib
+*  Part Number          : PCF1D151MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF1D151MCL1GS 1 2
+L1 1 3 2.0526e-009
+R1 3 4 0.01021
+C1 4 2 0.00011319
+R2 4 5 0.3263
+C2 5 2 2.3697e-005
+R3 5 6 9.8239
+C3 6 2 9.4363e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 8/31/2015
+*  File Name            : PCF1D220MCL1GS_v100.lib
+*  Part Number          : PCF1D220MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 8/31/2015
+*********************************************************************
+*$
+.SUBCKT PCF1D220MCL1GS 1 2
+L1 1 3 1.51e-009
+R1 3 4 0.02171
+C1 4 2 1.736e-005
+R2 4 5 0.71399
+C2 5 2 3.083e-006
+R3 5 6 11.2757
+C3 6 2 1.1565e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 12/11/2015
+*  File Name            : PCF1D220MCL4GB_v100.lib
+*  Part Number          : PCF1D220MCL4GB
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 12/11/2015
+*********************************************************************
+*$
+.SUBCKT PCF1D220MCL4GB 1 2
+L1 1 3 1.5250e-009
+R1 3 4 0.025975
+C1 4 2 1.7284e-005
+R2 4 5 0.50828
+C2 5 2 4.4793e-006
+R3 5 6 25.3901
+C3 6 2 1.1616e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF1E100MCL1GS_v100.lib
+*  Part Number          : PCF1E100MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF1E100MCL1GS 1 2
+L1 1 3 5.504e-010
+R1 3 4 0.016868
+C1 4 2 8.1278e-006
+R2 4 5 0.64648
+C2 5 2 1.6102e-006
+R3 5 6 27.2039
+C3 6 2 2.9307e-007
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF1E220MCL1GS_v100.lib
+*  Part Number          : PCF1E220MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF1E220MCL1GS 1 2
+L1 1 3 1.7665e-009
+R1 3 4 0.016414
+C1 4 2 1.9406e-005
+R2 4 5 0.8323
+C2 5 2 2.0384e-006
+R3 5 6 18.3482
+C3 6 2 5.7964e-007
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF1E470MCL1GS_v100.lib
+*  Part Number          : PCF1E470MCL1GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF1E470MCL1GS 1 2
+L1 1 3 1.6226e-009
+R1 3 4 0.011708
+C1 4 2 3.9898e-005
+R2 4 5 0.30807
+C2 5 2 4.0106e-006
+R3 5 6 5.2508
+C3 6 2 2.2661e-006
+.ENDS
+*********************************************************************
+*  NICHICON CORPORATION and MoDeCH confidential
+*  Date                 : 07/06/2016
+*  File Name            : PCF1E470MCL4GS_v100.lib
+*  Part Number          : PCF1E470MCL4GS
+*  Simulator            : PSpice
+*  Model Type           : RC-ladder 7 Elements Capacitor Model
+*  Parameter Ver.       : Ver.1.00
+*********************************************************************
+* Modeling Conditions:
+*   Temperature = 20 degC
+*   DC Bias Voltage = 0 V
+*   Small Signal Operation
+*********************************************************************
+* record (history):
+* Ver.1.00 07/06/2016
+*********************************************************************
+*$
+.SUBCKT PCF1E470MCL4GS 1 2
+L1 1 3 9.6476e-010
+R1 3 4 0.010347
+C1 4 2 4.2371e-005
+R2 4 5 2.1885
+C2 5 2 3.3551e-006
+R3 5 6 0.00038953
+C3 6 2 1.689e-007
+.ENDS

@@ -1,0 +1,40 @@
+* NGSPICE BSIM Level 1 MOSFET Model Card Example
+* BSIM1 (LEVEL=4, VERSION=1) - First Berkeley Short-channel IGFET Model
+*
+* This model implements the basic BSIM1 equations with improved physics
+* compared to Level 1-3 SPICE models, including better short-channel effects
+* and temperature dependencies.
+
+.MODEL nmos_bsim1 NMOS LEVEL=4 VERSION=1
++ VFB    = -1.0        ; Flat-band voltage (V)
++ LVFB   = 0.0         ; Length dependence of VFB (V*m)
++ WVFB   = 0.0         ; Width dependence of VFB (V*m)
++ PHIB   = 0.7         ; Bulk Fermi potential (V)
++ K1     = 0.5         ; First-order body effect coefficient (V^0.5)
++ K2     = 0.0         ; Second-order body effect coefficient
++ ETA    = 0.1         ; Drain-induced barrier lowering coefficient
++ MUZ    = 600.0       ; Zero-field mobility (cm^2/V*s)
++ DL     = 0.1e-6      ; Channel length reduction (m)
++ DW     = 0.05e-6     ; Channel width reduction (m)
++ U0     = 0.06        ; Low-field mobility (cm^2/V*s)
++ U1     = 0.0         ; Mobility temperature coefficient
++ X2MZ   = 0.0         ; Mobility temperature exponent
++ MUS    = 1.0         ; Mobility scattering coefficient
++ X2MS   = 0.0         ; Mobility scattering exponent
++ X3MS   = 0.0         ; Mobility scattering exponent
++ TOX    = 10.0e-9     ; Gate oxide thickness (m)
++ TEMP   = 27.0        ; Temperature (C)
++ VDD    = 3.3         ; Supply voltage (V)
++ ICG    = 1.0e-6      ; Gate current coefficient
++ ICB    = 1.0e-6      ; Bulk current coefficient
++ ICS    = 1.0e-6      ; Source current coefficient
++ ICD    = 1.0e-6      ; Drain current coefficient
++ CJ     = 5.0e-4      ; Zero-bias bulk junction capacitance (F/m^2)
++ CJSW   = 2.5e-10     ; Zero-bias sidewall bulk junction capacitance (F/m)
++ MJ     = 0.5         ; Bulk junction grading coefficient
++ MJSW   = 0.33        ; Sidewall bulk junction grading coefficient
++ PB     = 1.0         ; Bulk junction potential (V)
++ CGDO   = 2.0e-10     ; Gate-drain overlap capacitance (F/m)
++ CGSO   = 2.0e-10     ; Gate-source overlap capacitance (F/m)
++ CGBO   = 1.0e-10     ; Gate-bulk overlap capacitance (F/m)
++ TNOM   = 27.0        ; Nominal temperature (C)

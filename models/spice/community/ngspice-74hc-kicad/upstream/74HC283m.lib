@@ -1,0 +1,69 @@
+* ngspice KiCad multi-device 74xx model
+* 4-Bit Binary Full Adders With Fast Carry
+* Pin sequence modified according to data sheet
+*
+.subckt 74HC283m S2 B2 A2 S1 A1 B1 C0 GND C4 S4 B4 A4 S3 A3 B3 VCC
+
+X74HC283 C0 A1 A2 A3 A4 B1 B2 B3 B4 S1 S2 S3 S4 C4 74HC283
+
+* ----------------------------------------------------------- 74HC283 ------
+*  4-Bit Binary Full Adders With Fast Carry
+*
+*  The High Speed CMOS Logic Data Book, 1989, TI Pages 2-379 to 2-383
+*  bss    4/4/94
+*
+.SUBCKT 74HC283 C0 A1 A2 A3 A4 B1 B2 B3 B4 S1 S2 S3 S4 C4
++     optional:  DPWR=$G_DPWR DGND=$G_DGND
++     params:  MNTYMXDLY=0 IO_LEVEL=0
+
+U1LOG LOGICEXP(9,5) DPWR DGND
++     C0 A1 A2 A3 A4 B1 B2 B3 B4
++     S1_O S2_O S3_O S4_O C4_O
++     D0_GATE IO_HC MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++  LOGIC:
++     c0bar = {~C0}
++     nor1 = {~(A1 | B1)}
++     nand1 = {~(A1 & B1)}
++     nor2 = {~(A2 | B2)}
++     nand2 = {~(A2 & B2)}
++     nor3 = {~(A3 | B3)}
++     nand3 = {~(A3 & B3)}
++     nor4 = {~(A4 | B4)}
++     nand4 = {~(A4 & B4)}
++     C4_O = {~(nor4 | (nor3 & nand4) | (nor2 & nand4 & nand3) | (nor1 & nand4 & nand3 & 
++             nand2) | (nand4 & nand3 & nand2 & nand1 & c0bar))}
++     S4_O = {(nand4 & (~nor4)) ^ (~(nor3 | (nor2 & nand3) | (nor1 & nand3 & nand2) |
++             (nand3 & nand2 & nand1 & c0bar)))}
++     S3_O = {(nand3 & (~nor3)) ^ (~(nor2 | (nor1 & nand2) | (nand2 & nand1 & c0bar)))}
++     S2_O = {(nand2 & (~nor2)) ^ (~(nor1 | (nand1 & c0bar)))}
++     S1_O = {(nand1 & (~nor1)) ^ C0}
+
+U2DLY PINDLY(5,0,9) DPWR DGND
++     S1_O S2_O S3_O S4_O C4_O
++     C0 A1 A2 A3 A4 B1 B2 B3 B4
++     S1 S2 S3 S4 C4
++     IO_HC MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++  BOOLEAN:
++     DATA = {CHANGED(A1,0) | CHANGED(A2,0) | CHANGED(A3,0) | CHANGED(A4,0) |
++                  CHANGED(B1,0) | CHANGED(B2,0) | CHANGED(B3,0) | CHANGED(B4,0)}
++     CARRY = {CHANGED(C0,0)}
++
++  PINDLY:
++     S1 S2 S3 S4 = {
++        CASE(
++           DATA, DELAY(-1,25ns,35ns),
++           CARRY, DELAY(-1,20ns,30ns),
++           DELAY(-1,26ns,36ns))}
++
++     C4 = {
++        CASE(
++           DATA, DELAY(-1,26ns,35ns),
++           CARRY, DELAY(-1,25ns,35ns),
++           DELAY(-1,27ns,36ns))}
+
+.ENDS 74HC283
+
+.ends
+

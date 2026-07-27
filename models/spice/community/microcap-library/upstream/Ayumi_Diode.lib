@@ -1,0 +1,204 @@
+* Generic diode model: 217C   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 217C_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00018412289
+.ENDS   
+
+* Generic diode model: 2B7   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 2B7_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 6.8041382e-05
+.ENDS   
+*   
+* Generic diode model: 2X2   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 2X2_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 1.7074694e-05
+.ENDS   
+
+* Generic diode model: 5AR4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5AR4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0032100303
+.ENDS   
+*   
+* Generic diode model: 5R4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5R4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00045585614
+.ENDS   
+*   
+* Generic diode model: 5T4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5T4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00083852549
+.ENDS   
+*   
+* Generic diode model: 5U4G   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5U4G_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00077090969
+.ENDS   
+*   
+* Generic diode model: 5U4GB   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5U4GB_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00077781746
+.ENDS   
+*   
+* Generic diode model: 5V4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5V4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0016198477
+.ENDS   
+*   
+* Generic diode model: 5W4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5W4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00031112698
+.ENDS   
+*   
+* Generic diode model: 5Y3   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5Y3_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00035355339
+.ENDS   
+*   
+* Generic diode model: 5Z3   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5Z3_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0005093784
+.ENDS   
+*   
+* Generic diode model: 5Z4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 5Z4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0012909944
+.ENDS   
+
+* Generic diode model: 6AL5   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 6AL5_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0018973666
+.ENDS   
+
+* Generic diode model: 6AX4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 6AX4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0013810679
+.ENDS   
+
+* Generic diode model: 6CA4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 6CA4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.001677051
+.ENDS   
+
+* Generic diode model: 6H6   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 6H6_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0003786917
+.ENDS   
+
+* Generic diode model: 6SQ7D   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 6SQ7D_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 6.3245553e-05
+.ENDS   
+
+* Generic diode model: 6X4   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 6X4_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00067836592
+.ENDS   
+*   
+* Generic diode model: 6X5   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 6X5_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00067082039
+.ENDS   
+
+* Generic diode model: 80   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 80_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00026895718
+.ENDS   
+
+* Generic diode model: 81   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 81_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00019583343
+.ENDS   
+*   
+* Generic diode model: 82   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 82_ayumi A K
+BIA A K I=URAMP(V(A,K)-15)/4
+.ENDS   
+
+*   
+* Generic diode model: 83   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 83_ayumi A K
+BIA A K I=URAMP(V(A,K)-15)/4
+.ENDS   
+*   
+* Generic diode model: 836   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 836_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00055901699
+.ENDS   
+*   
+* Generic diode model: 83V   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 83V_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.0014
+.ENDS   
+*   
+* Generic diode model: 84   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 84_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 0.00067082039
+.ENDS   
+
+* Generic diode model: 878   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 878_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 7.8e-06
+.ENDS   
+*   
+* Generic diode model: 879   
+* Copyright 2007--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Version 3.10, Generated on Sat Mar  8 23:08:31 2008
+.SUBCKT 879_ayumi A K
+BIA A K I=URAMP(V(A,K))^1.5 * 1.0606602e-05
+.ENDS   
+;$SpiceType=SPICE3

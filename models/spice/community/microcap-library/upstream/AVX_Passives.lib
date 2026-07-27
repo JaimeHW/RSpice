@@ -1,0 +1,2191 @@
+*File LGA.lib
+* AVX, Inc.
+* July 2015
+*
+* Copyright © 2015 AVX Corporation. All rights reserved.
+*
+* The following library is a collection of SPICE models for the AVX
+* LGA Low Inductance Ceramic Capacitors. The models in this library
+* are composed of passive networks of 5 components: 1 capacitor, 
+* 2 resistors, and 2 inductors. The parallel parasitic branch provides
+* multiple current paths depending on input signal frequency, and 
+* allows for more accurate simulations
+*
+* Please note that while the models in this library are all ceramic
+* capacitors composed of X7R dielectric, the temperature and DC Bias
+* data has not been incorporated into the models. Any data on Temperature,
+* DC Bias, etc. can be requested from AVX, Inc.
+*
+* Each of the models is based on the following schematic:
+*
+*                            |-------|     |-------|
+*                      |-----|  PR1  |-----|  PL1  |-----|
+*          | |         |     |-------|     |-------|     |
+*  O-------| |---------|                                 |-----O
+*          | |         |     |-------|     |-------|     |
+*          PC1         |-----|  PR2  |-----|  PL2  |-----|
+*                            |-------|     |-------|
+*
+* Where PC1 is the ideal capacitance, PR1 and PR2 are the Equivalent Series
+* Resistances, and PL1 and PL2 are the parasitic inductances.
+*
+* NOTICE: Please note that all models in this library are intended to be used
+* as a guide to illustrate an approximation of the devices in question.
+* AVX takes no liability for any device failure or incident that may occur
+* from designs based on simulation results. This library does not account for
+* temperature dependence, part tolerance, or any bias of any sort.
+*
+* Specifications are subject to change without notice.  
+* Contact your nearest AVX Sales Office for the latest specifications.  
+* All statements, information and data given herein are believed to be accurate 
+* and reliable, 
+* but are presented without guarantee, warranty, or responsibility of any kind, 
+* expressed or implied.  
+* Statements or suggestions concerning possible use of our product are made 
+* without responsibility or warranty that any such use is free of patent 
+* infringement and are not recommendations to infringe any patent.
+* The user should not assume that all safety measures are indicated or that 
+* other measures are indicated or that measures may not be required.  
+* Specifications are typical and may not apply to all applications.
+*
+*$
+.SUBCKT LGA 1 5 PARAMS: PC1=1n PR1=1n PR2=1n PL1=1n PL2=1n
+C_PC1 1 2 {PC1}
+R_PR1 2 3 {PR1}
+R_PR2 2 4 {PR2}
+L_PL1 3 5 {PL1}
+L_PL2 4 5 {PL2}
+.ENDS
+*$
+.SUBCKT LG126D103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126D223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126D473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126D104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124D103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124D223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124D473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124D104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126Z103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126Z223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126Z473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126Z104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124Z103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124Z223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124Z473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124Z104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126W103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126W223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126W473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG126W104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124W103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124W223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124W473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG124W104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT LG22ZC103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226C103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224C103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226D103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226D223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226D473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226D104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226D224MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224D103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224D223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224D473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224D104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224D224MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224D334MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=330N PR1=7.5M PR2=77.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224D474MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=470N PR1=6.5M PR2=66.8M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226Z103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226Z223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226Z473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226Z104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z224MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z334MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=330N PR1=7.5M PR2=77.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z474MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=470N PR1=6.5M PR2=66.8M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z105MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=1U PR1=4.4M PR2=45.1M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224Z225MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=2.2U PR1=2.1M PR2=20.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226W103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226W223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226W473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG226W104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224W103MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224W223MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224W473MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224W104MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224W224MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224W334MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=330N PR1=7.5M PR2=77.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LG224W474MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=470N PR1=6.5M PR2=66.8M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT LGC26D105MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=1U PR1=7.2M PR2=52M PL1=140.8P PL2=70.8P
+.ENDS
+*$
+.SUBCKT LGC24D225MAT2S1 1 2
+X1 1 2 LGA PARAMS: PC1=2.2U PR1=3.9M PR2=35M PL1=142.2P PL2=71.1P
+.ENDS
+*$
+
+
+
+*File: LGASNPB.lib
+* AVX, Inc.
+* July 2015
+*
+* Copyright © 2015 AVX Corporation. All rights reserved.
+*
+* The following library is a collection of SPICE models for the AVX
+* PGA Low Inductance Ceramic Capacitors. The models in this library
+* are composed of passive networks of 5 components: 1 capacitor, 
+* 2 resistors, and 2 inductors. The parallel parasitic branch provides
+* multiple current paths depending on input signal frequency, and 
+* allows for more accurate simulations
+*
+* Please note that while the models in this library are all ceramic
+* capacitors composed of X7R dielectric, the temperature and DC Bias
+* data has not been incorporated into the models. Any data on Temperature,
+* DC Bias, etc. can be requested from AVX, Inc.
+*
+* Each of the models is based on the following schematic:
+*
+*                            |-------|     |-------|
+*                      |-----|  PR1  |-----|  PL1  |-----|
+*          | |         |     |-------|     |-------|     |
+*  O-------| |---------|                                 |-----O
+*          | |         |     |-------|     |-------|     |
+*          PC1         |-----|  PR2  |-----|  PL2  |-----|
+*                            |-------|     |-------|
+*
+* Where PC1 is the ideal capacitance, PR1 and PR2 are the Equivalent Series
+* Resistances, and PL1 and PL2 are the parasitic inductances.
+*
+* NOTICE: Please note that all models in this library are intended to be used
+* as a guide to illustrate an approximation of the devices in question.
+* AVX takes no liability for any device failure or incident that may occur
+* from designs based on simulation results. This library does not account for
+* temperature dependence, part tolerance, or any bias of any sort.
+*
+* Specifications are subject to change without notice.  
+* Contact your nearest AVX Sales Office for the latest specifications.  
+* All statements, information and data given herein are believed to be accurate 
+* and reliable, 
+* but are presented without guarantee, warranty, or responsibility of any kind, 
+* expressed or implied.  
+* Statements or suggestions concerning possible use of our product are made 
+* without responsibility or warranty that any such use is free of patent 
+* infringement and are not recommendations to infringe any patent.
+* The user should not assume that all safety measures are indicated or that 
+* other measures are indicated or that measures may not be required.  
+* Specifications are typical and may not apply to all applications.
+*
+*$
+.SUBCKT PGA 1 5 PARAMS: PC1=1n PR1=1n PR2=1n PL1=1n PL2=1n
+C_PC1 1 2 {PC1}
+R_PR1 2 3 {PR1}
+R_PR2 2 4 {PR2}
+L_PL1 3 5 {PL1}
+L_PL2 4 5 {PL2}
+.ENDS
+*$
+.SUBCKT PG126D103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126D223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126D473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126D104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124D103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124D223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124D473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124D104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126Z103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126Z223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126Z473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126Z104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124Z103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124Z223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124Z473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124Z104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126W103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126W223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126W473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG126W104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124W103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=50M PR2=850M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124W223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=27M PR2=380M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124W473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=16M PR2=150M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG124W104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=9.2M PR2=114M PL1=62P PL2=72P
+.ENDS
+*$
+.SUBCKT PG22ZC103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226C103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224C103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226D103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226D223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226D473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226D104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226D224MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224D103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224D223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224D473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224D104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224D224MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224D334MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=330N PR1=7.5M PR2=77.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224D474MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=470N PR1=6.5M PR2=66.8M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226Z103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226Z223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226Z473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226Z104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z224MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z334MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=330N PR1=7.5M PR2=77.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z474MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=470N PR1=6.5M PR2=66.8M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z105MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=1U PR1=4.4M PR2=45.1M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224Z225MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=2.2U PR1=2.1M PR2=20.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226W103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226W223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226W473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG226W104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224W103MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=10N PR1=66.1M PR2=675.9M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224W223MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=22N PR1=38.5M PR2=394.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224W473MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=47N PR1=22M PR2=225.3M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224W104MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=100N PR1=13.2M PR2=135.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224W224MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=220N PR1=8.7M PR2=89M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224W334MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=330N PR1=7.5M PR2=77.2M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PG224W474MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=470N PR1=6.5M PR2=66.8M PL1=75P PL2=65P
+.ENDS
+*$
+.SUBCKT PGC26D105MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=1U PR1=7.2M PR2=52M PL1=140.8P PL2=70.8P
+.ENDS
+*$
+.SUBCKT PGC24D225MAB2S1 1 2
+X1 1 2 PGA PARAMS: PC1=2.2U PR1=3.9M PR2=35M PL1=142.2P PL2=71.1P
+.ENDS
+*$
+
+
+*FILE IDC.lib
+* AVX, Inc.
+* July 2015
+*
+* The following library is a collection of SPICE models for the AVX
+* LGA Low Inductance Ceramic Capacitors. The models in this library
+* are composed of passive networks of 5 components: 1 capacitor, 
+* 2 resistors, and 2 inductors. The parallel parasitic branch provides
+* multiple current paths depending on input signal frequency, and 
+* allows for more accurate simulations
+*
+* Please note that while the models in this library are all ceramic
+* capacitors composed of X7R dielectric, the temperature and DC Bias
+* data has not been incorporated into the models. Any data on Temperature,
+* DC Bias, etc. can be requested from AVX, Inc.
+*
+* Each of the models is based on the following schematic:
+*
+*                            |-------|     |-------|
+*                      |-----|  PR1  |-----|  PL1  |-----|
+*          | |         |     |-------|     |-------|     |
+*  O-------| |---------|                                 |-----O
+*          | |         |     |-------|     |-------|     |
+*          PC1         |-----|  PR2  |-----|  PL2  |-----|
+*                            |-------|     |-------|
+*
+* Where PC1 is the ideal capacitance, PR1 and PR2 are the Equivalent Series
+* Resistances, and PL1 and PL2 are the parasitic inductances.
+*
+* Note that the physical connections on an IDC differ greatly from an
+* LGA or MLCC. The IDC is generally laid out in the following fashion:
+*
+* |--| |--| |--| |--| |--|
+* |  |-|  |+|  |-|  |+|  |
+* |                      |
+* |  |+|  |-|  |+|  |-|  |
+* |--| |--| |--| |--| |--|
+*
+* For these models, all the terminals in the above image marked with a
+* '+' are connected to a single node, as are all the terminals marked
+* with a '-'. In this way, the SPICE model only requires two nodes, but
+* board layout must accommodate the eight terminal device.
+*
+*$
+.SUBCKT IDC 1 5 PARAMS: PC1=1n PR1=1n PR2=1n PL1=1n PL2=1n
+C_PC1 1 2 {PC1}
+R_PR1 2 3 {PR1}
+R_PR2 2 4 {PR2}
+L_PL1 3 5 {PL1}
+L_PL2 4 5 {PL2}
+.ENDS
+*$
+.SUBCKT W1L14C105MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=1000n PR1=4.2m PR2=93.3m PL1=97.9p PL2=59.7p
+.ENDS
+*$
+.SUBCKT W2L13C103MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=10n PR1=45.2m PR2=757.5m PL1=65p PL2=155p
+.ENDS
+*$
+.SUBCKT W2L13C103MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=10n PR1=137.6m PR2=3321.2m PL1=82.6p PL2=370p
+.ENDS
+*$
+.SUBCKT W2L13C223MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=22n PR1=32m PR2=535.5m PL1=65p PL2=155p
+.ENDS
+*$
+.SUBCKT W2L13C223MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=22n PR1=79.2m PR2=1911.3m PL1=82.6p PL2=370p
+.ENDS
+*$
+.SUBCKT W2L13C333MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=33n PR1=26.8m PR2=448m PL1=65p PL2=155p
+.ENDS
+*$
+.SUBCKT W2L13C333MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=33n PR1=59.6m PR2=1438.6m PL1=82.6p PL2=370p
+.ENDS
+*$
+.SUBCKT W2L1YC473MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=47n PR1=22.9m PR2=383.5m PL1=65p PL2=155p
+.ENDS
+*$
+.SUBCKT W2L13C473MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=47n PR1=46.5m PR2=1122.8m PL1=82.6p PL2=370p
+.ENDS
+*$
+.SUBCKT W2L1YC683MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=68n PR1=19.5m PR2=326m PL1=65p PL2=155p
+.ENDS
+*$
+.SUBCKT W2L1YC683MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=68n PR1=35.9m PR2=866.7m PL1=82.6p PL2=370p
+.ENDS
+*$
+.SUBCKT W2L1YC104MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=100n PR1=16.4m PR2=275.1m PL1=65p PL2=155p
+.ENDS
+*$
+.SUBCKT W2L1YC104MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=100n PR1=29.3m PR2=706.6m PL1=75p PL2=200p
+.ENDS
+*$
+.SUBCKT W2L1YC224MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=220n PR1=11.6m PR2=194.5m PL1=83p PL2=94p
+.ENDS
+*$
+.SUBCKT W2L1ZC224MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=220n PR1=14.5m PR2=350m PL1=75p PL2=200p
+.ENDS
+*$
+.SUBCKT W2L1ZC334MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=330n PR1=9.7m PR2=162.7m PL1=83p PL2=94p
+.ENDS
+*$
+.SUBCKT W2L1ZC334MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=330n PR1=11.9m PR2=286.5m PL1=75p PL2=200p
+.ENDS
+*$
+.SUBCKT W2L1ZC474MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=470n PR1=8.3m PR2=139.3m PL1=83p PL2=94p
+.ENDS
+*$
+.SUBCKT W2L1ZC474MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=470n PR1=9.7m PR2=234.2m PL1=75p PL2=200p
+.ENDS
+*$
+.SUBCKT W2L1ZC684MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=680n PR1=7.1m PR2=118.4m PL1=83p PL2=94p
+.ENDS
+*$
+.SUBCKT W2L14C684MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=680n PR1=7.9m PR2=191.9m PL1=70p PL2=95p
+.ENDS
+*$
+.SUBCKT W2L1ZC105MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=1000n PR1=6m PR2=99.9m PL1=85p PL2=95p
+.ENDS
+*$
+.SUBCKT W2L14C105MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=1000n PR1=5.5m PR2=131.7m PL1=70p PL2=95p
+.ENDS
+*$
+.SUBCKT W2L14C225MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=2200n PR1=4.2m PR2=70.7m PL1=88.1p PL2=96.5p
+.ENDS
+*$
+.SUBCKT W2L14C225MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=2200n PR1=3.1m PR2=75.8m PL1=70p PL2=95p
+.ENDS
+*$
+.SUBCKT W3L1YC473MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=47n PR1=19.9m PR2=232.1m PL1=91.5p PL2=183p
+.ENDS
+*$
+.SUBCKT W3L1YC104MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=100n PR1=15.1m PR2=176.5m PL1=91.5p PL2=183p
+.ENDS
+*$
+.SUBCKT W3L1YC104MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=100n PR1=18.2m PR2=496.1m PL1=85p PL2=205p
+.ENDS
+*$
+.SUBCKT W3L1YC224MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=220n PR1=11.4m PR2=132.6m PL1=91.5p PL2=183p
+.ENDS
+*$
+.SUBCKT W3L1YC224MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=220n PR1=12.5m PR2=340m PL1=85p PL2=205p
+.ENDS
+*$
+.SUBCKT W3L1YC334MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=330n PR1=9.8m PR2=114.4m PL1=91.5p PL2=183p
+.ENDS
+*$
+.SUBCKT W3L1YC334MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=330n PR1=10.3m PR2=280m PL1=85p PL2=205p
+.ENDS
+*$
+.SUBCKT W3L1YC474MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=470n PR1=8.6m PR2=100.6m PL1=91.5p PL2=183p
+.ENDS
+*$
+.SUBCKT W3L1ZC474MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=470n PR1=8.7m PR2=236.3m PL1=85p PL2=205p
+.ENDS
+*$
+.SUBCKT W3L1YC684MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=680n PR1=7.5m PR2=88m PL1=105p PL2=140p
+.ENDS
+*$
+.SUBCKT W3L16C684MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=680n PR1=7.3m PR2=198m PL1=85p PL2=205p
+.ENDS
+*$
+.SUBCKT W3L16C105MAT1A 1 2 
+X1 1 2 IDC PARAMS: PC1=1000n PR1=6.6m PR2=76.5m PL1=105p PL2=140p
+.ENDS
+*$
+.SUBCKT W3L16C105MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=1000n PR1=6.1m PR2=164.6m PL1=100p PL2=155p
+.ENDS
+*$
+.SUBCKT W3L14C225MAT1S 1 2 
+X1 1 2 IDC PARAMS: PC1=2200n PR1=4.1m PR2=112.8m PL1=123p PL2=120p
+.ENDS
+*$
+
+
+*FILE LICC.lib
+* AVX, Inc.
+* July 2015
+*
+* The following library is a collection of SPICE models for the AVX
+* LICC Low Inductance Ceramic Capacitors. The models in this library
+* are composed of passive networks of 5 components: 1 capacitor, 
+* 2 resistors, and 2 inductors. The parallel parasitic branch provides
+* multiple current paths depending on input signal frequency, and 
+* allows for more accurate simulations
+*
+* Please note that while the models in this library are all ceramic
+* capacitors composed of X7R dielectric, the temperature and DC Bias
+* data has not been incorporated into the models. Any data on Temperature,
+* DC Bias, etc. can be requested from AVX, Inc.
+*
+* Each of the models is based on the following schematic:
+*
+*                            |-------|     |-------|
+*                      |-----|  PR1  |-----|  PL1  |-----|
+*          | |         |     |-------|     |-------|     |
+*  O-------| |---------|                                 |-----O
+*          | |         |     |-------|     |-------|     |
+*          PC1         |-----|  PR2  |-----|  PL2  |-----|
+*                            |-------|     |-------|
+*
+* Where PC1 is the ideal capacitance, PR1 and PR2 are the Equivalent Series
+* Resistances, and PL1 and PL2 are the parasitic inductances.
+*
+*$
+.SUBCKT LICC 1 5 PARAMS: PC1=1n PR1=1n PR2=1n PL1=1n PL2=1n
+C_PC1 1 2 {PC1}
+R_PR1 2 3 {PR1}
+R_PR2 2 4 {PR2}
+L_PL1 3 5 {PL1}
+L_PL2 4 5 {PL2}
+.ENDS
+*$
+.SUBCKT 03063C102KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=1n PR1=153.04m PR2=5008.44m PL1=150p PL2=75p
+.ENDS
+*$
+.SUBCKT 03063C222KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=2.2n PR1=3191.09m PR2=97.51m PL1=150p PL2=75p
+.ENDS
+*$
+.SUBCKT 03063C332KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=3.3n PR1=2530.9m PR2=75.3m PL1=150p PL2=75p
+.ENDS
+*$
+.SUBCKT 03063C472KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=4.7n PR1=2067.59m PR2=63.18m PL1=150p PL2=75p
+.ENDS
+*$
+.SUBCKT 03063C682KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=6.8n PR1=1674m PR2=51.2m PL1=150p PL2=75p
+.ENDS
+*$
+.SUBCKT 03063C103KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=10n PR1=1342.77m PR2=41.03m PL1=150p PL2=75p
+.ENDS
+*$
+.SUBCKT 03063C223KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=22n  PR1=855.54m PR2=26.14m PL1=122p PL2=85p
+.ENDS
+*$
+.SUBCKT 03063C333KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=33n  PR1=678.5m PR2=20.7m PL1=122p PL2=85p
+.ENDS
+*$
+.SUBCKT 03063C473KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=47n  PR1=554.32m PR2=16.94m PL1=122p PL2=85p
+.ENDS
+*$
+.SUBCKT 03063C683KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=68n  PR1=448.8m PR2=13.71m PL1=122p PL2=85p
+.ENDS
+*$
+.SUBCKT 03063C104KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=100n   PR1=360m PR2=11m PL1=105p PL2=95p
+.ENDS
+*$
+.SUBCKT 03063C224KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=220n PR1=229.37m PR2=7.01m PL1=105p PL2=95p
+.ENDS
+*$
+.SUBCKT 03063C334KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=330n PR1=181.9m PR2=5.6m PL1=105p PL2=95p
+.ENDS
+*$
+.SUBCKT 03063C474KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=470n PR1=148.62m PR2=4.54m PL1=105p PL2=95p
+.ENDS
+*$
+.SUBCKT 03063C684KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=680n PR1=1203m PR2=3.7m PL1=105p PL2=95p
+.ENDS
+*$
+.SUBCKT 03063C105KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=1000n PR1=96.52m PR2=2.95m PL1=105p PL2=95p
+.ENDS
+*$
+.SUBCKT 05083C104KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=100n PR1=697.92m PR2=24.84m PL1=110p PL2=132p
+.ENDS
+*$
+.SUBCKT 05083C224KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=220n PR1=340m PR2=12.1m PL1=110p PL2=132p
+.ENDS
+*$
+.SUBCKT 05083C334KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=330n PR1=234.9m PR2=8.4m PL1=110p PL2=132p
+.ENDS
+*$
+.SUBCKT 05083C474KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=470n PR1=170.13m PR2=6.05m PL1=92p PL2=180p
+.ENDS
+*$
+.SUBCKT 05083C684KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=680n PR1=121.47m PR2=4.32m PL1=92p PL2=180p
+.ENDS
+*$
+.SUBCKT 05083C105KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=1000n PR1=85.45m PR2=3.04m PL1=75p PL2=300p
+.ENDS
+*$
+.SUBCKT 05083C155KAT 1 2 
+X1 1 2 LICC PARAMS: PC1=1500n PR1=59.03m PR2=2.1m PL1=75p PL2=300p
+.ENDS
+*$
+
+
+*FILE AutomotiveCapGuard.lib
+* AVX, Inc.
+* August 2015
+*
+* The following library is a collection of SPICE models for the AVX
+* CapGuard series multilayer varistors. The models in this library are
+* comprised of a passive network of ten components, as well as a
+* diode and voltage-dependent voltage source, which acts as the active
+* component of the varistor.
+*
+* The entire network is laid out as follows:
+*
+*             |-------|     |-------|           |\\\\\\ |     /------\
+*       |-----|  PR1  |-----|  PL1  |-----|-----|  D1  >|----|   E1   |----|
+*       |     |-------|     |-------|     |     |////// |     \------/     |
+* O-----|                                 |                                |-----O
+*       |     |-------|     |-------|     |               ||PC1            |
+*       |-----|  PR2  |-----|  PL2  |-----|---------------||---------------|
+*             |-------|     |-------|                     ||
+*
+* The network of passive components is intended to give correct frequency response
+* characteristics, as well as providing realistic transient output. The active
+* portion of the circuit (diode + voltage source) provides the characteristic
+* V-I relationship seen in all varistors.
+*
+* All models are based on typical data. Actual measurements may vary.
+*
+* NOTICE: Please note that all models in this library are intended to be used
+* as a guide to illustrate an approximation of the devices in question.
+* AVX takes no liability for any device failure or incident that may occur
+* from designs based on simulation results. Take extreme care when using
+* this library that the current and voltage levels seen by the varistor
+* are reasonable. This library does not account for temperature dependence,
+* part tolerance, or any bias of any sort. This part is not energy-restricted,
+* as real varistors are. Over-current failure is not modelled in this library.
+*
+* Specifications are subject to change without notice.  
+* Contact your nearest AVX Sales Office for the latest specifications.  
+* All statements, information and data given herein are believed to be accurate 
+* and reliable, 
+* but are presented without guarantee, warranty, or responsibility of any kind, 
+* expressed or implied.  
+* Statements or suggestions concerning possible use of our product are made 
+* without responsibility or warranty that any such use is free of patent 
+* infringement and are not recommendations to infringe any patent.
+* The user should not assume that all safety measures are indicated or that 
+* other measures are indicated or that measures may not be required.  
+* Specifications are typical and may not apply to all applications.
+*
+*$
+.SUBCKT CAPGUARD 1 2 PARAMS: PR1=1N PR2=1N PL1=1N PL2=1N PC1=1N DRS=1M B=0
+R1 1 3 {PR1}
+R2 1 4 {PR2}
+L1 3 7 {PL1}
+L2 4 7 {PL2}
+C1 7 2 {PC1}
+D1 7 9 DIODE
+.model DIODE D(bv=0.24 RS={DRS})
+E1 9 2 value={V(7,9)*B-V(1,7)}
+.ENDS
+*$
+.SUBCKT MV1018J123MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.056 PR2=2.69 PL1=484P PL2=703P PC1=12.3N DRS=4.919M B=39.112
+.ENDS
+*$
+.SUBCKT MV1018J473MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.049 PR2=1.065 PL1=441P PL2=393P PC1=45.5N DRS=4.919M B=39.112
+.ENDS
+*$
+.SUBCKT MV1018J104MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.575 PR2=0.019 PL1=470P PL2=496P PC1=104N DRS=4.919M B=39.112
+.ENDS
+*$
+.SUBCKT MV1026H123MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.056 PR2=2.69 PL1=484P PL2=703P PC1=12.3N DRS=4.055M B=52.1
+.ENDS
+*$
+.SUBCKT MV1026H473MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.049 PR2=1.065 PL1=441P PL2=393P PC1=45.5N DRS=4.055M B=52.1
+.ENDS
+*$
+.SUBCKT MV1026H104MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.575 PR2=0.019 PL1=470P PL2=496P PC1=104N DRS=4.055M B=52.1
+.ENDS
+*$
+.SUBCKT MV1048H123MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.056 PR2=2.69 PL1=484P PL2=703P PC1=12.3N DRS=2.191M B=97.139
+.ENDS
+*$
+.SUBCKT MV1048H473MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.049 PR2=1.065 PL1=441P PL2=393P PC1=45.5N DRS=2.191M B=97.139
+.ENDS
+*$
+.SUBCKT MV1048H104MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.575 PR2=0.019 PL1=470P PL2=496P PC1=104N DRS=2.191M B=97.139
+.ENDS
+*$
+.SUBCKT MV1060J123MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.056 PR2=2.69 PL1=484P PL2=703P PC1=12.3N DRS=2.567M B=119.092
+.ENDS
+*$
+.SUBCKT MV1060J473MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.049 PR2=1.065 PL1=441P PL2=393P PC1=45.5N DRS=2.567M B=119.092
+.ENDS
+*$
+.SUBCKT MV1060J104MAA1 1 2
+X1 1 2 CAPGUARD PARAMS: PR1=0.575 PR2=0.019 PL1=470P PL2=496P PC1=104N DRS=2.567M B=119.092
+.ENDS
+*$
+
+*FILE AutomotiveTransGuard.lib
+* AVX, Inc.
+* August 2015
+*
+* The following library is a collection of SPICE models for the AVX
+* TransGuard series multilayer varistors. The models in this library are
+* comprised of a passive network of five components, as well as a
+* diode and voltage-dependent voltage source, which acts as the active
+* component of the varistor.
+*
+* The entire network is laid out as follows:
+*
+*             |-------|     |-------|           |\\\\\\ |     /----\
+*       |-----|  PR1  |-----|  PL1  |-----|-----|  D1  >|----|  E1  |----|
+*       |     |-------|     |-------|     |     |////// |     \----/     |
+* O-----|                                 |                              |-----O
+*       |     |-------|     |-------|     |              ||PC1           |
+*       |-----|  PR2  |-----|  PL2  |-----|--------------||--------------|
+*             |-------|     |-------|                    ||
+*
+* The network of passive components is intended to give correct frequency response
+* characteristics, as well as providing realistic transient output. The active
+* portion of the circuit (diode + voltage source) provides the characteristic
+* V-I relationship seen in all varistors.
+*
+* All models are based on typical data. Actual measurements may vary.
+*
+* NOTICE: Please note that all models in this library are intended to be used
+* as a guide to illustrate an approximation of the devices in question.
+* AVX takes no liability for any device failure or incident that may occur
+* from designs based on simulation results. Take extreme care when using
+* this library that the current and voltage levels seen by the varistor
+* are reasonable. This library does not account for temperature dependence,
+* part tolerance, or any bias of any sort. This part is not energy-restricted,
+* as real varistors are. Over-current failure is not modelled in this library.
+*
+* DEVICES SHOULD NOT EXCEED PEAK CURRENT, AS SPECIFIED IN DATASHEET
+*
+* Specifications are subject to change without notice.  
+* Contact your nearest AVX Sales Office for the latest specifications.  
+* All statements, information and data given herein are believed to be accurate 
+* and reliable, 
+* but are presented without guarantee, warranty, or responsibility of any kind, 
+* expressed or implied.  
+* Statements or suggestions concerning possible use of our product are made 
+* without responsibility or warranty that any such use is free of patent 
+* infringement and are not recommendations to infringe any patent.
+* The user should not assume that all safety measures are indicated or that 
+* other measures are indicated or that measures may not be required.  
+* Specifications are typical and may not apply to all applications.
+*
+*$
+.SUBCKT TRANSGUARD 1 2 PARAMS: PR1=1N PR2=1N PL1=1N PL2=1N PC1=1N DRS=1M B=0
+R1 1 3 {PR1}
+R2 1 4 {PR2}
+L1 3 5 {PL1}
+L2 4 5 {PL2}
+CP 5 2 {PC1}
+D1 5 6 DIODE
+.model DIODE D(bv=0.24 RS={DRS})
+E1 6 2 value={V(5,6)*B-V(1,5)}
+.ENDS
+*$
+.SUBCKT VCAS040205X150 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=435M PR2=413M PL1=586P PL2=590P PC1=208P DRS=74.716M B=11.617
+.ENDS
+*$
+.SUBCKT VCAS060305A150 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=19374M PR2=89M PL1=1703P PL2=508P PC1=523P DRS=34.968M B=13.667
+.ENDS
+*$
+.SUBCKT VCAS080505A150 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=177M PR2=71M PL1=1041P PL2=983P PC1=1046P DRS=16.893M B=13.667
+.ENDS
+*$
+.SUBCKT VCAS080505C150 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=3528M PR2=13M PL1=476P PL2=434P PC1=1760P DRS=6.612M B=13.667
+.ENDS
+*$
+.SUBCKT VCAS120605A150 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=2750M PR2=12M PL1=4398P PL2=1026P PC1=1397P DRS=15.839M B=15.14
+.ENDS
+*$
+.SUBCKT VCAS120605D150 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=210M PR2=69M PL1=2128P PL2=692P PC1=2387P DRS=20.297M B=14.137
+.ENDS
+*$
+.SUBCKT VCAS040209X200 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=357M PR2=360M PL1=624P PL2=605P PC1=132P DRS=51.591M B=16.634
+.ENDS
+*$
+.SUBCKT VCAS060309A200 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=16353M PR2=61M PL1=1273P PL2=406P PC1=551P DRS=16.394M B=19.741
+.ENDS
+*$
+.SUBCKT VCAS080509A200 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=7927M PR2=49M PL1=1296P PL2=540P PC1=595P DRS=16.631M B=21.259
+.ENDS
+*$
+.SUBCKT VCAS080512A250 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=82M PR2=369M PL1=1772P PL2=610P PC1=360P DRS=21.197M B=25.815
+.ENDS
+*$
+.SUBCKT VCAS040214X300 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=509M PR2=969M PL1=556P PL2=607P PC1=78P DRS=44.673M B=23.598
+.ENDS
+*$
+.SUBCKT VCAS060314A300 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=297M PR2=207M PL1=3752P PL2=580P PC1=242P DRS=17.638M B=28.852
+.ENDS
+*$
+.SUBCKT VCAS080514A300 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=124M PR2=330M PL1=2497P PL2=664P PC1=316P DRS=18.475M B=28.092
+.ENDS
+*$
+.SUBCKT VCAS080514C300 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=295M PR2=271M PL1=1033P PL2=801P PC1=582P DRS=6.42M B=28.852
+.ENDS
+*$
+.SUBCKT VCAS120614A300 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=637M PR2=250M PL1=1619P PL2=1148P PC1=523P DRS=17.899M B=29.98
+.ENDS
+*$
+.SUBCKT VCAS120614D300 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=481M PR2=46M PL1=1252P PL2=1001P PC1=955P DRS=10.828M B=30.188
+.ENDS
+*$
+.SUBCKT VCAS060316B400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=452M PR2=125M PL1=726P PL2=1066P PC1=185P DRS=13.017M B=36.444
+.ENDS
+*$
+.SUBCKT VCAS120616K380 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=378M PR2=103M PL1=2939P PL2=736P PC1=1065P DRS=17.942M B=39.299
+.ENDS
+*$
+.SUBCKT VGAS120616K390 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=103M PR2=112M PL1=1942P PL2=916P PC1=1076P DRS=6.166M B=38.115
+.ENDS
+*$
+.SUBCKT VGAS120616N390 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=133M PR2=118M PL1=2210P PL2=1069P PC1=1290P DRS=5.271M B=39.178
+.ENDS
+*$
+.SUBCKT VCAS121016J390 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4203M PR2=10M PL1=260P PL2=604P PC1=2361P DRS=4.919M B=39.112
+.ENDS
+*$
+.SUBCKT VGAS121016J400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=0.069 PR2=0.071 PL1=1512P PL2=1525P PC1=2.115N DRS=5.216M B=34.926
+.ENDS
+*$
+.SUBCKT VGAS181216P390 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=27M PR2=46M PL1=1571P PL2=2680P PC1=7230P DRS=5.339M B=39.329
+.ENDS
+*$
+.SUBCKT VGAS181216P400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4970M PR2=2.3M PL1=186P PL2=808P PC1=4104P DRS=3.035M B=39.481
+.ENDS
+*$
+.SUBCKT VGAS222016Y400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=16M PR2=101M PL1=788P PL2=4581P PC1=12887P DRS=3.947M B=38.57
+.ENDS
+*$
+.SUBCKT VCAS040218X400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=1185M PR2=342M PL1=569P PL2=629P PC1=52P DRS=47.010M B=31.946
+.ENDS
+*$
+.SUBCKT VCAS060318A400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=452M PR2=125M PL1=726P PL2=1066P PC1=185P DRS=13.017M B=36.444
+.ENDS
+*$
+.SUBCKT VCAS080518A400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=600M PR2=430M PL1=1301P PL2=880P PC1=257P DRS=11.328M B=39.481
+.ENDS
+*$
+.SUBCKT VCAS080518C400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=471M PR2=303M PL1=877P PL2=740P PC1=351P DRS=6.031M B=41
+.ENDS
+*$
+.SUBCKT VCAS120618A400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=230M PR2=444M PL1=1234P PL2=1006P PC1=417P DRS=22.146M B=40.291
+.ENDS
+*$
+.SUBCKT VCAS120618D400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=463M PR2=124M PL1=2790P PL2=722P PC1=817P DRS=8.172M B=38.494
+.ENDS
+*$
+.SUBCKT VGAS120618D400 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=103.6M PR2=112.2M PL1=1942P PL2=916P PC1=1.076N DRS=6.166M B=38.115
+.ENDS
+*$
+.SUBCKT VCAS120618E380 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=378M PR2=103M PL1=2939P PL2=736P PC1=1065P DRS=8.27M B=39.128
+.ENDS
+*$
+.SUBCKT VCAS121018J390 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4203M PR2=10M PL1=261P PL2=604P PC1=2361P DRS=4.919M B=39.112
+.ENDS
+*$
+.SUBCKT VGAS181218P440 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4970M PR2=2.3M PL1=186P PL2=808P PC1=4104P DRS=3.225M B=41.759
+.ENDS
+*$
+.SUBCKT VCAS060326A580 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=122M PR2=889M PL1=985P PL2=627P PC1=109P DRS=16.78M B=53.148
+.ENDS
+*$
+.SUBCKT VCAS080526A580 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=1185M PR2=1155M PL1=1126P PL2=887P PC1=94P DRS=20.543M B=53.148
+.ENDS
+*$
+.SUBCKT VCAS080526C580 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=493M PR2=325M PL1=1123P PL2=715P PC1=252P DRS=5.372M B=56.185
+.ENDS
+*$
+.SUBCKT VCAS120626D580 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=227M PR2=286M PL1=1597P PL2=1047P PC1=382P DRS=8.498M B=53.74
+.ENDS
+*$
+.SUBCKT VCAS120626F540 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=775M PR2=115M PL1=9804P PL2=870P PC1=707P DRS=5.198M B=51.831
+.ENDS
+*$
+.SUBCKT VGAS120626F540 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=162.4M PR2=149.7M PL1=1067.3P PL2=4342.7P PC1=540.9P DRS=5.676M B=52.389
+.ENDS
+*$
+.SUBCKT VCAS121026H560 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=126M PR2=124M PL1=1189P PL2=1091P PC1=1547P DRS=4.055M B=52.1
+.ENDS
+*$
+.SUBCKT VGAS121026H560 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=71.8M PR2=89.7M PL1=1334P PL2=1045P PC1=1.384N DRS=4.194 B=52.389
+.ENDS
+*$
+.SUBCKT VGAS181226P570 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=67M PR2=73.2M PL1=2033P PL2=2097P PC1=3.084N DRS=3.308M B=51.933
+.ENDS
+*$
+.SUBCKT VGAS222026Y570 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=41M PR2=41M PL1=1610P PL2=1640P PC1=6894P DRS=2.994M B=52.237
+.ENDS
+*$
+.SUBCKT VCAS060330A650 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=347M PR2=446M PL1=979P PL2=596P PC1=119P DRS=14.623M B=62.259
+.ENDS
+*$
+.SUBCKT VCAS080530A650 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=603M PR2=511M PL1=1075P PL2=1211P PC1=108P DRS=13.017M B=66.815
+.ENDS
+*$
+.SUBCKT VCAS080530C650 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=358M PR2=604M PL1=634P PL2=1097P PC1=210P DRS=4.955M B=63.778
+.ENDS
+*$
+.SUBCKT VCAS120630D650 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=257M PR2=280M PL1=1001P PL2=2079P PC1=337P DRS=8.805M B=61.246
+.ENDS
+*$
+.SUBCKT VCAS121030H620 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=123M PR2=107M PL1=1135P PL2=998P PC1=1388P DRS=4.222M B=61.075
+.ENDS
+*$
+.SUBCKT VGAS121030H620 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=79.9M PR2=83.1M PL1=1645P PL2=1002P PC1=1.246N DRS=3.55M B=65.296
+.ENDS
+*$
+.SUBCKT VCAS121030S620 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=123M PR2=107M PL1=1135P PL2=998P PC1=1388P DRS=3.911M B=63.094
+.ENDS
+*$
+.SUBCKT VCAS080531C650 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=358M PR2=604M PL1=634P PL2=1097P PC1=210P DRS=4.955M B=63.778
+.ENDS
+*$
+.SUBCKT VCAS120631M650 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=157M PR2=373M PL1=1267P PL2=2140P PC1=522P DRS=5.81M B=61.652
+.ENDS
+*$
+.SUBCKT VGAS181231P650 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=175M PR2=34M PL1=3398P PL2=1666P PC1=2754P DRS=2.802 B=61.196
+.ENDS
+*$
+.SUBCKT VCAS120634N770 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=164M PR2=589M PL1=745P PL2=2823P PC1=388P DRS=4.516M B=72.904
+.ENDS
+*$
+.SUBCKT VGAS121034S770 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=0.3M PR2=5302M PL1=603P PL2=457P PC1=907P DRS=2.565M B=74.255
+.ENDS
+*$
+.SUBCKT VGAS181234U770 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=79M PR2=106P PL1=1759P PL2=1885P PC1=1503P DRS=2.423M B=75.926
+.ENDS
+*$
+.SUBCKT VGAS222034Y770 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=54M PR2=31M PL1=1864P PL2=984P PC1=6273P DRS=2.178M B=72.737
+.ENDS
+*$
+.SUBCKT VCAS080538C770 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=383M PR2=668M PL1=598P PL2=1078P PC1=178P DRS=3.245M B=75.926
+.ENDS
+*$
+.SUBCKT VCAS120642L800 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=549M PR2=95M PL1=6231P PL2=958P PC1=581P DRS=5.45M B=80.917
+.ENDS
+*$
+.SUBCKT VCAS120642K900 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=429M PR2=564M PL1=1638P PL2=1370P PC1=252P DRS=4.458M B=92.098
+.ENDS
+*$
+.SUBCKT VGAS181242U900 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=0.0877 PR2=0.0972 PL1=1503P PL2=1654P PC1=1.892N DRS=2.429M B=86.707
+.ENDS
+*$
+.SUBCKT VCAS120645K900 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=429M PR2=564M PL1=1638P PL2=1370P PC1=252P DRS=6.023M B=88.399
+.ENDS
+*$
+*.SUBCKT VGAS120645K900 1 2
+*X1 1 2 TRANSGUARD PARAMS: PR1=195M PR2=433M PL1=2607P PL2=1083P PC1=262P DRS=5.339M B=88.074
+*.ENDS
+*$
+.SUBCKT VCAS120648D101 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=350M PR2=342M PL1=1140P PL2=1195P PC1=237P DRS=5.501M B=97.879
+.ENDS
+*$
+.SUBCKT VCAS121048H101 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=311M PR2=240M PL1=1561P PL2=1207P PC1=394P DRS=2.191M B=97.139
+.ENDS
+*$
+.SUBCKT VGAS121048H101 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=196.9M PR2=152.7M PL1=5655P PL2=11242P PC1=500.2P DRS=3.271M B=89.137
+.ENDS
+*$
+.SUBCKT VCAS120656F111 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=471M PR2=318M PL1=2445P PL2=1428P PC1=224P DRS=5.862M B=103.406
+.ENDS
+*$
+.SUBCKT VCAS120660M131 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=150M PR2=524M PL1=2109P PL2=1222P PC1=244P DRS=2.167M B=117.765
+.ENDS
+*$
+.SUBCKT VCAS121060J121 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=239M PR2=217M PL1=1238P PL2=1143P PC1=406P DRS=2.567M B=119.092
+.ENDS
+*$
+.SUBCKT VGAS121060J121 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=122M PR2=168.4M PL1=808.7P PL2=4527.2P PC1=385P DRS=2.725M B=120.266
+.ENDS
+*$
+.SUBCKT VGAS121065P131 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=315M PR2=317M PL1=1018P PL2=1047P PC1=496P DRS=2.247M B=128.314
+.ENDS
+*$
+.SUBCKT VCAS121085S151 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=518M PR2=548M PL1=1267P PL2=1190P PC1=227P DRS=2.019M B=157.196
+.ENDS
+*$
+.SUBCKT VCAS04AG183R0YAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=5.075 PR2=3.886 PL1=178.6P PL2=1648.445P PC1=1.202P DRS=654.548M B=569.442
+.ENDS
+*$
+.SUBCKT VCAS06AG182R0CAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4.859 PR2=4.848 PL1=547.1P PL2=519.3P PC1=1.934P DRS=409.618M B=721.293
+.ENDS
+*$
+.SUBCKT VCAS06AG183R0YAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4.859 PR2=4.848 PL1=547.1P PL2=519.3P PC1=1.934P DRS=409.618M B=721.293
+.ENDS
+*$
+.SUBCKT VCAS06AG18120YAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=1487M PR2=4407M PL1=958P PL2=988P PC1=13P DRS=320.888M B=189.814
+.ENDS
+*$
+.SUBCKT VCAS04LC18V500 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=880.3M PR2=1.991 PL1=374.5P PL2=949.9P PC1=36.8P DRS=40.676M B=44.064
+.ENDS
+*$
+.SUBCKT VCAS06LC18X500 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=1.086 PR2=2.449 PL1=1108.4P PL2=983.8P PC1=41.57P DRS=48.061M B=45.322
+.ENDS
+*$
+.SUBCKT VCAS08LC18X500 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=599.4M PR2=616.7M PL1=1381.61P PL2=966.4P PC1=98.4P DRS=16.587M B=45.121
+.ENDS
+*$
+
+
+*FILE AVX_Miniature-AC-Var-(MAV)_SPICE.lib
+* AVX, Inc.
+* August 2015
+*
+* The following library is a collection of SPICE models for the AVX
+* MAV series multilayer varistors. The models in this library are
+* comprised of a passive network of five components, as well as a
+* diode and voltage-dependent voltage source, which acts as the active
+* component of the varistor.
+*
+* The entire network is laid out as follows:
+*
+*             |-------|     |-------|           |\\\\\\ |     /------\
+*       |-----|  PR1  |-----|  PL1  |-----|-----|  D1  >|----|   E1   |----|
+*       |     |-------|     |-------|     |     |////// |     \------/     |
+* O-----|                                 |                                |-----O
+*       |     |-------|     |-------|     |               ||PC1            |
+*       |-----|  PR2  |-----|  PL2  |-----|---------------||---------------|
+*             |-------|     |-------|                     ||
+*
+*
+* For 2 element arrays, the node values are associated with the part terminals
+* in the following way:
+* 
+* -------------------
+* |                 |
+* ---             ---
+* |1|             |4|
+* ---             ---
+* |                 |
+* ---             ---
+* |2|             |3|
+* ---             ---
+* |                 |
+* -------------------
+* 
+* For electrical connections on these devices, the folloiwng tells how each varistor
+* is connected internally:
+* varistor between 1 and 4
+* varistor between 2 and 3
+*
+* For 4 element arrays, the node values are associated with the part terminals
+* in the following way:
+* 
+* -------------------
+* |                 |
+* ---             ---
+* |1|             |8|
+* ---             ---
+* |                 |
+* ---             ---
+* |2|             |7|
+* ---             ---
+* |                 |
+* ---             ---
+* |3|             |6|
+* ---             ---
+* |                 |
+* ---             ---
+* |4|             |5|
+* ---             ---
+* |                 |
+* -------------------
+* 
+* For electrical connections on these devices, the folloiwng tells how each varistor
+* is connected internally:
+* varistor between 1 and 8
+* varistor between 2 and 7
+* varistor between 3 and 6
+* varistor between 4 and 5
+*
+* The network of passive components is intended to give correct frequency response
+* characteristics, as well as providing realistic transient output. The active
+* portion of the circuit (diode + voltage source) provides the characteristic
+* V-I relationship seen in all varistors.
+*
+* All models are based on typical data. Actual measurements may vary.
+*
+* NOTICE: Please note that all models in this library are intended to be used
+* as a guide to illustrate an approximation of the devices in question.
+* AVX takes no liability for any device failure or incident that may occur
+* from designs based on simulation results. Take extreme care when using
+* this library that the current and voltage levels seen by the varistor
+* are reasonable. This library does not account for temperature dependence,
+* part tolerance, or any bias of any sort. This part is not energy-restricted,
+* as real varistors are. Over-current failure is not modelled in this library.
+*
+* DEVICES SHOULD NOT EXCEED PEAK CURRENT, AS SPECIFIED IN DATASHEET
+*
+* Specifications are subject to change without notice.  
+* Contact your nearest AVX Sales Office for the latest specifications.  
+* All statements, information and data given herein are believed to be accurate 
+* and reliable, 
+* but are presented without guarantee, warranty, or responsibility of any kind, 
+* expressed or implied.  
+* Statements or suggestions concerning possible use of our product are made 
+* without responsibility or warranty that any such use is free of patent 
+* infringement and are not recommendations to infringe any patent.
+* The user should not assume that all safety measures are indicated or that 
+* other measures are indicated or that measures may not be required.  
+* Specifications are typical and may not apply to all applications.
+*
+*$
+.SUBCKT SMDMLV 1 2 PARAMS: PR1=1N PR2=1N PL1=1N PL2=1N PC1=1N DRS=1M B=0
+R1 1 3 {PR1}
+R2 1 4 {PR2}
+L1 3 5 {PL1}
+L2 4 5 {PL2}
+CP 5 2 {PC1}
+D1 5 6 DIODE
+.model DIODE D(bv=0.24 RS={DRS})
+E1 6 2 value={V(5,6)*B-V(1,5)}
+.ENDS
+*$
+.SUBCKT SMDMLV2E 1 2 3 4 PARAMS: PR1=1N PR2=1N PL1=1N PL2=1N PC1=1N DRS=1M B=0
+R1 1 5 {PR1}
+R2 1 6 {PR2}
+R3 2 7 {PR1}
+R4 2 8 {PR2}
+L1 5 9 {PL1}
+L2 6 9 {PL2}
+L3 7 10 {PL1}
+L4 8 10 {PL2}
+C1 9 4 {PC1}
+C2 10 3 {PC1}
+D1 9 11 DIODE
+D2 10 12 DIODE
+.model DIODE D(bv=0.24 RS={DRS})
+E1 11 4 value={V(9,11)*B-V(1,9)}
+E2 12 3 value={V(10,12)*B-V(2,10)}
+.ENDS
+*$
+.SUBCKT MAV0010 1 2
+X1 1 2 SMDMLV PARAMS: PR1=1487M PR2=4407M PL1=958P PL2=988P PC1=13P DRS=39.270M B=197.169
+.ENDS
+*$
+.SUBCKT MAV0020 1 2 3 4
+X1 1 2 3 4 SMDMLV2E PARAMS: PR1=4.9 PR2=5.0 PL1=398.2P PL2=2514P PC1=3.43P DRS=104.393M B=182.221
+.ENDS
+*$
+.SUBCKT MAV0040 1 2
+X1 1 2 SMDMLV PARAMS: PR1=4.9 PR2=5.0 PL1=398.2P PL2=2514P PC1=3.43P DRS=138.213M B=195.888
+.ENDS
+*$
+
+*FILE AVX_L2F-L3F-SpiceModels.lib
+
+* AVX, Inc.
+* July 2015
+*
+* Copyright © 2015 AVX Corporation. All rights reserved.
+*
+* The following library is a collection of SPICE models for the AVX
+* SMT Feedthrough Filter components. The models in this library are
+* composed of a passive network of five components, 1 Capacitor, 3
+* Resistors, and 1 Inductor. This parts functions as a self-contained
+* Low pass filter, with the Series resistances, SR1 and SR2, acting as
+* a signal path, and the Parallel components, PC1, PR1, and PL1, acting
+* as a shunt path to ground for high-frequency signal elements.
+*
+* Please note that Temperature Dependencies, component tolerances, and
+* DC Bias characteristics are not included in these models. For information
+* concerning the temperature characteristics, DC bias characteristics, etc.
+* please contact AVX.
+*
+* Each of the models is based on the following schematic:
+*
+*       |-------|           |-------|
+* O-----|  SR1  |-----|-----|  SR2  |-----O
+*       |-------|     |     |-------|
+*                     |
+*                  ------- PC1
+*                  -------
+*                     |
+*                     |
+*                     |
+*                  -------
+*                  | PR1 |
+*                  -------
+*                     |
+*                     |
+*                     |
+*                  -------
+*                  | PL1 |
+*                  -------
+*                     |
+*                     |
+*                     |
+*                  ------- Ground
+*                   -----
+*                    ---
+*
+* Where SR1 and SR2 represent the copper losses in the feedthrough path,
+* PC1 represents the capacitive nature of the filter, PR1 represents the
+* Equivalent series resistance of the shunt path, and PL1 represents the
+* parasitic inductance of the shunt path.
+*
+*$
+.SUBCKT SMT_FILTER 1 5 PARAMS: SR1=1n SR2=1n PC1=1n PR1=1n PL1=1n
+R1 1 2 {SR1}
+R2 2 5 {SR2}
+R3 3 4 {PR1}
+C1 2 3 {PC1}
+L1 4 0 {PL1}
+.ENDS
+*$
+.SUBCKT L2F11A2208AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=652.5M SR2=652.5M PC1=22P PR1=167.8M PL1=75.6P
+.ENDS
+*$
+.SUBCKT L2F11A4708AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=338.8M SR2=338.8M PC1=47P PR1=84.7M PL1=79.5P
+.ENDS
+*$
+.SUBCKT L2F11A1018AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=176.5M SR2=176.5M PC1=100P PR1=42.9M PL1=83.7P
+.ENDS
+*$
+.SUBCKT L2F11A2218AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=89.4M SR2=89.4M PC1=220P PR1=21.1M PL1=88.3P
+.ENDS
+*$
+.SUBCKT L2F11A4718AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=46.4M SR2=46.4M PC1=470P PR1=10.6M PL1=92.9P
+.ENDS
+*$
+.SUBCKT L2F15C1028AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=65.5M SR2=65.5M PC1=1N PR1=141M PL1=58.2P
+.ENDS
+*$
+.SUBCKT L2F15C2228AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=48.3M SR2=48.3M PC1=2.2N PR1=89.9M PL1=63.5P
+.ENDS
+*$
+.SUBCKT L2F15C4728AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=36.1M SR2=36.1M PC1=4.7N PR1=58.3M PL1=69.2P
+.ENDS
+*$
+.SUBCKT L2F15C1038AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=27M SR2=27M PC1=10N PR1=37.8M PL1=75.2P
+.ENDS
+*$
+.SUBCKT L3F11A2208AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=1273.5M SR2=1273.5M PC1=22P PR1=205.3M PL1=82.4P
+.ENDS
+*$
+.SUBCKT L3F11A4708AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=401M SR2=401M PC1=47P PR1=82.8M PL1=83.5P
+.ENDS
+*$
+.SUBCKT L3F11A1018AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=127.1M SR2=127.1M PC1=100P PR1=33.5M PL1=84.7P
+.ENDS
+*$
+.SUBCKT L3F11A2218AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=38.3M SR2=38.3M PC1=220P PR1=13M PL1=85.8P
+.ENDS
+*$
+.SUBCKT L3F15C2228AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=148M SR2=148M PC1=2200P PR1=118.3M PL1=67.4P
+.ENDS
+*$
+.SUBCKT L3F15C4728AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=125.3M SR2=125.3M PC1=4700P PR1=74.1M PL1=69.2P
+.ENDS
+*$
+.SUBCKT L3F15C1038AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=106.2M SR2=106.2M PC1=10000P PR1=46.5M PL1=71P
+.ENDS
+*$
+.SUBCKT L3F15C2238AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=89.3M SR2=89.3M PC1=22000P PR1=28.6M PL1=72.9P
+.ENDS
+*$
+.SUBCKT L3F15C4738AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=75.6M SR2=75.6M PC1=47000P PR1=17.9M PL1=74.8P
+.ENDS
+*$
+.SUBCKT L3H11A2208AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=53.1M SR2=53.1M PC1=22P PR1=457.6M PL1=130.9P
+.ENDS
+*$
+.SUBCKT L3H11A4708AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=42.4M SR2=42.4M PC1=47P PR1=286.1M PL1=124.7P
+.ENDS
+*$
+.SUBCKT L3H11A1018AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=33.8M SR2=33.8M PC1=100P PR1=179.4M PL1=118.8P
+.ENDS
+*$
+.SUBCKT L3H11A2218AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=26.7M SR2=26.7M PC1=220P PR1=110.1M PL1=112.9P
+.ENDS
+*$
+.SUBCKT L3H11A4718AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=21.3M SR2=21.3M PC1=470P PR1=68.9M PL1=107.5P
+.ENDS
+*$
+.SUBCKT L3H15C1038AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=15.8M SR2=15.8M PC1=10000P PR1=60.5M PL1=96.9P
+.ENDS
+*$
+.SUBCKT L3H15C2238AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=13.8M SR2=13.8M PC1=22000P PR1=42.2M PL1=94.4P
+.ENDS
+*$
+.SUBCKT L3H15C4738AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=12.1M SR2=12.1M PC1=47000P PR1=29.9M PL1=92P
+.ENDS
+*$
+.SUBCKT L3H15C1048AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=10.6M SR2=10.6M PC1=100000P PR1=21.2M PL1=89.6P
+.ENDS
+*$
+
+
+*FILE AVX_W2F-W3F-SpiceModels.lib
+* AVX, Inc.
+* July 2015
+*
+* Copyright © 2015 AVX Corporation. All rights reserved.
+*
+* The following library is a collection of SPICE models for the AVX
+* SMT Feedthrough Filter components. The models in this library are
+* composed of a passive network of five components, 1 Capacitor, 3
+* Resistors, and 1 Inductor. This parts functions as a self-contained
+* Low pass filter, with the Series resistances, SR1 and SR2, acting as
+* a signal path, and the Parallel components, PC1, PR1, and PL1, acting
+* as a shunt path to ground for high-frequency signal elements.
+*
+* Please note that Temperature Dependencies, component tolerances, and
+* DC Bias characteristics are not included in these models. For information
+* concerning the temperature characteristics, DC bias characteristics, etc.
+* please contact AVX.
+*
+* Each of the models is based on the following schematic:
+*
+*       |-------|           |-------|
+* O-----|  SR1  |-----|-----|  SR2  |-----O
+*       |-------|     |     |-------|
+*                     |
+*                  ------- PC1
+*                  -------
+*                     |
+*                     |
+*                     |
+*                  -------
+*                  | PR1 |
+*                  -------
+*                     |
+*                     |
+*                     |
+*                  -------
+*                  | PL1 |
+*                  -------
+*                     |
+*                     |
+*                     |
+*                  ------- Ground
+*                   -----
+*                    ---
+*
+* Where SR1 and SR2 represent the copper losses in the feedthrough path,
+* PC1 represents the capacitive nature of the filter, PR1 represents the
+* Equivalent series resistance of the shunt path, and PL1 represents the
+* parasitic inductance of the shunt path.
+*
+*$
+.SUBCKT SMT_FILTER 1 5 PARAMS: SR1=1n SR2=1n PC1=1n PR1=1n PL1=1n
+R1 1 2 {SR1}
+R2 2 5 {SR2}
+R3 3 4 {PR1}
+C1 2 3 {PC1}
+L1 4 0 {PL1}
+.ENDS
+*$
+.SUBCKT W2F11A2208AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=652.5M SR2=652.5M PC1=22P PR1=167.8M PL1=75.6P
+.ENDS
+*$
+.SUBCKT W2F11A4708AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=338.8M SR2=338.8M PC1=47P PR1=84.7M PL1=79.5P
+.ENDS
+*$
+.SUBCKT W2F11A1018AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=176.5M SR2=176.5M PC1=100P PR1=42.9M PL1=83.7P
+.ENDS
+*$
+.SUBCKT W2F11A2218AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=89.4M SR2=89.4M PC1=220P PR1=21.1M PL1=88.3P
+.ENDS
+*$
+.SUBCKT W2F11A4718AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=46.4M SR2=46.4M PC1=470P PR1=10.6M PL1=92.9P
+.ENDS
+*$
+.SUBCKT W2F15C1028AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=65.5M SR2=65.5M PC1=1N PR1=141M PL1=58.2P
+.ENDS
+*$
+.SUBCKT W2F15C2228AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=48.3M SR2=48.3M PC1=2.2N PR1=89.9M PL1=63.5P
+.ENDS
+*$
+.SUBCKT W2F15C4728AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=36.1M SR2=36.1M PC1=4.7N PR1=58.3M PL1=69.2P
+.ENDS
+*$
+.SUBCKT W2F15C1038AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=27M SR2=27M PC1=10N PR1=37.8M PL1=75.2P
+.ENDS
+*$
+.SUBCKT W3F11A2208AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=1273.5M SR2=1273.5M PC1=22P PR1=205.3M PL1=82.4P
+.ENDS
+*$
+.SUBCKT W3F11A4708AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=401M SR2=401M PC1=47P PR1=82.8M PL1=83.5P
+.ENDS
+*$
+.SUBCKT W3F11A1018AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=127.1M SR2=127.1M PC1=100P PR1=33.5M PL1=84.7P
+.ENDS
+*$
+.SUBCKT W3F11A2218AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=38.3M SR2=38.3M PC1=220P PR1=13M PL1=85.8P
+.ENDS
+*$
+.SUBCKT W3F15C2228AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=148M SR2=148M PC1=2200P PR1=118.3M PL1=67.4P
+.ENDS
+*$
+.SUBCKT W3F15C4728AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=125.3M SR2=125.3M PC1=4700P PR1=74.1M PL1=69.2P
+.ENDS
+*$
+.SUBCKT W3F15C1038AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=106.2M SR2=106.2M PC1=10000P PR1=46.5M PL1=71P
+.ENDS
+*$
+.SUBCKT W3F15C2238AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=89.3M SR2=89.3M PC1=22000P PR1=28.6M PL1=72.9P
+.ENDS
+*$
+.SUBCKT W3F15C4738AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=75.6M SR2=75.6M PC1=47000P PR1=17.9M PL1=74.8P
+.ENDS
+*$
+.SUBCKT W3H11A2208AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=53.1M SR2=53.1M PC1=22P PR1=457.6M PL1=130.9P
+.ENDS
+*$
+.SUBCKT W3H11A4708AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=42.4M SR2=42.4M PC1=47P PR1=286.1M PL1=124.7P
+.ENDS
+*$
+.SUBCKT W3H11A1018AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=33.8M SR2=33.8M PC1=100P PR1=179.4M PL1=118.8P
+.ENDS
+*$
+.SUBCKT W3H11A2218AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=26.7M SR2=26.7M PC1=220P PR1=110.1M PL1=112.9P
+.ENDS
+*$
+.SUBCKT W3H11A4718AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=21.3M SR2=21.3M PC1=470P PR1=68.9M PL1=107.5P
+.ENDS
+*$
+.SUBCKT W3H15C1038AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=15.8M SR2=15.8M PC1=10000P PR1=60.5M PL1=96.9P
+.ENDS
+*$
+.SUBCKT W3H15C2238AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=13.8M SR2=13.8M PC1=22000P PR1=42.2M PL1=94.4P
+.ENDS
+*$
+.SUBCKT W3H15C4738AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=12.1M SR2=12.1M PC1=47000P PR1=29.9M PL1=92P
+.ENDS
+*$
+.SUBCKT W3H15C1048AT 1 2
+X1 1 2 SMT_FILTER PARAMS: SR1=10.6M SR2=10.6M PC1=100000P PR1=21.2M PL1=89.6P
+.ENDS
+*$
+
+*FILE AVX_HTLL-Auto-Var_SPICE.lib
+* AVX, Inc.
+* August 2015
+*
+* The following library is a collection of SPICE models for the AVX
+* Automotive High Temperature Low Leakage Varistor series multilayer varistors. 
+* The models in this library are comprised of a passive network of five 
+* components, as well as a diode and voltage-dependent voltage source, 
+* which acts as the active component of the varistor.
+*
+* The entire network is laid out as follows:
+*
+*             |-------|     |-------|           |\\\\\\ |     /------\
+*       |-----|  PR1  |-----|  PL1  |-----|-----|  D1  >|----|   E1   |----|
+*       |     |-------|     |-------|     |     |////// |     \------/     |
+* O-----|                                 |                                |-----O
+*       |     |-------|     |-------|     |               ||PC1            |
+*       |-----|  PR2  |-----|  PL2  |-----|---------------||---------------|
+*             |-------|     |-------|                     ||
+*
+*
+* For 2 element arrays, the node values are associated with the part terminals
+* in the following way:
+* 
+* -------------------
+* |                 |
+* ---             ---
+* |1|             |4|
+* ---             ---
+* |                 |
+* ---             ---
+* |2|             |3|
+* ---             ---
+* |                 |
+* -------------------
+* 
+* For electrical connections on these devices, the folloiwng tells how each varistor
+* is connected internally:
+* varistor between 1 and 4
+* varistor between 2 and 3
+*
+* For 4 element arrays, the node values are associated with the part terminals
+* in the following way:
+* 
+* -------------------
+* |                 |
+* ---             ---
+* |1|             |8|
+* ---             ---
+* |                 |
+* ---             ---
+* |2|             |7|
+* ---             ---
+* |                 |
+* ---             ---
+* |3|             |6|
+* ---             ---
+* |                 |
+* ---             ---
+* |4|             |5|
+* ---             ---
+* |                 |
+* -------------------
+* 
+* For electrical connections on these devices, the folloiwng tells how each varistor
+* is connected internally:
+* varistor between 1 and 8
+* varistor between 2 and 7
+* varistor between 3 and 6
+* varistor between 4 and 5
+*
+* The network of passive components is intended to give correct frequency response
+* characteristics, as well as providing realistic transient output. The active
+* portion of the circuit (diode + voltage source) provides the characteristic
+* V-I relationship seen in all varistors.
+*
+* All models are based on typical data. Actual measurements may vary.
+*
+* NOTICE: Please note that all models in this library are intended to be used
+* as a guide to illustrate an approximation of the devices in question.
+* AVX takes no liability for any device failure or incident that may occur
+* from designs based on simulation results. Take extreme care when using
+* this library that the current and voltage levels seen by the varistor
+* are reasonable. This library does not account for temperature dependence,
+* part tolerance, or any bias of any sort. This part is not energy-restricted,
+* as real varistors are. Over-current failure is not modelled in this library.
+*
+* DEVICES SHOULD NOT EXCEED PEAK CURRENT, AS SPECIFIED IN DATASHEET
+*
+* Specifications are subject to change without notice.  
+* Contact your nearest AVX Sales Office for the latest specifications.  
+* All statements, information and data given herein are believed to be accurate 
+* and reliable, 
+* but are presented without guarantee, warranty, or responsibility of any kind, 
+* expressed or implied.  
+* Statements or suggestions concerning possible use of our product are made 
+* without responsibility or warranty that any such use is free of patent 
+* infringement and are not recommendations to infringe any patent.
+* The user should not assume that all safety measures are indicated or that 
+* other measures are indicated or that measures may not be required.  
+* Specifications are typical and may not apply to all applications.
+*
+*$
+.SUBCKT SMDMLV 1 2 PARAMS: PR1=1N PR2=1N PL1=1N PL2=1N PC1=1N DRS=1M B=0
+R1 1 3 {PR1}
+R2 1 4 {PR2}
+L1 3 5 {PL1}
+L2 4 5 {PL2}
+CP 5 2 {PC1}
+D1 5 6 DIODE
+.model DIODE D(bv=0.24 RS={DRS})
+E1 6 2 value={V(5,6)*B-V(1,5)}
+.ENDS
+*$
+.SUBCKT CANATL07 1 2
+X1 1 2 SMDMLV PARAMS: PR1=4236M PR2=1733M PL1=2762P PL2=632P PC1=13P DRS=63.127M B=104.910
+.ENDS
+*$
+
+*FILE AntennaPowerGuard.lib
+* AVX, Inc.
+* August 2017
+*
+* The following library is a collection of SPICE models for the AVX
+* Antenna PowerGuard series multilayer varistors. The models in this library are
+* comprised of a passive network of five components, as well as a
+* diode and voltage-dependent voltage source, which acts as the active
+* component of the varistor.
+*
+* The entire network is laid out as follows:
+*
+*             |-------|     |-------|           |\\\\\\ |     /----\
+*       |-----|  PR1  |-----|  PL1  |-----|-----|  D1  >|----|  E1  |----|
+*       |     |-------|     |-------|     |     |////// |     \----/     |
+* O-----|                                 |                              |-----O
+*       |     |-------|     |-------|     |              ||PC1           |
+*       |-----|  PR2  |-----|  PL2  |-----|--------------||--------------|
+*             |-------|     |-------|                    ||
+*
+* The network of passive components is intended to give correct frequency response
+* characteristics, as well as providing realistic transient output. The active
+* portion of the circuit (diode + voltage source) provides the characteristic
+* V-I relationship seen in all varistors.
+*
+* All models are based on typical data. Actual measurements may vary.
+*
+* NOTICE: Please note that all models in this library are intended to be used
+* as a guide to illustrate an approximation of the devices in question.
+* AVX takes no liability for any device failure or incident that may occur
+* from designs based on simulation results. Take extreme care when using
+* this library that the current and voltage levels seen by the varistor
+* are reasonable. This library does not account for temperature dependence,
+* part tolerance, or any bias of any sort. This part is not energy-restricted,
+* as real varistors are. Over-current failure is not modelled in this library.
+*
+* DEVICES SHOULD NOT EXCEED PEAK CURRENT, AS SPECIFIED IN DATASHEET
+*
+* Specifications are subject to change without notice.  
+* Contact your nearest AVX Sales Office for the latest specifications.  
+* All statements, information and data given herein are believed to be accurate 
+* and reliable, 
+* but are presented without guarantee, warranty, or responsibility of any kind, 
+* expressed or implied.  
+* Statements or suggestions concerning possible use of our product are made 
+* without responsibility or warranty that any such use is free of patent 
+* infringement and are not recommendations to infringe any patent.
+* The user should not assume that all safety measures are indicated or that 
+* other measures are indicated or that measures may not be required.  
+* Specifications are typical and may not apply to all applications.
+*
+*$
+.SUBCKT TRANSGUARD 1 2 PARAMS: PR1=1N PR2=1N PL1=1N PL2=1N PC1=1N DRS=1M B=0
+R1 1 3 {PR1}
+R2 1 4 {PR2}
+L1 3 5 {PL1}
+L2 4 5 {PL2}
+CP 5 2 {PC1}
+D1 5 6 DIODE
+.model DIODE D(bv=0.24 RS={DRS})
+E1 6 2 value={V(5,6)*B-V(1,5)}
+.ENDS
+*$
+.SUBCKT VCAS04AP181R5DAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=9.84 PR2=6.48 PL1=707.452P PL2=464.1345P PC1=1.40P DRS=229M B=280.925
+.ENDS
+*$
+.SUBCKT VCAS04AP301R5DAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=9.84 PR2=6.48 PL1=707.452P PL2=464.1345P PC1=1.40P DRS=167M B=288.517
+.ENDS
+*$
+.SUBCKT VCAS04AP601R5DAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=9.84 PR2=6.48 PL1=707.452P PL2=464.1345P PC1=1.40P DRS=167M B=288.517
+.ENDS
+*$
+.SUBCKT VCAS04AP182R0LAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=14.93 PR2=10.73 PL1=595.5125P PL2=423.185P PC1=2.4P DRS=259 B=182.221
+.ENDS
+*$
+.SUBCKT VCAS06AP182R0LAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=7.02 PR2=6.54 PL1=832.433P PL2=654.308P PC1=2.69P DRS=84M B=273.332
+.ENDS
+*$
+.SUBCKT VCAS06AP302R0LAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=7.02 PR2=6.54 PL1=832.433P PL2=654.308P PC1=2.69P DRS=84M B=273.332
+.ENDS
+*$
+.SUBCKT VCAS06AP602R0LAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=7.02 PR2=6.54 PL1=832.433P PL2=654.308P PC1=2.69P DRS=84M B=273.332
+.ENDS
+*$
+.SUBCKT VCAS06AP243R3LAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4.41 PR2=7.05 PL1=807.234P PL2=830.291P PC1=3.06P DRS=196M B=212.592
+.ENDS
+*$
+.SUBCKT VCAS06AP303R3LAT 1 2
+X1 1 2 TRANSGUARD PARAMS: PR1=4.41 PR2=7.05 PL1=807.234P PL2=830.291P PC1=3.06P DRS=196M B=212.592
+.ENDS
+*$
+
+
+
+;$SpiceType=AMBIGUOUS

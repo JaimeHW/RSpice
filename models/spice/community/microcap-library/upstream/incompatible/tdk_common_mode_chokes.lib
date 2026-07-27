@@ -1,0 +1,23 @@
+// Based on the circuit diagram and data at...
+// http://www.docstoc.com/docs/32798259/TDK-Common-mode-filters-equivalent-circuit-model-for
+
+// .macro Name	 CommonModeChoke(R1,L1,C1,R2,L2,C2,C12,R12,R3)
+.macro ACM2012-900-2P CommonModeChoke(14,3.1n,0.84p, 880,200n,.02p,0.95p,1G,.065)
+.macro ACM2012-201-2P CommonModeChoke(16,3.3n,1.02p,1600,445n,.03p,1.07p,1G,.085)
+.macro ACM2012-361-2P CommonModeChoke(17,3.4n,1.13p,2730,835n,.03p,2.01p,1G,.095)
+
+.macro ACM2520U-201-2P CommonModeChoke(85,7n,.37p,860,735n,.15p,1.3p,10G,.10)
+.macro ACM2520U-301-2P CommonModeChoke(93,7n,.44p,1130,790n,.15p,1.5p,10G,.12)
+.macro ACM2520U-451-2P CommonModeChoke(98,8n,.51p,1430,850n,.16p,1.7p,10G,.14)
+.macro ACM2520U-601-2P CommonModeChoke(102,8n,.58p,2100,1150n,.17p,2.0p,10G,.16)
+.macro ACM2520U-102-2P CommonModeChoke(105,9n,.64p,3700,1700n,.21p,2.6p,10G,.21)
+
+.macro ACM3225-800-2P CommonModeChoke(20,4.0n,1.06p,220,270n,.01p,.64p,1G,.012)
+.macro ACM3225-161-2P CommonModeChoke(25,4.2n,2.21p,460,385n,.08p,.88p,1G,.015)
+.macro ACM3225-271-2P CommonModeChoke(32,4.4n,2.46p,990,470n,.14p,1.00p,1G,.065)
+.macro ACM3225-601-2P CommonModeChoke(13,4.3n,2.60p,1580,1000n,.15p,2.40p,1G,.070)
+.macro ACM3225-102-2P CommonModeChoke(18,5.4n,3.00p,2650,1950n,.15p,2.80p,1G,.200)
+
+.macro ACM4532-601-2P CommonModeChoke(15,3.0n,11.80p,1800,1300n,.16p,2.80p,1G,.040)
+.macro ACM4532-801-2P CommonModeChoke(16,3.0n,12.84p,2400,1650n,.20p,3.50p,1G,.050)
+;$SpiceType=AMBIGUOUS

@@ -1,0 +1,4975 @@
+*DEVICE=D1N5259B,D
+* D1N5259B D model
+.MODEL 1N5259B D
++ IS=389.27E-15
++ N=1.2744
++ RS=1.0000E-6
++ IKF=.1035
++ CJO=14.208E-12
++ M=1.1798
++ VJ=9.9900
++ ISR=29.315E-12
++ BV=38.982
++ IBV=.52416
++ TT=1.7312E-6
+*$
+
+*DEVICE=BAS216,D
+* BAS216 D model
+.MODEL BAS216 D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646E-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+*$
+
+*DEVICE=BAS221,D
+* BAS221 D model
+.MODEL BAS221 D
++ IS=10.010E-21
++ N=4.995
++ RS=1.0000E-3
++ IKF=1.8660E-186
++ CJO=598.00e-15
++ M=.3333
++ VJ=.75
++ ISR=1.3340E-9
++ NR=2.100
++ BV=330.09
++ IBV=2.7225E-3
++ TT=52.960E-9
+*$
+
+*DEVICE=BAS321,D
+* BAS321 D model
+.MODEL BAS321 D
++ IS=3.7106E-9
++ N=1.9403
++ RS=.41967
++ IKF=62.731E-3
++ CJO=412.54E-12
++ M=.1
++ VJ=2.2836
++ ISR=7.2305E-9
++ BV=319.86
++ IBV=5.1728E-6
++ TT=37.510E-9
+*$
+
+*DEVICE=BAS45A,D
+* BAS45A D model
+.MODEL BAS45A D
++ IS=7.0000E-9
++ N=2.2707
++ RS=1.0000E-3
++ IKF=22.121
++ CJO=2.9332E-12
++ M=.24677
++ VJ=.3905
++ ISR=10.010E-21
++ NR=4.9950
++ BV=225.36
++ IBV=10
++ TT=1.7500E-6
+*$
+
+*DEVICE=BAS56,D
+* BAS56 D model
+.MODEL BAS56 D
++ IS=10.825E-9
++ N=1.9301
++ RS=.49924
++ IKF=1.4135
++ CJO=994.44E-15
++ M=.10001
++ VJ=.69196
++ ISR=1.0704E-9
++ BV=113.15
++ IBV=15.676E-3
++ TT=5.7708E-9
+*$
+
+*DEVICE=BAV23,D
+* BAV23 D model
+.MODEL BAV23 D
++ IS=3.7106E-9
++ N=1.9403
++ RS=.41967
++ IKF=62.731E-3
++ CJO=794.74E-15
++ M=.10536
++ VJ=.3905
++ ISR=5.8659E-9
++ BV=319.86
++ IBV=5.1728E-6
++ TT=37.510E-9
+*$
+
+*DEVICE=BZV85C3V6,D
+* BZV85C3V6 D model
+.MODEL BZV85C3V6 D
++ IS=4.2450E-15
++ N=1.0330
++ RS=1.0000E-3
++ IKF=12.280E-3
++ CJO=245.10E-12
++ M=.218
++ VJ=.3905
++ ISR=9.2230E-6
++ NR=4.9950
++ BV=3.4110
++ IBV=52.160E-3
++ TT=5.0000E-9
+*$
+
+*DEVICE=BZV90C30,D
+* BZV90C30 D model
+.MODEL BZV90C30 D
++ IS=857.99E-18
++ N=.82675
++ RS=.31465
++ IKF=13.858E-6
++ CJO=21.774E-12
++ M=.33323
++ VJ=.68651
++ ISR=43.476E-12
++ NR=2.6052
++ BV=30.139
++ IBV=.43564
++ TT=144.27E-9
+*$
+
+*DEVICE=BZX284B6V2,D
+* BZX284B6V2 D model
+.MODEL BZX284B6V2 D
++ IS=2.6665E-18
++ N=.82284
++ RS=.51617
++ IKF=11.760E-3
++ CJO=167.78E-12
++ M=.37745
++ VJ=.86869
++ ISR=48.886E-9
++ BV=6.3329
++ IBV=.94329
++ TT=121.76E-9
+*$
+
+*DEVICE=BZX284C7V5,D
+* BZX284C7V5 D model
+.MODEL BZX284C7V5 D
++ IS=110.88E-18
++ N=.92657
++ RS=.85899
++ IKF=149.75
++ CJO=86.021E-12
++ M=.32808
++ VJ=.62493
++ ISR=1.1185E-9
++ BV=7.6329
++ IBV=1.0062
++ TT=2.7411E-6
+*$
+
+*DEVICE=BZX284C8V2,D
+* BZX284C8V2 D model
+.MODEL BZX284C8V2 D
++ IS=2.6665E-18
++ N=.82284
++ RS=.51617
++ IKF=11.760E-3
++ CJO=75.686E-12
++ M=.32952
++ VJ=.64386
++ ISR=146.71E-12
++ BV=8.3329
++ IBV=.94329
++ TT=2.7700E-6
+*$
+
+*DEVICE=BZX79C6V8,D
+* BZX79C6V8 D model
+.MODEL BZX79C6V8 D
++ IS=2.4710E-9
++ N=2.0880
++ RS=1.0000E-3
++ IKF=6.5100
++ CJO=95.650E-12
++ M=.3487
++ VJ=.7022
++ ISR=10.010E-21
++ BV=6.9480
++ IBV=.8623
++ TT=140E-9
+*$
+
+*DEVICE=BZX84C2V4,D
+
+* BZX84C2V4 D model
+.MODEL BZX84C2V4 D
++ IS=2.6665E-18
++ N=.82284
++ RS=.51617
++ IKF=11.760E-3
++ CJO=243.19E-12
++ M=.28964
++ VJ=.58074
++ ISR=4.7427E-6
++ BV=2.4673
++ IBV=74.447E-3
++ TT=29.431E-9
+*$
+
+*DEVICE=BZX84C51V,D
+
+* BZX84C51V D model
+.MODEL BZX84C51V D
++ IS=2.6665E-18
++ N=.82284
++ RS=.51617
++ IKF=11.760E-3
++ CJO=14.030E-12
++ M=.33875
++ VJ=.76575
++ ISR=60.382E-12
++ BV=51.120
++ IBV=.21741
++ TT=2.3083E-6
+*$
+
+*DEVICE=BZX84C56V,D
+
+* BZX84C56V D model
+.MODEL BZX84C56V D
++ IS=2.6665E-18
++ N=.82284
++ RS=.51617
++ IKF=11.760E-3
++ CJO=12.024E-12
++ M=.34443
++ VJ=.60675
++ ISR=53.794E-12
++ BV=56.116
++ IBV=.18612
++ TT=2.3083E-6
+*$
+
+*DEVICE=BZX84C62V,D
+
+* BZX84C62V D model
+.MODEL BZX84C62V D
++ IS=110.88E-18
++ N=.92657
++ RS=.85899
++ IKF=149.75
++ CJO=11.525E-12
++ M=.35851
++ VJ=.65914
++ ISR=51.091E-12
++ BV=62.112
++ IBV=.16341
++ TT=2.2362E-6
+*$
+
+*DEVICE=BZX84C68V,D
+
+* BZX84C68V D model
+.MODEL BZX84C68V D
++ IS=2.6665E-18
++ N=.82284
++ RS=.51617
++ IKF=11.760E-3
++ CJO=11.121E-12
++ M=.34915
++ VJ=.60561
++ ISR=53.010E-12
++ BV=68.110
++ IBV=.14452
++ TT=2.6257E-6
+*$
+
+*DEVICE=PLVA2656A,D
+* PLVA2656AB D model
+.MODEL PLVA2656A D
++ IS=1.2302E-15
++ N=.99169
++ RS=.4793
++ IKF=49.525E-3
++ CJO=125.26E-12
++ M=.33643
++ VJ=.68657
++ ISR=32.826E-9
++ BV=5.7651
++ IBV=3.2718
++ TT=104.45E-9
+*$
+
+*DEVICE=PLVA650A,D
+* PLVA650A D model
+.MODEL PLVA650A D
++ IS=535.74E-18
++ N=1.0029
++ RS=.29276
++ IKF=2.5050
++ CJO=119.42E-12
++ M=.32565
++ VJ=.62169
++ ISR=216.91E-9
++ NR=4.9950
++ BV=5.1893
++ IBV=.21213
++ TT=132.15E-9
+*$
+
+*DEVICE=PMBD6050,D
+* PMBD6050 D model
+.MODEL PMBD6050 D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=1.6725E-9
++ NR=4.9950
++ BV=139.42
++ IBV=34.486E-3
++ TT=4.5000E-9
+*$
+
+*DEVICE=PMBD7000,D
+* PMBD7000 D model
+.MODEL PMBD7000 D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646E-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=5.7708E-9
+*$
+
+*
+.SUBCKT 1N4735A 1 2 
+*
+* The Resistor R1 does not reflect 
+* a physical device. Instead it
+* improves modeling in the reverse 
+* mode of operation.
+*
+R1 1 2 3E+9 
+D1 1 2 1N4735A
+*
+.MODEL 1N4735A D 
++ IS = 1.803E-14 
++ N = 1.167 
++ BV = 6.2 
++ IBV = 0.041 
++ RS = 0.3264 
++ CJO = 6.85E-11 
++ VJ = 0.6947 
++ M = 0.3439 
++ FC = 0.5 
+.ENDS
+*
+.SUBCKT 1PS181 1 2 3
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 3 1 2.3E+9
+D1 3 1 1PS181
+R2 3 2 2.3E+9
+D2 3 2 1PS181
+*
+.MODEL 1PS181 D
++ IS = 1.705E-9
++ N = 1.71
++ BV = 87
++ IBV = 0.0003
++ RS = 1.022
++ CJO = 1.798E-12
++ VJ = 1.032
++ M = 0.2987
++ FC = 0.5
++ TT = 3.606E-9 
++ EG = 1.1
++ XTI = 3
+.ENDS
+*
+*
+.SUBCKT 1PS300 1 2 3
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 3 1 2.3E+9
+D1 3 1 1PS300
+R2 3 2 2.3E+9
+D2 3 2 1PS300
+*
+.MODEL 1PS300 D
++ IS = 1.705E-9
++ N = 1.71
++ BV = 87
++ IBV = 0.0003
++ RS = 1.022
++ CJO = 1.798E-12
++ VJ = 1.032
++ M = 0.2987
++ FC = 0.5
++ TT = 3.606E-9 
++ EG = 1.1
++ XTI = 3
+.ENDS
+*
+*
+.MODEL BAS116H D
++ IS=805.84E-18
++ N=1.0246
++ RS=50.000E-3
++ IKF=362.16E-6
++ CJO=1.9002E-12
++ M=.35193
++ VJ=1.2722
++ ISR=298.95E-15
++ BV=98
++ IBV=1.42E-3
++ TT=1.0230E-6
+*
+. *
+.MODEL BAS16H D(
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9)
+*
+.MODEL BAS16L D
++ IS = 6.0289E-9
++ N = 2.1283
++ RS = 1.0000E-3
++ IKF = 37.638E-3
++ CJO = 5.641E-013
++ M = 0.05188 
++ VJ = 0.01571
++ ISR = 2.0646e-9
++ NR = 4.9950
++ BV = 113.60
++ IBV = 10
++ TT = 4.5000E-9
+.SUBCKT BAS16VV 1 2 3 4 5 6
+*
+D1 1 6 BAS16VV
+D2 2 5 BAS16VV
+D3 3 4 BAS16VV
+*
+.MODEL BAS16VV D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+.ENDS
+*
+.SUBCKT BAS16VY 1 2 3 4 5 6
+*
+D1 1 6 BAS16VY
+D2 2 5 BAS16VY
+D3 3 4 BAS16VY
+*
+.MODEL BAS16VY D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+.ENDS
+*
+*
+.SUBCKT BAS21H 1 2
+*
+* The Resistor R1 does not reflect 
+* a physical device. Instead it
+* improves modeling in the reverse 
+* mode of operation.
+*
+R1 1 2 1.622E+10 
+D1 1 2 BAS21H 
+*
+.MODEL BAS21H D 
++ IS = 3.648E-9 
++ N = 1.909 
++ BV = 260 
++ IBV = 2E-7 
++ RS = 0.7535 
++ CJO = 6.99E-13 
++ VJ = 0.2028 
++ M = 0.1151 
++ FC = 0.5 
++ TT = 3.462E-8 
+.ENDS
+*
+*
+.SUBCKT BAS21VD 1 2 3 4 5 6
+*
+* The Resistors R1-R3 do not
+* reflect physical devices.
+* Instead they improve modeling
+* in the reverse mode of
+* operation.
+*
+R1 6 1 1.622E+10
+D1 6 1 BAS21VD
+R2 5 2 1.622E+10
+D2 5 2 BAS21VD
+R3 4 3 1.622E+10
+D3 4 3 BAS21VD
+*
+.MODEL BAS21VD D
++ IS = 3.648E-9
++ N = 1.909
++ BV = 260
++ IBV = 2E-7
++ RS = 0.7535
++ CJO = 5.01E-13
++ VJ = 0.4515
++ M = 0.0571
++ FC = 0.5
++ TT = 2.054E-8
+.ENDS
+*
+*
+.MODEL BAS416 D
++ IS=805.84E-18
++ N=1.0246
++ RS=50.000E-3
++ IKF=362.16E-6
++ CJO=1.9002E-12
++ M=.35193
++ VJ=1.2722
++ ISR=298.95E-15
++ BV=98
++ IBV=1.42E-3
++ TT=1.0230E-6
+*
+*DEVICE=BAS516,D
+* BAS516 D model
+.MODEL BAS516 D
++ IS=2.9891E-9
++ N=1.9303
++ RS=0.78115
++ IKF=0.085491E-3
++ CJO=383.41E-15
++ M=.1
++ VJ=9.99
++ ISR=6.8038E-9
++ NR=4.9950
++ BV=130.38
++ IBV=10
++ TT=3.0297E-9
+*$
+*
+.SUBCKT BAS521 1 2
+*
+* The Resistor R1 does not reflect 
+* a physical device. Instead it
+* improves modeling in the reverse 
+* mode of operation.
+*
+R1 1 2 1.2E+10
+D1 1 2 BAS521
+*
+.MODEL BAS521 D
++ IS = 7.219E-9
++ N = 2
++ BV = 310
++ IBV = 0.0001
++ RS = 0.63
++ CJO = 4.074E-13
++ VJ = 0.6538
++ M = 0.05409
++ FC = 0.5
++ TT = 2.1987E-8
++ EG = 0.69
++ XTI = 2
+.ENDS
+*
+.SUBCKT BAS716 1 2
+D1 1 2 BAS716
+.MODEL BAS716 D
++ IS = 3.519E-15
++ N = 1.093
++ BV = 110
++ IBV = 3E-9
++ RS = 0.7423
++ CJO = 1.817E-12
++ VJ = 0.6508
++ M = 0.3689
++ FC = 0.5
++ TT = 8.656E-7
+.ENDS
+*
+.SUBCKT BAV23S 1 2 3 
+*
+* The resistor does not reflect a
+* physical devices.  Instead it improves
+* modeling in the reverse mode of
+* operation.
+*
+R1 1 3 1.622E+10 
+D1 1 3 BAV23S
+R2 3 2 1.622E+10 
+D2 3 2 BAV23S
+*
+.MODEL BAV23S D 
++ IS = 3.648E-9 
++ N = 1.909 
++ BV = 260 
++ IBV = 2E-7 
++ RS = 0.7535 
++ CJO = 7.501E-13 
++ VJ = 0.1995 
++ M = 0.115 
++ FC = 0.5 
++ TT = 3.462E-8 
+.ENDS
+*DEVICE=BAV99S,D
+
+* BAV99S D model
+.MODEL BAV99S D
++ IS=7.4960E-9
++ N=2.0077
++ RS=.80464
++ IKF=.1058
++ CJO=515.09E-15
++ M=.115
++ VJ=.6389
++ ISR=1.4182E-9
++ NR=4.9950
++ BV=90.375
++ IBV=10
++ TT=2.1640E-9
+*$
+.SUBCKT BAW101S 1 3 4 6
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 1 6 1.2E+10 
+D1 1 6 BAW101S
+R2 4 3 1.2E+10 
+D2 4 3 BAW101S
+*
+.MODEL BAW101S D 
++ IS = 7.219E-9 
++ N = 2 
++ BV = 310 
++ IBV = 0.0001 
++ RS = 0.63 
++ CJO = 4.584E-13 
++ VJ = 0.7483 
++ M = 0.06257 
++ FC = 0.5
++ TT = 2.1987E-8
+.ENDS
+*
+.SUBCKT BAW56S 1 2 3 4 5 6
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 6 1 2.3E+9
+D1 6 1 BAW56S
+R2 6 2 2.3E+9
+D2 6 2 BAW56S
+R3 3 4 2.3E+9
+D3 3 4 BAW56S
+R4 3 5 2.3E+9
+D4 3 5 BAW56S
+
+*
+.MODEL BAW56S D
++ IS = 1.705E-9
++ N = 1.71
++ BV = 87
++ IBV = 0.0003
++ RS = 1.022
++ CJO = 1.798E-12
++ VJ = 1.032
++ M = 0.2987
++ FC = 0.5
++ TT = 3.606E-9 
++ EG = 1.1
++ XTI = 3
+.ENDS
+*
+*
+.SUBCKT BAW56T 1 2 3
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 3 1 2.3E+9
+D1 3 1 BAW56T
+R2 3 2 2.3E+9
+D2 3 2 BAW56T
+*
+.MODEL BAW56T D
++ IS = 1.705E-9
++ N = 1.71
++ BV = 87
++ IBV = 0.0003
++ RS = 1.022
++ CJO = 1.798E-12
++ VJ = 1.032
++ M = 0.2987
++ FC = 0.5
++ TT = 3.606E-9 
++ EG = 1.1
++ XTI = 3
+.ENDS
+*
+*
+.SUBCKT BAW56W 1 2 3
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 3 1 2.3E+9
+D1 3 1 BAW56W
+R2 3 2 2.3E+9
+D2 3 2 BAW56W
+*
+.MODEL BAW56W D
++ IS = 1.705E-9
++ N = 1.71
++ BV = 87
++ IBV = 0.0003
++ RS = 1.022
++ CJO = 1.798E-12
++ VJ = 1.032
++ M = 0.2987
++ FC = 0.5
++ TT = 3.606E-9 
++ EG = 1.1
++ XTI = 3
+.ENDS
+*
+*
+.SUBCKT BZA418A 1 2 3 4 5 6
+*
+* The Resistors R1-R4 do not 
+* reflect physical devices. 
+* Instead they improve modeling
+* in the reverse mode of 
+* operation.
+*
+D1 2 1 BZA418A
+R1 2 1 6.5E+08
+D2 2 3 BZA418A
+R2 2 3 6.5E+08
+D3 5 4 BZA418A
+R3 5 4 6.5E+08
+D4 5 6 BZA418A
+R4 5 6 6.5E+08
+*
+* The resistor R5 is only for 
+* pinning of the device
+*
+R5 2 5 0
+*
+.MODEL BZA418A D
++ IS = 2.26E-14
++ N = 1.135
++ BV = 17.9
++ IBV = 1E-09
++ RS = 0.2056
++ CJO = 4.079E-11
++ VJ = 0.5582
++ M = 0.381
++ FC = 0.5
++ TT = 7.502E-07
+.ENDS
+*
+*DEVICE=BZA820A,D
+
+* BZA820A D model
+.MODEL BZA820A D
++ IS=323.81E-18
++ N=.97963
++ RS=.24264
++ IKF=6.9002
++ CJO=37.279E-12
++ M=.32559
++ VJ=.3905
++ ISR=2.7811E-9
++ NR=2.4186
++ BV=19.919
++ IBV=6.0752
++ TT=656.43E-9
+*DEVICE=BZA856A,D
+
+* BZA856A D model
+.MODEL BZA856A D
++ IS=323.83E-18
++ N=.97963
++ RS=.24251
++ IKF=6.4502
++ CJO=156.61E-12
++ M=.28517
++ VJ=.98457
++ ISR=9.2948E-9
++ NR=2.4186
++ BV=5.7918
++ IBV=.18506
++ TT=116.14E-9
+.SUBCKT BZA856AVL 1 2 3 4 5
+*
+D1 2 1 BZA856AVL
+D2 2 3 BZA856AVL
+D3 2 4 BZA856AVL
+D4 2 5 BZA856AVL
+*
+.MODEL BZA856AVL D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 5.6 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 2.136E-11 
++ VJ = 0.7025 
++ M = 0.3242 
++ FC = 0.5 
+.ENDS
+*DEVICE=BZA862A,D
+
+* BZA862A D model
+.MODEL BZA862A D
++ IS=323.81E-18
++ N=.97963
++ RS=.24264
++ IKF=6.9002
++ CJO=140.64E-12
++ M=.29103
++ VJ=.92059
++ ISR=41.933E-9
++ NR=2.4186
++ BV=6.3692
++ IBV=.86917
++ TT=123.35E-9
+.SUBCKT BZA862AVL 1 2 3 4 5
+*
+D1 2 1 BZA862AVL
+D2 2 3 BZA862AVL
+D3 2 4 BZA862AVL
+D4 2 5 BZA862AVL
+*
+.MODEL BZA862AVL D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.2 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.815E-11 
++ VJ = 0.7121 
++ M = 0.3251 
++ FC = 0.5 
+.ENDS
+*DEVICE=BZA868A,D
+
+* BZA868A D model
+.MODEL BZA868A D
++ IS=323.81E-18
++ N=.97963
++ RS=.24264
++ IKF=6.9002
++ CJO=125.11E-12
++ M=.34068
++ VJ=1.2066
++ ISR=894.24E-12
++ NR=2.4186
++ BV=7.0126
++ IBV=2.4043
++ TT=115.42E-9
+.SUBCKT BZA868AVL 1 2 3 4 5
+*
+D1 2 1 BZA868AVL
+D2 2 3 BZA868AVL
+D3 2 4 BZA868AVL
+D4 2 5 BZA868AVL
+*
+.MODEL BZA868AVL D 
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.8 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.641E-11 
++ VJ = 0.8979 
++ M = 0.33 
++ FC = 0.5 
+.ENDS
+*DEVICE=BZA956A,D
+
+* BZA956A D model
+.MODEL BZA956A D
++ IS=274.79E-18
++ N=.99151
++ RS=.33553
++ IKF=8.8795
++ CJO=107.97E-12
++ M=.32308
++ VJ=.68909
++ ISR=1.1924E-6
++ NR=4.9950
++ BV=5.7434
++ IBV=.25951
++ TT=865.62E-9
+*$
+.SUBCKT BZA956AVL 1 2 3 4 5
+*
+D1 2 1 BZA956AVL
+D2 2 3 BZA956AVL
+D3 2 4 BZA956AVL
+D4 2 5 BZA956AVL
+*
+.MODEL BZA956AVL D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 5.6 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 2.136E-11 
++ VJ = 0.7025 
++ M = 0.3242 
++ FC = 0.5 
+.ENDS
+*DEVICE=BZA962A,D
+
+* BZA962A D model
+.MODEL BZA962A D
++ IS=322.57E-18
++ N=.9961
++ RS=.31568
++ IKF=7.9489
++ CJO=89.986E-12
++ M=.33327
++ VJ=.75415
++ ISR=55.253E-9
++ NR=3.2011
++ BV=6.4066
++ IBV=2.9783
++ TT=865.62E-9
+*$
+.SUBCKT BZA962AVL 1 2 3 4 5
+*
+D1 2 1 BZA962AVL
+D2 2 3 BZA962AVL
+D3 2 4 BZA962AVL
+D4 2 5 BZA962AVL
+*
+.MODEL BZA962AVL D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.2 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.815E-11 
++ VJ = 0.7121 
++ M = 0.3251 
++ FC = 0.5 
+.ENDS
+*DEVICE=BZA968A,D
+
+* BZA968A D model
+.MODEL BZA968A D
++ IS=329.56E-18
++ N=.99805
++ RS=.3112
++ IKF=6.1249
++ CJO=77.958E-12
++ M=.34229
++ VJ=.77441
++ ISR=8.8151E-9
++ NR=4.9950
++ BV=7.0369
++ IBV=9.6192
++ TT=865.62E-9
+*$
+.SUBCKT BZA968AVL 1 2 3 4 5
+*
+D1 2 1 BZA968AVL
+D2 2 3 BZA968AVL
+D3 2 4 BZA968AVL
+D4 2 5 BZA968AVL
+*
+.MODEL BZA968AVL D 
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.8 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.641E-11 
++ VJ = 0.8979 
++ M = 0.33 
++ FC = 0.5 
+.ENDS
+*DEVICE= BZV85-C33,D
+
+.MODEL BZV85-C33 D
++ IS=110.88E-18
++ N=.92657
++ RS=.85899
++ IKF=149.75
++ CJO=16.677E-12
++ M=.34957
++ VJ=.66723
++ ISR=100.00E-12
++ BV=33.134
++ IBV=.37878
++ TT=2.2362E-6
+*
+.SUBCKT BZX384-B10 1 2
+D1 2 1 BZX384-B10
+.MODEL BZX384-B10 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 10
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 6.004E-11
++ VJ = 0.6305
++ M = 0.3302
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B11 1 2
+D1 2 1 BZX384-B11
+.MODEL BZX384-B11 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 11
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B12 1 2
+D1 2 1 BZX384-B12
+.MODEL BZX384-B12 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 12
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 4.928E-11
++ VJ = 0.575
++ M = 0.3292
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B13 1 2
+D1 2 1 BZX384-B13
+.MODEL BZX384-B13 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 13
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 4.377E-11
++ VJ = 0.5656
++ M = 0.3289
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B15 1 2
+D1 2 1 BZX384-B15
+.MODEL BZX384-B15 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 15
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B16 1 2
+D1 2 1 BZX384-B16
+.MODEL BZX384-B16 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 16
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 3.509E-11
++ VJ = 0.6502
++ M = 0.3378
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B18 1 2
+D1 2 1 BZX384-B18
+.MODEL BZX384-B18 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 18
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B20 1 2
+D1 2 1 BZX384-B20
+.MODEL BZX384-B20 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 20
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 2.915E-11
++ VJ = 0.635
++ M = 0.3362
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B22 1 2
+D1 2 1 BZX384-B22
+.MODEL BZX384-B22 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 22
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 2.701E-11
++ VJ = 0.7087
++ M = 0.3557
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B24 1 2
+D1 2 1 BZX384-B24
+.MODEL BZX384-B24 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 24
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B27 1 2
+D1 2 1 BZX384-B27
+.MODEL BZX384-B27 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 27
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B2V4 1 2
+D1 2 1 BZX384-B2V4
+.MODEL BZX384-B2V4 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 2.4
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.615E-10
++ VJ = 0.5762
++ M = 0.2715
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B2V7 1 2
+D1 2 1 BZX384-B2V7
+.MODEL BZX384-B2V7 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 2.7
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.518E-10
++ VJ = 0.6816
++ M = 0.3174
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B30 1 2
+D1 2 1 BZX384-B30
+.MODEL BZX384-B30 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 30
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.17E-011
++ VJ = 0.6718
++ M = 0.3465
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B33 1 2
+D1 2 1 BZX384-B33
+.MODEL BZX384-B33 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 33
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.019E-11
++ VJ = 0.7645
++ M = 0.3782
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B36 1 2
+D1 2 1 BZX384-B36
+.MODEL BZX384-B36 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 36
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.866E-11
++ VJ = 0.7591
++ M = 0.3771
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B39 1 2
+D1 2 1 BZX384-B39
+.MODEL BZX384-B39 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 39
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.772E-11
++ VJ = 0.7471
++ M = 0.3751
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B3V0 1 2
+D1 2 1 BZX384-B3V0
+.MODEL BZX384-B3V0 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.346E-10
++ VJ = 0.6722
++ M = 0.3162
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B3V3 1 2
+D1 2 1 BZX384-B3V3
+.MODEL BZX384-B3V3 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3.3
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.162E-10
++ VJ = 0.6687
++ M = 0.3164
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B3V6 1 2
+D1 2 1 BZX384-B3V6
+.MODEL BZX384-B3V6 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3.6
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.062E-10
++ VJ = 0.6643
++ M = 0.3168
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B3V9 1 2
+D1 2 1 BZX384-B3V9
+.MODEL BZX384-B3V9 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3.9
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.82E-10
++ VJ = 0.6743
++ M = 0.3219
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B43 1 2
+D1 2 1 BZX384-B43
+.MODEL BZX384-B43 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 43
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.638E-11
++ VJ = 0.7517
++ M = 0.3762
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B47 1 2
+D1 2 1 BZX384-B47
+.MODEL BZX384-B47 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 47
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.707E-11
++ VJ = 0.888
++ M = 0.4248
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B4V3 1 2
+D1 2 1 BZX384-B4V3
+.MODEL BZX384-B4V3 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 4.3
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.715E-10
++ VJ = 0.7721
++ M = 0.3557
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B4V7 1 2
+D1 2 1 BZX384-B4V7
+.MODEL BZX384-B4V7 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 4.7
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B51 1 2
+D1 2 1 BZX384-B51
+.MODEL BZX384-B51 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 51
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.602E-11
++ VJ = 0.8454
++ M = 0.4154
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B56 1 2
+D1 2 1 BZX384-B56
+.MODEL BZX384-B56 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 56
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.508E-11
++ VJ = 0.8856
++ M = 0.4177
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B5V1 1 2
+D1 2 1 BZX384-B5V1
+.MODEL BZX384-B5V1 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 5.1
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.402E-10
++ VJ = 0.7934
++ M = 0.3578
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B5V6 1 2
+D1 2 1 BZX384-B5V6
+.MODEL BZX384-B5V6 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B62 1 2
+D1 2 1 BZX384-B62
+.MODEL BZX384-B62 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 62
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.403E-11
++ VJ = 0.8053
++ M = 0.4033
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B68 1 2
+D1 2 1 BZX384-B68
+.MODEL BZX384-B68 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 68
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.321E-11
++ VJ = 0.7877
++ M = 0.4021
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B6V2 1 2
+D1 2 1 BZX384-B6V2
+.MODEL BZX384-B6V2 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 6.2
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.732E-10
++ VJ = 0.9334
++ M = 0.4321
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B6V8 1 2
+D1 2 1 BZX384-B6V8
+.MODEL BZX384-B6V8 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B75 1 2
+D1 2 1 BZX384-B75
+.MODEL BZX384-B75 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 75
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.246E-11
++ VJ = 0.822
++ M = 0.4052
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B7V5 1 2
+D1 2 1 BZX384-B7V5
+.MODEL BZX384-B7V5 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 7.5
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 8.767E-11
++ VJ = 0.5829
++ M = 0.3299
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B8V2 1 2
+D1 2 1 BZX384-B8V2
+.MODEL BZX384-B8V2 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 8.2
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 7.562E-11
++ VJ = 0.5765
++ M = 0.3298
++ FC = 0.5
+.ENDS
+.SUBCKT BZX384-B9V1 1 2
+D1 2 1 BZX384-B9V1
+.MODEL BZX384-B9V1 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 9.1
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 7.316E-11
++ VJ = 0.5667
++ M = 0.3295
++ FC = 0.5
+.ENDS
+.MODEL BZX585-B10 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 10
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 6.004E-11
++ VJ = 0.6305
++ M = 0.3302
++ FC = 0.5
+.MODEL BZX585-B11 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 11
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
++ FC = 0.5
+.MODEL BZX585-B12 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 12
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 4.928E-11
++ VJ = 0.575
++ M = 0.3292
++ FC = 0.5
+.MODEL BZX585-B13 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 13
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 4.377E-11
++ VJ = 0.5656
++ M = 0.3289
++ FC = 0.5
+.MODEL BZX585-B15 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 15
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.MODEL BZX585-B16 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 16
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 3.509E-11
++ VJ = 0.6502
++ M = 0.3378
++ FC = 0.5
+.MODEL BZX585-B18 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 18
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.MODEL BZX585-B20 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 20
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 2.915E-11
++ VJ = 0.635
++ M = 0.3362
++ FC = 0.5
+.MODEL BZX585-B22 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 22
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 2.701E-11
++ VJ = 0.7087
++ M = 0.3557
++ FC = 0.5
+.MODEL BZX585-B24 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 24
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
++ FC = 0.5
+.MODEL BZX585-B27 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 27
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.MODEL BZX585-B2V4 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 2.4
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.615E-10
++ VJ = 0.5762
++ M = 0.2715
++ FC = 0.5
+.MODEL BZX585-B2V7 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 2.7
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.518E-10
++ VJ = 0.6816
++ M = 0.3174
++ FC = 0.5
+.MODEL BZX585-B30 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 30
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.17E-011
++ VJ = 0.6718
++ M = 0.3465
++ FC = 0.5
+.MODEL BZX585-B33 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 33
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.019E-11
++ VJ = 0.7645
++ M = 0.3782
++ FC = 0.5
+.MODEL BZX585-B36 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 36
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.866E-11
++ VJ = 0.7591
++ M = 0.3771
++ FC = 0.5
+.MODEL BZX585-B39 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 39
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.772E-11
++ VJ = 0.7471
++ M = 0.3751
++ FC = 0.5
+.MODEL BZX585-B3V0 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.346E-10
++ VJ = 0.6722
++ M = 0.3162
++ FC = 0.5
+.MODEL BZX585-B3V3 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3.3
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.162E-10
++ VJ = 0.6687
++ M = 0.3164
++ FC = 0.5
+.MODEL BZX585-B3V6 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3.6
++ IBV = 0.005
++ RS = 0.387
++ CJO = 3.062E-10
++ VJ = 0.6643
++ M = 0.3168
++ FC = 0.5
+.MODEL BZX585-B3V9 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 3.9
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.82E-10
++ VJ = 0.6743
++ M = 0.3219
++ FC = 0.5
+.MODEL BZX585-B43 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 43
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.638E-11
++ VJ = 0.7517
++ M = 0.3762
++ FC = 0.5
+.MODEL BZX585-B47 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 47
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.707E-11
++ VJ = 0.888
++ M = 0.4248
++ FC = 0.5
+.MODEL BZX585-B4V3 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 4.3
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.715E-10
++ VJ = 0.7721
++ M = 0.3557
++ FC = 0.5
+.MODEL BZX585-B4V7 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 4.7
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
++ FC = 0.5
+.MODEL BZX585-B51 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 51
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.602E-11
++ VJ = 0.8454
++ M = 0.4154
++ FC = 0.5
+.MODEL BZX585-B56 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 56
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.508E-11
++ VJ = 0.8856
++ M = 0.4177
++ FC = 0.5
+.MODEL BZX585-B5V1 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 5.1
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.402E-10
++ VJ = 0.7934
++ M = 0.3578
++ FC = 0.5
+.MODEL BZX585-B5V6 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.MODEL BZX585-B62 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 62
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.403E-11
++ VJ = 0.8053
++ M = 0.4033
++ FC = 0.5
+.MODEL BZX585-B68 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 68
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.321E-11
++ VJ = 0.7877
++ M = 0.4021
++ FC = 0.5
+.MODEL BZX585-B6V2 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 6.2
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.732E-10
++ VJ = 0.9334
++ M = 0.4321
++ FC = 0.5
+.MODEL BZX585-B6V8 D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.MODEL BZX585-B75 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 75
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 1.246E-11
++ VJ = 0.822
++ M = 0.4052
++ FC = 0.5
+.MODEL BZX585-B7V5 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 7.5
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 8.767E-11
++ VJ = 0.5829
++ M = 0.3299
++ FC = 0.5
+.MODEL BZX585-B8V2 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 8.2
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 7.562E-11
++ VJ = 0.5765
++ M = 0.3298
++ FC = 0.5
+.MODEL BZX585-B9V1 D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 9.1
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 7.316E-11
++ VJ = 0.5667
++ M = 0.3295
++ FC = 0.5
+
+.SUBCKT BZX84C75 1 3
+D1 1 3 BZX84C75
+.MODEL BZX84C75 D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 75
++ IBV = 0.002
++ RS = 0.3363
++ CJO = 1.246E-11
++ VJ = 0.822
++ M = 0.4052
++ FC = 0.5
+.ENDS
+
+.MODEL BZX884-B10 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 10
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 6.004E-11
++ VJ = 0.6305
++ M = 0.3302
++ FC = 0.5
+.MODEL BZX884-B11 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 11
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
++ FC = 0.5
+.MODEL BZX884-B12 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 12
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 4.928E-11
++ VJ = 0.575
++ M = 0.3292
++ FC = 0.5
+.MODEL BZX884-B13 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 13
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 4.377E-11
++ VJ = 0.5656
++ M = 0.3289
++ FC = 0.5
+.MODEL BZX884-B15 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 15
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.MODEL BZX884-B16 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 16
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 3.509E-11
++ VJ = 0.6502
++ M = 0.3378
++ FC = 0.5
+.MODEL BZX884-B18 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 18
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.MODEL BZX884-B20 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 20
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 2.915E-11
++ VJ = 0.635
++ M = 0.3362
++ FC = 0.5
+.MODEL BZX884-B22 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 22
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 2.701E-11
++ VJ = 0.7087
++ M = 0.3557
++ FC = 0.5
+.MODEL BZX884-B24 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 24
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
++ FC = 0.5
+.MODEL BZX884-B27 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 27
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.MODEL BZX884-B2V4 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 2.4
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 3.615E-10
++ VJ = 0.5762
++ M = 0.2715
++ FC = 0.5
+.MODEL BZX884-B2V7 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 2.7
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 3.518E-10
++ VJ = 0.6816
++ M = 0.3174
++ FC = 0.5
+.MODEL BZX884-B30 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 30
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 2.17E-011
++ VJ = 0.6718
++ M = 0.3465
++ FC = 0.5
+.MODEL BZX884-B33 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 33
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 2.019E-11
++ VJ = 0.7645
++ M = 0.3782
++ FC = 0.5
+.MODEL BZX884-B36 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 36
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.866E-11
++ VJ = 0.7591
++ M = 0.3771
++ FC = 0.5
+.MODEL BZX884-B39 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 39
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.772E-11
++ VJ = 0.7471
++ M = 0.3751
++ FC = 0.5
+.MODEL BZX884-B3V0 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 3
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 3.346E-10
++ VJ = 0.6722
++ M = 0.3162
++ FC = 0.5
+.MODEL BZX884-B3V3 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 3.3
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 3.162E-10
++ VJ = 0.6687
++ M = 0.3164
++ FC = 0.5
+.MODEL BZX884-B3V6 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 3.6
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 3.062E-10
++ VJ = 0.6643
++ M = 0.3168
++ FC = 0.5
+.MODEL BZX884-B3V9 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 3.9
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 2.82E-10
++ VJ = 0.6743
++ M = 0.3219
++ FC = 0.5
+.MODEL BZX884-B43 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 43
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.638E-11
++ VJ = 0.7517
++ M = 0.3762
++ FC = 0.5
+.MODEL BZX884-B47 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 47
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.707E-11
++ VJ = 0.888
++ M = 0.4248
++ FC = 0.5
+.MODEL BZX884-B4V3 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 4.3
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 2.715E-10
++ VJ = 0.7721
++ M = 0.3557
++ FC = 0.5
+.MODEL BZX884-B4V7 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 4.7
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
++ FC = 0.5
+.MODEL BZX884-B51 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 51
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.602E-11
++ VJ = 0.8454
++ M = 0.4154
++ FC = 0.5
+.MODEL BZX884-B56 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 56
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.508E-11
++ VJ = 0.8856
++ M = 0.4177
++ FC = 0.5
+.MODEL BZX884-B5V1 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 5.1
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 2.402E-10
++ VJ = 0.7934
++ M = 0.3578
++ FC = 0.5
+.MODEL BZX884-B5V6 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.MODEL BZX884-B62 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 62
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.403E-11
++ VJ = 0.8053
++ M = 0.4033
++ FC = 0.5
+.MODEL BZX884-B68 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 68
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.321E-11
++ VJ = 0.7877
++ M = 0.4021
++ FC = 0.5
+.MODEL BZX884-B6V2 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 6.2
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 1.732E-10
++ VJ = 0.9334
++ M = 0.4321
++ FC = 0.5
+.MODEL BZX884-B6V8 D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.MODEL BZX884-B75 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 75
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 1.246E-11
++ VJ = 0.822
++ M = 0.4052
++ FC = 0.5
+.MODEL BZX884-B7V5 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 7.5
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 8.767E-11
++ VJ = 0.5829
++ M = 0.3299
++ FC = 0.5
+.MODEL BZX884-B8V2 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 8.2
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 7.562E-11
++ VJ = 0.5765
++ M = 0.3298
++ FC = 0.5
+.MODEL BZX884-B9V1 D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 9.1
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 7.316E-11
++ VJ = 0.5667
++ M = 0.3295
++ FC = 0.5
+*
+.MODEL PDZ10B D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 10
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 6.004E-11
++ VJ = 0.6305
++ M = 0.3302
++ FC = 0.5
+*
+*
+.MODEL PDZ11B D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 11
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
++ FC = 0.5
+*
+.SUBCKT PDZ4_7B 1 2
+D1 2 1 PDZ4.7B
+.MODEL PDZ4.7B D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 4.7
++ IBV = 0.005
++ RS = 0.387
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
++ FC = 0.5
+.ENDS
+*
+.MODEL PDZ5_6B D
++ IS = 1.777E-15
++ N = 1.015
++ BV = 5.6
++ IBV = 0.00025
++ RS = 0.3502
++ CJO = 1.298E-10
++ VJ = 0.6612
++ M = 0.3228
++ FC = 0.5
+*
+*
+.MODEL PDZ9_1B D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 9.1
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 7.316E-11
++ VJ = 0.5667
++ M = 0.3295
++ FC = 0.5
+*
+* 
+.SUBCKT PESD12VL1BA 1 2
+*
+D1 11 1 PESD12VL1BA
+D2 11 2 PESD12VL1BA
+*
+.MODEL PESD12VL1BA D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 15
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD12VL2BT 1 2 3
+*
+D1 11 1 PESD12VL2BT
+D2 11 3 PESD12VL2BT
+D3 12 2 PESD12VL2BT
+D4 12 3 PESD12VL2BT
+*
+.MODEL PESD12VL2BT D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 15
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.ENDS
+*
+*
+.MODEL PESD12VS1UB D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 15
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+*
+.SUBCKT PESD12VS2UAT 1 2 3
+D1 1 3 PESD12VS2UAT
+D2 2 3 PESD12VS2UAT
+.MODEL PESD12VS2UAT D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 15
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD12VS2UQ 1 2 3
+D1 3 1  PESD12VS2UQ
+D2 3 2  PESD12VS2UQ
+.MODEL PESD12VS2UQ D
++ IS = 9.72E-15
++ N = 1.088
++ BV = 15.4
++ IBV = 0.005
++ RS = 0.2663
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD12VS2UT 1 2 3
+*
+D1 3 1 PESD12VS2UT
+D2 3 2 PESD12VS2UT
+*
+.MODEL PESD12VS2UT D
++ IS = 9.794E-015
++ N = 1.101
++ BV = 15
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 4.023E-011
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD12VU1UT 1 2 3
+*
+D1 3 2 DIODE 
+D2 3 1 ZENER12V
+*
+.MODEL DIODE D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+
+.MODEL ZENER12V D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 15
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD15VL1BA 1 2
+*
+D1 11 1 PESD15VL1BA
+D2 11 2 PESD15VL1BA
+*
+.MODEL PESD15VL1BA D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 18
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD15VL2BT 1 2 3
+*
+D1 11 1 PESD15VL2BT
+D2 11 3 PESD15VL2BT
+D3 12 2 PESD15VL2BT
+D4 12 3 PESD15VL2BT
+*
+.MODEL PESD15VL2BT D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 18
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.ENDS
+*
+*
+.MODEL PESD15VS1UB D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 18
++ IBV = 0.005
++ RS = 0.4798
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+*
+.SUBCKT PESD15VS2UAT 1 2 3
+D1 1 3 PESD15VS2UAT
+D2 2 3 PESD15VS2UAT
+.MODEL PESD15VS2UAT D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 18
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD15VS2UQ 1 2 3
+*
+D1 3 1 PESD15VS2UQ
+D2 3 2 PESD15VS2UQ
+*
+.MODEL PESD15VS2UQ D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 18
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD15VS2UT 1 2 3
+*
+D1 3 1 PESD15VS2UT
+D2 3 2 PESD15VS2UT
+*
+.MODEL PESD15VS2UT D 
++ IS = 9.794E-015
++ N = 1.101
++ BV = 18
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 3.17E-011
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD15VU1UT 1 2 3
+*
+D1 3 2 DIODE 
+D2 3 1 ZENER15V
+*
+.MODEL DIODE D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+
+.MODEL ZENER15V D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 18
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD1CAN 1 2 3
+*
+D1 11 1 PESD1CAN
+D2 11 3 PESD1CAN
+D3 12 2 PESD1CAN
+D4 12 3 PESD1CAN
+*
+.MODEL PESD1CAN D
++ IS = 9.794E-15
++ N = 1.101 
++ BV = 27
++ IBV = 0.002
++ RS = 0.3363
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD1LIN 1 2
+*
+D1 11 1 D15V
+D2 11 2 D24V
+*
+.MODEL D15V D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 18
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+*
+.MODEL D24V D
++ IS = 9.794E-15
++ N = 1.101 
++ BV = 27
++ IBV = 0.002
++ RS = 0.3363
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD24VL1BA 1 2
+*
+D1 11 1 PESD24VL1BA
+D2 11 2 PESD24VL1BA
+*
+.MODEL PESD24VL1BA D
++ IS = 9.794E-15
++ N = 1.101 
++ BV = 27
++ IBV = 0.002
++ RS = 0.3363
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD24VL2BT 1 2 3
+*
+D1 11 1 PESD24VL2BT
+D2 11 3 PESD24VL2BT
+D3 12 2 PESD24VL2BT
+D4 12 3 PESD24VL2BT
+*
+.MODEL PESD24VL2BT D
++ IS = 9.794E-15
++ N = 1.101 
++ BV = 27
++ IBV = 0.002
++ RS = 0.3363
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+*
+*
+.MODEL PESD24VS1UB D
++ IS = 1.13E-14
++ N = 1.103
++ BV = 27
++ IBV = 0.002
++ RS = 0.4798
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+*
+.SUBCKT PESD24VS2UAT 1 2 3
+D1 1 3 PESD24VS2UAT
+D2 2 3 PESD24VS2UAT
+.MODEL PESD24VS2UAT D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 27
++ IBV = 0.002
++ RS = 0.3363
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD24VS2UQ 1 2 3
+*
+D1 3 1 PESD24VS2UQ
+D2 3 2 PESD24VS2UQ
+*
+.MODEL PESD24VS2UQ D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 27
++ IBV = 0.002
++ RS = 0.3363
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD24VS2UT 1 2 3
+*
+D1 3 1 PESD24VS2UT
+D2 3 2 PESD24VS2UT
+*
+.MODEL PESD24VS2UT D
++ IS = 9.794E-015 
++ N = 1.101
++ BV = 27
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 2.233E-011
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD24VU1UT 1 2 3
+*
+D1 3 2 DIODE 
+D2 3 1 ZENER24V
+*
+.MODEL DIODE D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+
+.MODEL ZENER24V D
++ IS = 9.794E-15
++ N = 1.101
++ BV = 24
++ IBV = 0.005
++ RS = 0.3363
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD3V3L1BA 1 2
+*
+D1 11 1 PESD3V3L1BA
+D2 11 2 PESD3V3L1BA
+*
+.MODEL PESD3V3L1BA D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD3V3L2BT 1 2 3
+*
+D1 11 1 PESD3V3L2BT
+D2 11 3 PESD3V3L2BT
+D3 12 2 PESD3V3L2BT
+D4 12 3 PESD3V3L2BT
+
+*
+.MODEL PESD3V3L2BT D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD3V3L2UM 1 2 3
+*
+D1 3 1 PESD3V3L2UM
+D2 3 2 PESD3V3L2UM
+*
+.MODEL PESD3V3L2UM D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 5.6 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 2.136E-11 
++ VJ = 0.7025 
++ M = 0.3242 
++ FC = 0.5 
+.ENDS
+.SUBCKT PESD3V3L4UG 1 2 3 4 5
+*
+D1 2 1 PESD3V3L4UG
+D2 2 3 PESD3V3L4UG
+D3 2 4 PESD3V3L4UG
+D4 2 5 PESD3V3L4UG
+*
+.MODEL PESD3V3L4UG D
++ IS = 3.644E-17
++ N = 0.9717
++ BV = 5.6
++ IBV = 0.001
++ RS = 0.5003
++ CJO = 2.136E-11
++ VJ = 0.7025
++ M = 0.3242
++ FC = 0.5
+.ENDS
+.SUBCKT PESD3V3L4UW 1 2 3 4 5
+*
+D1 2 1 PESD3V3L4UW
+D2 2 3 PESD3V3L4UW
+D3 2 4 PESD3V3L4UW
+D4 2 5 PESD3V3L4UW
+*
+.MODEL PESD3V3L4UW D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 5.6 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 2.136E-11 
++ VJ = 0.7025 
++ M = 0.3242 
++ FC = 0.5 
+.ENDS
+.SUBCKT PESD3V3L5UV 1 2 3 4 5 6
+*
+D1 2 1 PESD3V3L5UV
+D2 2 3 PESD3V3L5UV
+D3 2 4 PESD3V3L5UV
+D4 2 5 PESD3V3L5UV
+D5 2 6 PESD3V3L5UV
+*
+.MODEL PESD3V3L5UV D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 5.6 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 2.136E-11 
++ VJ = 0.7025 
++ M = 0.3242 
++ FC = 0.5 
+.ENDS
+.SUBCKT PESD3V3L5UY 1 2 3 4 5 6
+*
+D1 2 1 PESD3V3L5UY
+D2 2 3 PESD3V3L5UY
+D3 2 4 PESD3V3L5UY
+D4 2 5 PESD3V3L5UY
+D5 2 6 PESD3V3L5UY
+*
+.MODEL PESD3V3L5UY D
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 5.6 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 2.136E-11 
++ VJ = 0.7025 
++ M = 0.3242 
++ FC = 0.5 
+.ENDS
+*
+.MODEL PESD3V3S1UB D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+*
+.SUBCKT PESD3V3S2UAT 1 2 3
+D1 1 3 PESD3V3S2UAT
+D2 2 3 PESD3V3S2UAT
+.MODEL PESD3V3S2UAT D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD3V3S2UQ 1 2 3
+*
+* The Resistors R1 and R2 do not 
+* reflect physical devices. 
+* Instead they improve modeling
+* in the reverse mode of 
+* operation.
+*
+R1 3 1 2.2E+9
+D1 3 1 PESD3V3S2UQ
+R2 3 2 2.2E+9
+D2 3 2 PESD3V3S2UQ
+*
+.MODEL PESD3V3S2UQ D
++ IS = 3.134E-16
++ N = 0.9403
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.2549
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD3V3S2UT 1 2 3
+*
+D1 3 1 PESD3V3S2UT
+D2 3 2 PESD3V3S2UT
+*
+.MODEL PESD3V3S2UT D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD3V3U1UT 1 2 3
+*
+D1 3 2 DIODE 
+D2 3 1 ZENER3V3
+*
+.MODEL DIODE D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+
+.MODEL ZENER3V3 D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD3V3V4UG 1 2 3 4 5
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 2 1 5E+8
+D1 2 1 PESD3V3V4UG
+R2 2 3 5E+8
+D2 2 3 PESD3V3V4UG
+R3 2 4 5E+8
+D3 2 4 PESD3V3V4UG
+R4 2 5 5E+8
+D4 2 5 PESD3V3V4UG
+*
+.MODEL PESD3V3V4UG D
++ IS = 2.497E-17
++ N = 1.003
++ BV = 5.6
++ IBV = 0.001
++ RS = 0.5053
++ CJO = 1.561E-11
++ VJ = 0.6327
++ M = 0.2904
+.ENDS
+*
+.SUBCKT PESD3V3V4UW 1 2 3 4 5
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 2 1 5E+8
+D1 2 1 PESD3V3V4UW
+R2 2 3 5E+8
+D2 2 3 PESD3V3V4UW
+R3 2 4 5E+8
+D3 2 4 PESD3V3V4UW
+R4 2 5 5E+8
+D4 2 5 PESD3V3V4UW
+*
+.MODEL PESD3V3V4UW D
++ IS = 2.497E-17
++ N = 1.003
++ BV = 5.6
++ IBV = 0.001
++ RS = 0.5053
++ CJO = 1.561E-11
++ VJ = 0.6327
++ M = 0.2904
+.ENDS
+* 
+.SUBCKT PESD5V0L1BA 1 2
+*
+D1 11 1 PESD5V0L1BA
+D2 11 2 PESD5V0L1BA
+*
+.MODEL PESD5V0L1BA D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.ENDS
+*
+* 
+.SUBCKT PESD5V0L2BT 1 2 3
+*
+D1 11 1 PESD5V0L2BT
+D2 11 3 PESD5V0L2BT
+D3 12 2 PESD5V0L2BT
+D4 12 3 PESD5V0L2BT
+*
+.MODEL PESD5V0L2BT D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD5V0L2UM 1 2 3
+*
+D1 3 1 PESD5V0L2UM
+D2 3 2 PESD5V0L2UM
+*
+.MODEL PESD5V0L2UM D 
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.8 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.641E-11 
++ VJ = 0.8979 
++ M = 0.33 
++ FC = 0.5 
+.ENDS
+.SUBCKT PESD5V0L4UG 1 2 3 4 5
+*
+D1 2 1 PESD5V0L4UG
+D2 2 3 PESD5V0L4UG
+D3 2 4 PESD5V0L4UG
+D4 2 5 PESD5V0L4UG
+*
+.MODEL PESD5V0L4UG D
++ IS = 3.644E-17
++ N = 0.9717
++ BV = 6.8
++ IBV = 0.001
++ RS = 0.5003
++ CJO = 1.641E-11
++ VJ = 0.8979
++ M = 0.33
++ FC = 0.5
+.ENDS
+.SUBCKT PESD5V0L4UW 1 2 3 4 5
+*
+D1 2 1 PESD5V0L4UW
+D2 2 3 PESD5V0L4UW
+D3 2 4 PESD5V0L4UW
+D4 2 5 PESD5V0L4UW
+*
+.MODEL PESD5V0L4UW D 
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.8 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.641E-11 
++ VJ = 0.8979 
++ M = 0.33 
++ FC = 0.5 
+.ENDS
+.SUBCKT PESD5V0L5UV 1 2 3 4 5 6
+*
+D1 2 1 PESD5V0L5UV
+D2 2 3 PESD5V0L5UV
+D3 2 4 PESD5V0L5UV
+D4 2 5 PESD5V0L5UV
+D5 2 6 PESD5V0L5UV
+*
+.MODEL PESD5V0L5UV D 
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.8 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.641E-11 
++ VJ = 0.8979 
++ M = 0.33 
++ FC = 0.5 
+.ENDS
+.SUBCKT PESD5V0L5UY 1 2 3 4 5 6
+*
+D1 2 1 PESD5V0L5UY
+D2 2 3 PESD5V0L5UY
+D3 2 4 PESD5V0L5UY
+D4 2 5 PESD5V0L5UY
+D5 2 6 PESD5V0L5UY
+*
+.MODEL PESD5V0L5UY D 
++ IS = 3.644E-17 
++ N = 0.9717 
++ BV = 6.8 
++ IBV = 0.001 
++ RS = 0.5003 
++ CJO = 1.641E-11 
++ VJ = 0.8979 
++ M = 0.33 
++ FC = 0.5 
+.ENDS
+.SUBCKT PESD5V0L6UAS 1 2 3 4 5 6 7 8
+*
+D1 6 1 PESD5V0L6UAS
+D2 6 2 PESD5V0L6UAS
+D3 6 3 PESD5V0L6UAS
+D4 6 4 PESD5V0L6UAS
+D5 6 5 PESD5V0L6UAS
+D6 6 8 PESD5V0L6UAS
+*
+* The resistor R1 is only for 
+* pinning of the device
+*
+R1 6 7 0
+*
+*
+.MODEL PESD5V0L6UAS D
++ IS = 3.644E-17
++ N = 0.9717
++ BV = 6.8
++ IBV = 0.001
++ RS = 0.5003
++ CJO = 1.641E-11
++ VJ = 0.8979
++ M = 0.33
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD5V0L6US 1 2 3 4 5 6 7 8
+*
+D1 6 1 PESD5V0L6US
+D2 6 2 PESD5V0L6US
+D3 6 3 PESD5V0L6US
+D4 6 4 PESD5V0L6US
+D5 6 5 PESD5V0L6US
+D6 6 8 PESD5V0L6US
+*
+* The resistor R1 is only for 
+* pinning of the device
+*
+R1 6 7 0
+*
+.MODEL PESD5V0L6US D
++ IS = 3.644E-17
++ N = 0.9717
++ BV = 6.8
++ IBV = 0.001
++ RS = 0.5003
++ CJO = 1.641E-11
++ VJ = 0.8979
++ M = 0.33
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD5V0L7BAS 1 2 3 4 5 6 7 8
+*
+D1 11 1 PESD5V0L7BAS
+D2 11 2 PESD5V0L7BAS
+D3 11 3 PESD5V0L7BAS
+D4 11 4 PESD5V0L7BAS
+D5 11 5 PESD5V0L7BAS
+D6 11 6 PESD5V0L7BAS
+D7 11 7 PESD5V0L7BAS
+D8 11 8 PESD5V0L7BAS
+*
+*
+.MODEL PESD5V0L7BAS D
++ IS = 3.644E-17
++ N = 0.9717
++ BV = 6.8
++ IBV = 0.001
++ RS = 0.5003
++ CJO = 1.641E-11
++ VJ = 0.8979
++ M = 0.33
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD5V0L7BS 1 2 3 4 5 6 7 8
+*
+D1 11 1 PESD5V0L7BS
+D2 11 2 PESD5V0L7BS
+D3 11 3 PESD5V0L7BS
+D4 11 4 PESD5V0L7BS
+D5 11 5 PESD5V0L7BS
+D6 11 6 PESD5V0L7BS
+D7 11 7 PESD5V0L7BS
+D8 11 8 PESD5V0L7BS
+*
+*
+.MODEL PESD5V0L7BS D
++ IS = 3.644E-17
++ N = 0.9717
++ BV = 6.8
++ IBV = 0.001
++ RS = 0.5003
++ CJO = 1.641E-11
++ VJ = 0.8979
++ M = 0.33
++ FC = 0.5
+.ENDS
+*
+*
+.MODEL PESD5V0S1UB D
++ IS = 1.033E-15
++ N = 1.001
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.387
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+*
+.SUBCKT PESD5V0S2UAT 1 2 3
+D1 1 3 PESD5V0S2UAT
+D2 2 3 PESD5V0S2UAT
+.MODEL PESD5V0S2UAT D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.ENDS
+*
+.SUBCKT PESD5V0S2UQ 1 2 3
+D1 3 1 PESD5V0S2UQ
+D2 3 2 PESD5V0S2UQ
+.MODEL PESD5V0S2UQ D
++ IS = 3.02E-16
++ N = 0.9388
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.2559
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD5V0U1UT 1 2 3
+*
+D1 3 2 DIODE 
+D2 3 1 ZENER5V0
+*
+.MODEL DIODE D
++ IS=6.0289E-9
++ N=2.1283
++ RS=1.0000E-3
++ IKF=37.638E-3
++ CJO=593.63E-15
++ M=.1
++ VJ=.68774
++ ISR=2.0646e-9
++ NR=4.9950
++ BV=113.60
++ IBV=10
++ TT=4.5000E-9
+
+.MODEL ZENER5V0 D
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD5V0V4UG 1 2 3 4 5
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 2 1 1E+10
+D1 2 1 PESD5V0V4UG
+R2 2 3 1E+10
+D2 2 3 PESD5V0V4UG
+R3 2 4 1E+10
+D3 2 4 PESD5V0V4UG
+R4 2 5 1E+10
+D4 2 5 PESD5V0V4UG
+*
+.MODEL PESD5V0V4UG D
++ IS = 3.997E-17
++ N = 1.012
++ BV = 6.8
++ IBV = 0.001
++ RS = 1.445
++ CJO = 1.217E-11
++ VJ = 0.6509
++ M = 0.2841
+.ENDS
+.SUBCKT PESD5V2S18U 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 
+*
+* The Resistors R1-R19 do not 
+* reflect physical devices. 
+* Instead they improve modeling
+* in the reverse mode of 
+* operation.
+*
+D1   6  1  PESD5V2S18U 
+R1   6  1  5E+7
+D2   6  2  PESD5V2S18U 
+R2   6  2  5E+7
+D3   6  3  PESD5V2S18U 
+R3   6  3  5E+7
+D4   6  4  PESD5V2S18U 
+R4   6  4  5E+7
+D5   6  5  PESD5V2S18U 
+R5   6  5  5E+7
+D6   6  7  PESD5V2S18U 
+R6   6  7  5E+7
+D7   6  8  PESD5V2S18U 
+R7   6  8  5E+7
+D8   6  9  PESD5V2S18U 
+R8   6  9  5E+7
+D9   6 10  PESD5V2S18U 
+R9   6 10  5E+7
+D10  6 11  PESD5V2S18U 
+R10  6 11  5E+7
+D11  6 12  PESD5V2S18U 
+R11  6 12  5E+7
+D12  6 13  PESD5V2S18U 
+R12  6 13  5E+7
+D13  6 14  PESD5V2S18U 
+R13  6 14  5E+7
+D14  6 15  PESD5V2S18U 
+R14  6 15  5E+7
+D15  6 17  PESD5V2S18U 
+R15  6 17  5E+7
+D16  6 18  PESD5V2S18U 
+R16  6 18  5E+7
+D17  6 19  PESD5V2S18U 
+R17  6 19  5E+7
+D18  6 20  PESD5V2S18U 
+R18  6 20  5E+7
+*
+* The resistor R19 is only for 
+* pinning of the device
+*
+R19 16  6  0
+*
+.MODEL PESD5V2S18U D 
++ IS = 2.779E-16 
++ N = 0.9976 
++ BV = 6.7 
++ IBV = 0.001 
++ RS = 0.2888 
++ CJO = 1.025E-10 
++ VJ = 0.7664 
++ M = 0.3438 
++ FC = 0.5 
+.ENDS
+*
+.SUBCKT PESD5V2S2UT 1 2 3
+*
+D1 3 1 PESD5V2S2UT
+D2 3 2 PESD5V2S2UT
+*
+.MODEL PESD5V2S2UT D 
++ IS = 7.035E-16
++ N = 0.9809
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.3487
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD5V0V4UW 1 2 3 4 5
+*
+* The Resistors do not reflect
+* physical devices.  Instead they 
+* improve modeling in the reverse
+* mode of operation.
+*
+R1 2 1 1E+10
+D1 2 1 PESD5VOV4UW
+R2 2 3 1E+10
+D2 2 3 PESD5VOV4UW
+R3 2 4 1E+10
+D3 2 4 PESD5VOV4UW
+R4 2 5 1E+10
+D4 2 5 PESD5VOV4UW
+*
+.MODEL PESD5VOV4UW D
++ IS = 3.997E-17
++ N = 1.012
++ BV = 6.8
++ IBV = 0.001
++ RS = 1.445
++ CJO = 1.217E-11
++ VJ = 0.6509
++ M = 0.2841
+.ENDS
+*
+.SUBCKT PMBD7100 1 2 3
+*
+* The Resistors R1 and R2 do not 
+* reflect physical devices. 
+* Instead they improve modeling
+* in the reverse mode of 
+* operation.
+*
+R1 1 3 9E+9
+D1 1 3 PMBD7100
+R2 2 3 9E+9
+D2 2 3 PMBD7100
+*
+.MODEL PMBD7100 D
++ IS = 3.622E-9
++ N = 1.865
++ BV = 110
++ IBV = 1E-5
++ RS = 0.9623
++ CJO = 5.936E-13
++ VJ = 0.6877
++ M = 0.1
++ FC = 0.5
++ TT = 3.246E-9
+.ENDS
+*
+
+.MODEL PZU10B D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 10
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 84.638E-12
++ VJ = .87838
++ M = .40269
+
+.MODEL PZU10B1 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 9.66
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 84.638E-12
++ VJ = .87838
++ M = .40269
+
+.MODEL PZU10B2 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 9.99
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 84.638E-12
++ VJ = .87838
++ M = .40269
+
+.MODEL PZU10B3 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 10.33
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 84.638E-12
++ VJ = .87838
++ M = .40269
+
+.MODEL PZU11B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 11 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
+
+.MODEL PZU11B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 10.66 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
+
+.MODEL PZU11B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 10.99 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
+
+.MODEL PZU11B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 11.33 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 5.404E-11
++ VJ = 0.5891
++ M = 0.3295
+
+.MODEL PZU12B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 12.01
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.928E-11
++ VJ = 0.575
++ M = 0.3292
+
+.MODEL PZU12B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 11.66
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.928E-11
++ VJ = 0.575
++ M = 0.3292
+
+.MODEL PZU12B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 11.99 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.928E-11
++ VJ = 0.575
++ M = 0.3292
+
+.MODEL PZU12B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 12.34
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.928E-11
++ VJ = 0.575
++ M = 0.3292
+
+.MODEL PZU13B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 13.215
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.392E-011 
++ VJ = 0.5723 
++ M = 0.3274
+
+.MODEL PZU13B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 12.75 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.392E-011 
++ VJ = 0.5723 
++ M = 0.3274
+
+.MODEL PZU13B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 13.2 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.392E-011 
++ VJ = 0.5723 
++ M = 0.3274
+
+.MODEL PZU13B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 13.665
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.392E-011 
++ VJ = 0.5723 
++ M = 0.3274
+
+.MODEL PZU14B2 D 
++ IS = 1.429E-14
++ N = 1.101
++ BV = 14
++ IBV = 0.005
++ RS = 0.3705
++ CJO = 4.201E-11
++ VJ = 0.5815
++ M = 0.3285
+
+.MODEL PZU15B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 14.68 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
+
+.MODEL PZU15B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 14.15 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
+
+.MODEL PZU15B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 14.66 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
+
+.MODEL PZU15B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 15.185 
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
+
+.MODEL PZU16B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 16.23
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.509E-11
++ VJ = 0.6502
++ M = 0.3378
+
+.MODEL PZU16B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 15.69
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.509E-11
++ VJ = 0.6502
++ M = 0.3378
+
+.MODEL PZU16B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 16.18
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.509E-11
++ VJ = 0.6502
++ M = 0.3378
+
+.MODEL PZU16B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 16.72
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.509E-11
++ VJ = 0.6502
++ M = 0.3378
+
+.MODEL PZU18B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 17.985
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
+
+.MODEL PZU18B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 17.32
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
+
+.MODEL PZU18B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 17.955
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
+
+.MODEL PZU18B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 18.62
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
+
+.SUBCKT PZU2_4B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 2.45
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.615E-10
++ VJ = 0.5762
++ M = 0.2715
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU2_7B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 2.7
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.518E-10
++ VJ = 0.6816
++ M = 0.3174
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU2_7B1 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 2.625
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.518E-10
++ VJ = 0.6816
++ M = 0.3174
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU2_7B2 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 2.775
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.518E-10
++ VJ = 0.6816
++ M = 0.3174
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.MODEL PZU20B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 19.97
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.915E-11
++ VJ = 0.635
++ M = 0.3362
+
+.MODEL PZU20B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 19.28
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.915E-11
++ VJ = 0.635
++ M = 0.3362
+
+.MODEL PZU20B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 19.955
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.915E-11
++ VJ = 0.635
++ M = 0.3362
+
+.MODEL PZU20B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 20.645
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.915E-11
++ VJ = 0.635
++ M = 0.3362
+
+.MODEL PZU22B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 22.025
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.701E-11
++ VJ = 0.7087
++ M = 0.3557
+
+.MODEL PZU22B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 21.325
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.701E-11
++ VJ = 0.7087
++ M = 0.3557
+
+.MODEL PZU22B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 22.005
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.701E-11
++ VJ = 0.7087
++ M = 0.3557
+
+.MODEL PZU22B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 22.7
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.701E-11
++ VJ = 0.7087
++ M = 0.3557
+
+.MODEL PZU24B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 24.25
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
+
+.MODEL PZU24B1 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 23.445
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
+
+.MODEL PZU24B2 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 24.25
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
+
+.MODEL PZU24B3 D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 25.055
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.48E-11
++ VJ = 0.7142
++ M = 0.3513
+
+.MODEL PZU27B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 27
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
+
+.SUBCKT PZU3_0B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.346E-10
++ VJ = 0.6722
++ M = 0.3162
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_0B1 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 2.925
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.346E-10
++ VJ = 0.6722
++ M = 0.3162
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_0B2 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.075
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.346E-10
++ VJ = 0.6722
++ M = 0.3162
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_3B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.3
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.162E-10
++ VJ = 0.6687
++ M = 0.3164
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_3B1 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.225
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.162E-10
++ VJ = 0.6687
++ M = 0.3164
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_3B2 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.375
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.162E-10
++ VJ = 0.6687
++ M = 0.3164
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_6B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.6
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.062E-10
++ VJ = 0.6643
++ M = 0.3168
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_6B1 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.525
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.062E-10
++ VJ = 0.6643
++ M = 0.3168
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_6B2 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.675
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 3.062E-10
++ VJ = 0.6643
++ M = 0.3168
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_9B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.9
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.797E-01
++ VJ = 0.6215
++ M = 0.3154
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_9B1 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.835
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.797E-01
++ VJ = 0.6215
++ M = 0.3154
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU3_9B2 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 3.985
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.797E-01
++ VJ = 0.6215
++ M = 0.3154
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.MODEL PZU30B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 29.94
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.17E-011
++ VJ = 0.6718
++ M = 0.3465
+
+.MODEL PZU33B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 33.06
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 2.019E-11
++ VJ = 0.7645
++ M = 0.3782
+
+.MODEL PZU36B D 
++ IS = 1.429E-014 
++ N = 1.101 
++ BV = 35.97
++ IBV = 0.005 
++ RS = 0.3705 
++ CJO = 1.866E-11
++ VJ = 0.7591
++ M = 0.3771
+
+.SUBCKT PZU4_3B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.245
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.715E-10
++ VJ = 0.7721
++ M = 0.3557
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU4_3B1 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.11
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.715E-10
++ VJ = 0.7721
++ M = 0.3557
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU4_3B2 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.245
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.715E-10
++ VJ = 0.7721
++ M = 0.3557
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU4_3B3 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.38
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.715E-10
++ VJ = 0.7721
++ M = 0.3557
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU4_7B 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.66
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU4_7B1 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.515
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU4_7B2 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.65
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.SUBCKT PZU4_7B3 1 2
+D1 1 2 DIODE1
+D2 1 2 DIODE2
+.MODEL DIODE1 D
++ IS = 3.311E-13
++ N = 1.22
++ BV = 4.795
++ IBV = 0.005
++ RS = 0.2214
++ CJO = 2.589E-10
++ VJ = 0.8029
++ M = 0.3636
+.MODEL DIODE2 D
++ IS = 2.399E-01
++ N = 1.757
++ RS = 391.3
+.ENDS
+
+.MODEL PZU5_1B D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.105
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 129.04E-12
++ VJ = .46589
++ M = .2767
+
+.MODEL PZU5_1B1 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 4.94
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 129.04E-12
++ VJ = .46589
++ M = .2767
+
+.MODEL PZU5_1B2 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.09
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 129.04E-12
++ VJ = .46589
++ M = .2767
+
+.MODEL PZU5_1B3 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.255
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 129.04E-12
++ VJ = .46589
++ M = .2767
+
+.MODEL PZU5_6B D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.615
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 126.73E-12
++ VJ = .66355
++ M = .33169
+
+.MODEL PZU5_6B1 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.43
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 126.73E-12
++ VJ = .66355
++ M = .33169
+
+.MODEL PZU5_6B2 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.61
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 126.73E-12
++ VJ = .66355
++ M = .33169
+
+.MODEL PZU5_6B3 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.795
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 126.73E-12
++ VJ = .66355
++ M = .33169
+
+.MODEL PZU6_2B D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 6.195
++ IBV = 0.005
++ RS = 0.2338
++ CJO=113.90E-12
++ VJ=.70655
++ M=.34012
+
+.MODEL PZU6_2B1 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 5.99
++ IBV = 0.005
++ RS = 0.2338
++ CJO=113.90E-12
++ VJ=.70655
++ M=.34012
+
+.MODEL PZU6_2B2 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 6.195
++ IBV = 0.005
++ RS = 0.2338
++ CJO=113.90E-12
++ VJ=.70655
++ M=.34012
+
+.MODEL PZU6_2B3 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 6.395
++ IBV = 0.005
++ RS = 0.2338
++ CJO=113.90E-12
++ VJ=.70655
++ M=.34012
+
+.MODEL PZU6_8B D
++ IS = 7.526E-016
++ N = 0.992
++ BV = 6.805
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 1.107E-010
++ VJ = 0.7367
++ M = 0.3406
+
+.MODEL PZU6_8B1 D
++ IS = 7.526E-016
++ N = 0.992
++ BV = 6.6
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 1.107E-010
++ VJ = 0.7367
++ M = 0.3406
+
+.MODEL PZU6_8B2 D
++ IS = 7.526E-016
++ N = 0.992
++ BV = 6.79
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 1.107E-010
++ VJ = 0.7367
++ M = 0.3406
+
+.MODEL PZU6_8B3 D
++ IS = 7.526E-016
++ N = 0.992
++ BV = 7
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 1.107E-010
++ VJ = 0.7367
++ M = 0.3406
+
+.MODEL PZU7_5B D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 7.45
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 128.24E-12
++ VJ = .81245
++ M = .36798
+
+.MODEL PZU7_5B1 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 7.21
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 128.24E-12
++ VJ = .81245
++ M = .36798
+
+.MODEL PZU7_5B2 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 7.44
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 128.24E-12
++ VJ = .81245
++ M = .36798
+
+.MODEL PZU7_5B3 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 7.68
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 128.24E-12
++ VJ = .81245
++ M = .36798
+
+.MODEL PZU8_2B D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 8.2
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 108.31E-12
++ VJ = .83652
++ M = .38088
+
+.MODEL PZU8_2B1 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 7.93
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 108.31E-12
++ VJ = .83652
++ M = .38088
+
+.MODEL PZU8_2B2 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 8.19
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 108.31E-12
++ VJ = .83652
++ M = .38088
+
+.MODEL PZU8_2B3 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 8.46
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 108.31E-12
++ VJ = .83652
++ M = .38088
+
+.MODEL PZU9_1B D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 9.055
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 81.449E-12
++ VJ = .78547
++ M = .36117
+
+.MODEL PZU9_1B1 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 8.745
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 81.449E-12
++ VJ = .78547
++ M = .36117
+
+.MODEL PZU9_1B2 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 9.04
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 81.449E-12
++ VJ = .78547
++ M = .36117
+
+.MODEL PZU9_1B3 D
++ IS = 7.526E-16
++ N = 0.992
++ BV = 9.35
++ IBV = 0.005
++ RS = 0.2338
++ CJO = 81.449E-12
++ VJ = .78547
++ M = .36117
+
+*
+.SUBCKT BZA408B 1 2 3 4 5 6
+*
+*Model is for Spice 3
+*
+R1 1 11 2.94E+10
+R2 2 11 2E+10
+D1 11 1 DIODE1
+D2 11 2 DIODE2
+*
+R3 3 22 2.94E+10
+R4 2 22 2E+10
+D3 22 3 DIODE1
+D4 22 2 DIODE2
+*
+R5 4 33 2.94E+10
+R6 2 33 2E+10
+D5 33 4 DIODE1
+D6 33 2 DIODE2
+*
+R7 6 44 2.94E+10
+R8 2 44 2E+10
+D7 44 6 DIODE1
+D8 44 2 DIODE2
+*
+*The resistor R9 is only for 
+* pinning of the device
+*
+R9 2 5 0
+*
+.MODEL DIODE1 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.129
++ IBV = 2.518E-6
++ RS = 1
++ CJO = 3.995E-9
++ VJ = 0.01729
++ M = 0.6586
++ FC = 0.5
+*
+.MODEL DIODE2 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.07
++ IBV = 0.0005811
++ RS = 1
++ CJO = 5.094E-11
++ VJ = 0.9561
++ M = 0.2158
++ FC = 0.5
+.ENDS
+
+.MODEL PESD12VS1UL D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 15
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 4.023E-11
++ VJ = 0.6144
++ M = 0.3297
++ FC = 0.5
+
+.MODEL PESD15VS1UL D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 18
++ IBV = 0.005
++ RS = 0.4467
++ CJO = 3.17E-11
++ VJ = 0.6421
++ M = 0.3327
++ FC = 0.5
+
+.MODEL PESD24VS1UL D
++ IS = 5.229E-15
++ N = 1.061
++ BV = 27
++ IBV = 0.002
++ RS = 0.4467
++ CJO = 2.233E-11
++ VJ = 0.7107
++ M = 0.3546
++ FC = 0.5
+
+.MODEL PESD3V3S1UL D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 5.6
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 1.961E-10
++ VJ = 0.9187
++ M = 0.423
++ FC = 0.5
+
+.MODEL PESD5V0S1UL D
++ IS = 7.066E-16
++ N = 0.9643
++ BV = 6.8
++ IBV = 0.005
++ RS = 0.2544
++ CJO = 1.519E-10
++ VJ = 0.9041
++ M = 0.4027
++ FC = 0.5
+
+*
+.SUBCKT PESD5V0S1BA 1 2
+*
+*Model is for Spice 3
+*
+R1 1 22 2.94E+10
+R2 2 22 2E+010
+D1 22 1 DIODE1
+D2 22 2 DIODE2
+*
+.MODEL DIODE1 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.129 
++ IBV = 2.518E-06
++ RS = 1
++ CJO = 8.737E-10
++ VJ = 0.07778
++ M = 0.6347
++ FC = 0.5
+*
+.MODEL DIODE2 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.07
++ IBV = 0.0005811
++ RS = 1
++ CJO = 3.699E-11
++ VJ = 0.6608
++ M = 0.2001
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD5V0S1BB 1 2
+*
+*Model is for Spice 3
+*
+R1 1 22 2.94E+10
+R2 2 22 2E+010
+D1 22 1 DIODE1
+D2 22 2 DIODE2
+*
+.MODEL DIODE1 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.129 
++ IBV = 2.518E-06
++ RS = 1
++ CJO = 8.737E-10
++ VJ = 0.07778
++ M = 0.6347
++ FC = 0.5
+*
+.MODEL DIODE2 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.07
++ IBV = 0.0005811
++ RS = 1
++ CJO = 3.699E-11
++ VJ = 0.6608
++ M = 0.2001
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD5V0S1BL 1 2
+*
+*Model is for Spice 3
+*
+R1 1 22 2.94E+10
+R2 2 22 2E+010
+D1 22 1 DIODE1
+D2 22 2 DIODE2
+*
+.MODEL DIODE1 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.129 
++ IBV = 2.518E-06
++ RS = 1
++ CJO = 8.737E-10
++ VJ = 0.07778
++ M = 0.6347
++ FC = 0.5
+*
+.MODEL DIODE2 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.07
++ IBV = 0.0005811
++ RS = 1
++ CJO = 3.699E-11
++ VJ = 0.6608
++ M = 0.2001
++ FC = 0.5
+.ENDS
+*
+*
+.SUBCKT PESD5V0S2BT 1 2 3
+*
+*Model is for Spice 3
+*
+R1 1 22 2.94E+10
+R2 3 22 2E+010
+D1 22 1 DIODE1
+D2 22 3 DIODE2
+*
+R3 2 22 2.94E+10
+R4 3 22 2E+010
+D3 22 2 DIODE1
+D4 22 3 DIODE2
+*
+.MODEL DIODE1 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.129 
++ IBV = 2.518E-06
++ RS = 1
++ CJO = 8.737E-10
++ VJ = 0.07778
++ M = 0.6347
++ FC = 0.5
+*
+.MODEL DIODE2 D
++ IS = 1E-14
++ N = 0.05
++ BV = 7.07
++ IBV = 0.0005811
++ RS = 1
++ CJO = 3.699E-11
++ VJ = 0.6608
++ M = 0.2001
++ FC = 0.5
+.ENDS
+*

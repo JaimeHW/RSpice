@@ -1,0 +1,156 @@
+******************************************************************
+* 
+* EPCOS AG			EPCOS AG
+* Bereich Induktivitäten	Inductors Division
+* Entwicklung			Development Department
+* D-89520 Heidenheim		D-89520 Heidenheim
+* In den Seewiesen 26		In den Seewiesen 26
+*
+* Allgemeines			General
+*	Wolfgang Sammet
+*	Tel  +49 (0) 7321 326-220
+*	FAX  +49 (0) 7321 326-628
+*	Email wolfgang.sammet@epcos.com
+*
+*
+* Modellierung und Simulation	Modeling and simulation
+*	Stefan Schefler
+*	Tel  +49 (0) 7321 326-446
+*	FAX  +49 (0) 7321 326-628
+*	Email stefan.schefler@epcos.com
+*
+*
+******************************************************************
+* Bitte lesen Sie die Hinweise in der Datei "Liesmich.txt" .
+* Please read the hints in "Readme.txt" .
+******************************************************************
+*
+* 
+* Library B82450.lib 
+* Version 1.01 (Donnerstag, 22. Juli 2010 16:17 Uhr CEST)
+* 
+******************************************************************
+* SPICE-Simulationsdaten für Transponder (B82450)
+* SPICE simulation data for Transponder (B82450)
+* 	B82450
+*
+******************************************************************
+*
+******************************************************************
+* Library für/for PSPICE
+* 
+* Libraries für weitere Spice-Versionen sind verfügbar (HSPICE, 
+* Ansoft Designer..)
+*
+* Libraries for further Simulation Programs available (HSPICE, 
+* Ansoft Designer.. )
+*	
+******************************************************************
+*
+.subckt B82450_BASE1 A1 A2  PARAMS:  
++	ls11_a=1.0300m rs11_a=11.1746 cp11_a=1.6610p rp11_a=272.9541k 
++	lwira1_a=9.4400n lwa1_a=874.1727n rwa1_a=151.5364m lwb1_a=583.8990n 
++	rwb1_a=1.8056 kw1a1_a=0.9999 
+ls1_b	A1 31 	{ls11_a}  
+rs1_b	31 A2 	{rs11_a}  
+cp1_b	A1 A2 	{cp11_a}  
+rp1_b	A1 A2 	{rp11_a}  
+lwira_b	900 0 	{lwira1_a}  
+lwa_b	900 901 	{lwa1_a}  
+rwa_b	901 0 	{rwa1_a}  
+lwb_b	900 902 	{lwb1_a}  
+rwb_b	902 0 	{rwb1_a}  
+kw1a_b	ls1_b lwira_b	{kw1a1_a}
+.ENDS
+
+*
+* B82450A1004A000 Transponder (B82450A*A) 12mm Standard Type (1000 uH +-3%)
+*
+.subckt B82450A1004A000 A1 A2   PARAMS:  
++	ls11=1.0300m rs11=11.1746 cp11=1.6610p rp11=272.9541k 
++	lwira1=9.4400n lwa1=874.1727n rwa1=151.5364m lwb1=583.8990n 
++	rwb1=1.8056 kw1a1=0.9999 
+X1 A1 A2 B82450_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82450A1004E000 Transponder (B82450A*E)  8mm Standard Type (1000 uH )
+*
+.subckt B82450A1004E000 A1 A2   PARAMS:  
++	ls11=1.0130m rs11=14.01 cp11=1.7283p rp11=373.4053k 
++	lwira1=7.2000n lwa1=1.5166u rwa1=119.9761m lwb1=397.6463n 
++	rwb1=1.7975 kw1a1=0.9999 
+X1 A1 A2 B82450_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82450A2364A000 Transponder (B82450A*A) 12mm Standard Type (2360 uH +-3%)
+*
+.subckt B82450A2364A000 A1 A2   PARAMS:  
++	ls11=2.4318m rs11=20.8283 cp11=1.8175p rp11=748.9823k 
++	lwira1=9.4400n lwa1=4.2754u rwa1=1.2410 lwb1=314.8321n 
++	rwb1=1.3550 kw1a1=0.9999 
+X1 A1 A2 B82450_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82450A2364E000 Transponder (B82450A*E)  8mm Standard Type (2360 uH )
+*
+.subckt B82450A2364E000 A1 A2   PARAMS:  
++	ls11=2.4073m rs11=34.77 cp11=1.5497p rp11=828.1411k 
++	lwira1=7.2000n lwa1=1.3447u rwa1=123.4955m lwb1=492.9076n 
++	rwb1=2.1564 kw1a1=0.9999 
+X1 A1 A2 B82450_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82450A7004A000 Transponder (B82450A*A) 12mm Standard Type (7000 uH +-3%)
+*
+.subckt B82450A7004A000 A1 A2   PARAMS:  
++	ls11=7.2022m rs11=66.2943 cp11=2.3521p rp11=2.8384meg 
++	lwira1=9.4400n lwa1=1.0199u rwa1=1.8333 lwb1=98.6976n 
++	rwb1=3.5415 kw1a1=999.0000m 
+X1 A1 A2 B82450_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82450A7004E000 Transponder (B82450A*E)  8mm Standard Type (7000 uH )
+*
+.subckt B82450A7004E000 A1 A2   PARAMS:  
++	ls11=6.9293m rs11=111.68 cp11=1.6371p rp11=21.4879meg 
++	lwira1=7.2000n lwa1=63.8072n rwa1=1.5086 lwb1=2.1950u 
++	rwb1=2.8270 kw1a1=999.0000m 
+X1 A1 A2 B82450_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82451N4754E002 Z-Transponder (B82451) Standard Type (4750 uH )
+*
+.subckt B82451N4754E002 A1 A2   PARAMS:  
++	ls11=4.7655m rs11=34.74 cp11=2.6365p rp11=958.3909k 
++	lwira1=34.9800n lwa1=10.2895u rwa1=3.5734 lwb1=5.1637u 
++	rwb1=6.5199 kw1a1=0.9999 
+X1 A1 A2 B82450_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+

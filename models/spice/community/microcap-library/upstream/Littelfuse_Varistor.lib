@@ -1,0 +1,376 @@
+*******************************
+*Varistor PSpice Model Netlist*
+*******************************
+*
+* © 	Littelfuse Inc
+*     
+*
+*     December 7, 2001
+*	version 4.2
+*
+* 
+*
+.SUBCKT CHMOV  1 2 PARAMS: T=1 C=1pF L=1nH a1=1 a2=0 a3=0 a4=0 a5=0 a6=100u a7=100u
+Enonln1	3 1	VALUE {(T)*(
++	10^(
++	+a1+a2*(log10(limit(v(4),a7,1g))-3)
++	+a3*2^(-log10(limit(v(4),a7,1g))+3)
++	+a4*exp(-log10(limit(v(4),a7,1g))+3)
++	+a5*exp(log10(limit(v(4),a7,1g))-3)
++	+a6*2^(log10(limit(v(4),a7,1g))-3)
++	)
++	-10^(
++	a1+a2*(log10(-limit(v(4),-1g,-a7))-3)
++	+a3*2^(-log10(-limit(v(4),-1g,-a7))+3)
++	+a4*exp(-log10(-limit(v(4),-1g,-a7))+3)
++	+a5*exp(log10(-limit(v(4),-1g,-a7))-3)
++	+a6*2^(log10(-limit(v(4),-1g,-a7))-3)
++	)
++	+limit(v(4)/a7*v(8),-v(8),v(8))
++	)}
+L_series	5 6  {L}  
+H_H1		4 0  VH_H1 1k
+VH_H1		5 70 0V
+R_R2		0 4  1G  
+R_series	6 2  100u  
+V_V1		3 70  0V
+E_x_zero	8 0 	VALUE {10^(
++	a1+a2*(log10(a7/1e3))
++	+a3*2^(-log10(a7/1e3))
++	+a4*exp(-log10(a7/1e3))
++	+a5*exp(log10(a7/1e3))
++	+a6*2^(log10(a7/1e3))
++	)}
+R_x_zero	8 0  1G
+C_parallel	1 5 {C}
+.ENDS
+.SUBCKT V22CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=1.6nF a1=1.467 a2=6.074E-2 a3=1.119E-2 a4=-1.691E-3 a5=2.383E-2 a6=9.805E-3
+.ENDS
+*
+.SUBCKT V27CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=1.3nF a1=1.556 a2=6.074E-2 a3=1.119E-2 a4=-1.691E-3 a5=2.383E-2 a6=9.805E-3
+.ENDS
+*
+.SUBCKT V33CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=1100pF a1=1.643 a2=6.074E-2 a3=1.119E-2 a4=-1.691E-3 a5=2.383E-2 a6=9.805E-3
+.ENDS
+*
+.SUBCKT V39CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=900pF a1=1.715 a2=6.074E-2 a3=1.119E-2 a4=-1.691E-3 a5=2.383E-2 a6=9.805E-3
+.ENDS
+*
+.SUBCKT V47CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=800pF a1=1.796 a2=6.074E-2 a3=1.119E-2 a4=-1.691E-3 a5=2.383E-2 a6=9.805E-3
+.ENDS
+*
+.SUBCKT V56CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=700pF a1=1.872 a2=6.074E-2 a3=1.119E-2 a4=-1.691E-3 a5=2.383E-2 a6=9.805E-3
+.ENDS
+*
+.SUBCKT V120CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=300pF a1=2.182 a2=5.787E-2 a3=1.393E-2 a4=-2.074E-3 a5=1.549E-2 a6=-6.7E-4
+.ENDS
+*
+.SUBCKT V150CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=250pF a1=2.279 a2=5.787E-2 a3=1.393E-2 a4=-2.074E-3 a5=1.549E-2 a6=-6.7E-4
+.ENDS
+*
+.SUBCKT V180CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=200pF a1=2.358 a2=5.787E-2 a3=1.393E-2 a4=-2.074E-3 a5=1.549E-2 a6=-6.7E-4
+.ENDS
+*
+.SUBCKT V200CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=180pF a1=2.404 a2=5.787E-2 a3=1.393E-2 a4=-2.074E-3 a5=1.549E-2 a6=-6.7E-4
+.ENDS
+*
+.SUBCKT V220CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=160pF a1=2.446 a2=5.787E-2 a3=1.393E-2 a4=-2.074E-3 a5=1.549E-2 a6=-6.7E-4
+.ENDS
+*
+.SUBCKT V240CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=150pF a1=2.483 a2=5.787E-2 a3=1.393E-2 a4=-2.074E-3 a5=1.549E-2 a6=-6.7E-4
+.ENDS
+*
+.SUBCKT V360CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=100pF a1=2.619 a2=3.426E-2 a3=7.355E-3 a4=-1.093E-3 a5=1.392E-3 a6=2.721E-2
+.ENDS
+*
+.SUBCKT V390CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=90pF a1=2.653 a2=3.426E-2 a3=7.355E-3 a4=-1.093E-3 a5=1.392E-3 a6=2.721E-2
+.ENDS
+*
+.SUBCKT V430CH8 1 2 PARAMS: TOL=0
+X1	1 2	CHMOV PARAMS: T={1+TOL/100} L=2.5nH C=80pF a1=2.696 a2=3.426E-2 a3=7.355E-3 a4=-1.093E-3 a5=1.392E-3 a6=2.721E-2
+.ENDS
+*
+*******************************
+*Varistor PSpice Model Netlist*
+*******************************
+*
+* © 	Littelfuse Inc.
+*	11th March 2004
+*	version 4.0
+*
+* Representing typical characteristics for the following DA/DB-Series varistors: 
+*
+* V131DA40
+* V151DA40
+* V251DA40
+* V271DA40
+* V321DA40
+* V421DA40
+* V481DA40
+* V511DA40
+* V571DA40
+* V661DA40
+* V751DA40
+*
+.SUBCKT DAMOV  1 2 PARAMS: T=1 C=1pF L=1nH a1=1 a2=0 a3=0 a4=0 a5=0 a6=100u a7=100u
+E_non_lin	3 1 	VALUE {(T)*(
++ 			a1+a2*(log10(limit(v(4),a7,1g))-3)
++			+a3*2^(-log10(limit(v(4),a7,1g))+3)
++			+a4*exp(-log10(limit(v(4),a7,1g))+3)
++ 			+a5*exp(log10(limit(v(4),a7,1g))-3)
++ 			-(a1+a2*(log10(-limit(v(4),-1g,-a7))-3)
++			+a3*2^(-log10(-limit(v(4),-1g,-a7))+3)
++			+a4*exp(-log10(-limit(v(4),-1g,-a7))+3)
++ 			+a5*exp(log10(-limit(v(4),-1g,-a7))-3))
++ 			+limit(v(4)/a7*v(8),-v(8),v(8)))}
+L_series	5 6  {L}  
+H_H1		4 0  VH_H1 1k
+VH_H1		5 7 0V
+R_R2		0 4  1G  
+R_series	6 2  {a6}  
+V_V1		3 7  0V
+E_x_zero	8 0 	VALUE {a1+a2*(log10(a7/1e3))+a3*2^(-log10(a7/1e3))
++			+a4*exp(-log10(a7/1e3))+a5*exp(log10(a7/1e3))}
+R_x_zero	8 0  1G
+C_parallel	1 5 {C}
+.ENDS
+*
+.SUBCKT V131DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=10nF a1=250.3 a2=9.855 a3=-3.115 a4=0.2016 a5=3.161 a6=2.405E-3
+.ENDS
+*
+.SUBCKT V151DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=8nF a1=300.3 a2=11.83 a3=-3.737 a4=0.242 a5=3.793 a6=2.886E-3
+.ENDS
+*
+.SUBCKT V251DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=5nF a1=488 a2=19.22 a3=-6.073 a4=0.3932 a5=6.163 a6=4.689E-3
+.ENDS
+*
+.SUBCKT V271DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=4.5nF a1=538.1 a2=21.19 a3=-6.696 a4=0.4335 a5=6.795 a6=5.17E-3
+.ENDS
+*
+.SUBCKT V321DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=3.8nF a1=638.2 a2=25.13 a3=-7.942 a4=0.5142 a5=8.059 a6=6.132E-3
+.ENDS
+*
+.SUBCKT V421DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=3nF a1=850.9 a2=33.51 a3=-10.59 a4=0.6855 a5=10.75 a6=8.176E-3
+.ENDS
+*
+.SUBCKT V481DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=2.7nF a1=938.5 a2=36.95 a3=-11.68 a4=0.7561 a5=11.85 a6=9.018E-3
+.ENDS
+*
+.SUBCKT V511DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=2.5nF a1=1026 a2=40.4 a3=-12.77 a4=0.8267 a5=12.96 a6=9.859E-3
+.ENDS
+*
+.SUBCKT V571DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=2.2nF a1=1139 a2=44.84 a3=-14.17 a4=0.9174 a5=14.38 a6=10.94E-3
+.ENDS
+*
+.SUBCKT V661DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=2nF a1=1314 a2=51.74 a3=-16.35 a4=1.059 a5=16.59 a6=12.62E-3
+.ENDS
+*
+.SUBCKT V751DA40 1 2 PARAMS: TOL=0
+X1	1 2	DAMOV PARAMS: T={1+TOL/100} L=20nH C=1.8nF a1=1502 a2=59.13 a3=-18.69 a4=1.21 a5=18.96 a6=14.43E-3
+.ENDS
+*
+
+*******************************
+*Varistor PSpice Model Netlist*
+*******************************
+*
+* © 	Littelfuse Inc.
+*
+*     March 25, 2003
+*	version 4.2
+*
+* Representing typical characteristics for the following UltraMOV series varistors:
+*
+*V20E130 V20E140 V20E150 V20E175 V20E200
+*V20E230 V20E250 V20E275 V20E300
+*V20E320 V20E385 V20E420 V20E440
+*V20E460 V20E510 V20E550 V20E625
+*
+.SUBCKT UMOV  1 2 PARAMS: T=1 C=1pF L=1nH a1=1 a2=0 a3=0 a4=0 a5=0 a6=100u a7=100u
+E_non_lin	3 1	VALUE {(T)*(
++	10^(
++	+a1+a2*(log10(limit(v(4),a7,1g))-3)
++	+a3*2^(-log10(limit(v(4),a7,1g))+3)
++	+a4*exp(-log10(limit(v(4),a7,1g))+3)
++	+a5*exp(log10(limit(v(4),a7,1g))-3)
++	+a6*2^(log10(limit(v(4),a7,1g))-3)
++	)
++	-10^(
++	a1+a2*(log10(-limit(v(4),-1g,-a7))-3)
++	+a3*2^(-log10(-limit(v(4),-1g,-a7))+3)
++	+a4*exp(-log10(-limit(v(4),-1g,-a7))+3)
++	+a5*exp(log10(-limit(v(4),-1g,-a7))-3)
++	+a6*2^(log10(-limit(v(4),-1g,-a7))-3)
++	)
++	+limit(v(4)/a7*v(8),-v(8),v(8))
++	)}
+L_series	5 6  {L}  
+H_H1		4 0  VH_H1 1k
+VH_H1		5 70 0V
+R_R2		0 4  1G  
+R_series	6 2  100u  
+V_V1		3 70  0V
+E_x_zero	8 0 	VALUE {10^(
++	a1+a2*(log10(a7/1e3))
++	+a3*2^(-log10(a7/1e3))
++	+a4*exp(-log10(a7/1e3))
++	+a5*exp(log10(a7/1e3))
++	+a6*2^(log10(a7/1e3))
++	)}
+R_x_zero	8 0  1G
+C_parallel	1 5 {C}
+.ENDS
+.SUBCKT V20E130 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=1.9nF a1=2.398 a2=4.817E-2 a3=1.273E-2 a4=-2.058E-3 a5=1.193E-2 a6=-2.71E-2
+.ENDS
+*
+.SUBCKT V20E140 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=1.75nF a1=2.429 a2=4.817E-2 a3=1.273E-2 a4=-2.058E-3 a5=1.193E-2 a6=-2.71E-2
+.ENDS
+*
+.SUBCKT V20E150 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=1.6nF a1=2.467 a2=4.817E-2 a3=1.273E-2 a4=-2.058E-3 a5=1.193E-2 a6=-2.71E-2
+.ENDS
+*
+.SUBCKT V20E175 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=1.4nF a1=2.518 a2=4.817E-2 a3=1.273E-2 a4=-2.058E-3 a5=1.193E-2 a6=-2.71E-2
+.ENDS
+*
+.SUBCKT V20E200 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=1.3nF a1=2.558 a2=3.756E-2 a3=1.103E-2 a4=-1.894E-3 a5=8.026E-3 a6=-8.958E-3
+.ENDS
+*
+.SUBCKT V20E230 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=1.1nF a1=2.649 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E250 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=1nF a1=2.683 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E275 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=900pF a1=2.726 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E300 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=800pF a1=2.764 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E320 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=750pF a1=2.8 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E385 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=700pF a1=2.885 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E420 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=600pF a1=2.925 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E440 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=500pF a1=2.947 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E460 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=400pF a1=2.967 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E510 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=350pF a1=3.006 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E550 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=300pF a1=3.051 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+.SUBCKT V20E625 1 2 PARAMS: TOL=0
+X1	1 2	UMOV PARAMS: T={1+TOL/100} L=12nH C=250pF a1=3.092 a2=5.574E-2 a3=1.837E-2 a4=-3.412E-3 a5=1.362E-2 a6=-3.772E-2
+.ENDS
+*
+********************************
+*Varistor PSpice Model Netlist*
+*******************************
+*
+* © 	Littelfuse Inc.
+*	6th April 2004
+*	version 4.0
+*
+* Representing typical characteristics for the following MHS-Series varistors: 
+*
+* V0402MHS03	V0603MHS03
+* V0402MHS12	V0603MHS12
+* V0402MHS22	V0603MHS22
+*
+.SUBCKT MHSMOV  1 2 PARAMS: T=1 C=1pF L=1nH a1=1 a2=0 a3=0 a4=0 a5=0 a6=100u a7=100u
+E_non_lin	3 1 	VALUE {(T)*(
++ 			a1+a2*(log10(limit(v(4),a7,1g))-3)
++			+a3*2^(-log10(limit(v(4),a7,1g))+3)
++			+a4*exp(-log10(limit(v(4),a7,1g))+3)
++ 			+a5*exp(log10(limit(v(4),a7,1g))-3)
++ 			-(a1+a2*(log10(-limit(v(4),-1g,-a7))-3)
++			+a3*2^(-log10(-limit(v(4),-1g,-a7))+3)
++			+a4*exp(-log10(-limit(v(4),-1g,-a7))+3)
++ 			+a5*exp(log10(-limit(v(4),-1g,-a7))-3))
++ 			+limit(v(4)/a7*v(8),-v(8),v(8)))}
+L_series	5 6  {L}  
+H_H1		4 0  VH_H1 1k
+VH_H1		5 7 0V
+R_R2		0 4  1G  
+R_series	6 2  {a6}  
+V_V1		3 7  0V
+E_x_zero	8 0 	VALUE {a1+a2*(log10(a7/1e3))+a3*2^(-log10(a7/1e3))
++			+a4*exp(-log10(a7/1e3))+a5*exp(log10(a7/1e3))}
+R_x_zero	8 0  1G
+C_parallel	1 5 {C}
+.ENDS
+*
+.SUBCKT V0402MHS03 1 2 PARAMS: TOL=0
+X1	1 2	MHSMOV PARAMS: T={1+TOL/100} L=1nH C=3pF a1=75.78 a2=8.133 a3=1.408 a4=-0.1752 a5=21.34 a6=887E-3
+.ENDS
+*
+.SUBCKT V0402MHS12 1 2 PARAMS: TOL=0
+X1	1 2	MHSMOV PARAMS: T={1+TOL/100} L=1nH C=12pF a1=32.84 a2=2.451 a3=0.3199 a4=-0.04852 a5=8.592 a6=623E-6
+.ENDS
+*
+.SUBCKT V0402MHS22 1 2 PARAMS: TOL=0
+X1	1 2	MHSMOV PARAMS: T={1+TOL/100} L=1nH C=22pF a1=16.29 a2=1.908 a3=0.2937 a4=-0.03302 a5=4.955 a6=185.2E-3
+.ENDS
+*
+.SUBCKT V0603MHS03 1 2 PARAMS: TOL=0
+X1	1 2	MHSMOV PARAMS: T={1+TOL/100} L=1nH C=3pF a1=75.78 a2=8.133 a3=1.408 a4=-0.1752 a5=21.34 a6=887E-3
+.ENDS
+*
+.SUBCKT V0603MHS12 1 2 PARAMS: TOL=0
+X1	1 2	MHSMOV PARAMS: T={1+TOL/100} L=1nH C=12pF a1=32.84 a2=2.451 a3=0.3199 a4=-0.04852 a5=8.592 a6=623E-6
+.ENDS
+*
+.SUBCKT V0603MHS22 1 2 PARAMS: TOL=0
+X1	1 2	MHSMOV PARAMS: T={1+TOL/100} L=1nH C=22pF a1=16.29 a2=1.908 a3=0.2937 a4=-0.03302 a5=4.955 a6=185.2E-3
+.ENDS
+*
+

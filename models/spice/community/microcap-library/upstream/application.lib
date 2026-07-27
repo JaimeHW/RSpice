@@ -1,0 +1,615 @@
+*
+** Application library **
+** Christophe Basso "Switch-Mode Power Supply SPICE Simulation and Practical Designs"
+** Last modified February 2007
+*
+.subckt dcXFMR 1 2 3 4 d
+Rp2 d 0 1Meg
+VM 6 5
+RS 5 3 1u
+E1 6 4 Value = { V(1,2)*V(d) }
+G2 1 2 Value = { I(VM)*V(d) }
+Rp1 1 2 1Meg
+.ends
+*
+**** MULTI-WINDING TRANSFORMER ****
+.SUBCKT XFMR2 1 2 3 4 10 11 PARAMS: RATIO1=1 RATIO2=1
+*RATIO1 is the gain from V(1,2) to V(3,4)
+*RATIO2 is the gain from V(2,1) to V(10,11)
+RP 1 2 1MEG
+E1 5 4 VALUE = { V(1,2)*RATIO1 }
+G1 1 2 VALUE = { I(VM1)*RATIO1 }
+RS1 6 3 1U
+VM1 5 6
+E2 20 11 VALUE = { V(2,1)*RATIO2 }
+G2 2 1 VALUE = { I(VM2)*RATIO2 }
+RS2 21 10 1U
+VM2 20 21 
+.ENDS XFMR2
+**** SINGLE WINDING TRANSFORMER ****
+.SUBCKT XFMR1 1 2 3 4 PARAMS: RATIO=1
+*RATIO is the gain from V(1,2) to V(3,4)
+RP 1 2 1MEG
+E 5 4 VALUE = { V(1,2)*RATIO }
+G 1 2 VALUE = { I(VM)*RATIO }
+RS 6 3 1U
+VM 5 6
+.ENDS XFMR1
+********
+.SUBCKT TL431 k a ref
+* made by Chris Basso - 2005
+G1 a 2 5 ref -250u
+Q1 k 2 1 QN3904
+R1 1 7 240
+R2 7 a 6.6k
+Q2 k 7 a QN3904 50
+D1 ref k DN4148
+C2 7 a 1n
+D2 a k D2_mod
+C1 k 2 43p
+V1 5 a DC=2.49
+D3 a 2 D3_mod
+.MODEL QN3904 NPN AF=1.0 BF=300 BR=7.5 CJC=3.5PF CJE=4.5PF
++ IKF=.025 IS=1.4E-14 ISE=3E-13 KF=9E-16 NE=1.5 RC=2.4
++ TF=4E-10 TR=21E-9 VAF=100 XTB=1.5
+.MODEL DN4148 D BV=100V CJO=4PF IS=7E-09 M=.45 N=2 RS=.8
++ TT=6E-09 VJ=.6V
+.MODEL D2_mod D BV=36 CJO=4PF IS=7E-09 M=.45 N=1.3 RS=.8
++ TT=6E-09 VJ=.6V
+.MODEL D3_mod D N=0.01
+.ENDS
+********
+.model Sbreak VSWITCH Roff=100 Ron=10 Voff=0.0 Von=1.0
+.model Sbreak2 VSWITCH Roff=1E6 Ron=10m Voff=0.0 Von=1.0
+.model Sbreak3 VSWITCH Roff=100 Ron=50 Voff=0.0 Von=1.0
+.model dbreak d N=0.01
+.model dbreakz d BV=15.6 RS=10m
+.model dbreakPFC d BV=460 RS=10m
+.model dbreakCL d BV=3 RS=10m
+.MODEL MBR20100 D
++IS=0.000210108 RS=0.0123882 N=2 EG=0.817576
++XTI=0.500001 BV=1000 IBV=0.0001 CJO=1e-11
++VJ=0.7 M=0.5 FC=0.5 TT=0
++KF=0 AF=1
+.MODEL mbr845 d
++IS=6.50276e-05 RS=0.0119924 N=1.33205 EG=0.6
++XTI=3.09376 BV=45 IBV=0.0001 CJO=1.3657e-09
++VJ=0.4 M=0.478505 FC=0.5 TT=1e-09
++KF=0 AF=1
+.MODEL mbra210et3 d
++IS=1.58646e-09 RS=0.01 N=0.797738 EG=0.71104
++XTI=4 BV=10 IBV=8e-07 CJO=1.5593e-09
++VJ=0.570707 M=0.478061 FC=0.5 TT=0
++KF=0 AF=1
+*
+.MODEL mbrf2060ct d
++IS=1e-15 RS=0.0238648 N=0.510622 EG=0.947814
++XTI=0.5 BV=60 IBV=0.00015 CJO=1e-11
++VJ=0.7 M=0.5 FC=0.5 TT=0
++KF=0 AF=1
+*
+.MODEL mbrp30045ct d
++IS=0.001 RS=0.000431628 N=1.97975 EG=1.3
++XTI=2.80944 BV=45 IBV=0.0008 CJO=1e-11
++VJ=0.7 M=0.5 FC=0.5 TT=0
++KF=0 AF=1
+*
+*****
+.SUBCKT FFLOP 6 8 2 1
+*             S R Q Q\
+E_BQB 10 0 VALUE = { IF ( (V(8)<2.5) & (V(2)>2.5), 0, 5V ) }
+E_BQ  20 0 VALUE = { IF ( (V(6)<2.5) & (V(1)>2.5), 0, 5V ) }
+RD1   10 1 100
+CD1   1 0 10P IC=5
+RD2   20 2 100
+CD2   2 0 10P IC=0
+.ENDS FFLOP
+*******
+.SUBCKT DFFLOP 1  2 11 12 5  6
+*             CLK D R  S  QB Q 
+X1 7 4 2 8 NAND30_64
+X2 8 3 10 9 NAND30_64
+X3 1 8 10 7 NAND31_64
+X4 4 9 1 10 NAND30_64
+X5 4 7 6 5 NAND31_64
+X6 5 10 3 6 NAND30_64
+X7 11 4 INV_64
+X8 12 3 INV_64
+.ENDS DFFLOP
+***** INTERNAL F_FLOP DEFINITION ****
+.SUBCKT NAND30_64 1 2 3 4
+E1 5 0 VALUE = { IF ( (V(1)>2.5) & (V(2)>2.5) & (V(3)>2.5), 100m, 10 ) }
+R1 5 4 10
+C1 4 0 10P IC=100m
+.ENDS NAND30_64
+*
+.SUBCKT NAND31_64 1 2 3 4
+E1 5 0 VALUE = { IF ( (V(1)>2.5) & (V(2)>2.5) & (V(3)>2.5), 100m, 10 ) }
+R1 5 4 10
+C1 4 0 10P IC=10
+.ENDS NAND31_64
+*
+.SUBCKT INV_64 1 2
+E1 3 0 VALUE = { IF ( V(1)>2.5, 100m, 10 ) }
+R1 3 2 10
+C1 2 0 10P IC=10
+.ENDS INV_64
+*******
+.SUBCKT OR2_CB 1 2 3
+E_B1 4 0 VALUE = { IF ( (V(1)>2.5) | (V(2)>2.5), 5V, 0 ) }
+RD 4 3 10
+CD 3 0 10P
+.ENDS OR2_CB
+*******
+.SUBCKT INV 1 2
+E1 3 0 VALUE = { IF ( V(1)>2.5V, 100m, 5 ) }
+R1 3 2 10
+C1 2 0 10P
+.ENDS INV
+*******
+.SUBCKT AND2_CB 1 2 3
+E_B1 4 0 VALUE = { IF ( (V(1)>2.5) & (V(2)>2.5), 5V, 0 ) }
+RD 4 3 10
+CD 3 0 10P
+.ENDS AND2_CB
+*******
+.SUBCKT Opto A K C E params: Cpole=2.2n CTR=2
+VILED 2 K
+DLED A 2 Dmod
+Vsat C 4 DC=100m
+D2 E 4 DCLAMP
+F2 4 E VILED {CTR}
+Cpole 4 E {Cpole}
+.MODEL DCLAMP D BV=30 N=0.01
+.MODEL Dmod D N=1.8
+.ENDS
+*******
+.SUBCKT SWhyste NodeMinus NodePlus Plus Minus PARAMS: RON=1 ROFF=1MEG VT=5 VH=2
+S5 NodePlus NodeMinus 8 0 smoothSW
+EBcrtl 8 0 Value = { IF ( V(plus)-V(minus) > V(ref), 1, 0 ) }
+EBref ref1 0 Value = { IF ( V(8) > 0.5, {VT-VH}, {VT+VH} ) }
+Rdel ref1 ref 100
+Cdel ref 0 100p  IC={VT+VH}
+Rconv1 8 0 10Meg
+Rconv2 plus 0 10Meg
+Rconv3 minus 0 10Meg
+.model smoothSW VSWITCH (RON={RON} ROFF={ROFF} VON=1 VOFF=0)
+.ends SWhyste
+******
+.MODEL MBR20100CT D
++IS=0.000210108 RS=0.0123882 N=2 EG=0.817576
++XTI=0.500001 BV=1000 IBV=0.0001 CJO=1e-11
++VJ=0.7 M=0.5 FC=0.5 TT=0
++KF=0 AF=1
+******
+.SUBCKT shuntreg FB gnd out params: pole=7k
+*
+R4 1 2 2k
+C3 gnd 2 {1/(2*3.14*pole*2k)}
+R3 3 FB 15
+X1 5 3 6 AMPSIMP params: POLE=10Meg VHIGH=10
+X2 7 6 3 MOS
+V1 5 gnd DC=5.7V
+R5 7 gnd 165
+E1 1 0 8 7 1
+V3 8 gnd DC=670m
+V6 9 gnd DC=645m
+Rsupply FB gnd 2.3k
+E2 out 0 2 gnd 1
+Dclamp 7 9 DCLAMP
+.MODEL DCLAMP D N=0.01
+.ENDS
+*******
+.SUBCKT AMPSIMP 1 5 7 params: POLE=30 GAIN=30000 VHIGH=4V VLOW=100mV
+* + - OUT
+G1 0 4 1 5 100u
+R1 4 0 {GAIN/100u}
+C1 4 0 {1/(6.28*(GAIN/100u)*POLE)}
+E1 2 0 4 0 1
+Ro 2 7 10
+Vlow 3 0 DC={VLOW}
+Vhigh 8 0 DC={VHIGH}
+Dlow 3 4 DCLP
+Dhigh 4 8 DCLP
+.MODEL DCLP D N=0.01 T_ABS=27
+.ENDS
+*
+.SUBCKT MOS 30 40 50
+* NODES: DRAIN GATE SOURCE
+M1 30 20 50 50 MOD1 L=1u W=1u
+RG 40 20 167
+RL 30 50 50E6
+D1 30 50 DIODE
+.MODEL MOD1 PMOS VTO=-1.709 RS=3.091 RD=0.979 IS=1E-15 KP=0.146
++CGSO=26P CGDO=4P CBD=12P PB=1
+.MODEL DIODE D IS=1.072E-13 RS=0.527 N=1.077
+.ENDS MOS
+*****
+.SUBCKT UVLO_G  1   2  30 params: VON=12 VOFF=10
+*              VIN OUT Gnd
+X1 1 3 1 30 SWhyste RON=1 ROFF=1E6 VT={((VON-VOFF)/2) + VOFF} VH={(VON-VOFF)/2}
+RUV 3 30 100K
+B1 4 0 V= V(3,30) > 5V ? 5V : 0
+RD 4 2 100
+CD 2 0 100P
+.ENDS UVLO_G
+******
+.SUBCKT COMPARHYS NINV INV OUT params: VHIGH=5 VLOW=100m VHYS=50m
+E2 HYS NINV Value = { IF ( V(OUT) > {(VHIGH+VLOW)/2}, {VHYS}, 0 ) }
+E1 4 0 Value = { IF ( V(HYS,INV) > 0, {VHIGH}, {VLOW} ) }
+RO 4 OUT 100
+CO OUT 0 100PF
+.ENDS
+******
+.SUBCKT COMPAR NINV INV OUT params: VHIGH=12 VLOW=100m
+E1 4 0 Value = { IF ( V(NINV,INV) > 0, {VHIGH}, {VLOW} ) }
+RO 4 OUT 10
+CO OUT 0 10PF
+.ENDS
+******
+.SUBCKT REFVAR  In Out Gnd params: Vref=5 Zo=2.5 Slope=10k Imax=1.5m Ripple=1mV
+Rout 5 6 {Zo}
+Vdum 6 Out
+Eout 5 Gnd Value = { IF ( I(Vdum) < {Imax}, ({Vref}-V(in)*{Ripple}),  
++ ((({Vref}-V(in)*{Ripple}) - {Slope}*I(Vdum))+({Slope}*{Imax})) ) }
+.ENDS
+*******
+.SUBCKT VARIRES 1 2 CTRL
+R1 1 2 1E10
+G1 1 2 Value = { V(1,2)/(V(CTRL)+1u) }
+.ENDS
+*******
+.SUBCKT VARICAP 1 2 CTRL
+R1 1 3 1u
+VC 3 4
+EC 4 2 Value = { (1/(v(ctrl)+1p))*v(int) }
+GINT 0 INT Value = { I(VC) }
+Rdum INT 0 1G
+CINT INT 0 1
+.ENDS
+*******
+.SUBCKT VARICOIL 1 2 CTRL
+GC 1 2 Value = { V(INT)/(V(CTRL)+1p) }
+GINT 0 INT Value = { V(1,2) }
+Rdum INT 0 1G
+CINT INT 0 1
+.ENDS
+*******
+.subckt DTAND 1 5 6 params: delay=150n
+.param Cdel={delay/(0.693*1k)}
+*
+X1 1 2 5 AND2_CB
+X2 3 4 6 AND2_CB
+Rdel1 1 2 1k
+C1 2 0 {Cdel}
+Rdel2 3 4 1k
+C2 4 0 {Cdel}
+X3 1 3 INV
+.ENDS
+*********
+.SUBCKT GAIN 1 2
+*Connections: In Out
+E1 2 0 1 0 1
+.ENDS
+*********
+.subckt POWERVCO err out params: Fmin=50k Fmax=400k Vout=350
+*
+G4 0 1 Value = { 2*100p*{Fmin} }
+Rdum 1 0 1G
+R1 err 0 100k
+G1 0 1 Value = { 2*100p*({Fmax}-{Fmin})*V(CTRL)/5 }
+G2 1 0 Value = { IF ( V(osc) > 2.5, (4*100p*{Fmin})+2*2*100p*({Fmax}-{Fmin})*V(CTRL)/5, 0 ) }
+C1 1 0 100p IC=0
+E3 CTRL 0 Value = { IF ( V(ERR)<100m, 0, IF ( V(ERR)>5, 5, V(ERR) ) ) }
+X2 1 4 osc COMPARHYS params: VHIGH=5 VHYS=1
+V2 4 0 DC=2
+E5 out 0 Value = { IF ( V(osc)>2.5, {Vout}, 0 ) }
+V3 3 0 DC={Vout}
+D1 0 out MUR3060
+D2 out 3 MUR3060
+*
+.MODEL MUR3060 D BV=600 CJO=517P IBV=10U IS=235U M=.333
++ N=3.68 RS=35M TT=86.4N VJ=.75
+*	
+.ENDS
+**********
+.SUBCKT VCO2 FB1 A B params: fmin=100k fmax=1Meg DT=50n SS=100u
+*
+Rdum1 3 0 1G
+Rdum2 5 0 1G
+Rdum3 8 0 1G
+* 
+G4 0 3 Value = { {Fmin*2}*20p }
+G3 0 5 Value = { V(FBCC)*1.9*10p*({2*Fmax}/(1-{2*Fmax}*{DT})-{2*Fmin})/5 }
+G5 0 4 Value = { 2*10p/{DT} }
+C1 8 0 10p IC=0
+Xcomp 8 6 cmp COMPAR params: VHIGH=5
+E2 6 0 Value = { IF ( V(CMP) < 3, 3, 1 ) }
+G1 8 0 Value = { IF ( V(CMP) < 3, 0, I(VDT)+I(VFmin)+I(Vvco) ) }
+VDT 4 0
+X1 cmp 10 0 0 10 13 DFFLOP
+X2 13 14 A AND2_CB
+X3 10 14 B AND2_CB
+X4 cmp 14 INV
+R3 FB1 0 20k
+Vvco 5 8
+X10 20 19 FB AMPSIMP params: VHIGH=6 VLOW=1m
+V4 18 0 DC=100m
+R4 18 19 10k
+R5 19 FB 10k
+X12 FB1 17 GAIN
+R8 17 20 10k
+R9 20 0 10k
+Vfmin 3 8
+R6 29 FB 10k
+D1 29 28 _D1_mod
+V5 28 0 DC=5
+CSS 31 0 {10u*SS}
+I1 28 31 DC=50u
+D2 31 28 DN4148
+D3 29 FBCC _D1_mod
+D4 30 FBCC _D1_mod
+E1 30 0 28 31 1
+*
+.MODEL DN4148 D BV=100V CJO=4PF IS=7E-09 M=.45 N=2 RS=.8
++ TT=6E-09 VJ=.6V
+.MODEL _D1_mod D N=10m
+*
+.ENDS
+**********
+.subckt coresat L1 L2 110 100 params: Feddy=25k IVSEC=0 Ae=0.000067 lm=0.037
++lg=0 Bsat=350m ur=6000 N=15 Hc=50
+*
+.param VSEC={N*Ae*Bsat}
+.param u0={1.25u}
+.param u={u0*ur/(1+ur*(lg/lm))}
+.param Lmag={u*N^2*Ae/lm}
+.param Lsat={u0*N^2*Ae/(lm+lg)}
+.param IHyst={Hc*lm/N}
+.param Cjo={3*VSEC/(6.28*Feddy*clamp*Lmag)}
+.param clamp={250}
+*
+Rdum phi 0 10G
+F1 L1 12 VM 1
+Gint 0 phi 12 L1 -1
+C1 phi 0 {VSEC/Clamp} IC={IVSEC/VSEC*clamp}
+Ebuf 5 0 phi 0 1
+Rmag 8 0 {Lmag*clamp/VSEC}
+VM 5 8
+D3 2 9 D2mod
+V6 9 0 DC={Clamp}
+R2 2 8 {Lsat*clamp/VSEC}
+V8 0 10 DC={Clamp}
+Vdum 12 L2
+D4 10 2 D2mod
+I1 6 L1 DC={IHYST}
+E1 100 0 Value = { ({N}/{lm})*I(VDUM) }
+E2 110 0 Value = { V(phi)*{VSEC}/({N}*{Ae})/{CLAMP} }
+I6 6 12 DC={IHYST}
+D1 L1 6 Dmod
+D2 12 6 Dmod
+.MODEL Dmod D N=1
+.MODEL D2mod D CJO={Cjo} VJ=25
+.ENDS
+**********
+.SUBCKT OP3842 In out gnd
+Vmin out 2 DC=0.6
+R15 3 gnd 310Meg
+Cp 3 gnd 16p
+Dclamp gnd 3 DCLP3
+D5 4 5 DCLP1
+G1 gnd 3 11 In 100U
+Isink 5 gnd DC=120u
+Isource 6 out DC=900u
+E1 7 gnd 3 gnd 1
+Vclamp 6 gnd DC=5.3
+Q1 gnd 5 2 QP
+R2 7 8 1k
+C2 8 gnd 35p
+E2 gnd 4 8 gnd -1
+D3 out 6 DCLP2
+Vref 11 gnd DC=2.5V
+*
+.MODEL DCLP3 D BV=5 N=10m
+.MODEL DCLP2 D BV=100V CJO=4PF IS=7E-09 M=.45 N=2 RS=.8
++ TT=6E-09 VJ=.6V
+.MODEL QP PNP
+.MODEL DCLP1 D BV=5
+.ENDS OP3842
+************
+**** UVLO CIRCUIT ****
+** VH = (VON - VOFF)/2
+** VT = VOFF + VH
+.SUBCKT UVLO 1 2 30 params: VON=12 VOFF=10
+* VIN OUT Gnd
+X1 1 3 1 30 SWhyste params: RON=1 ROFF=1E6 VT={((VON-VOFF)/2) + VOFF} VH={(VON-VOFF)/2}
+RUV 3 30 100K
+E1 4 0 Value = { IF ( V(3,30) > 5V, 5V, 0 ) }
+RD 4 2 100
+CD 2 0 100P
+.ENDS UVLO
+*********
+.subckt 262MULERR FB MULIN ERR MULOUT
+*
+E3 MULOUT 0 Value = { IF ( V(4)*V(MULIN)*0.65>1.8, 1.8, V(err)*V(MULIN)*0.65 ) }
+G1 0 6 7 FB 100u
+Vref 7 0 DC=2.5V
+R8 err 0 1G
+R100 MULIN 0 1G
+D2 10 err _D2_mod 
+V4 10 0 DC=1.7
+D1 err 11 _D2_mod 
+V7 11 0 DC=6.4
+V11 6 0
+G4 0 err Value = { IF ( I(V11) > 10u, 10u, I(V11) ) }
+E5 4 0 Value = { IF ( V(err)-2.05 < 0, 0, V(err)-2.05 ) }
+*
+.MODEL _D2_mod D BV=100V CJO=4PF IS=7E-09 M=.45 N=0.01
++ RS=.8 TT=6E-09 VJ=.6V
+.ENDS
+********
+.SUBCKT COMPARHYSV NINV INV OUT VAR params: VHIGH=5 VLOW=100m
+Rdum VAR 0 10Meg
+EB2 HYS NINV Value = { IF ( V(OUT) > {(VHIGH+VLOW)/2}, V(VAR), 0 ) }
+EB1 4 0 Value = { IF ( V(HYS,INV) > 0, {VHIGH}, {VLOW} ) }
+RO 4 OUT 10
+CO OUT 0 10PF
+.ENDS
+********
+.SUBCKT irfbe20 1 2 3
+M1 9 7 8 8 MM L=100u W=100u
+RS 8 3 0.0001
+D1 3 1 MD
+RDS 3 1 1e+06
+RD 9 1 5.58265
+RG 2 7 1.65378
+D2 4 5 MD1
+RL 5 10 1
+FI2 7 9 VFI2 -1
+VFI2 4 0 0
+EV16 10 0 9 7 1
+CAP 11 10 1.18252e-09
+FI1 7 9 VFI1 -1
+VFI1 11 6 0
+RCAP 6 10 1
+D4 0 6 MD3
+D3 0 5 MD2
+** discrete elements **
+.MODEL MD3 D IS=1e-10 N=0.4
+.MODEL MD1 D IS=1e-32 N=50
++CJO=1.17652e-09 VJ=1.39725 M=0.9 FC=1e-08
+.MODEL MD2 D IS=1e-10 N=0.4 RS=3e-06
+.MODEL MD D IS=1.19565e-14 RS=0.0525945 N=0.883654 BV=800
++IBV=0.00025 EG=1.2 XTI=3.04329 TT=0
++CJO=3.11456e-10 VJ=5 M=0.9 FC=0.5
+.MODEL MM NMOS LEVEL=1 IS=1e-32
++VTO=4.05669 LAMBDA=0.000387746 KP=0.746614
++CGSO=4.5273e-06 CGDO=1e-11
+.ENDS irfbe20
+*********
+.SUBCKT STP20NM60FD 1 2 3
+LG 2 4  7.5E-09
+LS 12 3 7.5E-09
+LD 6 1  4.5E-09
+RG 4 5  2.701
+RS 9 12 0.292E-01
+RD 7 6  0.198
+RJ 8 7  0.244E-02
+CGS 5 9   0.151E-08
+CGD 7 10  0.126E-08
+CK  11 7  0.301E-10
+DGD 11 7 DGD
+DBS 12 6 DBS
+DBD  9 7 DBD
+MOS  13 5 9 9 MOS L=1u W=1u
+E1  10 5 101 0 1
+E2  11 5 102 0 1
+E3  8 13 POLY(2) 6 8 6 12 0 0 0 0  0.903E-01
+G1  0 100 7 5 1u
+D1  100 101  DID
+D2  102 100  DID
+R1  101 0  1MEG
+R2  102 0  1MEG
+** discrete elements **
+.MODEL MOS NMOS LEVEL = 3 VTO = 4.492 PHI = 0.819 IS = 0.1E-12 JS = 0 THETA = 0.174 KP = 23.092 
+.MODEL DGD D IS = 0.1E-12 CJO = 0.849E-11 VJ = 0.724 M = 0.353 
+.MODEL DBD D IS = 0.1E-12 CJO = 0.693E-11 VJ = 0.709 M = 0.309
+.MODEL DBS D IS = 0.1E-12 BV = 644 N = 1 TT = 0.345E-06 RS = 0.717E-02
+.MODEL DID D IS = 0.01E-12 RS = 0 BV = 654
+.ENDS STP20NM60FD
+**************
+.SUBCKT ntb52n10 1 2 3
+M1 9 7 8 8 MM L=100u W=100u
+RS 8 3 0.00662207
+D1 3 1 MD
+RDS 3 1 8.33e+10
+RD 9 1 0.00857017
+RG 2 7 4.04874
+D2 4 5 MD1
+D3 0 5 MD2
+RL 5 10 1
+FI2 7 9 VFI2 -1
+VFI2 4 0 0
+EV16 10 0 9 7 1
+CAP 11 10 3.80889e-09
+FI1 7 9 VFI1 -1
+VFI1 11 6 0
+RCAP 6 10 1
+D4 0 6 MD3
+** discrete models **
+.MODEL MD D IS=1.2e-09 RS=0.00271192 N=1.27357 BV=100
++IBV=2.5e-07 EG=1.2 XTI=4 TT=0
++CJO=3.23804e-09 VJ=3.86005 M=0.899453 FC=0.5
+.MODEL MD1 D IS=1e-32 N=50
++CJO=3.05942e-09 VJ=1.11418 M=0.9 FC=1e-08
+.MODEL MM NMOS LEVEL=1 IS=1e-32
++VTO=3.39396 LAMBDA=0.0622182 KP=21.8729
++CGSO=2.00282e-05 CGDO=1e-11
+.MODEL MD3 D IS=1e-10 N=0.4
+.MODEL MD2 D IS=1e-10 N=0.4 RS=3e-06
+.ENDS ntb52n10
+************
+.SUBCKT stp7nb80 1 2 3
+LG 2 4  7.5n
+LS 12 3 7.5n
+LD 6 1  4.5n
+RG 4 5  2.5
+RS 9 12 0.622E-03
+RD 7 6  1.067
+RJ 8 7  0.454E-02
+CGS 5 9   0.131E-08
+CGD 7 10  0.155E-08
+CK  11 7  0.158E-10
+DGD 11 7 DGD
+DBS 12 6 DBS
+DBD  9 7 DBD
+MOS  13 5 9 9 MOS L=1u W=1u
+E1  10 5 101 0 1
+E2  11 5 102 0 1
+E3  8 13 POLY(2) 6 8 6 12 0 0 0 0  0.319E-01
+G1  0 100 7 5 1u
+D1  100 101  DID
+D2  102 100  DID
+R1  101 0  1MEG
+R2  102 0  1MEG
+** discrete models **
+.MODEL MOS NMOS LEVEL=3 VTO=4.662 PHI=0.318 IS=0 JS=0 
++THETA=0.865E-06 KP=8.597 Vmax=0.302E+07 Kappa=0.123E-02 eta= 0.446E-03
+.MODEL DGD D CJO=0.265E-10 VJ=0.305909 M=0.141673
+.MODEL DBD D CJO=0.678E-08 VJ=0.824 M=0.816
+.MODEL DBS D BV=880 N=1 TT=0.285E-06 RS=0.124E+09
+.MODEL DID D RS=0 BV=890
+.ENDS stp7nb80
+***********
+.SUBCKT STP11NK50Z 1 2 3
+LG 2 4  7.5n
+LS 12 3 7.5n
+LD 6 1  4.5n
+RG 4 5  2.702
+RS 9 12 0.219E-01
+RD 7 6  0.304
+RJ 8 7  0.232E-01
+CGS 5 9   0.148E-08
+CGD 7 10  0.225E-08
+CK  11 7  0.408E-10
+DGD 11 7 DGD
+DBS 12 6 DBS
+DBD  9 7 DBD
+MOS  13 5 9 9 MOS L=1u W=1u
+E1  10 5 101 0 1
+E2  11 5 102 0 1
+E3  8 13 POLY(2) 6 8 6 12 0 0 0 0  0.654E-01
+G1  0 100 7 5 1u
+D1  100 101  DID
+D2  102 100  DID
+R1  101 0  1MEG
+R2  102 0  1MEG
+** discrete models **
+.MODEL MOS NMOS LEVEL=3 VTO=4.763 PHI=0.847 IS=0.1E-12 JS=0 THETA=0.304E-01 KP=11.208
+.MODEL DGD D IS=0.1E-12 CJO=0.137E-10 VJ=0.755 M=0.349
+.MODEL DBD D IS=0.1E-12 CJO=0.155E-10 VJ=0.761 M=0.332
+.MODEL DBS D IS=0.1E-12 BV= 569 N= 1 TT= 0.388E-06 RS=0.636E-02
+.MODEL DID D IS=0.01E-12 RS=0 BV=679
+.ENDS STP11NK50Z
+*******
+

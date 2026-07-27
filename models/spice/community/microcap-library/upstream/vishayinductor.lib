@@ -1,0 +1,1367 @@
+*Vishay Inductors
+*Derived from the article "Circuit Simulation of Surface
+*Mount Inductors and Impedance Beads" by Vishay
+
+
+*High Frequency 1.2nH Inductor
+.subckt IMC0402_1N2 1 2
+L1 1 3 .896n
+R1 3 2 75.79m
+C1 1 2 2.1268p
+.ends
+
+*High Frequency 1.5nH Inductor
+.subckt IMC0402_1N5 1 2
+L1 1 3 1.254n
+R1 3 2 50.568m
+C1 1 2 1.4873p
+.ends
+
+*High Frequency 1.8nH Inductor
+.subckt IMC0402_1N8 1 2
+L1 1 3 1.469n
+R1 3 2 69.254m
+C1 1 2 1.3205p
+.ends
+
+*High Frequency 2.2nH Inductor
+.subckt IMC0402_2N2 1 2
+L1 1 3 2.115n
+R1 3 2 72.762m
+C1 1 2 .91637p
+.ends
+
+*High Frequency 2.7nH Inductor
+.subckt IMC0402_2N7 1 2
+L1 1 3 2.356n
+R1 3 2 79.357m
+C1 1 2 .82001p
+.ends
+
+*High Frequency 3.3nH Inductor
+.subckt IMC0402_3N3 1 2
+L1 1 3 2.929n
+R1 3 2 87.174m
+C1 1 2 .66923p
+.ends
+
+*High Frequency 3.9nH Inductor
+.subckt IMC0402_3N9 1 2
+L1 1 3 3.452n
+R1 3 2 86.272m
+C1 1 2 .57138p
+.ends
+
+*High Frequency 4.7nH Inductor
+.subckt IMC0402_4N7 1 2
+L1 1 3 4.15n
+R1 3 2 123.66m
+C1 1 2 .47681p
+.ends
+
+*High Frequency 5.6nH Inductor
+.subckt IMC0402_5N6 1 2
+L1 1 3 5.255n
+R1 3 2 143.73m
+C1 1 2 .382p
+.ends
+
+*High Frequency 6.8nH Inductor
+.subckt IMC0402_6N8 1 2
+L1 1 3 6.376n
+R1 3 2 171.93m
+C1 1 2 .31975p
+.ends
+
+*High Frequency 8.2nH Inductor
+.subckt IMC0402_8N2 1 2
+L1 1 3 7.329n
+R1 3 2 230m
+C1 1 2 .28377p
+.ends
+
+*High Frequency 10nH Inductor
+.subckt IMC0402_10N 1 2
+L1 1 3 8.904n
+R1 3 2 213.97m
+C1 1 2 .23723p
+.ends
+
+*High Frequency 12nH Inductor
+.subckt IMC0402_12N 1 2
+L1 1 3 11.175n
+R1 3 2 312.95m
+C1 1 2 .19187p
+.ends
+
+*High Frequency 18nH Inductor
+.subckt IMC0402_18N 1 2
+L1 1 3 16.818n
+R1 3 2 554.44m
+C1 1 2 .13639p
+.ends
+
+*High Frequency 33nH Inductor
+.subckt IMC0402_33N 1 2
+L1 1 3 30.769n
+R1 3 2 792.65m
+C1 1 2 .08367p
+.ends
+
+*High Frequency 39nH Inductor
+.subckt IMC0402_39N 1 2
+L1 1 3 35.933n
+R1 3 2 1.059
+C1 1 2 .07628p
+.ends
+
+*High Frequency 47nH Inductor
+.subckt IMC0402_47N 1 2
+L1 1 3 45.3n
+R1 3 2 1.832
+C1 1 2 .0609p
+.ends
+
+*High Frequency 56nH Inductor
+.subckt IMC0402_56N 1 2
+L1 1 3 54.122n
+R1 3 2 1.987
+C1 1 2 .05267p
+.ends
+
+*High Frequency 1.5nH Inductor
+.subckt IMC0603_1N5 1 2
+L1 1 3 1.34n
+R1 3 2 31.9m
+.ends
+
+*High Frequency 1.8nH Inductor
+.subckt IMC0603_1N8 1 2
+L1 1 3 1.65n
+R1 3 2 48.5m
+.ends
+
+*High Frequency 2.2nH Inductor
+.subckt IMC0603_2N2 1 2
+L1 1 3 1.98n
+R1 3 2 55.7m
+.ends
+
+*High Frequency 2.7nH Inductor
+.subckt IMC0603_2N7 1 2
+L1 1 3 2.52n
+R1 3 2 55.4m
+C1 1 2 .0125p
+.ends
+
+*High Frequency 3.3nH Inductor
+.subckt IMC0603_3N3 1 2
+L1 1 3 3.15n
+R1 3 2 37.4m
+C1 1 2 .0118p
+.ends
+
+*High Frequency 3.9nH Inductor
+.subckt IMC0603_3N9 1 2
+L1 1 3 3.68n
+R1 3 2 54.1m
+C1 1 2 .0232p
+.ends
+
+*High Frequency 4.7nH Inductor
+.subckt IMC0603_4N7 1 2
+L1 1 3 4.4n
+R1 3 2 83.4m
+C1 1 2 .0362p
+.ends
+
+*High Frequency 5.6nH Inductor
+.subckt IMC0603_5N6 1 2
+L1 1 3 5.46n
+R1 3 2 119.7m
+C1 1 2 .0439p
+.ends
+
+*High Frequency 6.8nH Inductor
+.subckt IMC0603_6N8 1 2
+L1 1 3 6.54n
+R1 3 2 120.9m
+C1 1 2 .0486p
+.ends
+
+*High Frequency 8.2nH Inductor
+.subckt IMC0603_8N2 1 2
+L1 1 3 7.82n
+R1 3 2 125.6m
+C1 1 2 .0515p
+.ends
+
+*High Frequency 10nH Inductor
+.subckt IMC0603_10N 1 2
+L1 1 3 9.64n
+R1 3 2 180.6m
+C1 1 2 .0555p
+.ends
+
+*High Frequency 12nH Inductor
+.subckt IMC0603_12N 1 2
+L1 1 3 11.55n
+R1 3 2 217.3m
+C1 1 2 .062p
+.ends
+
+*High Frequency 15nH Inductor
+.subckt IMC0603_15N 1 2
+L1 1 3 14.64n
+R1 3 2 281.2m
+C1 1 2 .063p
+.ends
+
+*High Frequency 18nH Inductor
+.subckt IMC0603_18N 1 2
+L1 1 3 17.45n
+R1 3 2 314m
+C1 1 2 .0647p
+.ends
+
+*High Frequency 22nH Inductor
+.subckt IMC0603_22N 1 2
+L1 1 3 21.26n
+R1 3 2 332.2m
+C1 1 2 .0698p
+.ends
+
+*High Frequency 27nH Inductor
+.subckt IMC0603_27N 1 2
+L1 1 3 25.98n
+R1 3 2 400.9m
+C1 1 2 .0683p
+.ends
+
+*High Frequency 33nH Inductor
+.subckt IMC0603_33N 1 2
+L1 1 3 31.95n
+R1 3 2 527.3m
+C1 1 2 .074p
+.ends
+
+*High Frequency 39nH Inductor
+.subckt IMC0603_39N 1 2
+L1 1 3 37.29n
+R1 3 2 580.9m
+C1 1 2 .0694p
+.ends
+
+*High Frequency 47nH Inductor
+.subckt IMC0603_47N 1 2
+L1 1 3 45.3n
+R1 3 2 722.7m
+C1 1 2 .0723p
+.ends
+
+*High Frequency 56nH Inductor
+.subckt IMC0603_56N 1 2
+L1 1 3 53.7n
+R1 3 2 911.7m
+C1 1 2 .0667p
+.ends
+
+*High Frequency 68nH Inductor
+.subckt IMC0603_68N 1 2
+L1 1 3 63.19n
+R1 3 2 1.0948
+C1 1 2 .0717p
+.ends
+
+*High Frequency 82nH Inductor
+.subckt IMC0603_82N 1 2
+L1 1 3 76.62n
+R1 3 2 1.4347
+C1 1 2 .0684p
+.ends
+
+*High Frequency 100nH Inductor
+.subckt IMC0603_R10 1 2
+L1 1 3 93.26n
+R1 3 2 1.5531
+C1 1 2 .0709p
+.ends
+
+*High Frequency 3.9nH Inductor
+.subckt IMC0805_3N9_01 1 2
+L1 1 3 4.3n
+R1 3 2 88.4m
+C1 1 2 .0075p
+.ends
+
+*High Frequency 4.7nH Inductor
+.subckt IMC0805_4N7_01 1 2
+L1 1 3 4.6n
+R1 3 2 95.8m
+C1 1 2 .0061p
+.ends
+
+*High Frequency 5.6nH Inductor
+.subckt IMC0805_5N6_01 1 2
+L1 1 3 5.5n
+R1 3 2 105.3m
+C1 1 2 .0325p
+.ends
+
+*High Frequency 6.8nH Inductor
+.subckt IMC0805_6N8_01 1 2
+L1 1 3 5.2n
+R1 3 2 129.7m
+C1 1 2 .032p
+.ends
+
+*High Frequency 8.2nH Inductor
+.subckt IMC0805_8N2_01 1 2
+L1 1 3 8.1n
+R1 3 2 147.2m
+C1 1 2 .0398p
+.ends
+
+*High Frequency 10nH Inductor
+.subckt IMC0805_10N_01 1 2
+L1 1 3 11.2n
+R1 3 2 146.8m
+C1 1 2 .1445p
+.ends
+
+*High Frequency 12nH Inductor
+.subckt IMC0805_12N_01 1 2
+L1 1 3 12.6n
+R1 3 2 174.9m
+C1 1 2 .0598p
+.ends
+
+*High Frequency 15nH Inductor
+.subckt IMC0805_15N_01 1 2
+L1 1 3 16.4n
+R1 3 2 186.1m
+C1 1 2 .0836p
+.ends
+
+*High Frequency 18nH Inductor
+.subckt IMC0805_18N_01 1 2
+L1 1 3 18.8n
+R1 3 2 219.4m
+C1 1 2 .0698p
+.ends
+
+*High Frequency 22nH Inductor
+.subckt IMC0805_22N_01 1 2
+L1 1 3 22.4n
+R1 3 2 242m
+C1 1 2 .0837p
+.ends
+
+*High Frequency 27nH Inductor
+.subckt IMC0805_27N_01 1 2
+L1 1 3 27.4n
+R1 3 2 263.8m
+C1 1 2 .0921p
+.ends
+
+*High Frequency 33nH Inductor
+.subckt IMC0805_33N_01 1 2
+L1 1 3 33.4n
+R1 3 2 281.4m
+C1 1 2 .1046p
+.ends
+
+*High Frequency 39nH Inductor
+.subckt IMC0805_39N_01 1 2
+L1 1 3 39n
+R1 3 2 328.2m
+C1 1 2 .0924p
+.ends
+
+*High Frequency 47nH Inductor
+.subckt IMC0805_47N_01 1 2
+L1 1 3 45.3n
+R1 3 2 343.2m
+C1 1 2 .0975p
+.ends
+
+*High Frequency 56nH Inductor
+.subckt IMC0805_56N_01 1 2
+L1 1 3 55.7n
+R1 3 2 402.3m
+C1 1 2 .0927p
+.ends
+
+*High Frequency 68nH Inductor
+.subckt IMC0805_68N_01 1 2
+L1 1 3 67.9n
+R1 3 2 435.6m
+C1 1 2 .0936p
+.ends
+
+*High Frequency 82nH Inductor
+.subckt IMC0805_82N_01 1 2
+L1 1 3 79.8n
+R1 3 2 488m
+C1 1 2 .1503p
+.ends
+
+*High Frequency 100nH Inductor
+.subckt IMC0805_R10_01 1 2
+L1 1 3 94.4n
+R1 3 2 596.8m
+C1 1 2 .0968p
+.ends
+
+*High Frequency 120nH Inductor
+.subckt IMC0805_R12_01 1 2
+L1 1 3 97.7n
+R1 3 2 723.5m
+C1 1 2 .1994p
+.ends
+
+*High Frequency 150nH Inductor
+.subckt IMC0805_R15_01 1 2
+L1 1 3 132.9n
+R1 3 2 1.1647
+C1 1 2 .1295p
+.ends
+
+*High Frequency 180nH Inductor
+.subckt IMC0805_R18_01 1 2
+L1 1 3 150.2n
+R1 3 2 1.2414
+C1 1 2 .1698p
+.ends
+
+*High Frequency 220nH Inductor
+.subckt IMC0805_R22_01 1 2
+L1 1 3 194.2n
+R1 3 2 1.3983
+C1 1 2 .1719p
+.ends
+
+*High Frequency 270nH Inductor
+.subckt IMC0805_R27_01 1 2
+L1 1 2 230.6n
+R1 1 2 17.7k
+C1 1 2 .4812p
+.ends
+
+*High Frequency 330nH Inductor
+.subckt IMC0805_R33_01 1 2
+L1 1 2 274.2n
+R1 1 2 16.4k
+C1 1 2 .5637p
+.ends
+
+*High Frequency 390nH Inductor
+.subckt IMC0805_R39_01 1 2
+L1 1 2 331.9n
+R1 1 2 12.6k
+C1 1 2 .8714p
+.ends
+
+*High Frequency 470nH Inductor
+.subckt IMC0805_R47_01 1 2
+L1 1 2 425.7n
+R1 1 2 10.5k
+C1 1 2 1.5701p
+.ends
+
+*High Frequency 560nH Inductor
+.subckt IMC0805_R56_01 1 2
+L1 1 2 491n
+R1 1 2 10.9k
+C1 1 2 1.2488p
+.ends
+
+*High Frequency 680nH Inductor
+.subckt IMC0805_R68_01 1 2
+L1 1 2 592.1n
+R1 1 2 12.1k
+C1 1 2 1.3662p
+.ends
+
+*High Frequency 820nH Inductor
+.subckt IMC0805_R82_01 1 2
+L1 1 2 737.5n
+R1 1 2 13.5k
+C1 1 2 1.1962p
+.ends
+
+*High Frequency 1uH Inductor
+.subckt IMC0805_1R0_01 1 2
+L1 1 2 859.1n
+R1 1 2 12.5k
+C1 1 2 1.4749p
+.ends
+
+*Surface Mount, Molded 10nH Inductor
+.subckt IMC1210_10N 1 2
+L1 1 3 6.83n
+R1 3 2 89.79m
+C1 1 2 .0984p
+.ends
+
+*Surface Mount, Molded 12nH Inductor
+.subckt IMC1210_12N 1 2
+L1 1 3 9.09n
+R1 3 2 107.98m
+C1 1 2 .0965p
+.ends
+
+*Surface Mount, Molded 15nH Inductor
+.subckt IMC1210_15N 1 2
+L1 1 3 11.09n
+R1 3 2 119.35m
+C1 1 2 .1285p
+.ends
+
+*Surface Mount, Molded 18nH Inductor
+.subckt IMC1210_18N 1 2
+L1 1 3 14.62n
+R1 3 2 138.9m
+C1 1 2 .139p
+.ends
+
+*Surface Mount, Molded 22nH Inductor
+.subckt IMC1210_22N 1 2
+L1 1 3 18.48n
+R1 3 2 135.92m
+C1 1 2 .1827p
+.ends
+
+*Surface Mount, Molded 27nH Inductor
+.subckt IMC1210_27N 1 2
+L1 1 3 22.37n
+R1 3 2 172.43m
+C1 1 2 .2258p
+.ends
+
+*Surface Mount, Molded 33nH Inductor
+.subckt IMC1210_33N 1 2
+L1 1 3 30.59n
+R1 3 2 218.71m
+C1 1 2 .1876p
+.ends
+
+*Surface Mount, Molded 39nH Inductor
+.subckt IMC1210_39N 1 2
+L1 1 3 35.42n
+R1 3 2 209.12m
+C1 1 2 .244p
+.ends
+
+*Surface Mount, Molded 47nH Inductor
+.subckt IMC1210_47N 1 2
+L1 1 3 37.57n
+R1 3 2 215.71m
+C1 1 2 .2882p
+.ends
+
+*Surface Mount, Molded 56nH Inductor
+.subckt IMC1210_56N 1 2
+L1 1 3 46.38n
+R1 3 2 308.05m
+C1 1 2 .3251p
+.ends
+
+*Surface Mount, Molded 68nH Inductor
+.subckt IMC1210_68N 1 2
+L1 1 3 54.42n
+R1 3 2 224.86m
+C1 1 2 .3369p
+.ends
+
+*Surface Mount, Molded 82nH Inductor
+.subckt IMC1210_82N 1 2
+L1 1 3 63.2n
+R1 3 2 359.5m
+C1 1 2 .2936p
+.ends
+
+*Surface Mount, Molded 100nH Inductor
+.subckt IMC1210_R10 1 2
+L1 1 3 80.52n
+R1 3 2 353.36m
+C1 1 2 .3709p
+.ends
+
+*Surface Mount, Molded 120nH Inductor
+.subckt IMC1210_R12 1 2
+L1 1 3 103.4n
+R1 3 2 363.8m
+C1 1 2 .5019p
+.ends
+
+*Surface Mount, Molded 150nH Inductor
+.subckt IMC1210_R15 1 2
+L1 1 3 139.55n
+R1 3 2 229.68m
+C1 1 2 .602p
+.ends
+
+*Surface Mount, Molded 180nH Inductor
+.subckt IMC1210_R18 1 2
+L1 1 3 159.31n
+R1 3 2 312.54m
+C1 1 2 .6353p
+.ends
+
+*Surface Mount, Molded 220nH Inductor
+.subckt IMC1210_R22 1 2
+L1 1 3 205.23n
+R1 3 2 269.1m
+C1 1 2 .7814p
+.ends
+
+*Surface Mount, Molded 270nH Inductor
+.subckt IMC1210_R27 1 2
+L1 1 2 253.82n
+R1 1 2 5.98k
+C1 1 2 .6474p
+.ends
+
+*Surface Mount, Molded 330nH Inductor
+.subckt IMC1210_R33 1 2
+L1 1 2 309.87n
+R1 1 2 4.11k
+C1 1 2 .6869p
+.ends
+
+*Surface Mount, Molded 390nH Inductor
+.subckt IMC1210_R39 1 2
+L1 1 2 375.18n
+R1 1 2 4.59k
+C1 1 2 .705p
+.ends
+
+*Surface Mount, Molded 470nH Inductor
+.subckt IMC1210_R47 1 2
+L1 1 2 439.72n
+R1 1 2 7.48k
+C1 1 2 .7929p
+.ends
+
+*Surface Mount, Molded 560nH Inductor
+.subckt IMC1210_R56 1 2
+L1 1 2 523.33n
+R1 1 2 9.09k
+C1 1 2 .9563p
+.ends
+
+*Surface Mount, Molded 680nH Inductor
+.subckt IMC1210_R68 1 2
+L1 1 2 646.61n
+R1 1 2 10.66k
+C1 1 2 .8764p
+.ends
+
+*Surface Mount, Molded 820nH Inductor
+.subckt IMC1210_R82 1 2
+L1 1 2 751.05n
+R1 1 2 11.24k
+C1 1 2 .707p
+.ends
+
+*Surface Mount, Molded 1uH Inductor
+.subckt IMC1210_1R0 1 2
+L1 1 2 .99u
+R1 1 2 14.21k
+C1 1 2 1.21p
+.ends
+
+*Surface Mount, Molded 1.2uH Inductor
+.subckt IMC1210_1R2 1 2
+L1 1 2 1.15u
+R1 1 2 13.73k
+C1 1 2 .99p
+.ends
+
+*Surface Mount, Molded 1.5uH Inductor
+.subckt IMC1210_1R5 1 2
+L1 1 2 1.46u
+R1 1 2 15.51k
+C1 1 2 1.58p
+.ends
+
+*Surface Mount, Molded 1.8uH Inductor
+.subckt IMC1210_1R8 1 2
+L1 1 2 1.72u
+R1 1 2 18.89k
+C1 1 2 1.43p
+.ends
+
+*Surface Mount, Molded 2.2uH Inductor
+.subckt IMC1210_2R2 1 2
+L1 1 2 2.11u
+R1 1 2 20.98k
+C1 1 2 1.12p
+.ends
+
+*Surface Mount, Molded 2.7uH Inductor
+.subckt IMC1210_2R7 1 2
+L1 1 2 2.66u
+R1 1 2 25.9k
+C1 1 2 .98p
+.ends
+
+*Surface Mount, Molded 3.3uH Inductor
+.subckt IMC1210_3R3 1 2
+L1 1 2 3.16u
+R1 1 2 24.65k
+C1 1 2 1.52p
+.ends
+
+*Surface Mount, Molded 3.9uH Inductor
+.subckt IMC1210_3R9 1 2
+L1 1 2 3.67u
+R1 1 2 27.8k
+C1 1 2 1.69p
+.ends
+
+*Surface Mount, Molded 4.7uH Inductor
+.subckt IMC1210_4R7 1 2
+L1 1 2 4.5u
+R1 1 2 26.43k
+C1 1 2 1.41p
+.ends
+
+*Surface Mount, Molded 5.6uH Inductor
+.subckt IMC1210_5R6 1 2
+L1 1 2 5.28u
+R1 1 2 35.52k
+C1 1 2 1.34p
+.ends
+
+*Surface Mount, Molded 6.8uH Inductor
+.subckt IMC1210_6R8 1 2
+L1 1 2 6.32u
+R1 1 2 38.26k
+C1 1 2 1.57p
+.ends
+
+*Surface Mount, Molded 8.2uH Inductor
+.subckt IMC1210_8R2 1 2
+L1 1 2 7.52u
+R1 1 2 37.93k
+C1 1 2 1.35p
+.ends
+
+*Surface Mount, Molded 10uH Inductor
+.subckt IMC1210_100 1 2
+L1 1 2 9.43u
+R1 1 2 46.21k
+C1 1 2 1.52p
+.ends
+
+*Surface Mount, Molded 10nH Inductor
+.subckt IMC1210_10N_100 1 2
+L1 1 3 9.9n
+R1 3 2 64.1m
+C1 1 2 .1357p
+.ends
+
+*Surface Mount, Molded 12nH Inductor
+.subckt IMC1210_12N_100 1 2
+L1 1 3 11.8n
+R1 3 2 88.7m
+C1 1 2 .1463p
+.ends
+
+*Surface Mount, Molded 15nH Inductor
+.subckt IMC1210_15N_100 1 2
+L1 1 3 14.6n
+R1 3 2 130.7m
+C1 1 2 .1746p
+.ends
+
+*Surface Mount, Molded 18nH Inductor
+.subckt IMC1210_18N_100 1 2
+L1 1 3 17.4n
+R1 3 2 143.7m
+C1 1 2 .1926p
+.ends
+
+*Surface Mount, Molded 22nH Inductor
+.subckt IMC1210_22N_100 1 2
+L1 1 3 21.3n
+R1 3 2 200.2m
+C1 1 2 .1892p
+.ends
+
+*Surface Mount, Molded 27nH Inductor
+.subckt IMC1210_27N_100 1 2
+L1 1 3 29.2n
+R1 3 2 156.7m
+C1 1 2 .2227p
+.ends
+
+*Surface Mount, Molded 33nH Inductor
+.subckt IMC1210_33N_100 1 2
+L1 1 3 38.4n
+R1 3 2 273.4m
+C1 1 2 .1597p
+.ends
+
+*Surface Mount, Molded 39nH Inductor
+.subckt IMC1210_39N_100 1 2
+L1 1 3 34n
+R1 3 2 197.6m
+C1 1 2 .2976p
+.ends
+
+*Surface Mount, Molded 47nH Inductor
+.subckt IMC1210_47N_100 1 2
+L1 1 3 44.2n
+R1 3 2 212.7m
+C1 1 2 .263p
+.ends
+
+*Surface Mount, Molded 56nH Inductor
+.subckt IMC1210_56N_100 1 2
+L1 1 3 48.1n
+R1 3 2 277.6m
+C1 1 2 .3289p
+.ends
+
+*Surface Mount, Molded 68nH Inductor
+.subckt IMC1210_68N_100 1 2
+L1 1 3 61.8n
+R1 3 2 314.1m
+C1 1 2 .2958p
+.ends
+
+*Surface Mount, Molded 82nH Inductor
+.subckt IMC1210_82N_100 1 2
+L1 1 3 84.9n
+R1 3 2 325.6m
+C1 1 2 .2483p
+.ends
+
+*Surface Mount, Molded 100nH Inductor
+.subckt IMC1210_R10_100 1 2
+L1 1 2 93.5n
+R1 1 2 11.46k
+C1 1 2 .5351p
+.ends
+
+*Surface Mount, Molded 120nH Inductor
+.subckt IMC1210_R12_100 1 2
+L1 1 2 117.7n
+R1 1 2 13.69k
+C1 1 2 .4697p
+.ends
+
+*Surface Mount, Molded 150nH Inductor
+.subckt IMC1210_R15_100 1 2
+L1 1 2 142.4n
+R1 1 2 13.69k
+C1 1 2 .4757p
+.ends
+
+*Surface Mount, Molded 180nH Inductor
+.subckt IMC1210_R18_100 1 2
+L1 1 2 162.3n
+R1 1 2 18.45k
+C1 1 2 .5231p
+.ends
+
+*Surface Mount, Molded 220nH Inductor
+.subckt IMC1210_R22_100 1 2
+L1 1 2 201.2n
+R1 1 2 28.14k
+C1 1 2 .4544p
+.ends
+
+*Surface Mount, Molded 270nH Inductor
+.subckt IMC1210_R27_100 1 2
+L1 1 2 240.8n
+R1 1 2 45.62k
+C1 1 2 .4926p
+.ends
+
+*Surface Mount, Molded 330nH Inductor
+.subckt IMC1812_R33 1 2
+L1 1 2 295.7n
+R1 1 2 28k
+C1 1 2 .5365p
+.ends
+
+*Surface Mount, Molded 390nH Inductor
+.subckt IMC1812_R39 1 2
+L1 1 2 342.9n
+R1 1 2 29.24k
+C1 1 2 .5127p
+.ends
+
+*Surface Mount, Molded 470nH Inductor
+.subckt IMC1812_R47 1 2
+L1 1 2 450.8n
+R1 1 2 29.47k
+C1 1 2 .5427p
+.ends
+
+*Surface Mount, Molded 560nH Inductor
+.subckt IMC1812_R56 1 2
+L1 1 2 510.4n
+R1 1 2 41.36k
+C1 1 2 .4498p
+.ends
+
+*Surface Mount, Molded 680nH Inductor
+.subckt IMC1812_R68 1 2
+L1 1 2 606.7n
+R1 1 2 32.51k
+C1 1 2 .4792p
+.ends
+
+*Surface Mount, Molded 820nH Inductor
+.subckt IMC1812_R82 1 2
+L1 1 2 741.2n
+R1 1 2 32.76k
+C1 1 2 .4674p
+.ends
+
+*Surface Mount, Molded 1uH Inductor
+.subckt IMC1812_1R0 1 2
+L1 1 2 951.3n
+R1 1 2 12.4k
+C1 1 2 1.692p
+.ends
+
+*Surface Mount, Molded 1.2uH Inductor
+.subckt IMC1812_1R2 1 2
+L1 1 2 1.164u
+R1 1 2 12.33k
+C1 1 2 1.674p
+.ends
+
+*Surface Mount, Molded 1.5uH Inductor
+.subckt IMC1812_1R5 1 2
+L1 1 2 1.402u
+R1 1 2 14.92k
+C1 1 2 1.693p
+.ends
+
+*Surface Mount, Molded 1.8uH Inductor
+.subckt IMC1812_1R8 1 2
+L1 1 2 1.737u
+R1 1 2 18.89k
+C1 1 2 1.441p
+.ends
+
+*Surface Mount, Molded 2.2uH Inductor
+.subckt IMC1812_2R2 1 2
+L1 1 2 2.13u
+R1 1 2 23.51k
+C1 1 2 1.622p
+.ends
+
+*Surface Mount, Molded, Shielded 10nH Inductor
+.subckt ISC1210_10N 1 2
+L1 1 2 7.41n
+R1 1 2 1.04k
+C1 1 2 .1003p
+.ends
+
+*Surface Mount, Molded, Shielded 12nH Inductor
+.subckt ISC1210_12N 1 2
+L1 1 2 7.82n
+R1 1 2 1.21k
+C1 1 2 .1051p
+.ends
+
+*Surface Mount, Molded, Shielded 15nH Inductor
+.subckt ISC1210_15N 1 2
+L1 1 2 12.84n
+R1 1 2 1.8k
+C1 1 2 .2178p
+.ends
+
+*Surface Mount, Molded, Shielded 18nH Inductor
+.subckt ISC1210_18N 1 2
+L1 1 2 15.64n
+R1 1 2 2.5k
+C1 1 2 .2487p
+.ends
+
+*Surface Mount, Molded, Shielded 22nH Inductor
+.subckt ISC1210_22N 1 2
+L1 1 2 18.89n
+R1 1 2 2.35k
+C1 1 2 .2434p
+.ends
+
+*Surface Mount, Molded, Shielded 27nH Inductor
+.subckt ISC1210_27N 1 2
+L1 1 2 24.66n
+R1 1 2 3k
+C1 1 2 .2279p
+.ends
+
+*Surface Mount, Molded, Shielded 33nH Inductor
+.subckt ISC1210_33N 1 2
+L1 1 2 31.88n
+R1 1 2 3.07k
+C1 1 2 .1983p
+.ends
+
+*Surface Mount, Molded, Shielded 39nH Inductor
+.subckt ISC1210_39N 1 2
+L1 1 2 34.27n
+R1 1 2 3.63k
+C1 1 2 .4437p
+.ends
+
+*Surface Mount, Molded, Shielded 47nH Inductor
+.subckt ISC1210_47N 1 2
+L1 1 2 39.47n
+R1 1 2 4.39k
+C1 1 2 .2873p
+.ends
+
+*Surface Mount, Molded, Shielded 56nH Inductor
+.subckt ISC1210_56N 1 2
+L1 1 2 44.78n
+R1 1 2 5.47k
+C1 1 2 .4233p
+.ends
+
+*Surface Mount, Molded, Shielded 68nH Inductor
+.subckt ISC1210_68N 1 2
+L1 1 2 60.28n
+R1 1 2 4.74k
+C1 1 2 .3259p
+.ends
+
+*Surface Mount, Molded, Shielded 82nH Inductor
+.subckt ISC1210_82N 1 2
+L1 1 2 76.96n
+R1 1 2 10.12k
+C1 1 2 .3506p
+.ends
+
+*Surface Mount, Molded, Shielded 100nH Inductor
+.subckt ISC1210_R10 1 2
+L1 1 2 82.88n
+R1 1 2 7.5k
+C1 1 2 .413p
+.ends
+
+*Surface Mount, Molded, Shielded 120nH Inductor
+.subckt ISC1210_R12 1 2
+L1 1 2 120.07n
+R1 1 2 2.39k
+C1 1 2 .5536p
+.ends
+
+*Surface Mount, Molded, Shielded 150nH Inductor
+.subckt ISC1210_R15 1 2
+L1 1 2 147n
+R1 1 2 3.37k
+C1 1 2 .5382p
+.ends
+
+*Surface Mount, Molded, Shielded 180nH Inductor
+.subckt ISC1210_R18 1 2
+L1 1 2 164.2n
+R1 1 2 3.2k
+C1 1 2 .6848p
+.ends
+
+*Surface Mount, Molded, Shielded 220nH Inductor
+.subckt ISC1210_R22 1 2
+L1 1 2 221.31n
+R1 1 2 3.99k
+C1 1 2 .6573p
+.ends
+
+*Surface Mount, Molded, Shielded 270nH Inductor
+.subckt ISC1210_R27 1 2
+L1 1 2 256.78n
+R1 1 2 4.27k
+C1 1 2 .6229p
+.ends
+
+*Surface Mount, Molded, Shielded 330nH Inductor
+.subckt ISC1210_R33 1 2
+L1 1 2 316.73n
+R1 1 2 4.75k
+C1 1 2 .6377p
+.ends
+
+*Surface Mount, Molded, Shielded 390nH Inductor
+.subckt ISC1210_R39 1 2
+L1 1 2 390.58n
+R1 1 2 3k
+C1 1 2 .9118p
+.ends
+
+*Surface Mount, Molded, Shielded 470nH Inductor
+.subckt ISC1210_R47 1 2
+L1 1 2 440.61n
+R1 1 2 7.49k
+C1 1 2 1.1016p
+.ends
+
+*Surface Mount, Molded, Shielded 560nH Inductor
+.subckt ISC1210_R56 1 2
+L1 1 2 501.99n
+R1 1 2 6.19k
+C1 1 2 .9598p
+.ends
+
+*Surface Mount, Molded, Shielded 680nH Inductor
+.subckt ISC1210_R68 1 2
+L1 1 2 625.92n
+R1 1 2 7.79k
+C1 1 2 .737p
+.ends
+
+*Surface Mount, Molded, Shielded 820nH Inductor
+.subckt ISC1210_R82 1 2
+L1 1 2 804.02n
+R1 1 2 6.85k
+C1 1 2 1.0187p
+.ends
+
+*Surface Mount, Molded, Shielded 1uH Inductor
+.subckt ISC1210_1R0 1 2
+L1 1 2 987.4n
+R1 1 2 10.4k
+C1 1 2 1.34p
+.ends
+
+*Multilayer Ferrite Bead Z=40ohm Idc=400mA
+.subckt ILBB0603_400 1 2
+L1 1 2 95.2n
+R1 1 2 65
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=60ohm Idc=400mA
+.subckt ILBB0603_600 1 2
+L1 1 2 153.3n
+R1 1 2 80
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=68ohm Idc=200mA
+.subckt ILBB0603_680 1 2
+L1 1 2 177.9n
+R1 1 2 100
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=80ohm Idc=150mA
+.subckt ILBB0603_800 1 2
+L1 1 2 199.3n
+R1 1 2 118
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=120ohm Idc=150mA
+.subckt ILBB0603_121 1 2
+L1 1 2 335.6n
+R1 1 2 157
+C1 1 2 1.2p
+.ends
+
+*Multilayer Ferrite Bead Z=220ohm Idc=150mA
+.subckt ILBB0603_221 1 2
+L1 1 2 603.7n
+R1 1 2 315
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=300ohm Idc=150mA
+.subckt ILBB0603_301 1 2
+L1 1 2 795.4n
+R1 1 2 420
+C1 1 2 .8p
+.ends
+
+*Multilayer Ferrite Bead Z=450ohm Idc=100mA
+.subckt ILBB0603_451 1 2
+L1 1 2 1.1186u
+R1 1 2 545
+C1 1 2 .8p
+.ends
+
+*Multilayer Ferrite Bead Z=600ohm Idc=100mA
+.subckt ILBB0603_601 1 2
+L1 1 2 1.4531u
+R1 1 2 690
+C1 1 2 .8p
+.ends
+
+*Multilayer Ferrite Bead Z=750ohm Idc=100mA
+.subckt ILBB0603_751 1 2
+L1 1 2 2.0182u
+R1 1 2 810
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=1000ohm Idc=100mA
+.subckt ILBB0603_102 1 2
+L1 1 2 2.4001u
+R1 1 2 1.1k
+C1 1 2 .658p
+.ends
+
+*Multilayer Ferrite Bead Z=11ohm Idc=600mA
+.subckt ILBB0805_110 1 2
+L1 1 2 27.3n
+R1 1 2 18
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=32ohm Idc=600mA
+.subckt ILBB0805_320 1 2
+L1 1 2 105.3n
+R1 1 2 50
+C1 1 2 .85p
+.ends
+
+*Multilayer Ferrite Bead Z=60ohm Idc=300mA
+.subckt ILBB0805_600 1 2
+L1 1 2 211.4n
+R1 1 2 82
+C1 1 2 .7p
+.ends
+
+*Multilayer Ferrite Bead Z=90ohm Idc=300mA
+.subckt ILBB0805_900 1 2
+L1 1 2 283.6n
+R1 1 2 125
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=120ohm Idc=300mA
+.subckt ILBB0805_121 1 2
+L1 1 2 296.9n
+R1 1 2 165
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=150ohm Idc=300mA
+.subckt ILBB0805_151 1 2
+L1 1 2 443.7n
+R1 1 2 208
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=300ohm Idc=200mA
+.subckt ILBB0805_301 1 2
+L1 1 2 862.1n
+R1 1 2 350
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=400ohm Idc=200mA
+.subckt ILBB0805_401 1 2
+L1 1 2 1.3274u
+R1 1 2 510
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=600ohm Idc=200mA
+.subckt ILBB0805_601 1 2
+L1 1 2 1.3454u
+R1 1 2 636
+C1 1 2 1.2p
+.ends
+
+*Multilayer Ferrite Bead Z=1000ohm Idc=100mA
+.subckt ILBB0805_102 1 2
+L1 1 2 2.7573u
+R1 1 2 975
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=1500ohm Idc=100mA
+.subckt ILBB0805_152 1 2
+L1 1 2 4.7412u
+R1 1 2 1600
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=2000ohm Idc=80mA
+.subckt ILBB0805_202 1 2
+L1 1 2 7.4365u
+R1 1 2 2500
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=19ohm Idc=500mA
+.subckt ILB1206_190 1 2
+L1 1 2 63.51n
+R1 1 2 27
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=26ohm Idc=500mA
+.subckt ILB1206_260 1 2
+L1 1 2 75n
+R1 1 2 37
+C1 1 2 .8p
+.ends
+
+*Multilayer Ferrite Bead Z=31ohm Idc=500mA
+.subckt ILB1206_310 1 2
+L1 1 2 73.34n
+R1 1 2 37
+C1 1 2 1p
+.ends
+
+*Multilayer Ferrite Bead Z=50ohm Idc=600mA
+.subckt ILB1206_500 1 2
+L1 1 2 109.6n
+R1 1 2 75
+C1 1 2 .4p
+.ends
+
+*Multilayer Ferrite Bead Z=70ohm Idc=600mA
+.subckt ILB1206_700 1 2
+L1 1 2 174.12n
+R1 1 2 95
+C1 1 2 .2p
+.ends
+
+*Multilayer Ferrite Bead Z=120ohm Idc=400mA
+.subckt ILB1206_121 1 2
+L1 1 2 352.33n
+R1 1 2 150
+C1 1 2 1.5p
+.ends
+
+*Multilayer Ferrite Bead Z=150ohm Idc=300mA
+.subckt ILB1206_151 1 2
+L1 1 2 492.76n
+R1 1 2 180
+C1 1 2 .9p
+.ends
+
+*Multilayer Ferrite Bead Z=300ohm Idc=300mA
+.subckt ILB1206_301 1 2
+L1 1 2 1.05u
+R1 1 2 330
+C1 1 2 1.8p
+.ends
+
+*Multilayer Ferrite Bead Z=500ohm Idc=200mA
+.subckt ILB1206_501 1 2
+L1 1 2 1.69u
+R1 1 2 485
+C1 1 2 2.1p
+.ends
+
+*Multilayer Ferrite Bead Z=600ohm Idc=200mA
+.subckt ILB1206_601 1 2
+L1 1 2 2.49u
+R1 1 2 610
+C1 1 2 2p
+.ends
+

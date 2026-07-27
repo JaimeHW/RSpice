@@ -1,0 +1,297 @@
+* AD827 SPICE Macro-model                   7/2006, Rev. A
+*                                           TRW / ADI
+*						
+*
+* Copyright 2006 by Analog Devices
+*
+* Refer to "README.DOC" file for License Statement.  Use of this model
+* indicates your acceptance with the terms and provisions in the License Statement.
+*
+* Node assignments
+*               non-inverting input
+*               | inverting input
+*               | | positive supply
+*               | | |  negative supply
+*               | | |  |  output
+*               | | |  |  |
+*               | | |  |  |
+.SUBCKT AD827ab   1 2 99 50 30
+*
+* INPUT STAGE & POLE AT 300 MHZ
+*
+R1   2  3     5E11
+R2   1  3     5E11
+R3   5 99     443
+R4   6 99     443
+CIN  1  2     1.5E-12
+C2   5  6     0.599E-12
+I1   4  50    2.22E-3
+IOS  1  2     25E-9
+EOS  9  1     POLY(1)  19 23  0.5E-3  1
+Q1   5  2 10  QX
+Q2   6  9 11  QX
+R5   10 4     419.8
+R6   11 4     419.8
+*
+EREF 98 0     23  0  1
+*
+* GAIN STAGE & DOMINANT POLE AT 8.8 KHZ
+*
+R7  12 98     2.44E6
+C3  12 98     7.4E-12
+G1  98 12     5  6  2.25E-3
+V2  99 13     2.1
+V3  14 50     2.1
+D3  12 13     DX
+D4  14 12     DX
+*
+* ZERO/POLE PAIR AT 70MHz/200MHz
+*
+R8  15 16     1E6
+R9  16 98     1.86E6
+L1  16 98     1.48E-3
+G2  98 15     12 23  1E-6
+*
+* POLE AT 300 MHZ
+*
+R41 41 98     1E6
+C41 41 98     531E-18
+G41 98 41     15 23  1E-6
+*
+* POLE AT 300 MHZ
+*
+R42 42 98     1E6
+C42 42 98     531E-18
+G42 98 42     41 23  1E-6
+*
+* POLE AT 400 MHZ
+*
+R43 43 98     1E6
+C43 43 98     398E-18
+G43 98 43     42 23  1E-6
+*
+* COMMON-MODE GAIN NETWORK WITH ZERO AT 40 kHZ
+*
+R11 18 19     1E6
+C6  18 19     3.98E-12
+R12 19 98     1
+E2  18 98     3  23  17.8
+*
+* POLE AT 400 MHZ
+*
+R15 22 98     1E6
+C8  22 98     398E-18
+G3  98 22     43 23  1E-6
+*
+* OUTPUT STAGE
+*
+RF  30 60     500
+CF  60 12     12.5E-12
+R16 23 99     100E3
+R17 23 50     100E3
+ISY 99 50     2.95E-3
+R18 25 99     90
+R19 25 50     90
+L2  25 30     3E-8
+G4  28 50     22 25  11.11E-3
+G5  29 50     25 22  11.11E-3
+G6  25 99     99 22  11.11E-3
+G7  50 25     22 50  11.11E-3
+V4  26 25     0.8
+V5  25 27     0.8
+D5  22 26     DX
+D6  27 22     DX
+D7  99 28     DX
+D8  99 29     DX
+D9  50 28     DY
+D10 50 29     DY
+*
+* MODELS USED
+*
+.MODEL QX NPN(BF=336)
+.MODEL DX   D(IS=1E-15)
+.MODEL DY   D(IS=1E-15 BV=50)
+.ENDS
+
+
+*$
+* AD8145  SPICE Macro-model                 7/2007 Rev. PrA.
+*					    CK / ADI
+*
+* Copyright 2002 by Analog Devices, Inc.
+*
+* Refer to "README.DOC" file for License Statement.
+* Use of this model indicates your acceptance with
+* AD8145  SPICE Macro-model                 5/2003 Rev. PrA.
+*					    TRW / ADI
+*
+* Copyright 2002 by Analog Devices, Inc.
+*
+* Refer to "README.DOC" file for License Statement.
+* Use of this model indicates your acceptance with
+* the terms and provisions in the License Statement.
+*
+*  The following characteristics are modeled:
+*  Bandwidth (500MHz for LS and 270MHz for SS)
+*  Slew Rate (2000 v/us at 2Vp-p)
+*  Input Bias Current
+*  Offset Voltage
+*  Output Swing (-4V, +3.5V)
+*  Noise is not modelled
+*  Distortion is not modelled
+*  
+*
+* Node assignments
+*                IN+ input
+*                | IN- input
+*                | | REF input
+*                | | | FB input
+*                | | | |  V+
+*                | | | |  |  V-
+*                | | | |  |  |  out
+*                | | | |  |  |  |
+.SUBCKT AD8145a   1 2 3 4a 99 50 455
+Rf 45 4 350
+Rg 4 4a 350
+Cg 4 4a 0.8pF
+*
+* INPUT STAGE
+*
+Q1   17  1   9   QX
+Q2   18  11  10  QX
+R1   9   12  1150
+R2   10  12  1150
+I1   12  50   2E-3
+Dcm1 95 12 dx
+Vcm1 95 50 2.4
+Dcm2 94 16 dx
+Vcm2 94 50 2.4
+EOS1 2   11  POLY(1) (31,98)  1.5E-3  1
+IOS1 1   2   0.08u
+C1   1   2   3E-12
+RD1  1   2   6E6
+*
+* REF/FB INPUT STAGE
+*
+Q3   17  3   14  QY
+Q4   18  13  15  QY
+R3   14  16  1150
+R4   15  16  1150
+I2   16  50   2E-3
+VOS2 4   13  1.5E-3
+IOS2 3   4   0.08u
+C2   3   4   2E-12
+RD2  3   4   1.93E6
+VC1  32  17  DC  0.7
+VC2  33  18  DC  0.7
+D7   99   32  DX
+D8   99   33  DX
+*
+* TRANSCONDUCTANCE STAGE & DOMINANT POLE AT 350 KHZ
+*
+R7   19  98  6E6
+C3   19  98  .45E-12
+F1   98  19  POLY(2)  VC1  VC2  0   1   -1
+V2   99   20  2
+V3   21  50   1.5
+D1   19  20  DX
+D2   21  19  DX
+*
+* POLE AT 500 MHZ
+*
+R6   23  98   100k
+C4   23  98   1f
+G2   98  23   19  98  1e-5
+*
+* COMMON-MODE GAIN NETWORK WITH ZERO AT 100 KHZ
+*
+R10  30  31   1E6
+R11  31  98   1
+C7   30  31   3.18E-12
+E3   98  30   POLY(2)  (1,98) (2,98)  0  5  5
+*
+* OUTPUT STAGE
+*
+Eref 98 0 poly(2) 50 0 99 0 0 0.5 0.5
+FSY  99   50   POLY(2) V7 V8 10E-3 1 1
+R15  29  99   12
+R16  29  50   12
+L1   29  45   6E-10
+G7   29  99   99  23  83.3e-3
+G8   50  29   23  50  83.3e-3
+V4   25 29   -.332
+V5   29 26   -.3
+D3   23 25  DX
+D4   26 23  DX
+G5   98 70   29 23 2.94E-2
+D5   70 71   DX
+D6   72 70   DX
+V7   71 98   DC 0
+V8   98 72   DC 0
+*
+* MODELS USED
+*
+.MODEL QX NPN(BF=400)
+.MODEL QY NPN(BF=200)
+.MODEL DX   D(IS=1E-15)
+.ENDS
+*$
+
+.SUBCKT irfe330a 1 2 3
+**************************************
+*      Model Generated by MODPEX     *
+*Copyright(c) Symmetry Design Systems*
+*         All Rights Reserved        *
+*    UNPUBLISHED LICENSED SOFTWARE   *
+*   Contains Proprietary Information *
+*      Which is The Property of      *
+*     SYMMETRY OR ITS LICENSORS      *
+*Commercial Use or Resale Restricted *
+*   by Symmetry License Agreement    *
+**************************************
+* Model generated on Sep  13, 07
+* MODEL FORMAT: SPICE3
+* Symmetry POWER MOS Model (Version 1.0)
+* External Node Designations
+* Node 1 -> Drain
+* Node 2 -> Gate
+* Node 3 -> Source
+M1 9 7 8 8 MM L=100u W=100u
+.MODEL MM NMOS LEVEL=1 IS=1e-32
++VTO=3.79994 LAMBDA=0.000119062 KP=3.02115
++CGSO=6.04697e-06 CGDO=1e-11
+RS 8 3 0.00755625
+D1 3 1 MD
+.MODEL MD D IS=1e-06 RS=0.0742612 N=0.6 BV=400
++IBV=0.001 EG=1 XTI=1 TT=1e-07
++CJO=6.31679e-10 VJ=4.99466 M=0.9 FC=0.5
+RDS 3 1 8e+07
+RD 9 1 0.852237
+RG 2 7 17.5046
+D2 4 5 MD1
+* Default values used in MD1:
+*   RS=0 EG=1.11 XTI=3.0 TT=0
+*   BV=infinite IBV=1mA
+.MODEL MD1 D IS=1e-32 N=50
++CJO=8.40945e-10 VJ=1.72598 M=0.9 FC=1e-08
+D3 0 5 MD2
+* Default values used in MD2:
+*   EG=1.11 XTI=3.0 TT=0 CJO=0
+*   BV=infinite IBV=1mA
+.MODEL MD2 D IS=1e-10 N=1 RS=2.99999e-06
+RL 5 10 1
+FI2 7 9 VFI2 -1
+VFI2 4 0 0
+EV16 10 0 9 7 1
+CAP 11 10 8.40945e-10
+FI1 7 9 VFI1 -1
+VFI1 11 6 0
+RCAP 6 10 1
+D4 0 6 MD3
+* Default values used in MD3:
+*   EG=1.11 XTI=3.0 TT=0 CJO=0
+*   RS=0 BV=infinite IBV=1mA
+.MODEL MD3 D IS=1e-10 N=1
+.ENDS irfe330
+
+;$SpiceType=AMBIGUOUS

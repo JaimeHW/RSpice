@@ -1,0 +1,170 @@
+* ------------------------------------------------------------ *
+*
+* Original models from COlorado Power Electronic Center (Copec)
+* http://ece-www.colorado.edu/~pwrelect
+* Models translated by Christophe BASSO, Toulouse (FRANCE)
+* These voltage-mode models automatically toggle between DCM and CCM
+* Please report bugs to CBASSO@WANADOO.FR
+* OrCAD PSpice compatible
+* Last modified: June 28th 2004
+*
+* CCM-DCM1 works for converters without transformers (BUCK, BOOST...)
+* CCM-DCM2 works for converters including a transformer (FLYBACK...)
+*
+* ------------------------------------------------------------ *
+**********************************************************
+.SUBCKT CCM-DCM1 1  2  3  4 CTRL params: FS=100k L=75u
+**********************************************************
+* MODEL: CCM-DCM1
+* Application: two-switch PWM converters, CCM or DCM
+* Limitations: ideal switches, no transformer
+* Parameters:
+*      L=equivalent inductance for DCM
+*      fs=switching frequency
+**********************************************************
+* Nodes:
+* 1: transistor positive (drain of an n-channel MOS)
+* 2: transistor negative (source of an n-channel MOS)
+* 3: diode cathode
+* 4: diode anode
+* CTRL: duty cycle control input
+**********************************************************
+Xd CTRL 5 limit_cpc params: clampH=0.95 clampL=16m
+Vd 1 1x
+Et 1x 2 Value = { (1-V(u))*V(3,4)/(V(u)+1u) }
+Gd 4 3 Value = { (1-V(u))*I(Vd)/(V(u)+1u) }
+Ga 0 a Value = { IF ( I(Vd) > 0, I(Vd), 0 ) }
+Va a b
+Rdum1 b 0 10
+Eu1 100 0 Value = { V(5) }
+Eu2 20X 0 Value = { V(5)*V(5)/((V(5)*V(5)+2*{L}*{FS}*I(Vd)/V(3,4))+1u) }
+Xd2 20X 5 200 limit2_cpc
+* Xd2 20X 200 limit_cpc params: clampH=0.99 clampL=7m
+D1 200 u DN
+D2 100 u DN
+.model DN D N=0.01 RS=100m
+.ENDS
+**********************************************************
+.SUBCKT CCM-DCM2 1  2  3  4  CTRL params: FS=100k L=75u N=250m
+* MODEL: CCM-DCM2
+* Application: two-switch PWM converters, CCM or DCM
+*              with (possibly) transformer
+* Limitations: ideal switches
+**********************************************************
+* Parameters:
+*      L=equivalent inductance for DCM, 
+*        referred to primary
+*      fs=switching frequency
+*      n=transformer turns ratio 1:n (primary:secondary)
+**********************************************************
+* Nodes:
+* 1: transistor positive (drain of an n-channel MOS)
+* 2: transistor negative (source of an n-channel MOS)
+* 3: diode cathode
+* 4: diode anode
+* CTRL: duty cycle control input
+**********************************************************
+Xd CTRL 5 limit_cpc params: clampH=0.95 clampL=16m
+Vd 1 1x
+Et 1x 2 Value = { (1-V(u))*V(3,4)/(V(u)+1u)/{N} }
+Gd 4 3 Value = { (1-V(u))*I(Vd)/(V(u)+1u)/{N} }
+Ga 0 a Value = { IF (  I(Vd) > 0, I(Vd), 0 ) }
+Va a b
+Ra b 0 10
+Eu1 100 0 Value = { V(5) }
+Eu2 20X 0 Value = { V(5)*V(5)/((V(5)*V(5)+2*{L}*{N}*{FS}*I(Va)/V(3,4))+1u) }
+Xd2 20X 5 200 limit2_cpc
+* Xd2 20X 200 limit_cpc params: clampH=0.99 clampL=7m
+D1 200 u DN
+D2 100 u DN
+RD u 0 100k
+.MODEL DN D N=0.01 RS=100m
+.ENDS
+********
+.subckt limit_cpc d dc params: clampH=0.99 clampL=16m
+* clampH=High clamp voltage
+* clampL=Low clamp voltage
+Gd 0 dc VALUE = { V(d)*100u }
+Rdc dc 0 10k
+V1 clpn 0 {clampL}
+V2 clpp 0 {clampH}
+D1 clpn dc dclamp
+D2 dc clpp dclamp
+.model dclamp d n=0.01 rs=100m
+.ENDS
+********
+.subckt limit2_cpc d2nc d d2c
+*
+Gd 0 d2c d2nc 0 100u
+Rdc d2c 0 10k
+V1 clpn 0 7m
+E2 clpp 0 Value = { 1-V(d) }
+D1 clpn d2c dclamp
+D2 d2c clpp dclamp
+.model dclamp d n=0.01 rs=100m
+.ENDS
+********
+**********************************************************
+*
+.subckt CPM ctr current 1 2 d
++params: L=100e-6 fs=1e5 va=0.5 Rf=0.1
+**********************************************************
+* Parameters:
+*     L=equivalent inductance, referred to primary
+*     fs=switching frequency
+*     Va=amplitude of the artificial ramp, Va=Rf*ma/fs
+*     Rf=equivalent current-sense resistance
+*
+* MODEL: CPM
+* Current-Programmed-Mode controller model.
+* Computes duty ratio based on averaged inductor 
+* current, voltages applied to the inductor, and amplitude 
+* of the artificial ramp. The CPM controller model
+* is valid for CCM and DCM operation of the power 
+* converter. All parameters and inputs are referred to 
+* the primary side. 
+*
+**********************************************************
+* Nodes:
+* ctr: control input, v(control)=Rf*ic
+* current: sensed average inductor current v(current)=Rf*iL
+* 1: voltage across L in interval 1, slope m1=v(1)/L
+* 2: (-) voltage across L in interval 2, slope m2=v(2)/L
+* d: duty cycle (output of the CPM controller)
+**********************************************************
+*
+* generate d2 for CCM/DCM
+Ed2 d2 0 table 
++ {MIN(
++ L*fs*(v(ctr)-va*v(d))/Rf/(v(2)),
++ 1-v(d)
++ )} (0,0) (1,1)
+* 
+Em1 m1 0 value={Rf*v(1)/L/fs}
+Em2 m2 0 value={Rf*v(2)/L/fs}
+*
+* generate duty-ratio d (valid CCM and DCM operation)
+*
+Eduty d 0 table 
++ {
++ 2*(v(ctr)*(v(d)+v(d2))
++ -v(current)-v(m2)*v(d2)*v(d2)/2)
++ /(v(m1)*v(d)+2*va*(v(d)+v(d2)))
++ } (0.01,0.01) (0.99,0.99)
+*
+.ends ; end of subcircuit CPM  
+********
+.subckt ccm-dcm10 1  2  3  4  5
++ params: L=1 fs=1E6
+Et 1 2 value={(1-v(u))*v(3,4)/v(u)}
+Gd 4 3 value={(1-v(u))*i(Et)/v(u)}
+Ga 0 a value={MAX(i(Et),0)}
+Va a b
+Rdummy b 0 1k
+Eu u 0 table {MAX(v(5),
++ v(5)*v(5)/(v(5)*v(5)+2*L*fs*i(Et)/v(3,4)))} (0 0) (1 1)
+.ends
+********
+
+
+

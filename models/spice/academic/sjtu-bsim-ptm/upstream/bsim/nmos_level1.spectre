@@ -1,0 +1,26 @@
+* SPECTRE Level 1 MOSFET Model Card Example
+* Level 1 (level=1) - Basic SPICE MOSFET model
+*
+* This is the original SPICE MOSFET model with simple square-law characteristics.
+* Good for basic analog design and educational purposes.
+
+model nmos_level1 mos type=n level=1
++ vth    = 0.7         ; Threshold voltage (V)
++ kp     = 50.0e-6     ; Transconductance parameter (A/V^2)
++ gamma  = 0.8         ; Bulk threshold parameter (V^0.5)
++ phi    = 0.7         ; Surface potential (V)
++ lambda = 0.02        ; Channel length modulation (1/V)
++ tox    = 20.0e-9     ; Oxide thickness (m)
++ ld     = 0.1e-6      ; Lateral diffusion (m)
++ wd     = 0.0         ; Width reduction (m)
++ u0     = 600.0       ; Surface mobility (cm^2/V*s)
++ rsh    = 20.0        ; Sheet resistance (ohm/square)
++ cj     = 4.0e-4      ; Zero-bias bulk junction capacitance (F/m^2)
++ cjsw   = 3.0e-10     ; Zero-bias sidewall bulk junction capacitance (F/m)
++ mj     = 0.5         ; Bulk junction grading coefficient
++ mjsw   = 0.33        ; Sidewall bulk junction grading coefficient
++ pb     = 0.9         ; Bulk junction potential (V)
++ cgso   = 2.0e-10     ; Gate-source overlap capacitance (F/m)
++ cgdo   = 2.0e-10     ; Gate-drain overlap capacitance (F/m)
++ cgbo   = 1.0e-10     ; Gate-bulk overlap capacitance (F/m)
++ at     = 1.0e6       ; Flicker noise temperature coefficient

@@ -1,0 +1,22 @@
+* ngspice KiCad multi-device 74xx model
+* quad OR subcircuit
+
+.subckt 74HC32m 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+*
+.SUBCKT 74HC32  1A 1B 1Y
++     optional: DPWR=$G_DPWR DGND=$G_DGND
++     params: MNTYMXDLY=0 IO_LEVEL=0
+U1 or(2) DPWR DGND
++     1A 1B 1Y
++     DLY_HC32 IO_HC MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+.model DLY_HC32 ugate (tplhTY=10ns tplhMX=20ns tphlTY=10ns tphlMX=20ns)
+.ENDS  74HC32
+*
+Xor1 1 2 3 74HC32
+Xor2 4 5 6 74HC32
+Xor3 9 10 8 74HC32
+Xor4 12 13 11 74HC32
+.ends
+
+
+

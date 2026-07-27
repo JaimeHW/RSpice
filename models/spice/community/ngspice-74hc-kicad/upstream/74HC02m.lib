@@ -1,0 +1,25 @@
+* ngspice KiCad multi-device 74xx model
+* quad NOR subcircuit
+
+.subckt 74HC02m 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+*
+* ----------------------------------------------------------- 74HC00 ------
+*  Quad 2-Input Nor Gates
+*
+.SUBCKT 74HC02  1A 1B 1Y
++     optional: DPWR=$G_DPWR DGND=$G_DGND
++     params: MNTYMXDLY=0 IO_LEVEL=0
+U1 nor(2) DPWR DGND
++     1A 1B 1Y
++     DLY_HC02 IO_HC MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+.model DLY_HC02 ugate (tplhTY=9ns tplhMX=18ns tphlTY=9ns tphlMX=18ns)
+.ENDS  74HC02
+*
+Xnand1 2 2 1 74HC02
+Xnand2 5 6 4 74HC02
+Xnand3 8 9 10 74HC02
+Xnand4 11 12 13 74HC02
+.ends
+
+
+

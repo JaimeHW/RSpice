@@ -1,0 +1,345 @@
+*model = bsim3v3
+*Berkeley Spice Compatibility 
+* Lmin= .35 Lmax= 20 Wmin= .6 Wmax= 20
+.model $BSIM3_N NMOS
++Level=        8 
++Tnom=27.0
++Nch= 2.498E+17  Tox=9E-09 Xj=1.00000E-07
++Lint=9.36e-8 Wint=1.47e-7
++Vth0= .6322    K1= .756  K2= -3.83e-2  K3= -2.612 
++Dvt0= 2.812  Dvt1= 0.462  Dvt2=-9.17e-2 
++Nlx= 3.52291E-08  W0= 1.163e-6 
++K3b= 2.233 
++Vsat= 86301.58  Ua= 6.47e-9  Ub= 4.23e-18  Uc=-4.706281E-11 
++Rdsw= 650  U0= 388.3203 wr=1
++A0= .3496967 Ags=.1    B0=0.546    B1= 1   
++ Dwg = -6.0E-09 Dwb = -3.56E-09 Prwb = -.213
++Keta=-3.605872E-02  A1= 2.778747E-02  A2= .9 
++Voff=-6.735529E-02  NFactor= 1.139926  Cit= 1.622527E-04 
++Cdsc=-2.147181E-05   
++Cdscb= 0  Dvt0w =  0 Dvt1w =  0 Dvt2w =  0 
++ Cdscd =  0 Prwg =  0 
++Eta0= 1.0281729E-02  Etab=-5.042203E-03 
++Dsub= .31871233 
++Pclm= 1.114846  Pdiblc1= 2.45357E-03  Pdiblc2= 6.406289E-03 
++Drout= .31871233  Pscbe1= 5000000  Pscbe2= 5E-09 Pdiblcb = -.234
++Pvag= 0 delta=0.01
++ Wl =  0 Ww = -1.420242E-09 Wwl =  0 
++ Wln =  0 Wwn =  .2613948 Ll =  1.300902E-10 
++ Lw =  0 Lwl =  0 Lln =  .316394 
++ Lwn =  0
++kt1=-.3  kt2=-.051 
++At= 22400 
++Ute=-1.48 
++Ua1= 3.31E-10  Ub1= 2.61E-19 Uc1= -3.42e-10 
++Kt1l=0 Prt=764.3
+
+.model $BSIM3_P PMOS
++Level=        8 
++Tnom=27.0
++Nch= 3.533024E+17  Tox=9E-09 Xj=1.00000E-07
++Lint=6.23e-8 Wint=1.22e-7
++Vth0=-.6732829 K1= .8362093  K2=-8.606622E-02  K3= 1.82 
++Dvt0= 1.903801  Dvt1= .5333922  Dvt2=-.1862677 
++Nlx= 1.28e-8  W0= 2.1e-6 
++K3b= -0.24 Prwg=-0.001 Prwb=-0.323 
++Vsat= 103503.2  Ua= 1.39995E-09  Ub= 1.e-19  Uc=-2.73e-11 
++ Rdsw= 460  U0= 138.7609 
++A0= .4716551 Ags=0.12 
++Keta=-1.871516E-03  A1= .3417965  A2= 0.83 
++Voff=-.074182  NFactor= 1.54389  Cit=-1.015667E-03 
++Cdsc= 8.937517E-04 
++Cdscb= 1.45e-4  Cdscd=1.04e-4
++ Dvt0w=0.232 Dvt1w=4.5e6 Dvt2w=-0.0023
++Eta0= 6.024776E-02  Etab=-4.64593E-03 
++Dsub= .23222404 
++Pclm= .989  Pdiblc1= 2.07418E-02  Pdiblc2= 1.33813E-3 
++Drout= .3222404  Pscbe1= 118000  Pscbe2= 1E-09 
++Pvag= 0 
++kt1= -0.25  kt2= -0.032 prt=64.5 
++At= 33000 
++Ute= -1.5 
++Ua1= 4.312e-9 Ub1= 6.65e-19  Uc1= 0 
++Kt1l=0
+
+
+** Model: BSIM4.1.0
+** Berkeley SPICE3f5 Compatible
+** Lmin=0.12 Lmax=10 Wmin=0.6 Wmax=20
+** By Weidong Liu 10/11/2000
+
+.MODEL $BSIM4_N NMOS LEVEL=14 
+*+VERSION=4.1.0 
++ TNOM=27
++ EPSROX=3.9 TOXE=3e-9 TOXP=3e-9 TOXM=3e-9 TOXREF=3e-9 DTOX=0
+
++ MOBMOD=0 RDSMOD=0 IGCMOD=1 IGBMOD=1 DIOMOD=1 CAPMOD=2
++ RGATEMOD=1 RBODYMOD=1 TRNQSMOD=0 ACNQSMOD=0 FNOIMOD=1
++ TNOIMOD=0 PERMOD=1 GEOMOD=1 PARAMCHK=1 BINUNIT=1
+
++ NDEP=1.7e17 NGATE=9e19 VTH0=0.42 PHIN=0 XJ=9e-8 NSD=1e20
++ VFB=-0.76 K1=0.33 K2=-1.87e-2 K3=80 K3b=0 W0=2.5e-6 KT1=-0.11
++ KT1L=0 KT2=2.2e-2 LPE0=5.75e-8 LPEB=2.3e-10 DVT0=2.89 DVT1=0.53
++ DVT2=-3.2e-2 DVT0W=0 DVT1W=0 DVT2W=0 DVTP0=7.32e-7 DVTP1=0.12
++ DSUB=0.058 ETA0=0.001 ETAB=0
+
+
++ CDSC=2.58e-4 CDSCD=6.1e-8 CDSCB=0 CIT=0 NFACTOR=1.1 VOFF=-0.02 VOFFL=0
++ MINV=0.05 VSAT=9.2e4 AT=3.3e4 
++U0=4.19e-2 
++UA=8.7e-16 UB=3.06e-18
++ UC=4.6e-13 UTE=-1.5 UA1=4.31e-9 UB1=7.61e-18 UC1=-5.6e-11
++ RDSW=369.4 RDW=184.7 RSW=184.7 PRWG=3.22e-8 PRWB=6.8e-11 WR=1
++ RDSWMIN=0 RDWMIN=0 RSWMIN=0 PRT=0 A0=1.1 AGS=1e-20 B0=-1e-20
++ B1=0 KETA=-0.047 A1=0 A2=1 DELTA=0.014 PVAG=1e-20 PCLM=6.28e-4
++ PDITS=0.2 PDITSL=2.3e6 PDITSD=0.23 FPROUT=0.2 PDIBLCB=3.4e-8
++ PDIBLC1=0.81 DROUT=0.56 PDIBLC2=9.84e-06 PSCBE1=8.14e8 PSCBE2=9.58e-07
+
++ LINT=5e-9 WINT=5e-9 DWG=0 DWB=0 WL=0 WW=0 WWL=0
++ WLN=1 WWN=1 LL=0 LW=0 LWL=0 LLN=1 LWN=1
+
++ XGW=3e-7 XGL=4e-8 NGCON=1 RSHG=0.4 XRCRG1=12 XRCRG2=5
++ DMCG=5e-6 DMCI=5e-6 DMDG=5e-6 DMCGT=6e-7 DWJ=4.5e-8 RSH=6
++ RBDB=15 RBPD=15 RBSB=15 RBPS=15 RBPB=5 GBMIN=1e-10
+
++ CGSO=7.43e-10 CGDO=7.43e-10 CGBO=2.56e-11 CGSL=1e-14 CGDL=1e-14
++ CKAPPAS=0.5 CKAPPAD=0.5 NOFF=0.9 VOFFCV=0.02 ACDE=1 MOIN=15 XPART=0
+
++ JSS=1e-4 JSWS=1e-11 JSWGS=1e-10 CJS=5e-4 CJSWS=5e-10 CJSWGS=3e-10
++ PBS=1 PBSWS=1 PBSWGS=1 NJS=1 XTIS=3 MJS=0.5 MJSWS=0.33 MJSWGS=0.33
++ XJBVS=1 BVS=10 IJTHSFWD=1e-2 IJTHSREV=1e-3
+
++ JSD=1e-4 JSWD=1e-11 JSWGD=1e-10 CJD=5e-4 CJSWD=5e-10 CJSWGD=5e-10
++ PBD=1 PBSWD=1 PBSWGD=1 NJD=1 XTID=3 MJD=0.5 MJSWD=0.33 MJSWGD=0.33
++ XJBVD=1 BVD=10 IJTHDFWD=1e-2 IJTHDREV=1e-3
+
++ TCJ=1e-3 TCJSW=1e-3 TCJSWG=1e-3 TPB=0.005 TPBSW=0.005 TPBSWG=0.005
+
++ ALPHA0=7.4e-2 ALPHA1=0.005 BETA0=30 AGIDL=2e-4 BGIDL=2.1e9 CGIDL=2e-4
++ EGIDL=0.8 AIGC=0.043 BIGC=0.0054 CIGC=0.0075 AIGSD=0.043 BIGSD=0.0054
++ CIGSD=0.0075 DLCIG=2.2e-8 AIGBACC=0.043 BIGBACC=0.0054 CIGBACC=0.0075
++ AIGBINV=0.35 BIGBINV=0.03 CIGBINV=0.006 NIGC=1 NIGBACC=1 NIGBINV=3
++ NTOX=1 EIGBINV=1.1 PIGCD=1.0 POXEDGE=1
+** End
+
+** The BSIM4 model card below was not extracted/obtained from/based on
+** any real technologies. It should not be used for any other purposes
+** except for benchmarking the implementation of BSIM4.1.0 against BSIM 
+** Team's standard results using SPICE3f5.
+**** Weidong Liu, Xiaodong Jin, Mark Cao, and Chenming Hu 10/11/2000.
+
+
+** Model: BSIM4.1.0
+** Berkeley SPICE3f5 Compatible
+** Lmin=0.12 Lmax=10 Wmin=0.6 Wmax=20
+** By Weidong Liu 10/11/2000
+
+.MODEL $BSIM4_P PMOS LEVEL=14 
+*+VERSION=4.1.0 
++ TNOM=27
++ EPSROX=3.9 TOXE=3e-9 TOXP=3e-9 TOXM=3e-9 TOXREF=3e-9 DTOX=0
+
++ MOBMOD=0 RDSMOD=0 IGCMOD=1 IGBMOD=1 DIOMOD=1 CAPMOD=2
++ RGATEMOD=1 RBODYMOD=1 TRNQSMOD=0 ACNQSMOD=0 FNOIMOD=1
++ TNOIMOD=0 PERMOD=1 GEOMOD=1 PARAMCHK=1 BINUNIT=1
+
++ NDEP=1.7e17 NGATE=9e19 VTH0=-0.42 PHIN=0 XJ=9e-8 NSD=1e20
++ VFB=0.76 K1=0.33 K2=-1.87e-2 K3=80 K3b=0 W0=2.5e-6 KT1=-0.11
++ KT1L=0 KT2=2.2e-2 LPE0=5.75e-8 LPEB=2.3e-10 DVT0=2.89 DVT1=0.53
++ DVT2=-3.2e-2 DVT0W=0 DVT1W=0 DVT2W=0 DVTP0=7.32e-7 DVTP1=0.12
++ DSUB=0.058 ETA0=0.001 ETAB=0
+
++ CDSC=2.58e-4 CDSCD=6.1e-8 CDSCB=0 CIT=0 NFACTOR=1.1 VOFF=-0.02 VOFFL=0
++ MINV=0.05 VSAT=9.2e4 AT=3.3e4 
++U0=4.19e-2 
++UA=8.7e-16 UB=3.06e-18
++ UC=4.6e-13 UTE=-1.5 UA1=4.31e-9 UB1=7.61e-18 UC1=-5.6e-11
++ RDSW=369.4 RDW=184.7 RSW=184.7 PRWG=3.22e-8 PRWB=6.8e-11 WR=1
++ RDSWMIN=0 RDWMIN=0 RSWMIN=0 PRT=0 A0=1.1 AGS=1e-20 B0=-1e-20
++ B1=0 KETA=-0.047 A1=0 A2=1 DELTA=0.014 PVAG=1e-20 PCLM=6.28e-4
++ PDITS=0.2 PDITSL=2.3e6 PDITSD=0.23 FPROUT=0.2 PDIBLCB=3.4e-8
++ PDIBLC1=0.81 DROUT=0.56 PDIBLC2=9.84e-06 PSCBE1=8.14e8 PSCBE2=9.58e-07
+
++ LINT=5e-9 WINT=5e-9 DWG=0 DWB=0 WL=0 WW=0 WWL=0
++ WLN=1 WWN=1 LL=0 LW=0 LWL=0 LLN=1 LWN=1
+
++ XGW=3e-7 XGL=4e-8 NGCON=1 RSHG=0.4 XRCRG1=12 XRCRG2=5
++ DMCG=5e-6 DMCI=5e-6 DMDG=5e-6 DMCGT=6e-7 DWJ=4.5e-8 RSH=6
++ RBDB=15 RBPD=15 RBSB=15 RBPS=15 RBPB=5 GBMIN=1e-10
+
++ CGSO=7.43e-10 CGDO=7.43e-10 CGBO=2.56e-11 CGSL=1e-14 CGDL=1e-14
++ CKAPPAS=0.5 CKAPPAD=0.5 NOFF=0.9 VOFFCV=0.02 ACDE=1 MOIN=15 XPART=0
+
++ JSS=1e-4 JSWS=1e-11 JSWGS=1e-10 CJS=5e-4 CJSWS=5e-10 CJSWGS=3e-10
++ PBS=1 PBSWS=1 PBSWGS=1 NJS=1 XTIS=3 MJS=0.5 MJSWS=0.33 MJSWGS=0.33
++ XJBVS=1 BVS=10 IJTHSFWD=1e-2 IJTHSREV=1e-3
+
++ JSD=1e-4 JSWD=1e-11 JSWGD=1e-10 CJD=5e-4 CJSWD=5e-10 CJSWGD=5e-10
++ PBD=1 PBSWD=1 PBSWGD=1 NJD=1 XTID=3 MJD=0.5 MJSWD=0.33 MJSWGD=0.33
++ XJBVD=1 BVD=10 IJTHDFWD=1e-2 IJTHDREV=1e-3
+
++ TCJ=1e-3 TCJSW=1e-3 TCJSWG=1e-3 TPB=0.005 TPBSW=0.005 TPBSWG=0.005
+
++ ALPHA0=7.4e-2 ALPHA1=0.005 BETA0=30 AGIDL=2e-4 BGIDL=2.1e9 CGIDL=2e-4
++ EGIDL=0.8 AIGC=0.043 BIGC=0.0054 CIGC=0.0075 AIGSD=0.043 BIGSD=0.0054
++ CIGSD=0.0075 DLCIG=2.2e-8 AIGBACC=0.043 BIGBACC=0.0054 CIGBACC=0.0075
++ AIGBINV=0.35 BIGBINV=0.03 CIGBINV=0.006 NIGC=1 NIGBACC=1 NIGBINV=3
++ NTOX=1 EIGBINV=1.1 PIGCD=1.0 POXEDGE=1
+** End
+
+
+* IMPORTANT NOTES: 
+* ---------------- 
+* 
+* Parameters do not correspond to a particular technology but 
+* have reasonable values for standard 0.5um CMOS. 
+* Not intended for use in real design. 
+* 
+* Includes all intrinsic model parameters. An example set for 
+* extrinsic model parameters is provided. 
+* 
+* Geometry range: W >= 0.8um, L >= 0.5um 
+* Voltage range: |Vgb| < 3.3V, |Vdb| < 3.3V, |Vsb| < 2V 
+* 
+* For use with either simulator, comment/uncomment respective lines. 
+* Use of extrinsic model parameters and models (series resistance, 
+* junction currents/capacitances) is in general simulator-dependent. 
+* 
+********************************************************************** 
+* EKV v2.6 NMOS 
+*--------------- 
+.MODEL $EKV_N NMOS 
++ LEVEL = 44 ; ELDO 
+*+ LEVEL = 5 ! PSPICE 
+*** Setup Parameters 
++ UPDATE = 2.6 ; ELDO 
++ XQC = 0.4 ; ELDO 
+*** Process Related Model Parameters 
++ COX = 3.45E-3 
++ XJ = 0.15E-6 
+*** Intrinsic Model Parameters 
++ VTO = 0.6 
++ GAMMA = 0.71 
++ PHI = 0.97 
++ KP = 150E-6 
++ E0 = 88.0E6 
++ UCRIT = 4.5E6 
++ DL = -0.05E-6 
++ DW = -0.02E-6 
++ LAMBDA = 0.23 
++ LETA = 0.28 
++ WETA = 0.05 
++ Q0 = 280E-6 
++ LK = 0.5E-6 
+*** Substrate Current Parameters 
++ IBN = 1.0 
++ IBA = 200E6 
++ IBB = 350E6 
+*** Intrinsic Model Temperature Parameters 
++ TNOM = 25.0 
++ TCV = 1.5E-3 
++ BEX = -1.5 
++ UCEX = 1.7 
++ IBBT = 0.0 
+*** 1/f Noise Model Parameters 
++ KF = 1E-27 
++ AF = 1 
+*** Short-Distance Matching Statistical Parameters (for MC simulation only) 
++ AVTO = 0 DEV = 10.0E-3 ; ELDO v4.6 
++ AGAMMA = 0 DEV = 10.0E-3 ; ELDO v4.6 
++ AKP = 0 DEV = 25.0E-3 ; ELDO v4.6 
+*+ AVTO = DEV = 15.0E-9 ! PSPICE 
+*+ AGAMMA = DEV = 15.0E-9 ! PSPICE 
+*+ AKP = DEV = 25.0E-9 ! PSPICE 
+*** Series Resistance and Area Calulation Parameters 
+*+ RLEV = 3 ; ELDO 
++ HDIF = 0.9E-6 
++ RSH = 510 
+*** Junction Current Parameters 
+*+ ALEV = 3 ; ELDO 
++ JS = 8.0E-6 
++ JSW = 1.5E-10 
++ XTI = 0 
++ N = 1.5 
+*** Junction Capacitances Parameters 
++ CJ = 8.0E-4 
++ CJSW = 3.0E-10 
++ MJ = 0.5 
++ MJSW = 0.3 
++ PB = 0.9 
++ PBSW = 0.5 
++ FC = 0.5 
+*** Gate Overlap Capacitances 
++ CGSO = 1.5E-10 
++ CGDO = 1.5E-10 
++ CGBO = 4.0E-10 
+
+* EKV v2.6 PMOS 
+*--------------- 
+.MODEL $EKV_P PMOS 
++ LEVEL = 44 ; ELDO 
+*+ LEVEL = 5 ! PSPICE 
+*** Setup Parameters 
++ UPDATE = 2.6 
++ XQC = 0.4 
+*** Process Related Model Parameters 
++ COX = 3.45E-3 
++ XJ = 0.15E-6 
+*** Intrinsic Model Parameters 
++ VTO = -0.55 
++ GAMMA = 0.69 
++ PHI = 0.87 
++ KP = 35.0E-6 
++ E0 = 51.0E6 
++ UCRIT = 18.0E6 
++ DL = -0.05E-6 
++ DW = -0.03E-6 
++ LAMBDA = 1.1 
++ LETA = 0.45 
++ WETA = 0.0 
++ Q0 = 200E-6 
++ LK = 0.6E-6 
+*** Substrate Current Parameters 
++ IBN = 1.0 
++ IBA = 0.0 
++ IBB = 300E6 
+*** Intrinsic Model Temperature Parameters 
++ TNOM = 25.0 
++ TCV = -1.4E-3 
++ BEX = -1.4 
++ UCEX = 2.0 
++ IBBT = 0.0 
+*** 1/f Noise Model Parameters 
++ KF = 1.0E-28 
++ AF = 1 
+*** Short-Distance Matching Statistical Parameters (for MC simulation only) 
++ AVTO = 0 DEV = 10.0E-3 ; ELDO v4.6 
++ AGAMMA = 0 DEV = 10.0E-3 ; ELDO v4.6 
++ AKP = 0 DEV = 25.0E-3 ; ELDO v4.6 
+*+ AVTO = DEV = 10.0E-9 ! PSPICE 
+*+ AGAMMA = DEV = 10.0E-9 ! PSPICE 
+*+ AKP = DEV = 25.0E-9 ! PSPICE 
+*** Series Resistance and Area Calulation Parameters 
+*+ RLEV = 3 ; ELDO 
++ HDIF = 0.9E-6 
++ RSH = 990 
+*** Junction Current Parameters 
+*+ ALEV = 3 ; ELDO 
++ JS = 4.0E-5 
++ JSW = 7.0E-10 
++ XTI = 0 
++ N = 1.8 
+*** Junction Capacitances Parameters 
++ CJ = 8.0E-4 
++ CJSW = 4.0E-10 
++ MJ = 0.5 
++ MJSW = 0.35 
++ PB = 0.9 
++ PBSW = 0.8 
++ FC = 0.5 
+*** Gate Overlap Capacitances 
++ CGSO = 1.5E-10 
++ CGDO = 1.5E-10 
++ CGBO = 4.0E-10 
+
+;$SpiceType=AMBIGUOUS

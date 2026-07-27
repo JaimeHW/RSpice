@@ -1,0 +1,16 @@
+.subckt 74HC10m 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+
+.SUBCKT 74HC10  1A 1B 1C 1Y
++     optional: DPWR=$G_DPWR DGND=$G_DGND
++     params: MNTYMXDLY=0 IO_LEVEL=0
+U1 nand(3) DPWR DGND
++     1A 1B 1C 1Y
++     DLY_HC10 IO_HC MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+.model DLY_HC10 ugate (tplhTY=10ns tplhMX=19ns tphlTY=10ns tphlMX=19ns)
+.ENDS  74HC10
+
+X1 1 2 13 12 74HC10
+X2 3 4 5 6 74HC10
+X3 9 10 11 8 74HC10
+
+.ends

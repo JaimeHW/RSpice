@@ -1,0 +1,696 @@
+
+.SUBCKT DRDN005W 1 3 4 5 6
+Q1 3 5 4 DI_DRDN005W_NPN
+D1 1 6 DI_DRDN005W_DIODE
+
+*SRC=DRDN005W;DI_DRDN005W_NPN;BJTs NPN; Si;  80.0V  0.500A  219MHz   Diodes Inc. Transistor 
+.MODEL DI_DRDN005W_NPN  NPN (IS=50.8f NF=1.00 BF=479 VAF=161 
++ IKF=91.1m ISE=9.99p NE=2.00 BR=4.00 NR=1.00 
++ VAR=16.0 IKR=0.225 RE=0.103 RB=0.412 RC=41.2m 
++ XTB=1.5 CJE=58.7p VJE=1.10 MJE=0.500 CJC=18.9p VJC=0.300 
++ MJC=0.300 TF=576p TR=110n EG=1.12 )
+
+*SRC=DRDN005W;DI_DRDN005W_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDN005W_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT DRDN010W 1 3 4 5 6
+Q1 3 5 4 DI_DRDN010W_NPN
+D1 1 6 DI_DRDN010W_DIODE
+
+*SRC=DRDN010W;DI_DRDN010W_NPN;BJTs NPN; Si;  18.0V  1.00A  100MHz   Diodes Inc. BJTs
+.MODEL DI_DRDN010W_NPN  NPN (IS=102f NF=1.00 BF=1.09k VAF=76.4
++ IKF=0.425 ISE=13.4p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=1.05 RE=0.181 RB=0.726 RC=72.6m
++ XTB=1.5 CJE=71.7p VJE=1.10 MJE=0.500 CJC=23.1p VJC=0.300 MJC=0.300 
++ TF=1.55n TR=238n EG=1.12 )
+
+*SRC=DRDN010W;DI_DRDN010W_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDN010W_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT DRDNB16W 1 3 4 5 6
+Q1 3 5B 4 DI_DRDNB16W_NPN
+D1 1 6 DI_DRDNB16W_DIODE
+R1 5 5B 1K
+R2 5B 4 10K
+
+*SRC=DRDNB16W;DI_DRDNB16W_NPN;BJTs NPN; Si;  32.0V  0.500A  220MHz   Diodes Inc. PBTs
+.MODEL DI_DRDNB16W_NPN  NPN (IS=50.6f NF=1.00 BF=534 VAF=102
++ IKF=0.340 ISE=17.3p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=0.840 RE=0.283 RB=1.13 RC=0.113
++ XTB=1.5 CJE=55.3p VJE=1.10 MJE=0.500 CJC=21.3p VJC=0.300
++ MJC=0.300 TF=605p TR=120n EG=1.12 )
+
+*SRC=DRDNB16W;DI_DRDNB16W_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDNB16W_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT DRDNB21D 1 2 3 4 5 6
+Q1 1 6B 2 DI_DRDNB21D_NPN
+R1 6 6B 2.2K
+R2 6B 2 47K
+D1 1 5 DI_DRDNB21D_DIODE
+
+Q2 3 4B 2 DI_DRDNB21D_NPN
+R3 4 4B 2.2K
+R4 4B 2 47K
+D2 3 5 DI_DRDNB21D_DIODE
+
+*SRC=DRDNB21D;DI_DRDNB21D_NPN;BJTs NPN; Si;  50.0V  0.150A  200MHz   Diodes Inc. PBTs
+.MODEL DI_DRDNB21D_NPN  NPN (IS=9.98f NF=1.00 BF=766 VAF=127
++ IKF=54.7m ISE=2.14p NE=2.00 BR=4.00 NR=1.00
++ VAR=24.0 IKR=0.135 RE=0.815 RB=3.26 RC=0.326
++ XTB=1.5 CJE=20.7p VJE=1.10 MJE=0.500 CJC=11.4p VJC=0.300
++ MJC=0.300 TF=567p TR=119n EG=1.12 )
+
+*SRC=DRDNB21D;DI_DRDNB21D_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDNB21D_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT DRDNB26W 1 3 4 5 6
+Q1 3 5B 4 DI_DRDNB26W_NPN
+D1 1 6 DI_DRDNB26W_DIODE
+R1 5 5B 220
+R2 5B 4 4.7K
+
+*SRC=DRDNB26W;DI_DRDNB26W_NPN;BJTs NPN; Si;  32.0V  0.500A  220MHz   Diodes Inc. PBTs
+.MODEL DI_DRDNB26W_NPN  NPN (IS=50.6f NF=1.00 BF=534 VAF=102
++ IKF=0.340 ISE=17.3p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=0.840 RE=0.283 RB=1.13 RC=0.113
++ XTB=1.5 CJE=55.3p VJE=1.10 MJE=0.500 CJC=21.3p VJC=0.300
++ MJC=0.300 TF=605p TR=120n EG=1.12 )
+
+*SRC=DRDNB26W;DI_DRDNB26W_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDNB26W_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT DRDP006W 1 3 4 5 6
+Q1 4 5 3 DI_DRDP006W_PNP
+D1 1 6 DI_DRDP006W_DIODE
+
+*SRC=DRDP006W;DI_DRDP006W_PNP;BJTs PNP; Si;  60.0V  0.600A  200MHz   Diodes Inc. Transistor 
+.MODEL DI_DRDP006W_PNP  PNP (IS=60.7f NF=1.00 BF=312 VAF=139 
++ IKF=0.219 ISE=26.0p NE=2.00 BR=4.00 NR=1.00 
++ VAR=20.0 IKR=0.540 RE=85.8m RB=0.343 RC=34.3m 
++ XTB=1.5 CJE=50.4p VJE=1.10 MJE=0.500 CJC=23.1p VJC=0.300 
++ MJC=0.300 TF=758p TR=123n EG=1.12 )
+
+*SRC=DRDP006W;DI_DRDP006W_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDP006W_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT DRDPB16W 1 3 4 5 6
+Q1 3 5B 4 DI_DRDPB16W_PNP
+D1 1 6 DI_DRDPB16W_DIODE
+R1 5 5B 1K
+R2 5B 4 10K
+
+*SRC=DRDPB16W;DI_DRDPB16W_PNP;BJTs PNP; Si;  32.0V  0.500A  220MHz   Diodes Inc. PBTs
+.MODEL DI_DRDPB16W_PNP  PNP (IS=50.6f NF=1.00 BF=534 VAF=102
++ IKF=0.340 ISE=17.3p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=0.840 RE=0.283 RB=1.13 RC=0.113
++ XTB=1.5 CJE=55.3p VJE=1.10 MJE=0.500 CJC=21.3p VJC=0.300
++ MJC=0.300 TF=605p TR=120n EG=1.12 )
+
+*SRC=DRDPB16W;DI_DRDPB16W_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDPB16W_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT DRDPB26W 1 3 4 5 6
+Q1 3 5B 4 DI_DRDPB26W_PNP
+D1 1 6 DI_DRDPB26W_DIODE
+R1 5 5B 220
+R2 5B 4 4.7K
+
+*SRC=DRDPB26W;DI_DRDPB26W_PNP;BJTs PNP; Si;  32.0V  0.500A  220MHz   Diodes Inc. PBTs
+.MODEL DI_DRDPB26W_PNP  PNP (IS=50.6f NF=1.00 BF=534 VAF=102
++ IKF=0.340 ISE=17.3p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=0.840 RE=0.283 RB=1.13 RC=0.113
++ XTB=1.5 CJE=55.3p VJE=1.10 MJE=0.500 CJC=21.3p VJC=0.300
++ MJC=0.300 TF=605p TR=120n EG=1.12 )
+
+*SRC=DRDPB26W;DI_DRDPB26W_DIODE;Diodes;Si;  75.0V  0.250A  4.00ns   Diodes Inc. Switching Diode
+.MODEL DI_DRDPB26W_DIODE D  ( IS=300n RS=0.422 BV=75.0 IBV=2.50u
++ CJO=1.99p  M=0.333 N=2.77 TT=5.76n )
+
+.ENDS
+
+.SUBCKT CTA2N1P 1 2 3 4 5 6
+Q1 6 2 1 DI_CTA2N1P_BJT
+M1 3 5 4 4 DI_CTA2N1P_MOSFET
+
+*SRC=CTA2N1P;DI_CTA2N1P_BJT;BJTs NPN; Si;  40.0V  0.600A  275MHz   Diodes Inc. BJTs
+.MODEL DI_CTA2N1P_BJT  NPN (IS=1.27p NF=1.00 BF=410 VAF=114
++ IKF=60.7m ISE=47.7p NE=2.00 BR=4.00 NR=1.00
++ VAR=24.0 IKR=0.150 RE=0.261 RB=1.04 RC=0.104
++ XTB=1.5 CJE=27.7p VJE=1.10 MJE=0.500 CJC=14.2p VJC=0.300
++ MJC=0.300 TF=533p TR=84.1n EG=1.12 )
+
+*SRC=CTA2N1P;DI_CTA2N1P_MOSFET;MOSFETs P;Enh;50.0V 0.130A 6.00ohms  Diodes Inc. MOSFET
+.MODEL DI_CTA2N1P_MOSFET  PMOS( LEVEL=1 VTO=-1.60 KP=25.0m  GAMMA=1.98
++ PHI=.75  LAMBDA=108u RD=0.840 RS=0.840
++ IS=65.0f  PB=0.800 MJ=0.460 CBD=64.2p 
++ CBS=77.1p  CGSO=144n CGDO=120n CGBO=341n  )
+*   -- Assumes default L=100U W=100U --
+
+.ENDS
+
+.SUBCKT CTA2P1N 1 2 3 4 5 6
+Q1 6 2 1 DI_CTA2P1N_BJT
+M1 3 5 4 4 DI_CTA2P1N_MOSFET
+
+*SRC=CTA2P1N;DI_CTA2P1N_BJT;BJTs PNP; Si;  40.0V  0.600A  200MHz   Diodes Inc. BJTs
+.MODEL DI_CTA2P1N_BJT  PNP (IS=60.4f NF=1.00 BF=410 VAF=114
++ IKF=0.304 ISE=23.2p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=0.750 RE=0.261 RB=1.04 RC=0.104
++ XTB=1.5 CJE=27.7p VJE=1.10 MJE=0.500 CJC=18.5p VJC=0.300
++ MJC=0.300 TF=667p TR=84.1n EG=1.12 )
+
+*SRC=CTA2P1N;DI_CTA2P1N_MOSFET;MOSFETs N;Enh;60.0V 0.115A 2.00ohms  Didoes Inc. MOSFET 
+.MODEL DI_CTA2P1N_MOSFET  NMOS( LEVEL=1 VTO=1.50 KP=32.0m  GAMMA=1.86
++ PHI=.75  LAMBDA=40.0u RD=0.280 RS=0.280
++ IS=57.5f  PB=0.800 MJ=0.460 CBD=44.5p 
++ CBS=53.4p  CGSO=24.0n CGDO=20.0n CGBO=176n  )
+*   -- Assumes default L=100U W=100U --
+
+.ENDS
+
+.SUBCKT DVR1V8W 1 3 4 5 6
+Q1 3 5 4 DI_DVR1V8W_NPN
+X1 1 6 DI_DVR1V8W_Zener
+
+*SRC=DVR1V8W;DI_DVR1V8W_NPN;BJTs NPN; Si;  18.0V  1.00A  100MHz   Diodes Inc. BJTs
+.MODEL DI_DVR1V8W_NPN  NPN (IS=102f NF=1.00 BF=1.09k VAF=76.4
++ IKF=0.425 ISE=13.4p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=1.05 RE=0.181 RB=0.726 RC=72.6m
++ XTB=1.5 CJE=71.7p VJE=1.10 MJE=0.500 CJC=23.1p VJC=0.300 MJC=0.300 
++ TF=1.55n TR=238n EG=1.12 )
+
+*SRC=DVR1V8W;DI_DVR1V8W_Zener;Diodes;Zener <=10V; 3.30V  0.500W   Diodes Inc. Zener
+*SYM=HZEN
+.SUBCKT DI_DVR1V8W_Zener  1 2
+*        Terminals    A   K
+D1 1 2 DF
+DZ 3 1 DR
+VZ 2 3 0.827
+.MODEL DF D ( IS=62.4p RS=36.2 N=1.10
++ CJO=403p VJ=0.750 M=0.330 TT=50.1n )
+.MODEL DR D ( IS=12.5f RS=79.5 N=3.00 )
+.ENDS
+
+.ENDS
+
+.SUBCKT DVR2V5W 1 3 4 5 6
+Q1 3 5 4 DI_DVR2V5W_NPN
+X1 1 6 DI_DVR2V5W_Zener
+
+*SRC=DVR2V5W;DI_DVR2V5W_NPN;BJTs NPN; Si;  18.0V  1.00A  100MHz   Diodes Inc. BJTs
+.MODEL DI_DVR2V5W_NPN  NPN (IS=102f NF=1.00 BF=1.09k VAF=76.4
++ IKF=0.425 ISE=13.4p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=1.05 RE=0.181 RB=0.726 RC=72.6m
++ XTB=1.5 CJE=71.7p VJE=1.10 MJE=0.500 CJC=23.1p VJC=0.300 MJC=0.300 
++ TF=1.55n TR=238n EG=1.12 )
+
+*SRC=DVR2V5W;DI_DVR2V5W_Zener;Diodes;Zener <=10V; 3.90V  0.500W   Diodes Inc. Zener
+*SYM=HZEN
+.SUBCKT DI_DVR2V5W_Zener  1 2
+*        Terminals    A   K
+D1 1 2 DF
+DZ 3 1 DR
+VZ 2 3 1.44
+.MODEL DF D ( IS=52.8p RS=35.7 N=1.10
++ CJO=384p VJ=0.750 M=0.330 TT=50.1n )
+.MODEL DR D ( IS=10.6f RS=74.5 N=3.00 )
+.ENDS
+
+.ENDS
+
+.SUBCKT DVR3V3W 1 3 4 5 6
+Q1 3 5 4 DI_DVR3V3W_NPN
+X1 1 6 DI_DVR3V3W_Zener
+
+*SRC=DVR3V3W;DI_DVR3V3W_NPN;BJTs NPN; Si;  18.0V  1.00A  100MHz   Diodes Inc. BJTs
+.MODEL DI_DVR3V3W_NPN  NPN (IS=102f NF=1.00 BF=1.09k VAF=76.4
++ IKF=0.425 ISE=13.4p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=1.05 RE=0.181 RB=0.726 RC=72.6m
++ XTB=1.5 CJE=71.7p VJE=1.10 MJE=0.500 CJC=23.1p VJC=0.300 MJC=0.300 
++ TF=1.55n TR=238n EG=1.12 )
+
+*SRC=DVR3V3W;DI_DVR3V3W_Zener;Diodes;Zener <=10V; 4.70V  0.500W   Diodes Inc. Zener
+*SYM=HZEN
+.SUBCKT DI_DVR3V3W_Zener  1 2
+*        Terminals    A   K
+D1 1 2 DF
+DZ 3 1 DR
+VZ 2 3 2.27
+.MODEL DF D ( IS=43.8p RS=35.2 N=1.10
++ CJO=357p VJ=0.750 M=0.330 TT=50.1n )
+.MODEL DR D ( IS=8.77f RS=64.5 N=3.00 )
+.ENDS
+
+.ENDS
+
+.SUBCKT DVR5V0W 1 3 4 5 6
+Q1 3 5 4 DI_DVR5V0W_NPN
+X1 1 6 DI_DVR5V0W_Zener
+
+*SRC=DVR5V0W;DI_DVR5V0W_NPN;BJTs NPN; Si;  18.0V  1.00A  100MHz   Diodes Inc. BJTs
+.MODEL DI_DVR5V0W_NPN  NPN (IS=102f NF=1.00 BF=1.09k VAF=76.4
++ IKF=0.425 ISE=13.4p NE=2.00 BR=4.00 NR=1.00
++ VAR=20.0 IKR=1.05 RE=0.181 RB=0.726 RC=72.6m
++ XTB=1.5 CJE=71.7p VJE=1.10 MJE=0.500 CJC=23.1p VJC=0.300 MJC=0.300 
++ TF=1.55n TR=238n EG=1.12 )
+
+*SRC=DVR5V0W;DI_DVR5V0W_Zener;Diodes;Zener <=10V; 5.10V  0.500W   Diodes Inc. ZENER
+*SYM=HZEN
+.SUBCKT DI_DVR5V0W_Zener  1 2
+*        Terminals    A   K
+D1 1 2 DF
+DZ 3 1 DR
+VZ 2 3 2.62
+.MODEL DF D ( IS=40.4p RS=34.9 N=1.10
++ CJO=119p VJ=0.750 M=0.330 TT=50.1n )
+.MODEL DR D ( IS=8.08f RS=13.1 N=3.00 )
+.ENDS
+
+.ENDS
+
+*
+*DIODES_INC_SPICE_MODEL
+*ORIGIN=DZSL_DPG
+*SIMULATOR=PSPICE
+*DATE=03/08/2010
+*VERSION=2
+*------connections-------P1=D, P2=G, P3=N/C, P4=C, P5=E, P6=R1, P7=B, P8=S
+*
+.SUBCKT DLD101 P1 P2 P4 P5 P6 P7 P8
+*
+*MOSFET model
+M1 6 2 5 5 Nmod L=1E-6 W=0.2
+M2 5 2 5 6 Pmod L=1.5E-6 W=0.15
+RG P2 2 7
+RIN 2 5 1E9
+RD P1 6 Rdmod 0.58
+RB P1 7 Rdmod 0.015
+RL 6 5 10E9
+C1 2 5 10E-12
+C2 P1 P2 3E-12
+D1 5 7  Dbodymod
+LS 5 P8 2.0E-9
+*
+*Bipolar model
+Q1 P4 P7 P5 NPNmod
+R1 P6 P7 4.7E3
+R2 P5 P7 47E3
+*
+.MODEL Nmod NMOS (LEVEL=3 TOX=5E-8  NSUB=2E17 VTO=3.7 KP=8.6E-6 RS=.046 NFS=2E12
++ KAPPA=0.06 UO=650 IS=6E-15 N=10)
+.MODEL Pmod PMOS (LEVEL=3 TOX=15E-8 NSUB=6E15 TPG=-1 IS=1E-15 N=10)
+.MODEL Dbodymod D (IS=1E-12 N=1.05 RS=0.045 TRS1=1.5e-3 CJO=39e-12 BV=101)
+.MODEL Rdmod RES (TC1=7e-3 TC2=1.7E-5)
+.MODEL NPNmod  NPN (IS=6E-14 NF=1.02 BF=320 IKF=0.3 VAF=80 ISE=5E-14 NE=1.4 NR=1 BR=10
++ IKR=0.06 VAR=10 ISC=2E-13 NC=1.3 RC=0.194 RB=0.5 RE=0.245 CJC=6.05E-12 MJC=0.175 VJC=0.4
++ CJE=13E-12 MJE=0.36 VJE=0.7 TF=0.4E-9 TR=1.5E-6 XTB=1.4 QUASIMOD=1 RCO=25 GAMMA=5E-8)
+.ENDS DLD101
+*
+*$
+
+*TITLE=ZXCT1082 MACROMODEL
+*ORIGIN=DZSL_AG_GS
+*SIMULATOR=DIODES, SIMETRIX and PSPICE
+*DATE=1st Sept 2011
+*VERSION=2
+*PIN_ORDER   1:OUT  2:GND, 3:S+, 4:S-, 5:VCC
+
+*Does not include temperature dependence of offset error, gain or input current.
+*Includes roughly approximated temperature effect of low voltage operating knee of VS- and VCC. 
+
+.subckt ZXCT1082 OUT GND  S+  S- VCC
+* pins------------1---2---3---4---5
+      
+.PARAM VTH1 = {1-0.004*(TEMP-25)}
+.PARAM KG ={1e-4/(2-VTH1)**2} ; rnom/(VON-VTH1)^2
+D1  S+ 1 DHM
+D2  1  S- DHM
+D3  S- 2 DHM
+D4  2  S+ DHM
+D7  GND VCC DHM
+D8  GND S- DHM
+D9  GND S+ DHM
+
+*input current typ 1.7uA at Vcc=VS+=12V
+G1  S+ GND value={(1.4u+((V(VCC)-V(GND)-4)/42e6)+((V(S+)-V(GND))/6e8))
++ *0.25*(1+tanh(10*(V(VCC)-V(GND)-3.5)))*(1+tanh(20*(V(S+)-V(GND)-1)))}
+G2  S- GND value={(1.4u+((V(VCC)-V(GND)-4)/42e6)+((V(S+)-V(GND))/6e8))
++ *0.25*(1+tanh(10*(V(VCC)-V(GND)-3.5)))*(1+tanh(20*(V(S+)-V(GND)-1)))}
+R1  S+ FILT 10k      ;input filter
+C1  FILT S- 1pf       ;input filter 
+R2  VCC GND  3.75Meg   ;Vcc quiescent current, typ 16uA at 60V
+G3  S- SIN VALUE={0.1*((1+tanh(10*(V(S-)-V(FILT))))*tanh(50*max(V(S-)-V(SIN),0))
++ +(-1+tanh(10*(V(S-)-V(FILT))))*tanh(50*max(V(SIN)-V(GND),0)))
++ *tanh(20*max(V(VCC)-VTH1,0))}
+C5  S- GND 3p
+C6  S+ GND 2p
+C4  SIN FILT 100f
+R3  S+ SIN 1G
+C2  SIN S+ 500f
+R6  S+ S+A 1k
+G4  S+A OUT VALUE={KG*(max(V(S+A)-V(SIN)-VTH1,0)**2)*(V(S+A)-V(OUT))}
+R4  S+ OUT 8G
+C3  SIN OUT 80f
+C7  OUT GND 1.25p
+* zener diode
+D5  SIN S+ DHM
+D6  S+  Z1 DHM
+I1  SIN Z1 0.192
+RZ  Z1 SIN 100
+
+.model DHM D IS=6.3E-16 BV=65
+.ends ZXCT1082
+*
+*                (c)  2011 Diodes Incorporated
+*
+*   The copyright in these models  and  the designs embodied belong
+*   to Diodes Incorporated (" Diodes ").  They  are  supplied
+*   free of charge by Diodes for the purpose of research and design
+*   and may be used or copied intact  (including this notice)  for
+*   that purpose only.  All other rights are reserved.  The models
+*   are believed accurate but no condition or warranty as to their
+*   merchantability or fitness for purpose is given and no liability
+*   in respect of any use is accepted by Diodes Incorporated, its distributors
+*   or agents.
+*
+*   Diodes Incorporated, 4949 Hedgcoxe Road, Suite 200, Plano, TX 75024, USA
+
+*TITLE=ZXCT1010 MACROMODEL
+*ORIGIN=DZSL_AG_GS
+*SIMULATOR=DIODES, SIMETRIX and PSPICE
+*DATE=14th July 2010
+*VERSION=1
+*PIN_ORDER     2:GND, 3:OUT, 4:S+, 5:S-   (Pin 1 is NC)
+*
+.subckt ZXCT1010 GND OUT S+ S-
+* pins------------2---3--4--5
+*      
+R1  S- FILT  100k      ;input filter
+C1  S+ FILT  20p       ;input filter
+R2  S+ GND  1Meg       ;quiescent current at 5V
+*  Output as a voltage: first part of expression limits resonse to zero for negative input
+*  tanh function limits output when supply is less than 1.1V above Vout  
+E1  E1OUT GND VALUE={ max(V(S+)-V(FILT),0)*tanh( 20*max(V(S-)-1.1-V(OUT),0) ) }
+R3  E1OUT GND 1Meg
+*  Transconductance = 1/100 A/V, with temperature dependence
+G1  S+  OUT VALUE={(V(E1OUT) - V(GND))*(1/100)*(1.01-0.0003*TEMP-6e-6*(TEMP**2)-5e-8*(TEMP**3)+2.7e-10*(TEMP**4))}  
+.ends ZXCT1010
+*
+
+*TITLE=ZXCT1030 MACROMODEL
+*ORIGIN=DZSL_AG_GS
+*SIMULATOR=DIODES, SIMETRIX and PSPICE
+*DATE=14th June 2010
+*VERSION=1
+*PIN_ORDER   1:VCC, 2:VS-, 3:VS+, 4:GND, 5:COMPIN, 6:REF, 7:OUT, 8:COMPOUT
+*
+.subckt ZXCT1030 VCC VS- VS+ GND COMPIN REF OUT COMPOUT
+* pins------------1--2----3---4---5------6---7----8      
+*
+*Voltage reference
+R1         REFG REF  34
+V1         REFG  GND 1.24
+*
+* Current sense amplifier limited by supply voltage
+R2         GND VCC  58k        ;quiescent current at 5V
+R3         VS- AIN-  100k         ;input filter
+C1         VS+ AIN- 1p        ;input filter
+G1    VS+ OUT VALUE={ max(V(VS+)-V(AIN-),0)/150*tanh ( 20*max(V(VS+)-1.1-V(OUT),0) ) }
+R4         OUT GND  1.5k       ;output resistance
+*
+*Comparator with VS- undervoltage detection and limited by supply voltage
+E2         DELTA GND VALUE = { V(OUT)-V(COMPIN)+0.015*V(E3OUT) }
+R5         DELTA  COMPINT  1k   ; delay filter
+C2         COMPINT  GND  150p   ; delay filter
+E3      E3OUT GND VALUE={ 0.5*(1+tanh(V(COMPINT)*10000)) }
+E4  S1IN GND VALUE={ ( V(E3OUT)+tanh(20*max(2.1-V(VS-),0)) )*tanh(20*max(V(VCC)-2.1,0)) }
+*
+*Output transistor open collector
+S1         COMPOUT GND S1IN GND _S1
+.MODEL       _S1 VSWITCH Roff=10e6 Ron=300 Voff=0.25 Von=0.75
+*
+.ends ZXCT1030
+*
+*                (c)  2010 Diodes Inc
+*
+*   The copyright in these models  and  the designs embodied belong
+*   to Diodes Incorporated (" Zetex ").  They  are  supplied
+*   free of charge by Zetex for the purpose of research and design
+*   and may be used or copied intact  (including this notice)  for
+*   that purpose only.  All other rights are reserved.  The models
+*   are believed accurate but no condition  or warranty  as to their
+*   merchantability or fitness for purpose is given and no liability
+*   in respect of any use is accepted by Diodes Incorporated, its distributors
+*   or agents.
+*
+*   Diodes Zetex Semiconductors Ltd, Zetex Technology Park, Chadderton,
+*   Oldham, United Kingdom, OL9 9LL
+*
+*
+
+*TITLE=ZXRE060 MACROMODEL
+*ORIGIN=DZSL_AG_GS
+*SIMULATOR=DIODES, SIMETRIX and PSPICE
+*DATE=3rd March 2011
+*VERSION=1
+*PIN_ORDER   1:PGND, 2:GND, 3:IN, 4:FB, 5:OUT
+*
+.subckt ZXRE060 PGND  GND  IN  FB  OUT
+* pins-----------1----2----3----4---5      
+*
+*Voltage reference with temperature effect
+E1      REFG  1    value={(0.6+1.72e-5*(TEMP-25)-1e-7*(TEMP-25)**2)*(0.5+0.5*tanh(4*(V(VCCL)-1.5)))}
+I1	VCCL  1    0.48m  ; Supply current	
+R1      REFG  inm  48k
+R2      FB    inp  48k
+C1      inm   inp  0.2p  
+I3	VCCL  inp  45n ; input bias current
+I4  	VCCL  inm  45n
+*
+*First amplifier, limited to internal 2V supply
+E2      E2out 1    value={tanh(11.52*(V(inp)-V(inm)))}
+R7	E2out C3p  1
+C3	C3p   1    250n ;  600kHz first breakpoint
+R3	C3p   int  10k
+I2	VCCL  int  2.5u
+C2	int   1    6p   ;  2MHz second breakpoint
+*Second amplifier: transconductance
+*with sink current output voltage limit of 0
+*source current output voltage limit of 2V
+G1      G1out 1    value={11e-6*(1-tanh(19.3*(v(int)-v(Q2e))))*tanh(10*max((V(G1out)-V(1)),0))}
+G2      VCCL G1out value={11e-6*(1+tanh(19.3*(V(int)-V(Q2e))))*tanh(10*max(2-(V(G1out)-V(1)),0))}
+*
+*Output Stage
+Q1	Q1c  G1out Q2b 1 NPNCT
+R4	VCCL Q1c   250
+R5	Q2b  PGNDL 50k
+Q2	OUTL Q2b   Q2e 1 NPNCT 5
+R6	Q2e  PGNDL 2.56
+*
+L1	IN   VCCL  2n
+L2	GND  1     2n
+L3	OUT  OUTL  2n
+L4	PGND PGNDL 2n
+*Output transistor model from CT
+.model  NPNCT NPN  
++ is = 2.265f
++ nf = 1.000 
++ ise = 6.055f
++ ne = 1.562 
++ bf = 190.0 
++ ikf = 28.71m
++ vaf = 22.83 
++ nr = 1.008 
++ isc = 1.00000e-24
++ nc = 1.543 
++ br = 34.83 
++ ikr = 1.250m
++ var = 19.13 
++ rb = 267.9 
++ irb = 1.250m
++ rbm = 100.0m
++ re = 802.9m
++ rc = 164.1m
++ cje = 163.1f
++ vje = 1.200 
++ mje = 151.0m
++ tf = 70.00p
++ xtf = 10.00 
++ vtf = 30.00 
++ itf = 200.0m
++ ptf = 34.00 
++ cjc = 380.6f
++ vjc = 410.0m
++ mjc = 360.0m
++ xcjc = 50.00m
++ tr = 6.00n
++ cjs = 525.2f
++ vjs = 401.0m
++ mjs = 179.2m
++ xtb = 200.0m
++ xti = 5.100 
++ eg = 1.110 
++ fc = 950.0m
+.ends ZXRE060
+*
+*                (c)  2011 Diodes Inc
+*
+*   The copyright in these models  and  the designs embodied belong
+*   to Diodes Incorporated (" Zetex ").  They  are  supplied
+*   free of charge by Zetex for the purpose of research and design
+*   and may be used or copied intact  (including this notice)  for
+*   that purpose only.  All other rights are reserved.  The models
+*   are believed accurate but no condition  or warranty  as to their
+*   merchantability or fitness for purpose is given and no liability
+*   in respect of any use is accepted by Diodes Incorporated, its distributors
+*   or agents.
+*
+*   Diodes Zetex Semiconductors Ltd, Zetex Technology Park, Chadderton,
+*   Oldham, United Kingdom, OL9 9LL
+*
+
+*TITLE=AL8400 MACROMODEL
+*ORIGIN=DZSL_AG_GS
+*SIMULATOR=DIODES, SIMETRIX and PSPICE
+*DATE=3rd March 2011
+*VERSION=1
+*PIN_ORDER   1:E1, 2:GND, 3:VCC, 4:FB, 5:OUT
+*
+.subckt AL8400  E1  GND  VCC  FB  OUT
+* pins-----------1----2----3----4---5      
+*
+*Voltage reference with temperature effect
+E1A      REFG  1    value={(0.2+1.56e-5*(TEMP-25)-3e-8*(TEMP-25)**2)*(0.5+0.5*tanh(4*(V(VCCL)-1.5)))}
+I1	VCCL  1    0.48m  ; Supply current	
+R1      REFG  inm  48k
+R2      FB    inp  48k
+C4	REFG  inm  3p
+C5	FB    inp  3p
+C1      inm   inp  0.2p  
+I3	VCCL  inp  45n ; input bias current
+I4  	VCCL  inm  45n
+*
+*First amplifier, limited to internal 2V supply
+E2      E2out 1    value={tanh(11.52*(V(inp)-V(inm)))}
+R7	E2out C3p  1
+C3	C3p   1    250n ;  600kHz first breakpoint
+R3	C3p   int  10k
+I2	VCCL  int  2.5u
+C2	int   1    6p   ;  2MHz second breakpoint
+*Second amplifier: transconductance
+* with sink current output voltage limit of 0
+*source current output voltage limit of 2V
+G1      G1out 1    value={11e-6*(1-tanh(19.3*(v(int)-v(Q2e))))*tanh(10*max((V(G1out)-V(1)),0))}
+G2      VCCL G1out value={11e-6*(1+tanh(19.3*(V(int)-V(Q2e))))*tanh(10*max(2-(V(G1out)-V(1)),0))}
+*
+*Output Stage
+Q1	Q1c  G1out Q2b 1 NPNCT
+R4	VCCL Q1c   250
+R5	Q2b  PGNDL 50k
+Q2	OUTL Q2b   Q2e 1 NPNCT 5
+R6	Q2e  PGNDL 2.56
+*
+L1	VCC  VCCL  2n
+L2	GND  1     2n
+L3	OUT  OUTL  2n
+L4	E1   PGNDL 2n
+*Output transistor model from CT
+.model  NPNCT NPN  
++ is = 2.265f
++ nf = 1.000 
++ ise = 6.055f
++ ne = 1.562 
++ bf = 190.0 
++ ikf = 28.71m
++ vaf = 22.83 
++ nr = 1.008 
++ isc = 1.00000e-24
++ nc = 1.543 
++ br = 34.83 
++ ikr = 1.250m
++ var = 19.13 
++ rb = 267.9 
++ irb = 1.250m
++ rbm = 100.0m
++ re = 802.9m
++ rc = 164.1m
++ cje = 163.1f
++ vje = 1.200 
++ mje = 151.0m
++ tf = 70.00p
++ xtf = 10.00 
++ vtf = 30.00 
++ itf = 200.0m
++ ptf = 34.00 
++ cjc = 380.6f
++ vjc = 410.0m
++ mjc = 360.0m
++ xcjc = 50.00m
++ tr = 6.00n
++ cjs = 525.2f
++ vjs = 401.0m
++ mjs = 179.2m
++ xtb = 200.0m
++ xti = 5.100 
++ eg = 1.110 
++ fc = 950.0m
+.ends AL8400
+*
+*                (c)  2011 Diodes Inc
+*
+*   The copyright in these models  and  the designs embodied belong
+*   to Diodes Incorporated (" Zetex ").  They  are  supplied
+*   free of charge by Zetex for the purpose of research and design
+*   and may be used or copied intact  (including this notice)  for
+*   that purpose only.  All other rights are reserved.  The models
+*   are believed accurate but no condition  or warranty  as to their
+*   merchantability or fitness for purpose is given and no liability
+*   in respect of any use is accepted by Diodes Incorporated, its distributors
+*   or agents.
+*
+*   Diodes Zetex Semiconductors Ltd, Zetex Technology Park, Chadderton,
+*   Oldham, United Kingdom, OL9 9LL
+*
+
+*DIODES_INC_SPICE_MODEL
+*SIMULATOR=SIMETRIX
+*ORIGIN=DZSL_DPG_SU
+*DATE=5OCT2011
+*VERSION=1
+
+*PINS ORDER OUT BIAS EN GND FB Rext
+
+.SUBCKT AL5802 1 2 3 4 5 6
+Q1 1 3 6 T2
+Q2 3 5 4 T1
+R1 2 3 10K TC1=-4E-3
+.MODEL T2 NPN IS=2.6E-14 NF=1 BF=300 ISE=4.5E-15 NE=1.5 
++ BR=5 ISC=2E-14 NC=1.3 NR=1 CJC=5.6E-12 MJC=0.24 VJC=0.4
++ CJE=13.49E-12 MJE=0.37 VJE=0.75 
+.MODEL T1 NPN IS=1E-14 NF=1 BF=150 ISE=8E-15 NE=1.5 
++ BR=1.5 ISC=1.2E-13 NC=1.5 NR=1 CJC=5.279E-12 MJC=0.28 VJC=0.5
++ CJE=8.92E-12 MJE=0.36 VJE=0.73 
+.ENDS
+

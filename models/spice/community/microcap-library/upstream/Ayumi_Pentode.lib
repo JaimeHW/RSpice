@@ -1,0 +1,2554 @@
+
+
+* Generic pentode model: 1619   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:00 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 1619_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-0.99999999)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.021726327*EG2)^-0.34437983)}
+.param M2  {((0.8132815*URAMP(GG+EG2/8.5941123))^1.8443798)}
+.param P   {(0.00095297512*URAMP(GG+EG2/10.567205)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00057412229*M1*M2)}
+.param IG  {(0.00047648756*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.922008525*(1-EP/(EP+10))^1.5+0.077991475))}
+.param IK3 {(IK2*(EP+4700)/(EG2+4700))}
+.param IK4 {(IK3-URAMP(IK3-(0.0006149126*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0006149126*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.35p
+CGK G1 K  6.1p
+C12 G1 G2 4.1p
+CAK A  K  12.2p
+.ENDS   
+
+* Generic pentode model: 20P1   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:18 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 20P1_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999997)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.15450603*EG2)^-1.2979847)}
+.param M2  {((0.53610015*URAMP(GG+EG2/3.0024709))^2.7979847)}
+.param P   {(0.002051274*URAMP(GG+EG2/5.6005784)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0017001298*M1*M2)}
+.param IG  {(0.001025637*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.956631473*(1-EP/(EP+10))^1.5+0.043368527))}
+.param IK3 {(IK2*(EP+1622.5)/(EG2+1622.5))}
+.param IK4 {(IK3-URAMP(IK3-(0.0015988677*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0015988677*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  13.5p
+C12 G1 G2 9p
+CAK A  K  10.5p
+.ENDS   
+
+* Generic pentode model: 24   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:46:31 2008   
+*          Plate   
+*          | Screen Grid   
+*          | | Control Grid   
+*          | | | Cathode   
+*          | | | |
+.SUBCKT 24_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.67663821)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.056557649*EG2)^-1.0488029)}
+.param M2  {((0.58851157*URAMP(GG+EG2/7.2755574))^2.5488029)}
+.param P   {(0.00036970393*URAMP(GG+EG2/12.362641)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00025402288*M1*M2)}
+.param IG  {(0.00018485196*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.89560668*(1-EP/(EP+10))^1.5+0.10439332))}
+.param IK3 {(IK2*(EP+2237.1045)/(EG2+2237.1045))}
+.param IK4 {(IK3-URAMP(IK3-(0.0002306046*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0002306046*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.007p
+CGK G1 K  3.2p
+C12 G1 G2 2.1p
+CAK A  K  10.5p
+.ENDS   
+
+* Generic pentode model: 25E5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:19 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 25E5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.081561717*EG2)^-0.79980677)}
+.param M2  {((0.65222871*URAMP(GG+EG2/4.2639035))^2.2998068)}
+.param P   {(0.0042185857*URAMP(GG+EG2/6.5374361)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0025511424*M1*M2)}
+.param IG  {(0.0021092928*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.960918328*(1-EP/(EP+10))^1.5+0.039081672))}
+.param IK3 {(IK2*(EP+1400)/(EG2+1400))}
+.param IK4 {(IK3-URAMP(IK3-(0.00311336*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00311336*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.1p
+CGK G1 K  9.9p
+C12 G1 G2 6.6p
+CAK A  K  7p
+.ENDS   
+
+* Generic pentode model: 31LZ6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:20 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 31LZ6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-0.11976616)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.21025804*EG2)^-1.445676)}
+.param M2  {((0.50922098*URAMP(GG+EG2/2.3341748))^2.945676)}
+.param P   {(0.0061264796*URAMP(GG+EG2/4.5838151)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0058083241*M1*M2)}
+.param IG  {(0.0030632398*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.9984634955*(1-EP/(EP+10))^1.5+0.0015365045))}
+.param IK3 {(IK2*(EP+1345)/(EG2+1345))}
+.param IK4 {(IK3-URAMP(IK3-(0.0051737191*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0051737191*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.6p
+CGK G1 K  12.9p
+C12 G1 G2 8.6p
+CAK A  K  10.4p
+.ENDS   
+
+* Generic pentode model: 350B   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:53 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 350B_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999998)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.060793226*EG2)^-0.90421858)}
+.param M2  {((0.62390334*URAMP(GG+EG2/6.1864896))^2.4042186)}
+.param P   {(0.0019265247*URAMP(GG+EG2/9.9157821)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0012190211*M1*M2)}
+.param IG  {(0.00096326237*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.946533574*(1-EP/(EP+10))^1.5+0.053466426))}
+.param IK3 {(IK2*(EP+4981.25)/(EG2+4981.25))}
+.param IK4 {(IK3-URAMP(IK3-(0.0012619241*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0012619241*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  9.3p
+C12 G1 G2 6.2p
+CAK A  K  7.5p
+.ENDS   
+
+* Generic pentode model: 50HB26   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:23 2008   
+*              Plate   
+*              | Screen Grid   
+*              | | Control Grid   
+*              | | | Cathode   
+*              | | | |
+.SUBCKT 50HB26_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999978)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.092479665*EG2)^-0.92218999)}
+.param M2  {((0.6192743*URAMP(GG+EG2/4.1168586))^2.42219)}
+.param P   {(0.0043389918*URAMP(GG+EG2/6.6478758)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0027704924*M1*M2)}
+.param IG  {(0.0021694959*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.953564854*(1-EP/(EP+10))^1.5+0.046435146))}
+.param IK3 {(IK2*(EP+1715)/(EG2+1715))}
+.param IK4 {(IK3-URAMP(IK3-(0.0031844715*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0031844715*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.1p
+CGK G1 K  9.8p
+C12 G1 G2 6.5p
+CAK A  K  6.7p
+.ENDS   
+
+* Generic pentode model: 6146B   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:12 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6146B_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999998)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.058258554*EG2)^-0.41427032)}
+.param M2  {((0.78358839*URAMP(GG+EG2/3.7146753))^1.9142703)}
+.param P   {(0.001563206*URAMP(GG+EG2/4.7405951)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0009173158*M1*M2)}
+.param IG  {(0.000781603*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.956750418*(1-EP/(EP+10))^1.5+0.043249582))}
+.param IK3 {(IK2*(EP+3004)/(EG2+3004))}
+.param IK4 {(IK3-URAMP(IK3-(0.0013014595*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0013014595*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.22p
+CGK G1 K  7.7p
+C12 G1 G2 5.1p
+CAK A  K  8.3p
+.ENDS   
+
+* Generic pentode model: 6197   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:13 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6197_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.45955375)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.014421851*EG2)^-0.5339196)}
+.param M2  {((0.73749228*URAMP(GG+EG2/18.202083))^2.0339196)}
+.param P   {(0.0053217435*URAMP(GG+EG2/24.681049)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0030656981*M1*M2)}
+.param IG  {(0.0026608717*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.81697318*(1-EP/(EP+10))^1.5+0.18302682))}
+.param IK3 {(IK2*(EP+3900)/(EG2+3900))}
+.param IK4 {(IK3-URAMP(IK3-(0.002987557*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.002987557*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.125p
+CGK G1 K  6.9p
+C12 G1 G2 4.6p
+CAK A  K  5p
+.ENDS   
+
+* Generic pentode model: 6267   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:16 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6267_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.59868749)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.010782364*EG2)^-0.70765893)}
+.param M2  {((0.67945278*URAMP(GG+EG2/29.728844))^2.2076589)}
+.param P   {(0.0013378994*URAMP(GG+EG2/43.754099)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00078620809*M1*M2)}
+.param IG  {(0.00066894969*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.83966688*(1-EP/(EP+10))^1.5+0.16033312))}
+.param IK3 {(IK2*(EP+7510)/(EG2+7510))}
+.param IK4 {(IK3-URAMP(IK3-(0.00071507731*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00071507731*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.05p
+CGK G1 K  2.3p
+C12 G1 G2 1.5p
+CAK A  K  5.3p
+.ENDS   
+
+* Generic pentode model: 62BT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:25 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 62BT_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999993)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.10647561*EG2)^-1.0560332)}
+.param M2  {((0.58684685*URAMP(GG+EG2/3.8802609))^2.5560332)}
+.param P   {(0.002839063*URAMP(GG+EG2/6.6120504)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0019598422*M1*M2)}
+.param IG  {(0.0014195315*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.964210772*(1-EP/(EP+10))^1.5+0.035789228))}
+.param IK3 {(IK2*(EP+2070)/(EG2+2070))}
+.param IK4 {(IK3-URAMP(IK3-(0.0020873677*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0020873677*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  13.5p
+C12 G1 G2 9p
+CAK A  K  10.5p
+.ENDS   
+
+* Generic pentode model: 6550A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:21 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6550A_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.1919366)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.064698506*EG2)^-0.90961742)}
+.param M2  {((0.62250546*URAMP(GG+EG2/5.8346717))^2.4096174)}
+.param P   {(0.0027588474*URAMP(GG+EG2/9.3728844)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0017503674*M1*M2)}
+.param IG  {(0.0013794237*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.928052868*(1-EP/(EP+10))^1.5+0.071947132))}
+.param IK3 {(IK2*(EP+2900)/(EG2+2900))}
+.param IK4 {(IK3-URAMP(IK3-(0.0018325138*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0018325138*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.8p
+CGK G1 K  8.6p
+C12 G1 G2 5.7p
+CAK A  K  9.2p
+.ENDS   
+
+* Generic pentode model: 6AK6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:03 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6AK6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.047037015*EG2)^-0.80231696)}
+.param M2  {((0.65151759*URAMP(GG+EG2/7.4086847))^2.302317)}
+.param P   {(0.00071109747*URAMP(GG+EG2/11.371427)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00043043074*M1*M2)}
+.param IG  {(0.00035554873*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.86761893*(1-EP/(EP+10))^1.5+0.13238107))}
+.param IK3 {(IK2*(EP+4320)/(EG2+4320))}
+.param IK4 {(IK3-URAMP(IK3-(0.00045138222*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00045138222*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.12p
+CGK G1 K  2.1p
+C12 G1 G2 1.4p
+CAK A  K  4.1p
+.ENDS   
+
+* Generic pentode model: 6AN8P   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:07 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6AN8P_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.024591513*EG2)^-1.3002423)}
+.param M2  {((0.53566794*URAMP(GG+EG2/18.881801))^2.8002423)}
+.param P   {(0.0063199577*URAMP(GG+EG2/35.249078)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0052482203*M1*M2)}
+.param IG  {(0.0031599788*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.77512042*(1-EP/(EP+10))^1.5+0.22487958))}
+.param IK3 {(IK2*(EP+7075)/(EG2+7075))}
+.param IK4 {(IK3-URAMP(IK3-(0.0034308188*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0034308188*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.04p
+CGK G1 K  4.2p
+C12 G1 G2 2.8p
+CAK A  K  2.4p
+.ENDS   
+
+* Generic pentode model: 6AU6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:10 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6AU6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.24107953)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.014176045*EG2)^-0.93570358)}
+.param M2  {((0.61583848*URAMP(GG+EG2/27.099343))^2.4357036)}
+.param P   {(0.0032162308*URAMP(GG+EG2/44.003978)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0020681021*M1*M2)}
+.param IG  {(0.0016081154*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.71681629*(1-EP/(EP+10))^1.5+0.28318371))}
+.param IK3 {(IK2*(EP+15750)/(EG2+15750))}
+.param IK4 {(IK3-URAMP(IK3-(0.0017183702*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0017183702*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.0035p
+CGK G1 K  3.3p
+C12 G1 G2 2.2p
+CAK A  K  5p
+.ENDS   
+
+* Generic pentode model: 6BL8P   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:14 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6BL8P_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.57453871)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.0091087169*EG2)^-0.67124576)}
+.param M2  {((0.69084764*URAMP(GG+EG2/33.940276))^2.1712458)}
+.param P   {(0.0040028722*URAMP(GG+EG2/49.128454)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0023332764*M1*M2)}
+.param IG  {(0.0020014361*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.79161587*(1-EP/(EP+10))^1.5+0.20838413))}
+.param IK3 {(IK2*(EP+5830)/(EG2+5830))}
+.param IK4 {(IK3-URAMP(IK3-(0.0021242724*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0021242724*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.025p
+CGK G1 K  3.1p
+C12 G1 G2 2.1p
+CAK A  K  3.4p
+.ENDS   
+
+* Generic pentode model: 6BM8P   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:18 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6BM8P_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.90753334)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.058205333*EG2)^-0.96337515)}
+.param M2  {((0.60892065*URAMP(GG+EG2/6.7189608))^2.4633752)}
+.param P   {(0.0032859022*URAMP(GG+EG2/11.034214)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0021448732*M1*M2)}
+.param IG  {(0.0016429511*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.8420837*(1-EP/(EP+10))^1.5+0.1579163))}
+.param IK3 {(IK2*(EP+850)/(EG2+850))}
+.param IK4 {(IK3-URAMP(IK3-(0.002099612*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.002099612*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.3p
+CGK G1 K  5.4p
+C12 G1 G2 3.6p
+CAK A  K  7.7p
+.ENDS   
+
+* Generic pentode model: 6BQ5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:19 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6BQ5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.03372597)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.014266539*EG2)^-0.43210132)}
+.param M2  {((0.7763568*URAMP(GG+EG2/15.676066))^1.9321013)}
+.param P   {(0.0040800354*URAMP(GG+EG2/20.191832)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0023829269*M1*M2)}
+.param IG  {(0.0020400177*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.904015183*(1-EP/(EP+10))^1.5+0.095984817))}
+.param IK3 {(IK2*(EP+2486)/(EG2+2486))}
+.param IK4 {(IK3-URAMP(IK3-(0.0023468355*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0023468355*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  6.2p
+C12 G1 G2 4.1p
+CAK A  K  6p
+.ENDS   
+
+* Generic pentode model: 6BQ6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:21 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6BQ6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-0.12830687)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.15009144*EG2)^-1.2848724)}
+.param M2  {((0.53862432*URAMP(GG+EG2/3.0739639))^2.7848724)}
+.param P   {(0.0022372419*URAMP(GG+EG2/5.7070648)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0018337045*M1*M2)}
+.param IG  {(0.0011186209*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.971797202*(1-EP/(EP+10))^1.5+0.028202798))}
+.param IK3 {(IK2*(EP+1560)/(EG2+1560))}
+.param IK4 {(IK3-URAMP(IK3-(0.0017316916*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0017316916*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.6p
+CGK G1 K  8.7p
+C12 G1 G2 5.8p
+CAK A  K  6.4p
+.ENDS   
+
+* Generic pentode model: 6BR7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:24 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6BR7_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.48180983)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.013959713*EG2)^-0.49250535)}
+.param M2  {((0.75282106*URAMP(GG+EG2/17.706591))^1.9925054)}
+.param P   {(0.00084041925*URAMP(GG+EG2/23.520318)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00048560243*M1*M2)}
+.param IG  {(0.00042020962*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.76161675*(1-EP/(EP+10))^1.5+0.23838325))}
+.param IK3 {(IK2*(EP+4400)/(EG2+4400))}
+.param IK4 {(IK3-URAMP(IK3-(0.00047437278*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00047437278*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.01p
+CGK G1 K  2.4p
+C12 G1 G2 1.6p
+CAK A  K  4p
+.ENDS   
+
+* Generic pentode model: 6CB5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:35 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6CB5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.12233722)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.099225459*EG2)^-0.68051603)}
+.param M2  {((0.68791056*URAMP(GG+EG2/3.1452557))^2.180516)}
+.param P   {(0.0027158296*URAMP(GG+EG2/4.572187)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0015860374*M1*M2)}
+.param IG  {(0.0013579148*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.949431806*(1-EP/(EP+10))^1.5+0.050568194))}
+.param IK3 {(IK2*(EP+1175)/(EG2+1175))}
+.param IK4 {(IK3-URAMP(IK3-(0.0022959718*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0022959718*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.4p
+CGK G1 K  13p
+C12 G1 G2 8.6p
+CAK A  K  9.6p
+.ENDS   
+
+* Generic pentode model: 6CB6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:37 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6CB6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.7350712)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+
+.param M1  {((0.031445788*EG2)^-2.20504)}
+.param M2  {((0.40485393*URAMP(GG+EG2/18.926098))^3.70504)}
+.param P   {(0.0046867337*URAMP(GG+EG2/46.747967)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.010960467*M1*M2)}
+.param IG  {(0.0023433669*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.78046782*(1-EP/(EP+10))^1.5+0.21953218))}
+.param IK3 {(IK2*(EP+21225)/(EG2+21225))}
+.param IK4 {(IK3-URAMP(IK3-(0.0024945513*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0024945513*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.02p
+CGK G1 K  3.9p
+C12 G1 G2 2.6p
+CAK A  K  1.9p
+.ENDS   
+
+* Generic pentode model: 6CD6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:38 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6CD6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-0.11853336)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.13222789*EG2)^-1.0472626)}
+.param M2  {((0.58886744*URAMP(GG+EG2/3.1092727))^2.5472626)}
+.param P   {(0.0032013575*URAMP(GG+EG2/5.2800894)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0021974746*M1*M2)}
+.param IG  {(0.0016006788*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.943534714*(1-EP/(EP+10))^1.5+0.056465286))}
+.param IK3 {(IK2*(EP+2412.5)/(EG2+2412.5))}
+.param IK4 {(IK3-URAMP(IK3-(0.0025519299*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0025519299*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.1p
+CGK G1 K  12.6p
+C12 G1 G2 8.4p
+CAK A  K  7.5p
+.ENDS   
+
+* Generic pentode model: 6CL6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:43 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6CL6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.23313833)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.023688975*EG2)^-0.93652529)}
+.param M2  {((0.6156308*URAMP(GG+EG2/16.225658))^2.4365253)}
+.param P   {(0.0060982027*URAMP(GG+EG2/26.356151)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0039229723*M1*M2)}
+.param IG  {(0.0030491014*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.81697318*(1-EP/(EP+10))^1.5+0.18302682))}
+.param IK3 {(IK2*(EP+3450)/(EG2+3450))}
+.param IK4 {(IK3-URAMP(IK3-(0.0033994382*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0033994382*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.12p
+CGK G1 K  6.5p
+C12 G1 G2 4.4p
+CAK A  K  5.4p
+.ENDS   
+
+* Generic pentode model: 6CW5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:44 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6CW5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.38874904)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.09419804*EG2)^-1.560546)}
+.param M2  {((0.49010862*URAMP(GG+EG2/5.4129723))^3.060546)}
+.param P   {(0.0055371733*URAMP(GG+EG2/11.044434)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0058898823*M1*M2)}
+.param IG  {(0.0027685867*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.945717092*(1-EP/(EP+10))^1.5+0.054282908))}
+.param IK3 {(IK2*(EP+2245)/(EG2+2245))}
+.param IK4 {(IK3-URAMP(IK3-(0.0035373923*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0035373923*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.6p
+CGK G1 K  6.9p
+C12 G1 G2 4.6p
+CAK A  K  5.4p
+.ENDS   
+
+* Generic pentode model: 6DQ5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:49 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6DQ5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999998)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.097911417*EG2)^-0.59116807)}
+.param M2  {((0.71730246*URAMP(GG+EG2/2.8872786))^2.0911681)}
+.param P   {(0.0034387228*URAMP(GG+EG2/4.0251899)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.001983081*M1*M2)}
+.param IG  {(0.0017193614*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.96869564*(1-EP/(EP+10))^1.5+0.03130436))}
+.param IK3 {(IK2*(EP+1112.5)/(EG2+1112.5))}
+.param IK4 {(IK3-URAMP(IK3-(0.0030773802*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0030773802*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  13.5p
+C12 G1 G2 9p
+CAK A  K  10.5p
+.ENDS   
+
+* Generic pentode model: 6DQ6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:50 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6DQ6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.17812317*EG2)^-1.6443126)}
+.param M2  {((0.47705181*URAMP(GG+EG2/2.9358797))^3.1443126)}
+.param P   {(0.0034562529*URAMP(GG+EG2/6.1542156)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0040197798*M1*M2)}
+.param IG  {(0.0017281264*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.980449351*(1-EP/(EP+10))^1.5+0.019550649))}
+.param IK3 {(IK2*(EP+2287.5)/(EG2+2287.5))}
+.param IK4 {(IK3-URAMP(IK3-(0.0026038839*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0026038839*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  8.7p
+C12 G1 G2 5.8p
+CAK A  K  6.5p
+.ENDS   
+
+* Generic pentode model: 6EJ7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:53 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6EJ7_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.40321166)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.0054275937*EG2)^-0.61801526)}
+.param M2  {((0.7082102*URAMP(GG+EG2/53.760436))^2.1180153)}
+.param P   {(0.019963362*URAMP(GG+EG2/75.910283)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.011540933*M1*M2)}
+.param IG  {(0.0099816812*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.71666698*(1-EP/(EP+10))^1.5+0.28333302))}
+.param IK3 {(IK2*(EP+5500)/(EG2+5500))}
+.param IK4 {(IK3-URAMP(IK3-(0.010377457*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.010377457*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.005p
+CGK G1 K  6p
+C12 G1 G2 4p
+CAK A  K  3p
+.ENDS   
+
+* Generic pentode model: 6F6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:04 2008   
+*           Plate   
+*           | Screen Grid   
+*           | | Control Grid   
+*           | | | Cathode   
+*           | | | |
+.SUBCKT 6F6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999999)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.043621772*EG2)^-0.51782633)}
+.param M2  {((0.74337419*URAMP(GG+EG2/5.8829755))^2.0178263)}
+.param P   {(0.00053269576*URAMP(GG+EG2/7.9138819)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00030710831*M1*M2)}
+.param IG  {(0.00019764236*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.84588664*(1-EP/(EP+10))^1.5+0.15411336))}
+.param IK3 {(IK2*(EP+3830)/(EG2+3830))}
+.param IK4 {(IK3-URAMP(IK3-(0.00037552047*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00037552047*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.7p
+CGK G1 K  5p
+C12 G1 G2 3.3p
+CAK A  K  6.9p
+.ENDS   
+
+* Generic pentode model: 6GB5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:07 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6GB5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.84509256)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.074600608*EG2)^-0.78902807)}
+.param M2  {((0.65529996*URAMP(GG+EG2/4.6206063))^2.2890281)}
+.param P   {(0.0051497371*URAMP(GG+EG2/7.0511317)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0031020384*M1*M2)}
+.param IG  {(0.0025748686*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.963603604*(1-EP/(EP+10))^1.5+0.036396396))}
+.param IK3 {(IK2*(EP+4658)/(EG2+4658))}
+.param IK4 {(IK3-URAMP(IK3-(0.0037083507*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0037083507*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.75p
+CGK G1 K  12.9p
+C12 G1 G2 8.6p
+CAK A  K  9.4p
+.ENDS   
+
+* Generic pentode model: 6GB8   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:09 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6GB8_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.18361766)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.023367579*EG2)^-0.5778846)}
+.param M2  {((0.72188802*URAMP(GG+EG2/11.901617))^2.0778846)}
+.param P   {(0.0065222813*URAMP(GG+EG2/16.486791)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0037584671*M1*M2)}
+.param IG  {(0.0032611407*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.928052868*(1-EP/(EP+10))^1.5+0.071947132))}
+.param IK3 {(IK2*(EP+2900)/(EG2+2900))}
+.param IK4 {(IK3-URAMP(IK3-(0.0038634597*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0038634597*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.8p
+CGK G1 K  13.4p
+C12 G1 G2 9p
+CAK A  K  16.3p
+.ENDS   
+
+* Generic pentode model: 6GW8P   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:12 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6GW8P_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.84112562)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.01029284*EG2)^-0.37211195)}
+.param M2  {((0.80123414*URAMP(GG+EG2/19.311081))^1.872112)}
+.param P   {(0.0043151181*URAMP(GG+EG2/24.10167)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0025686773*M1*M2)}
+.param IG  {(0.0021575591*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.86365736*(1-EP/(EP+10))^1.5+0.13634264))}
+.param IK3 {(IK2*(EP+2342)/(EG2+2342))}
+.param IK4 {(IK3-URAMP(IK3-(0.002428883*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.002428883*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.4p
+CGK G1 K  5.8p
+C12 G1 G2 3.8p
+CAK A  K  7.6p
+.ENDS   
+
+* Generic pentode model: 6GY5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:13 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6GY5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.32801613)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.13136914*EG2)^-1.2504039)}
+.param M2  {((0.54537444*URAMP(GG+EG2/3.4606724))^2.7504039)}
+.param P   {(0.0046747506*URAMP(GG+EG2/6.345498)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0037232771*M1*M2)}
+.param IG  {(0.0023373753*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.984987065*(1-EP/(EP+10))^1.5+0.015012935))}
+.param IK3 {(IK2*(EP+2495)/(EG2+2495))}
+.param IK4 {(IK3-URAMP(IK3-(0.0034848868*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0034848868*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.48p
+CGK G1 K  12.9p
+C12 G1 G2 8.6p
+CAK A  K  8.5p
+.ENDS   
+
+* Generic pentode model: 6J7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:14 2008   
+*           Plate   
+*           | Screen Grid   
+*           | | Control Grid   
+*           | | | Cathode   
+*           | | | |
+.SUBCKT 6J7_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.75953915)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.0057490544*EG2)^-0.20145614)}
+.param M2  {((0.8815978*URAMP(GG+EG2/20.595073))^1.7014561)}
+.param P   {(0.00080605414*URAMP(GG+EG2/23.361076)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00053791349*M1*M2)}
+.param IG  {(0.00040302707*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.82254609*(1-EP/(EP+10))^1.5+0.17745391))}
+.param IK3 {(IK2*(EP+7400)/(EG2+7400))}
+.param IK4 {(IK3-URAMP(IK3-(0.00045533328*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00045533328*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.005p
+CGK G1 K  4.2p
+C12 G1 G2 2.8p
+CAK A  K  12p
+.ENDS   
+
+* Generic pentode model: 6JB5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:15 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6JB5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.16129088*EG2)^-2.7283665)}
+.param M2  {((0.35474692*URAMP(GG+EG2/4.0005552))^4.2283665)}
+.param P   {(0.0020818822*URAMP(GG+EG2/11.277209)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0106492*M1*M2)}
+.param IG  {(0.0010409411*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.931759377*(1-EP/(EP+10))^1.5+0.068240623))}
+.param IK3 {(IK2*(EP+3620)/(EG2+3620))}
+.param IK4 {(IK3-URAMP(IK3-(0.0013239066*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0013239066*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.49p
+CGK G1 K  5.4p
+C12 G1 G2 3.6p
+CAK A  K  6p
+.ENDS   
+
+* Generic pentode model: 6JE6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:16 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6JE6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.15531724*EG2)^-0.92957636)}
+.param M2  {((0.61739158*URAMP(GG+EG2/2.4633995))^2.4295764)}
+.param P   {(0.0036485186*URAMP(GG+EG2/3.9900115)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0023385402*M1*M2)}
+.param IG  {(0.0018242593*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.9913745766*(1-EP/(EP+10))^1.5+0.0086254234))}
+.param IK3 {(IK2*(EP+947.5)/(EG2+947.5))}
+.param IK4 {(IK3-URAMP(IK3-(0.0032785303*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0032785303*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.56p
+CGK G1 K  12.9p
+C12 G1 G2 8.6p
+CAK A  K  10.5p
+.ENDS   
+
+* Generic pentode model: 6JG6A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:17 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6JG6A_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99372841)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.20443422*EG2)^-2.1006356)}
+.param M2  {((0.41659311*URAMP(GG+EG2/2.8537634))^3.6006356)}
+.param P   {(0.0069256204*URAMP(GG+EG2/6.8502415)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.014050654*M1*M2)}
+.param IG  {(0.0034628102*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.988568836*(1-EP/(EP+10))^1.5+0.011431164))}
+.param IK3 {(IK2*(EP+1315)/(EG2+1315))}
+.param IK4 {(IK3-URAMP(IK3-(0.0050333831*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0050333831*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.7p
+CGK G1 K  12.8p
+C12 G1 G2 8.5p
+CAK A  K  8.3p
+.ENDS   
+
+* Generic pentode model: 6JR6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:20 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6JR6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99994363)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.13323481*EG2)^-1.5275541)}
+.param M2  {((0.49544944*URAMP(GG+EG2/3.7869273))^3.0275541)}
+.param P   {(0.0072054321*URAMP(GG+EG2/7.6434182)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0074085952*M1*M2)}
+.param IG  {(0.003602716*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.986575754*(1-EP/(EP+10))^1.5+0.013424246))}
+.param IK3 {(IK2*(EP+1900)/(EG2+1900))}
+.param IK4 {(IK3-URAMP(IK3-(0.0050620509*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0050620509*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.7p
+CGK G1 K  12.8p
+C12 G1 G2 8.5p
+CAK A  K  8.3p
+.ENDS   
+
+* Generic pentode model: 6JS6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:19 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6JS6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.9999936)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.21913245*EG2)^-1.3747601)}
+.param M2  {((0.52178266*URAMP(GG+EG2/2.1823209))^2.8747601)}
+.param P   {(0.0035536558*URAMP(GG+EG2/4.1824327)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0031522524*M1*M2)}
+.param IG  {(0.0017768279*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.9913745766*(1-EP/(EP+10))^1.5+0.0086254234))}
+.param IK3 {(IK2*(EP+1435)/(EG2+1435))}
+.param IK4 {(IK3-URAMP(IK3-(0.0031247106*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0031247106*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.7p
+CGK G1 K  14p
+C12 G1 G2 9.3p
+CAK A  K  9.3p
+.ENDS   
+
+* Generic pentode model: 6K6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:22 2008   
+*           Plate   
+*           | Screen Grid   
+*           | | Control Grid   
+*           | | | Cathode   
+*           | | | |
+.SUBCKT 6K6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999995)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.055289504*EG2)^-0.63369812)}
+.param M2  {((0.70300479*URAMP(GG+EG2/5.3716382))^2.1336981)}
+.param P   {(0.00053448807*URAMP(GG+EG2/7.6409696)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00030960116*M1*M2)}
+.param IG  {(0.00022926513*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.85981889*(1-EP/(EP+10))^1.5+0.14018111))}
+.param IK3 {(IK2*(EP+4070)/(EG2+4070))}
+.param IK4 {(IK3-URAMP(IK3-(0.00032413346*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00032413346*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  3p
+C12 G1 G2 2p
+CAK A  K  5.5p
+.ENDS   
+
+* Generic pentode model: 6K7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Wed Jun 30 20:54:56 2010   
+*           Plate   
+*           | Screen Grid   
+*           | | Control Grid   
+*           | | | Cathode   
+*           | | | |
+.SUBCKT 6K7_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((2.3738651*EG2)^-38.694622)}
+.param M2  {((0.037318425*URAMP(GG+EG2/0.40553339))^40.194622)}
+.param P   {(0.00060436625*URAMP(GG+EG2/10.866841)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*2.5180035e+51*M1*M2)}
+.param IG  {(0.00030218313*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.800634*(1-EP/(EP+10))^1.5+0.199366))}
+.param IK3 {(IK2*(EP+5600)/(EG2+5600))}
+.param IK4 {(IK3-URAMP(IK3-(0.00038749733*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00038749733*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.005p
+CGK G1 K  4.2p
+C12 G1 G2 2.8p
+CAK A  K  12p
+.ENDS   
+
+* Generic pentode model: 6KD6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:31 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6KD6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.14076535*EG2)^-1.0380568)}
+.param M2  {((0.59100333*URAMP(GG+EG2/2.905521))^2.5380568)}
+.param P   {(0.0075955054*URAMP(GG+EG2/4.9162515)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0051832527*M1*M2)}
+.param IG  {(0.0037977527*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.9959539371*(1-EP/(EP+10))^1.5+0.0040460629))}
+.param IK3 {(IK2*(EP+1090)/(EG2+1090))}
+.param IK4 {(IK3-URAMP(IK3-(0.0062293504*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0062293504*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.8p
+CGK G1 K  23.5p
+C12 G1 G2 15.7p
+CAK A  K  15.2p
+.ENDS   
+
+
+* Generic pentode model: 6KM6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:37 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6KM6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.57761874)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.52339318*EG2)^-5.2554363)}
+.param M2  {((0.22204339*URAMP(GG+EG2/1.4863713))^6.7554363)}
+.param P   {(0.006536245*URAMP(GG+EG2/6.6940577)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*4.7534114*M1*M2)}
+.param IG  {(0.0032681225*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.987878393*(1-EP/(EP+10))^1.5+0.012121607))}
+.param IK3 {(IK2*(EP+1060)/(EG2+1060))}
+.param IK4 {(IK3-URAMP(IK3-(0.0047861683*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0047861683*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.2p
+CGK G1 K  12.6p
+C12 G1 G2 8.4p
+CAK A  K  7.9p
+.ENDS   
+
+* Generic pentode model: 6KV6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:25 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6KV6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.5805065)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.16898169*EG2)^-1.508747)}
+.param M2  {((0.4985464*URAMP(GG+EG2/2.9675026))^3.008747)}
+.param P   {(0.0050541434*URAMP(GG+EG2/5.9523097)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0050986757*M1*M2)}
+.param IG  {(0.0025270717*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.984089257*(1-EP/(EP+10))^1.5+0.015910743))}
+.param IK3 {(IK2*(EP+1212.6074)/(EG2+1212.6074))}
+.param IK4 {(IK3-URAMP(IK3-(0.0038528147*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0038528147*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.6p
+CGK G1 K  12.9p
+C12 G1 G2 8.6p
+CAK A  K  8.4p
+.ENDS   
+
+* Generic pentode model: 6L6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:38 2008   
+*           Plate   
+*           | Screen Grid   
+*           | | Control Grid   
+*           | | | Cathode   
+*           | | | |
+.SUBCKT 6L6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.91804059)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.10751078*EG2)^-1.743575)}
+.param M2  {((0.4624527*URAMP(GG+EG2/4.9999386))^3.243575)}
+.param P   {(0.0016883841*URAMP(GG+EG2/10.811784)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0021948901*M1*M2)}
+.param IG  {(0.0022135943*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.942171668*(1-EP/(EP+10))^1.5+0.057828332))}
+.param IK3 {(IK2*(EP+2180)/(EG2+2180))}
+.param IK4 {(IK3-URAMP(IK3-(0.00056920996*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00056920996*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.6p
+CGK G1 K  5.7p
+C12 G1 G2 3.8p
+CAK A  K  5.9p
+.ENDS   
+
+* Generic pentode model: 6LB6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:40 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6LB6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99700414)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.23985722*EG2)^-1.8495045)}
+.param M2  {((0.44782743*URAMP(GG+EG2/2.3020886))^3.3495045)}
+.param P   {(0.0060056363*URAMP(GG+EG2/5.1405708)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0088470322*M1*M2)}
+.param IG  {(0.0030028181*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.9968847352*(1-EP/(EP+10))^1.5+0.0031152648))}
+.param IK3 {(IK2*(EP+1465)/(EG2+1465))}
+.param IK4 {(IK3-URAMP(IK3-(0.004837887*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.004837887*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.44p
+CGK G1 K  19.5p
+C12 G1 G2 13p
+CAK A  K  17.6p
+.ENDS   
+
+* Generic pentode model: 6LF6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:41 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6LF6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.95447628)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.32637983*EG2)^-2.7688412)}
+.param M2  {((0.35138341*URAMP(GG+EG2/1.987306))^4.2688412)}
+.param P   {(0.0091876684*URAMP(GG+EG2/5.6556625)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.05015216*M1*M2)}
+.param IG  {(0.0045938342*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.98106839*(1-EP/(EP+10))^1.5+0.01893161))}
+.param IK3 {(IK2*(EP+1910)/(EG2+1910))}
+.param IK4 {(IK3-URAMP(IK3-(0.0071353288*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0071353288*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  2.5p
+CGK G1 K  20.9p
+C12 G1 G2 13.9p
+CAK A  K  16.2p
+.ENDS   
+
+* Generic pentode model: 6LG6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:42 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6LG6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.11768156*EG2)^-0.95241752)}
+.param M2  {((0.61164136*URAMP(GG+EG2/3.3000807))^2.4524175)}
+.param P   {(0.0055353672*URAMP(GG+EG2/5.3954505)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.003591442*M1*M2)}
+.param IG  {(0.0027676836*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.9939525995*(1-EP/(EP+10))^1.5+0.0060474005))}
+.param IK3 {(IK2*(EP+1360)/(EG2+1360))}
+.param IK4 {(IK3-URAMP(IK3-(0.0043758251*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0043758251*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.8p
+CGK G1 K  14.5p
+C12 G1 G2 9.7p
+CAK A  K  12.2p
+.ENDS   
+
+* Generic pentode model: 6RB11   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:50 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6RB11_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.65537204)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.11100294*EG2)^-2.2938121)}
+.param M2  {((0.39538068*URAMP(GG+EG2/5.4468766))^3.7938121)}
+.param P   {(0.0034776823*URAMP(GG+EG2/13.776284)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0092134348*M1*M2)}
+.param IG  {(0.0017388412*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.957316208*(1-EP/(EP+10))^1.5+0.042683792))}
+.param IK3 {(IK2*(EP+2500)/(EG2+2500))}
+.param IK4 {(IK3-URAMP(IK3-(0.0021242915*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0021242915*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.7p
+CGK G1 K  5.6p
+C12 G1 G2 3.7p
+CAK A  K  6.3p
+.ENDS   
+
+* Generic pentode model: 6RP15   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:50 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT 6RP15_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.81734398)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.014236687*EG2)^-0.37474407)}
+.param M2  {((0.80010921*URAMP(GG+EG2/14.040541))^1.8747441)}
+.param P   {(0.0033159507*URAMP(GG+EG2/17.548281)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0019718712*M1*M2)}
+.param IG  {(0.0016579754*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.89490812*(1-EP/(EP+10))^1.5+0.10509188))}
+.param IK3 {(IK2*(EP+1370)/(EG2+1370))}
+.param IK4 {(IK3-URAMP(IK3-(0.0019454182*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0019454182*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  6.2p
+C12 G1 G2 4.1p
+CAK A  K  6p
+.ENDS   
+
+* Generic pentode model: 6SH7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:54 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6SH7_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.69566782)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.0053973753*EG2)^-0.3342013)}
+.param M2  {((0.81779465*URAMP(GG+EG2/33.758141))^1.8342013)}
+.param P   {(0.0026548433*URAMP(GG+EG2/41.279484)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0016073552*M1*M2)}
+.param IG  {(0.0013274216*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.73640106*(1-EP/(EP+10))^1.5+0.26359894))}
+.param IK3 {(IK2*(EP+5465)/(EG2+5465))}
+.param IK4 {(IK3-URAMP(IK3-(0.0014244744*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0014244744*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.003p
+CGK G1 K  5.1p
+C12 G1 G2 3.4p
+CAK A  K  7p
+.ENDS   
+
+* Generic pentode model: 6SJ7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:55 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6SJ7_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.40161932)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.02462593*EG2)^-0.84287662)}
+.param M2  {((0.64023858*URAMP(GG+EG2/14.609049))^2.3428766)}
+.param P   {(0.0011655656*URAMP(GG+EG2/22.818133)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00071703729*M1*M2)}
+.param IG  {(0.00068041382*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.78466568*(1-EP/(EP+10))^1.5+0.21533432))}
+.param IK3 {(IK2*(EP+12950)/(EG2+12950))}
+.param IK4 {(IK3-URAMP(IK3-(0.00044226898*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00044226898*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.005p
+CGK G1 K  3.6p
+C12 G1 G2 2.4p
+CAK A  K  7p
+.ENDS   
+
+* Generic pentode model: 6U8P   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:03 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 6U8P_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.65071871)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.046006989*EG2)^-2.7651713)}
+.param M2  {((0.35168575*URAMP(GG+EG2/14.091647))^4.2651713)}
+.param P   {(0.003445744*URAMP(GG+EG2/40.068859)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.018698107*M1*M2)}
+.param IG  {(0.001722872*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.74580496*(1-EP/(EP+10))^1.5+0.25419504))}
+.param IK3 {(IK2*(EP+6302.5)/(EG2+6302.5))}
+.param IK4 {(IK3-URAMP(IK3-(0.0018526668*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0018526668*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.007p
+CGK G1 K  3p
+C12 G1 G2 2p
+CAK A  K  3.5p
+.ENDS   
+
+* Generic pentode model: 6V6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:04 2008   
+*           Plate   
+*           | Screen Grid   
+*           | | Control Grid   
+*           | | | Cathode   
+*           | | | |
+.SUBCKT 6V6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999998)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.048335289*EG2)^-0.77023894)}
+.param M2  {((0.6607234*URAMP(GG+EG2/7.0192317))^2.2702389)}
+.param P   {(0.0010053341*URAMP(GG+EG2/10.623555)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00060166202*M1*M2)}
+.param IG  {(0.00051429562*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.916000233*(1-EP/(EP+10))^1.5+0.083999767))}
+.param IK3 {(IK2*(EP+3125)/(EG2+3125))}
+.param IK4 {(IK3-URAMP(IK3-(0.00061491868*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00061491868*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.7p
+CGK G1 K  5p
+C12 G1 G2 3.3p
+CAK A  K  6.9p
+.ENDS   
+
+* Generic pentode model: 6W6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:06 2008   
+*           Plate   
+*           | Screen Grid   
+*           | | Control Grid   
+*           | | | Cathode   
+*           | | | |
+.SUBCKT 6W6_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999997)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.032441217*EG2)^-0.3672418)}
+.param M2  {((0.80332392*URAMP(GG+EG2/6.062537))^1.8672418)}
+.param P   {(0.0022625178*URAMP(GG+EG2/7.546815)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.001349448*M1*M2)}
+.param IG  {(0.0012737812*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.947317212*(1-EP/(EP+10))^1.5+0.052682788))}
+.param IK3 {(IK2*(EP+1507)/(EG2+1507))}
+.param IK4 {(IK3-URAMP(IK3-(0.0012049281*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0012049281*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.8p
+CGK G1 K  8.6p
+C12 G1 G2 5.7p
+CAK A  K  8.2p
+.ENDS   
+
+* Generic pentode model: 7591   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:23 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 7591_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99926889)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.013694604*EG2)^-0.39656351)}
+.param M2  {((0.79090417*URAMP(GG+EG2/15.268483))^1.8965635)}
+.param P   {(0.0034491916*URAMP(GG+EG2/19.305098)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0020351267*M1*M2)}
+.param IG  {(0.0017245958*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.88749484*(1-EP/(EP+10))^1.5+0.11250516))}
+.param IK3 {(IK2*(EP+2850)/(EG2+2850))}
+.param IK4 {(IK3-URAMP(IK3-(0.0019960381*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0019960381*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.25p
+CGK G1 K  5.9p
+C12 G1 G2 3.9p
+CAK A  K  4.8p
+.ENDS   
+
+* Generic pentode model: 77   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:48 2008   
+*          Plate   
+*          | Screen Grid   
+*          | | Control Grid   
+*          | | | Cathode   
+*          | | | |
+.SUBCKT 77_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.0016865419*EG2)^-0.038461538)}
+.param M2  {((0.975*URAMP(GG+EG2/14.823231))^1.5384615)}
+.param P   {(0.00049759802*URAMP(GG+EG2/15.203314)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00043219909*M1*M2)}
+.param IG  {(0.00024879901*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.82767164*(1-EP/(EP+10))^1.5+0.17232836))}
+.param IK3 {(IK2*(EP+5075)/(EG2+5075))}
+.param IK4 {(IK3-URAMP(IK3-(0.00029869203*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00029869203*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.007p
+CGK G1 K  2.8p
+C12 G1 G2 1.9p
+CAK A  K  11p
+.ENDS   
+
+* Generic pentode model: 829B   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:56 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 829B_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-0.31275554)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.031067512*EG2)^-0.44774132)}
+.param M2  {((0.7701228*URAMP(GG+EG2/7.3992794))^1.9477413)}
+.param P   {(0.0023834096*URAMP(GG+EG2/9.6079215)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0013870937*M1*M2)}
+.param IG  {(0.0013863621*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.87139424*(1-EP/(EP+10))^1.5+0.12860576))}
+.param IK3 {(IK2*(EP+2800)/(EG2+2800))}
+.param IK4 {(IK3-URAMP(IK3-(0.0016211493*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0016211493*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.12p
+CGK G1 K  8.6p
+C12 G1 G2 5.8p
+CAK A  K  6.9p
+.ENDS   
+
+* Generic pentode model: 8417   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:26 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 8417_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.63054378)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.036846957*EG2)^-1.2260611)}
+.param M2  {((0.55024446*URAMP(GG+EG2/12.206043))^2.7260611)}
+.param P   {(0.0099006053*URAMP(GG+EG2/22.182946)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0077318666*M1*M2)}
+.param IG  {(0.0049503027*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.953390978*(1-EP/(EP+10))^1.5+0.046609022))}
+.param IK3 {(IK2*(EP+2100)/(EG2+2100))}
+.param IK4 {(IK3-URAMP(IK3-(0.0056272659*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0056272659*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.9p
+CGK G1 K  12.7p
+C12 G1 G2 8.5p
+CAK A  K  8.1p
+.ENDS   
+
+* Generic pentode model: E83F   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:32 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT E83F_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.67775811)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.012440248*EG2)^-0.83377528)}
+.param M2  {((0.6427354*URAMP(GG+EG2/28.718446))^2.3337753)}
+.param P   {(0.0069226192*URAMP(GG+EG2/44.6816)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0042425066*M1*M2)}
+.param IG  {(0.0034613096*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.81925243*(1-EP/(EP+10))^1.5+0.18074757))}
+.param IK3 {(IK2*(EP+9975)/(EG2+9975))}
+.param IK4 {(IK3-URAMP(IK3-(0.0036950034*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0036950034*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.015p
+CGK G1 K  4.8p
+C12 G1 G2 3.2p
+CAK A  K  3.5p
+.ENDS   
+
+* Generic pentode model: ECL85P   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Wed Oct 22 16:34:56 2008   
+*              Plate   
+*              | Screen Grid   
+*              | | Control Grid   
+*              | | | Cathode   
+*              | | | |
+.SUBCKT ECL85P_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.61401316)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.075869075*EG2)^-1.148877)}
+.param M2  {((0.56627772*URAMP(GG+EG2/5.7167203))^2.648877)}
+.param P   {(0.0037731888*URAMP(GG+EG2/10.095259)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0027774625*M1*M2)}
+.param IG  {(0.0018865944*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.935445718*(1-EP/(EP+10))^1.5+0.064554282))}
+.param IK3 {(IK2*(EP+4320)/(EG2+4320))}
+.param IK4 {(IK3-URAMP(IK3-(0.0024608947*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0024608947*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1p
+CGK G1 K  5.1p
+C12 G1 G2 3.4p
+CAK A  K  7.1p
+.ENDS   
+
+* Generic pentode model: EF39   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:46:08 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT EF39_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.0036430998)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.43484193*EG2)^-13.214995)}
+.param M2  {((0.10193683*URAMP(GG+EG2/2.0652635))^14.714995)}
+.param P   {(0.0015911301*URAMP(GG+EG2/20.260228)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*4892774400*M1*M2)}
+.param IG  {(0.00079556505*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.79959976*(1-EP/(EP+10))^1.5+0.20040024))}
+.param IK3 {(IK2*(EP+14558.316)/(EG2+14558.316))}
+.param IK4 {(IK3-URAMP(IK3-(0.00091480891*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00091480891*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.8p
+CGK G1 K  23.5p
+C12 G1 G2 15.7p
+CAK A  K  15.2p
+.ENDS   
+
+* Generic pentode model: EL12   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:44 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT EL12_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999993)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.014506242*EG2)^-0.43509457)}
+.param M2  {((0.77515592*URAMP(GG+EG2/15.499816))^1.9350946)}
+.param P   {(0.0044414767*URAMP(GG+EG2/19.99574)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0025921537*M1*M2)}
+.param IG  {(0.0022207383*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.906840231*(1-EP/(EP+10))^1.5+0.093159769))}
+.param IK3 {(IK2*(EP+2990)/(EG2+2990))}
+.param IK4 {(IK3-URAMP(IK3-(0.0025580516*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0025580516*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.6p
+CGK G1 K  5.7p
+C12 G1 G2 3.8p
+CAK A  K  5.9p
+.ENDS   
+
+* Generic pentode model: EL156   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:51 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT EL156_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.011748081*EG2)^-0.24110473)}
+.param M2  {((0.86152198*URAMP(GG+EG2/11.787288))^1.7411047)}
+.param P   {(0.0036416815*URAMP(GG+EG2/13.681935)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0023436481*M1*M2)}
+.param IG  {(0.0018208407*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.86493423*(1-EP/(EP+10))^1.5+0.13506577))}
+.param IK3 {(IK2*(EP+3400)/(EG2+3400))}
+.param IK4 {(IK3-URAMP(IK3-(0.0022273001*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0022273001*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.5p
+CGK G1 K  11.1p
+C12 G1 G2 7.4p
+CAK A  K  7p
+.ENDS   
+
+* Generic pentode model: EL32   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:47 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT EL32_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999999)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.12471331*EG2)^-1.9909547)}
+.param M2  {((0.42968188*URAMP(GG+EG2/4.5730334))^3.4909547)}
+.param P   {(0.0011713028*URAMP(GG+EG2/10.642835)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0020582453*M1*M2)}
+.param IG  {(0.00058565141*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.87143806*(1-EP/(EP+10))^1.5+0.12856194))}
+.param IK3 {(IK2*(EP+3110)/(EG2+3110))}
+.param IK4 {(IK3-URAMP(IK3-(0.00075455382*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00075455382*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  4p
+CGK G1 K  2.4p
+C12 G1 G2 1.6p
+CAK A  K  4p
+.ENDS   
+
+* Generic pentode model: EL34   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:48 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT EL34_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.29360503)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.040003405*EG2)^-0.73308055)}
+.param M2  {((0.67171782*URAMP(GG+EG2/8.2063559))^2.2330806)}
+.param P   {(0.0033402929*URAMP(GG+EG2/12.216969)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0019762451*M1*M2)}
+.param IG  {(0.0016701465*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.87617414*(1-EP/(EP+10))^1.5+0.12382586))}
+.param IK3 {(IK2*(EP+1250)/(EG2+1250))}
+.param IK4 {(IK3-URAMP(IK3-(0.0020885491*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0020885491*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.1p
+CGK G1 K  9.1p
+C12 G1 G2 6.1p
+CAK A  K  8.4p
+.ENDS   
+
+* Generic pentode model: EL95   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:50 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT EL95_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.012612458*EG2)^-0.34815571)}
+.param M2  {((0.81161992*URAMP(GG+EG2/14.936032))^1.8481557)}
+.param P   {(0.001923993*URAMP(GG+EG2/18.402742)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0011570767*M1*M2)}
+.param IG  {(0.00096199651*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.84850548*(1-EP/(EP+10))^1.5+0.15149452))}
+.param IK3 {(IK2*(EP+2630)/(EG2+2630))}
+.param IK4 {(IK3-URAMP(IK3-(0.0011209319*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0011209319*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.4p
+CGK G1 K  3.2p
+C12 G1 G2 2.1p
+CAK A  K  3.5p
+.ENDS   
+
+* Generic pentode model: KT33C   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:52 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT KT33C_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.96267547)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.055090322*EG2)^-0.90062349)}
+.param M2  {((0.62483768*URAMP(GG+EG2/6.8099498))^2.4006235)}
+.param P   {(0.0032650112*URAMP(GG+EG2/10.89875)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0020623072*M1*M2)}
+.param IG  {(0.0016325056*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.86614324*(1-EP/(EP+10))^1.5+0.13385676))}
+.param IK3 {(IK2*(EP+1150)/(EG2+1150))}
+.param IK4 {(IK3-URAMP(IK3-(0.0020920259*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0020920259*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.2p
+CGK G1 K  10.8p
+C12 G1 G2 7.2p
+CAK A  K  10.9p
+.ENDS   
+
+* Generic pentode model: KT66   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:54 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT KT66_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+1)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.051887963*EG2)^-0.76669755)}
+.param M2  {((0.66175569*URAMP(GG+EG2/6.5187433))^2.2666975)}
+.param P   {(0.0018223197*URAMP(GG+EG2/9.8506796)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0010893248*M1*M2)}
+.param IG  {(0.00091115984*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.938072528*(1-EP/(EP+10))^1.5+0.061927472))}
+.param IK3 {(IK2*(EP+2300)/(EG2+2300))}
+.param IK4 {(IK3-URAMP(IK3-(0.0011955789*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0011955789*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.1p
+CGK G1 K  8.1p
+C12 G1 G2 5.4p
+CAK A  K  9p
+.ENDS   
+
+* Generic pentode model: KT88   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:55 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT KT88_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999999)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.097534908*EG2)^-1.4398564)}
+.param M2  {((0.51022901*URAMP(GG+EG2/5.0214944))^2.9398564)}
+.param P   {(0.0031096914*URAMP(GG+EG2/9.8416483)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0029317575*M1*M2)}
+.param IG  {(0.0015548457*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.88165022*(1-EP/(EP+10))^1.5+0.11834978))}
+.param IK3 {(IK2*(EP+1850)/(EG2+1850))}
+.param IK4 {(IK3-URAMP(IK3-(0.0020406477*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0020406477*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  1.2p
+CGK G1 K  9p
+C12 G1 G2 6p
+CAK A  K  10.9p
+.ENDS   
+
+* Generic pentode model: Pen45   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:02 2008   
+*             Plate   
+*             | Screen Grid   
+*             | | Control Grid   
+*             | | | Cathode   
+*             | | | |
+.SUBCKT Pen45_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.77688676)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.013260501*EG2)^-0.37488998)}
+.param M2  {((0.80004694*URAMP(GG+EG2/15.078846))^1.87489)}
+.param P   {(0.0032965978*URAMP(GG+EG2/18.847452)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0019602521*M1*M2)}
+.param IG  {(0.0016482989*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.84850548*(1-EP/(EP+10))^1.5+0.15149452))}
+.param IK3 {(IK2*(EP+950)/(EG2+950))}
+.param IK4 {(IK3-URAMP(IK3-(0.001914113*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.001914113*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.85p
+CGK G1 K  13.2p
+C12 G1 G2 8.8p
+CAK A  K  11.9p
+.ENDS   
+
+* Generic pentode model: WE310A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:11 2008   
+*              Plate   
+*              | Screen Grid   
+*              | | Control Grid   
+*              | | | Cathode   
+*              | | | |
+.SUBCKT WE310A_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.54054476)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.010235898*EG2)^-0.32209043)}
+.param M2  {((0.82323027*URAMP(GG+EG2/17.269587))^1.8220904)}
+.param P   {(0.00076747724*URAMP(GG+EG2/20.977833)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.00046759791*M1*M2)}
+.param IG  {(0.00038373862*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.83327343*(1-EP/(EP+10))^1.5+0.16672657))}
+.param IK3 {(IK2*(EP+7155)/(EG2+7155))}
+.param IK4 {(IK3-URAMP(IK3-(0.00043926524*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.00043926524*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.016p
+CGK G1 K  3.6p
+C12 G1 G2 2.4p
+CAK A  K  9p
+.ENDS   
+
+* Generic pentode model: 35C5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:22 2008   
+*            Plate   
+*            | Screen Grid   
+*            | | Control Grid   
+*            | | | Cathode   
+*            | | | |
+.SUBCKT 35C5_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+0.99999998)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.12544688*EG2)^-1.6161868)}
+.param M2  {((0.48135753*URAMP(GG+EG2/4.1343593))^3.1161868)}
+.param P   {(0.0021455369*URAMP(GG+EG2/8.5889574)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0024204769*M1*M2)}
+.param IG  {(0.0010727685*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.953162074*(1-EP/(EP+10))^1.5+0.046837926))}
+.param IK3 {(IK2*(EP+1030)/(EG2+1030))}
+.param IK4 {(IK3-URAMP(IK3-(0.0014581748*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0014581748*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.6p
+CGK G1 K  6.9p
+C12 G1 G2 4.6p
+CAK A  K  8.4p
+.ENDS   
+
+* Generic pentode model: 12BY7A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:15 2008   
+*              Plate   
+*              | Screen Grid   
+*              | | Control Grid   
+*              | | | Cathode   
+*              | | | |
+.SUBCKT 12BY7A_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-0.02185341)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.014593712*EG2)^-0.7027291)}
+.param M2  {((0.68097344*URAMP(GG+EG2/21.860549))^2.2027291)}
+.param P   {(0.0061475247*URAMP(GG+EG2/32.101912)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.0036081888*M1*M2)}
+.param IG  {(0.0030737623*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.82512147*(1-EP/(EP+10))^1.5+0.17487853))}
+.param IK3 {(IK2*(EP+4890)/(EG2+4890))}
+.param IK4 {(IK3-URAMP(IK3-(0.0033632383*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.0033632383*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.063p
+CGK G1 K  6.1p
+C12 G1 G2 4.1p
+CAK A  K  3.4p
+.ENDS   
+
+* Generic pentode model: 12GN7A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:16 2008   
+*              Plate   
+*              | Screen Grid   
+*              | | Control Grid   
+*              | | | Cathode   
+*              | | | |
+.SUBCKT 12GN7A_ayumi A G2 G1 K
+.param GG  {(V(G1,K)+-0.52499611)}
+.param EP  {URAMP(V(A,K))}
+.param EG  {URAMP(V(G1,K))}
+.param EG2 {URAMP(V(G2,K))}
+.param M1  {((0.0070794303*EG2)^-0.51284817)}
+.param M2  {((0.74521269*URAMP(GG+EG2/35.989804))^2.0128482)}
+.param P   {(0.032317671*URAMP(GG+EG2/48.294674)^1.5)}
+.param IK  {(U(GG)*P+(1-U(GG))*0.018638041*M1*M2)}
+.param IG  {(0.016158835*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+.param IK2 {((IK-IG)*(1-0.4*(EXP(-EP/(EG2+1e-10)*15)-EXP(-15))))}
+.param IG2T {(IK2*(0.81776253*(1-EP/(EP+10))^1.5+0.18223747))}
+.param IK3 {(IK2*(EP+1950)/(EG2+1950))}
+.param IK4 {(IK3-URAMP(IK3-(0.017167779*(EP+URAMP(EG2-EP))^1.5)))}
+.param IP  {URAMP(IK4-IG2T-URAMP(IK4-IG2T-(0.017167779*EP^1.5)))}
+BIAK A  K I=IP+1e-10*V(A,K)
+BIG2 G2 K I=URAMP(IK4-IP)
+BIGK G1 K I=IG   
+* CAPS
+CGA G1 A  0.12p
+CGK G1 K  10.4p
+C12 G1 G2 7p
+CAK A  K  3.9p
+.ENDS   
+;$SpiceType=SPICE3

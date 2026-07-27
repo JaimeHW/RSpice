@@ -1,0 +1,37 @@
+* SPECTRE Level 3 MOSFET Model Card Example
+* Level 3 (level=3) - Semi-empirical MOSFET model
+*
+* Includes all Level 2 parameters plus additional semi-empirical parameters
+* for improved short-channel behavior modeling.
+
+model nmos_level3 mos type=n level=3
++ vth    = 0.7         ; Threshold voltage (V)
++ kp     = 50.0e-6     ; Transconductance parameter (A/V^2)
++ gamma  = 0.8         ; Bulk threshold parameter (V^0.5)
++ phi    = 0.7         ; Surface potential (V)
++ lambda = 0.02        ; Channel length modulation (1/V)
++ tox    = 20.0e-9     ; Oxide thickness (m)
++ ld     = 0.1e-6      ; Lateral diffusion (m)
++ wd     = 0.0         ; Width reduction (m)
++ u0     = 600.0       ; Surface mobility (cm^2/V*s)
++ rsh    = 20.0        ; Sheet resistance (ohm/square)
++ cj     = 4.0e-4      ; Zero-bias bulk junction capacitance (F/m^2)
++ cjsw   = 3.0e-10     ; Zero-bias sidewall bulk junction capacitance (F/m)
++ mj     = 0.5         ; Bulk junction grading coefficient
++ mjsw   = 0.33        ; Sidewall bulk junction grading coefficient
++ pb     = 0.9         ; Bulk junction potential (V)
++ cgso   = 2.0e-10     ; Gate-source overlap capacitance (F/m)
++ cgdo   = 2.0e-10     ; Gate-drain overlap capacitance (F/m)
++ cgbo   = 1.0e-10     ; Gate-bulk overlap capacitance (F/m)
++ at     = 1.0e6       ; Flicker noise temperature coefficient
++ nfs    = 1.0e11      ; Fast surface state density (1/cm^2)
++ delta  = 0.1         ; Narrow channel effect coefficient
++ xj     = 0.15e-6     ; Metallurgical junction depth (m)
++ ucrit  = 1.0e4       ; Critical field for mobility degradation (V/cm)
++ uexp   = 0.1         ; Mobility field dependence exponent
++ vmax   = 1.0e5       ; Maximum drift velocity (cm/s)
++ neff   = 1.0e17      ; Effective channel doping (1/cm^3)
++ utra   = -0.1        ; Mobility transverse field coefficient
++ theta  = 0.1         ; Mobility modulation coefficient (1/V)
++ kappa  = 0.2         ; Saturation field factor
++ eta    = 0.02        ; Drain-induced barrier lowering coefficient
