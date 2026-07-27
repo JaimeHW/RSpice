@@ -123,6 +123,18 @@ pub(crate) struct GeneratedVerilogAInstanceCheckpoint {
     pub state: GeneratedVerilogAPersistentState,
 }
 
+/// Which unknown a lane of a packed derivative array belongs to.
+///
+/// A packed array is sized to the whole device, so a model with more lanes than
+/// any one equation uses carries `Unused` entries rather than resizing per
+/// equation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedStampLane {
+    Node(usize),
+    Branch(usize),
+    Unused,
+}
+
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
@@ -2462,6 +2474,63 @@ impl<'a> GeneratedStamper<'a> {
         }
         if let Some(col_axis) = self.branch_axis_local(branch0) {
             self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, derivative2);
+        }
+        if needs_rhs {
+            self.add_current_rhs_axis_pair(pos_axis, neg_axis, equivalent);
+        }
+    }
+
+    /// Stamp a current whose derivatives arrive as one packed array.
+    ///
+    /// The `stamp_current_node*_local` family above takes its derivatives as
+    /// loose arguments, one pair per unknown, which needs a distinct entry
+    /// point for every arity a model happens to use. A backend that carries
+    /// derivatives as a fixed-width array has them all in one place already,
+    /// so this takes the array and the lane-to-unknown map beside it.
+    ///
+    /// `lanes` and `derivatives` are indexed alike: lane *k* of the array
+    /// belongs to the unknown `lanes[k]` names.
+    #[inline]
+    pub fn stamp_current_packed<const LANES: usize>(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        value: Value,
+        lanes: &[GeneratedStampLane; LANES],
+        derivatives: &[Value; LANES],
+    ) {
+        let pos_axis = pos.and_then(|node| self.node_axis_local(node));
+        let neg_axis = neg.and_then(|node| self.node_axis_local(node));
+        if pos_axis.is_none() && neg_axis.is_none() {
+            return;
+        }
+        let needs_rhs = self.rhs.is_some();
+        let mut equivalent = value;
+        for (lane, derivative) in lanes.iter().zip(derivatives.iter()) {
+            // A packed array covers every lane the *device* uses, so a given
+            // equation leaves most of them at zero. Skipping those is not an
+            // optimization: `0.0 * unknown` is `NaN` when the unknown is, which
+            // happens while Newton is diverging, and it would poison the
+            // equivalent source for a lane this equation does not even touch.
+            // The loose-argument calls never see such a lane at all.
+            if *derivative == 0.0 {
+                continue;
+            }
+            let (col_axis, unknown) = match *lane {
+                GeneratedStampLane::Node(node) => {
+                    (self.node_axis_local(node), self.node_value_local(node))
+                }
+                GeneratedStampLane::Branch(branch) => {
+                    (self.branch_axis_local(branch), self.branch_value_local(branch))
+                }
+                GeneratedStampLane::Unused => continue,
+            };
+            if needs_rhs {
+                equivalent -= *derivative * unknown;
+            }
+            if let Some(col_axis) = col_axis {
+                self.add_current_derivative_axis_pair(pos_axis, neg_axis, col_axis, *derivative);
+            }
         }
         if needs_rhs {
             self.add_current_rhs_axis_pair(pos_axis, neg_axis, equivalent);
@@ -6099,6 +6168,101 @@ mod tests {
             devices.add(instance);
         }
         devices
+    }
+
+    /// Stamp one current both ways and compare what reached the matrix.
+    ///
+    /// `stamp_current_packed` exists so a backend carrying derivatives as an
+    /// array does not need a distinct entry point per arity. It is only useful
+    /// if it puts exactly what the loose-argument calls put.
+    fn stamp_both_ways(
+        derivative0: crate::Value,
+        derivative1: crate::Value,
+        voltages: &[crate::Value],
+    ) -> ((Vec<crate::Value>, Vec<crate::Value>), (Vec<crate::Value>, Vec<crate::Value>)) {
+        let nodes = vec![1usize, 2usize];
+        let branches: Vec<usize> = Vec::new();
+        let size = 2usize;
+        let triplets: Vec<(usize, usize, crate::Value)> = (0..size)
+            .flat_map(|row| (0..size).map(move |col| (row, col, 0.0)))
+            .collect();
+
+        let mut run = |packed: bool| {
+            let mut matrix = super::StaticMatrix::from_triplets(size, size, &triplets).expect("matrix");
+            let mut cache = super::GeneratedStaticStampCache::default();
+            cache.link(&matrix, &nodes, &branches, size);
+            let mut rhs = vec![0.0 as crate::Value; size];
+            {
+                let mut stamper = super::GeneratedStamper::new_with_static_cache(
+                    &mut matrix,
+                    &mut rhs,
+                    voltages,
+                    size,
+                    &cache,
+                );
+                if packed {
+                    stamper.stamp_current_packed(
+                        Some(0),
+                        Some(1),
+                        0.75,
+                        &[super::GeneratedStampLane::Node(0), super::GeneratedStampLane::Node(1)],
+                        &[derivative0, derivative1],
+                    );
+                } else {
+                    stamper.stamp_current_node2_local(
+                        Some(0),
+                        Some(1),
+                        0.75,
+                        0,
+                        derivative0,
+                        1,
+                        derivative1,
+                    );
+                }
+            }
+            (matrix.values_mut().to_vec(), rhs)
+        };
+
+        (run(false), run(true))
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn packed_stamp_matches_the_loose_argument_stamp() {
+        let (loose, packed) = stamp_both_ways(0.25, -0.5, &[0.3, -0.2]);
+        assert_eq!(loose.0, packed.0, "matrix entries");
+        assert_eq!(loose.1, packed.1, "right-hand side");
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn a_zero_lane_cannot_poison_the_right_hand_side() {
+        // A packed array is sized to the device, so most equations leave most
+        // lanes at zero. Multiplying such a lane by its unknown would be
+        // harmless right up until Newton diverges and that unknown is NaN --
+        // and then `0.0 * NaN` is NaN, which would reach the right-hand side
+        // for a lane the equation does not even touch. The loose-argument call
+        // never sees the lane, so the packed one must skip it.
+        let (loose, packed) = stamp_both_ways(0.25, 0.0, &[0.3, crate::Value::NAN]);
+        assert!(
+            packed.1.iter().all(|value| value.is_finite()),
+            "zero lane poisoned the right-hand side: {:?}",
+            packed.1
+        );
+        // This is the one case where the two deliberately disagree, so record
+        // that rather than assert equality. The loose call is handed the lane
+        // as an argument and multiplies it out unconditionally; the packed one
+        // can see the derivative is zero and decline. Asserting they match here
+        // would be asserting the packed form reproduces a defect.
+        assert!(
+            loose.1.iter().any(|value| !value.is_finite()),
+            "fixture no longer reaches the case it exists for: {:?}",
+            loose.1
+        );
+        assert_eq!(
+            loose.0, packed.0,
+            "the matrix is unaffected either way; only the equivalent source differs"
+        );
     }
 
     #[cfg(feature = "veriloga-builtins-base")]
