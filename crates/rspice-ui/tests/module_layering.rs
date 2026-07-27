@@ -427,6 +427,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",
+    // A static catalog of demonstration circuits. It sits here rather than up
+    // in the presentation group because nothing presents it except the menu
+    // that lists it, and it loads a circuit into `AppState`.
+    "examples",
     // Workflows that mutate application state.
     "file_workflow",
     "project_workflow",
@@ -449,7 +453,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "jobs_manager",
     "calculator_tool",
     "preflight",
-    "examples",
     "cross_probe",
     "account_organization",
     "simulation_analysis_tabs",
@@ -513,8 +516,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("commands", "chrome", 10),
     ("commands", "menu_bar", 5),
     ("chrome", "preflight", 1),
-    ("surfaces", "examples", 3),
-    ("menu_bar", "examples", 1),
     ("surfaces", "preflight", 1),
     // Browser import/download sitting above what needs it.
     ("code_workspace", "browser_file_import", 7),
