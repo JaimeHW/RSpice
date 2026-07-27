@@ -2,6 +2,11 @@
 //!
 //! Provides a comprehensive library of analog and digital code models.
 //!
+//! The inventory below is grouped for reading. The authoritative list is
+//! [`CodeModelRegistry::builtin_model_names`](crate::xspice::CodeModelRegistry::builtin_model_names),
+//! and each model's own `description()` is what the registry reports; names
+//! joined by `/` are aliases for one model.
+//!
 //! # Analog Models
 //!
 //! - **gain** - Voltage gain block
@@ -30,6 +35,9 @@
 //! - **slew** - Slew-rate limited follower
 //! - **aswitch** - Analog switch
 //! - **pswitch** - PSPICE-compatible analog switch
+//! - **s_h** - Sample and hold
+//! - **capacitor** / **capacitoric** - Capacitor with optional initial condition
+//! - **inductor** / **inductoric** - Inductor with optional initial condition
 //! - **sidiode** - Simple XSPICE diode
 //! - **zener** - XSPICE Zener diode
 //! - **memristor** - Threshold memristive device
@@ -37,7 +45,7 @@
 //! - **cmeter** / **lmeter** - Topology-measuring C/L meters
 //! - **lcouple** - Inductive winding/core coupling
 //! - **ilimit** - Current-limited analog output driver
-//! - **seegen** - Single-event-effect current generator
+//! - **seegen** / **seegenerator** - Single-event-effect current generator
 //! - **potentiometer** - Three-terminal analog potentiometer
 //! - **tline** - Generic transmission line
 //! - **cpline** - Coupled transmission line
@@ -60,6 +68,8 @@
 //! - **d_or** / **d_nor** - OR/NOR gates
 //! - **d_xor** / **d_xnor** - XOR/XNOR gates
 //! - **d_tristate** - Tri-state buffer
+//! - **d_open_c** - Open-collector digital buffer
+//! - **d_open_e** - Open-emitter digital buffer
 //! - **d_pullup** / **d_pulldown** - Pull resistors
 //! - **d_lut** / **d_genlut** - Digital lookup tables
 //! - **d_fdiv** - Digital frequency divider
@@ -75,14 +85,34 @@
 //! - **d_srlatch** - SR latch
 //! - **d_state** - State machine
 //! - **d_ram** - Random access memory
-//! - **xyce_d_tff** - Xyce DIG-compatible finite-output T flip-flop
+//!
+//! # Xyce DIG-Compatible Models
+//!
+//! Xyce's `DIG` primitives drive their outputs through state-dependent
+//! rail resistances rather than ideal digital nodes, so these models stamp
+//! a finite-impedance analog output directly instead of relying on a DAC
+//! bridge. The `xyce_legacy_*` names are the Y-device form, which does not
+//! expose power-rail terminals.
+//!
+//! - **xyce_d_buffer** / **xyce_d_inverter** - Buffer and inverter
+//! - **xyce_d_and** / **xyce_d_nand** - AND/NAND gates
+//! - **xyce_d_or** / **xyce_d_nor** - OR/NOR gates
+//! - **xyce_d_xor** / **xyce_d_xnor** - XOR/XNOR gates
+//! - **xyce_d_add** - Full adder
+//! - **xyce_d_dff** / **xyce_d_jkff** / **xyce_d_tff** - Flip-flops
+//! - **xyce_d_dlatch** - D latch
+//! - **xyce_legacy_d_inverter** - Legacy Y-device inverter
+//! - **xyce_legacy_d_and** / **xyce_legacy_d_nand** - Legacy Y-device AND/NAND
+//! - **xyce_legacy_d_or** / **xyce_legacy_d_nor** - Legacy Y-device OR/NOR
+//! - **xyce_legacy_d_xor** / **xyce_legacy_d_xnor** - Legacy Y-device XOR/XNOR
+//! - **xyce_legacy_d_dff** - Legacy Y-device D flip-flop
 //!
 //! # Real Event Models
 //!
 //! - **d_to_real** - Digital to real-valued event converter
 //! - **real_gain** - Real-valued event gain
 //! - **real_delay** - Clocked real-valued event delay
-//! - **real_to_v** - Real-valued event to analog converter
+//! - **real_to_v** / **r_to_v** - Real-valued event to analog converter
 //!
 //! # Debug/Example Models
 //!
