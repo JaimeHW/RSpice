@@ -322,17 +322,14 @@ a before/after scoreboard.
 
 The native backend is a stateless, one-shot worker process. Service operators
 should start from the conservative worker profile in
-[config/production.toml](config/production.toml) and follow the isolation,
-admission, observability, capacity, backup, restore, upgrade, rollback, and
-incident procedures in the
-[production runbook](docs/operations/production-runbook.md).
+[config/production.toml](config/production.toml), which documents the isolation,
+admission, observability, and capacity settings a deployment is expected to pin.
 
 Releases are cut from annotated version tags for six Linux, macOS, and Windows
 target triples, bound to deterministic archives, SHA-256 sidecars, CycloneDX
 SBOMs, and GitHub artifact attestations, and published without permitting an
-existing asset to be replaced. Archives carry both runbooks, the production
-profile, and a manifest recording the exact source commit and payload hashes.
-Operator procedure: [native release runbook](docs/operations/native-release.md).
+existing asset to be replaced. Archives carry the production profile and a
+manifest recording the exact source commit and payload hashes.
 
 ## Repository
 
