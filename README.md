@@ -242,10 +242,11 @@ maturin develop --release
 ```python
 import rspice
 
+# Netlist.parse takes statements only — no title line, so nothing is swallowed.
 netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
 engine = rspice.Engine()
 result = engine.run_dc_op(netlist)
-print(result.voltage(1))
+print(result.voltage(1))  # 10.0
 ```
 
 Transient and AC results come back as NumPy arrays. The crate README carries the
@@ -278,8 +279,10 @@ long run cooperatively.
 ```rust
 use rspice_core::{Engine, Netlist};
 
-let netlist = Netlist::parse("V1 1 0 10\nR1 1 0 1k\n.end")?;
+// The first line of a SPICE deck is the title, never an element.
+let netlist = Netlist::parse("divider\nV1 1 0 10\nR1 1 0 1k\n.end")?;
 let result = Engine::default().run_dc_op(&netlist)?;
+assert_eq!(result.voltage(1), 10.0);
 ```
 
 API details and the feature-flag matrix: [crates/rspice-core/README.md](crates/rspice-core/README.md).
