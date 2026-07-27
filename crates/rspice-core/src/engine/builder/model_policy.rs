@@ -99,11 +99,10 @@ pub(super) fn add_xyce_core_inductor_element(
     let params = resolve_xyce_core_model_params(model_def, winding_turns)?;
     let core_bh_si_units =
         model_param(&model_def.params, &["BHSIUNITS"]).is_some_and(|value| value != 0.0);
-    let mut core = crate::device::passive::JilesAthertonInductor::new(element.name.clone(), np, nn)
+    let core = crate::device::passive::JilesAthertonInductor::new(element.name.clone(), np, nn)
         .with_params(params);
-    if let Some(ic) = initial_current {
-        core.set_initial_current(ic);
-    }
+    let effective_initial_current =
+        initial_current.filter(|value| value.is_finite() && *value != 0.0);
 
     // MutIndNonLin's Q vector is the authored vacuum inductance.  The
     // constitutive `mid` factor belongs only to F and its Jacobian; using the
@@ -116,10 +115,19 @@ pub(super) fn add_xyce_core_inductor_element(
             element.name, runtime_l
         )));
     }
-    if let Some(ic) = initial_current {
-        circuit
-            .inductors
-            .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
+    // MutIndNonLin2 does not honor instance IC values.  LEVEL=1 fixes only
+    // the public branch current at transient start; its hidden M/R state is
+    // still initialized by the device equations.
+    if !core.is_xyce_core_level2() {
+        if let Some(ic) = effective_initial_current {
+            circuit
+                .inductors
+                .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
+        } else {
+            circuit
+                .inductors
+                .add(element.name.clone(), np, nn, branch, runtime_l);
+        }
     } else {
         circuit
             .inductors
@@ -170,6 +178,8 @@ pub(super) fn add_xyce_core_winding_element(
     let params = resolve_xyce_core_model_params(model_def, winding_turns)?;
     let core = crate::device::passive::JilesAthertonInductor::new(element.name.clone(), 0, 0)
         .with_params(params);
+    let effective_initial_current =
+        initial_current.filter(|value| value.is_finite() && *value != 0.0);
     let runtime_l = core.nominal_inductance();
     if !runtime_l.is_finite() || runtime_l <= 0.0 {
         return Err(SimulationError::Circuit(format!(
@@ -181,10 +191,16 @@ pub(super) fn add_xyce_core_winding_element(
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
     let branch = circuit.allocate_branch_named(&element.name);
-    if let Some(ic) = initial_current {
-        circuit
-            .inductors
-            .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
+    if !core.is_xyce_core_level2() {
+        if let Some(ic) = effective_initial_current {
+            circuit
+                .inductors
+                .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
+        } else {
+            circuit
+                .inductors
+                .add(element.name.clone(), np, nn, branch, runtime_l);
+        }
     } else {
         circuit
             .inductors

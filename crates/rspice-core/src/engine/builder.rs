@@ -7474,7 +7474,6 @@ impl Engine {
                 ))
             })?;
             let mut winding_bindings = Vec::with_capacity(group.windings.len());
-            let mut aggregate_initial_current = 0.0;
             let mut first_turns = None;
             let mut first_index = None;
             for winding_name in &group.windings {
@@ -7512,8 +7511,6 @@ impl Engine {
                 }
                 first_turns.get_or_insert(*value);
                 first_index.get_or_insert(index);
-                aggregate_initial_current +=
-                    *value * circuit.inductors.i_prev.get(index).copied().unwrap_or(0.0);
                 winding_bindings.push(crate::circuit::XyceCoreWindingBinding {
                     inductor_index: index,
                     turns: *value,
@@ -7524,16 +7521,12 @@ impl Engine {
             let params = resolve_xyce_core_model_params(model_def, first_turns)?;
             let first_node_pos = circuit.inductors.node_pos[first_index];
             let first_node_neg = circuit.inductors.node_neg[first_index];
-            let mut core = crate::device::passive::JilesAthertonInductor::new(
+            let core = crate::device::passive::JilesAthertonInductor::new(
                 group.core_name.clone(),
                 first_node_pos,
                 first_node_neg,
             )
             .with_params(params);
-            let representative_current = aggregate_initial_current / first_turns;
-            if representative_current.is_finite() && representative_current.abs() > 0.0 {
-                core.set_initial_current(representative_current);
-            }
             let core_bh_si_units =
                 model_param(&model_def.params, &["BHSIUNITS"]).is_some_and(|value| value != 0.0);
             circuit.add_xyce_core_group(

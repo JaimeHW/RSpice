@@ -697,8 +697,11 @@ impl CircuitData {
     /// before delayed-wave companions take over for t > 0. Inductors without
     /// `IC=` are DC shorts here, while `IC=` inductors are constrained to the
     /// requested branch current using Xyce's transient-start operating-point
-    /// semantics. For t > 0, magnetic companion stamps take over and these
-    /// operating-point stamps must NOT be applied.
+    /// semantics. Grouped Xyce Core windings use deterministic branch-current
+    /// seeds for this startup solve so a zero-valued source in parallel with a
+    /// Core winding does not create duplicate ideal-voltage rows. For t > 0,
+    /// magnetic companion stamps take over and these operating-point stamps
+    /// must NOT be applied.
     pub fn stamp_transient_operating_point_direct(
         &self,
         matrix: &mut StaticMatrix,
