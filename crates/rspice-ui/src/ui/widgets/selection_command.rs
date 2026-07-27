@@ -6,9 +6,39 @@
 
 use egui::{Align, Frame, Layout, Margin, Rect, Stroke, Ui, Vec2};
 
-use crate::state::{DesignNoteKind, DocumentationShapeGeometry, Point, arc_parameters};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+
+/// A point in the previewed document's own integer coordinate space.
+///
+/// The widget only normalises these into the preview rect. It never asks what
+/// they mean, which is why the design system does not depend on the schematic
+/// model to draw a schematic preview.
+pub(crate) type PreviewPoint = (i32, i32);
+
+/// How a design note should read. Callers map their own domain enum onto this;
+/// the widget picks a colour and an underline from it and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NotePreviewStyle {
+    Muted,
+    Accent,
+    AccentUnderlined,
+    Warning,
+}
+
+/// How an already-tessellated documentation outline should be stroked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShapePreviewStroke {
+    /// Two opposite corners of a rectangle.
+    Rectangle,
+    /// An open polyline through every point.
+    Polyline,
+    /// A polyline closed back to its first point.
+    ClosedPolyline,
+    /// A leader from the first point to the second, then a box between the
+    /// second and third.
+    Callout,
+}
 
 /// The mockup media query is viewport-scoped, not container-scoped. The
 /// 760-point workflow surface has 12-point body padding, so comparing this
@@ -31,25 +61,28 @@ pub(crate) enum SelectionPreview {
         label: String,
     },
     Bus {
-        points: Vec<Point>,
+        points: Vec<PreviewPoint>,
         label: String,
     },
     BusTap {
-        bus_point: Point,
-        connection_point: Point,
+        bus_point: PreviewPoint,
+        connection_point: PreviewPoint,
         label: String,
     },
     NetLabel {
-        position: Point,
+        position: PreviewPoint,
         label: String,
     },
     DesignNote {
-        position: Point,
+        position: PreviewPoint,
         label: String,
-        kind: DesignNoteKind,
+        style: NotePreviewStyle,
     },
     DocumentationShape {
-        geometry: DocumentationShapeGeometry,
+        /// Already tessellated by the caller: arcs arrive as a polyline, so
+        /// the widget never needs the curve solver.
+        outline: Vec<PreviewPoint>,
+        stroke: ShapePreviewStroke,
         label: String,
     },
 }
@@ -452,13 +485,13 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
         SelectionPreview::DesignNote {
             position,
             label,
-            kind,
+            style,
         } => {
             let anchor = map_points(&[*position], content)[0];
-            let color = match kind {
-                DesignNoteKind::PlainText => t.color.text_dim,
-                DesignNoteKind::PropertyDisplay | DesignNoteKind::RequirementLink => t.color.accent,
-                DesignNoteKind::ReviewNote => t.color.warn,
+            let color = match style {
+                NotePreviewStyle::Muted => t.color.text_dim,
+                NotePreviewStyle::Accent | NotePreviewStyle::AccentUnderlined => t.color.accent,
+                NotePreviewStyle::Warning => t.color.warn,
             };
             painter.circle_filled(anchor, 3.0, color);
             let galley = painter.layout(
@@ -469,7 +502,7 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
             );
             let text_pos = anchor + Vec2::new(10.0, -galley.size().y * 0.5);
             painter.galley(text_pos, galley.clone(), color);
-            if *kind == DesignNoteKind::RequirementLink {
+            if *style == NotePreviewStyle::AccentUnderlined {
                 painter.line_segment(
                     [
                         text_pos + Vec2::new(0.0, galley.size().y),
@@ -480,12 +513,15 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
             }
             Rect::from_two_pos(anchor, text_pos + galley.size()).expand(10.0)
         }
-        SelectionPreview::DocumentationShape { geometry, .. } => {
-            let points = documentation_preview_points(geometry);
-            let mapped = map_points(&points, content);
+        SelectionPreview::DocumentationShape {
+            outline,
+            stroke: shape_stroke,
+            ..
+        } => {
+            let mapped = map_points(outline, content);
             let stroke = Stroke::new(1.8, t.color.accent);
-            match geometry {
-                DocumentationShapeGeometry::Rectangle { .. } => {
+            match shape_stroke {
+                ShapePreviewStroke::Rectangle => {
                     painter.rect_stroke(
                         Rect::from_two_pos(mapped[0], mapped[1]),
                         7.0,
@@ -493,18 +529,17 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
                         egui::StrokeKind::Middle,
                     );
                 }
-                DocumentationShapeGeometry::Line { .. }
-                | DocumentationShapeGeometry::Arc { .. } => {
+                ShapePreviewStroke::Polyline => {
                     painter.add(egui::Shape::line(mapped.clone(), stroke));
                 }
-                DocumentationShapeGeometry::Polygon { .. } => {
+                ShapePreviewStroke::ClosedPolyline => {
                     let mut closed = mapped.clone();
                     if let Some(first) = closed.first().copied() {
                         closed.push(first);
                     }
                     painter.add(egui::Shape::line(closed, stroke));
                 }
-                DocumentationShapeGeometry::Callout { .. } => {
+                ShapePreviewStroke::Callout => {
                     painter.line_segment([mapped[0], mapped[1]], stroke);
                     painter.rect_stroke(
                         Rect::from_two_pos(mapped[1], mapped[2]),
@@ -540,54 +575,28 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
         t.color.accent,
     );
 }
-
-fn documentation_preview_points(geometry: &DocumentationShapeGeometry) -> Vec<Point> {
-    match geometry {
-        DocumentationShapeGeometry::Arc {
-            start,
-            through,
-            end,
-        } => {
-            let Some((cx, cy, radius, start_angle, sweep)) = arc_parameters(*start, *through, *end)
-            else {
-                return vec![*start, *through, *end];
-            };
-            (0..=48)
-                .map(|index| {
-                    let angle = start_angle + sweep * f64::from(index) / 48.0;
-                    Point::new(
-                        (cx + radius * angle.cos()).round() as i32,
-                        (cy + radius * angle.sin()).round() as i32,
-                    )
-                })
-                .collect()
-        }
-        _ => geometry.points(),
-    }
-}
-
-fn map_points(points: &[Point], rect: Rect) -> Vec<egui::Pos2> {
+fn map_points(points: &[PreviewPoint], rect: Rect) -> Vec<egui::Pos2> {
     if points.is_empty() {
         return vec![rect.center()];
     }
     let min_x = points
         .iter()
-        .map(|point| i64::from(point.x))
+        .map(|point| i64::from(point.0))
         .min()
         .unwrap_or_default();
     let max_x = points
         .iter()
-        .map(|point| i64::from(point.x))
+        .map(|point| i64::from(point.0))
         .max()
         .unwrap_or_default();
     let min_y = points
         .iter()
-        .map(|point| i64::from(point.y))
+        .map(|point| i64::from(point.1))
         .min()
         .unwrap_or_default();
     let max_y = points
         .iter()
-        .map(|point| i64::from(point.y))
+        .map(|point| i64::from(point.1))
         .max()
         .unwrap_or_default();
     let span_x = (max_x - min_x) as f64;
@@ -606,8 +615,8 @@ fn map_points(points: &[Point], rect: Rect) -> Vec<egui::Pos2> {
         .iter()
         .map(|point| {
             egui::pos2(
-                rect.center().x + ((f64::from(point.x) - model_center_x) * scale) as f32,
-                rect.center().y + ((f64::from(point.y) - model_center_y) * scale) as f32,
+                rect.center().x + ((f64::from(point.0) - model_center_x) * scale) as f32,
+                rect.center().y + ((f64::from(point.1) - model_center_y) * scale) as f32,
             )
         })
         .collect()

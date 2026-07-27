@@ -11,13 +11,14 @@ use crate::state::{
     Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, DesignNote,
     DesignNoteKind, DesignNoteLayer, DesignReviewState, DocumentationShape,
     DocumentationShapeGeometry, DocumentationShapeLayer, NetLabel, Point, SchematicState,
+    arc_parameters,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, SelectionImpact,
-    SelectionPreview, select, select_with_response, selection_command_workflow,
-    workflow_preview_status,
+    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, NotePreviewStyle,
+    PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke, select,
+    select_with_response, selection_command_workflow, workflow_preview_status,
 };
 
 use crate::workbench::app::{
@@ -987,7 +988,7 @@ fn object_summary(
             ObjectSummary {
                 object: format!("BUS-{} \u{00b7} {candidate_label}", draft.original.id),
                 preview: SelectionPreview::Bus {
-                    points: draft.original.points.clone(),
+                    points: preview_points(&draft.original.points),
                     label: candidate_label,
                 },
                 scope: match bus_impact {
@@ -1016,8 +1017,8 @@ fn object_summary(
         ObjectPropertiesDraft::BusTap(draft) => ObjectSummary {
             object: format!("TAP-{} \u{00b7} {}", draft.original.id, draft.slice.trim()),
             preview: SelectionPreview::BusTap {
-                bus_point: draft.original.bus_point,
-                connection_point: draft.original.connection_point,
+                bus_point: preview_point(draft.original.bus_point),
+                connection_point: preview_point(draft.original.connection_point),
                 label: draft.slice.trim().to_owned(),
             },
             scope: "one selected typed bus tap".to_owned(),
@@ -1046,7 +1047,7 @@ fn object_summary(
             ObjectSummary {
                 object: format!("LABEL-{} \u{00b7} {}", draft.original.id, draft.name.trim()),
                 preview: SelectionPreview::NetLabel {
-                    position,
+                    position: preview_point(position),
                     label: draft.name.trim().to_owned(),
                 },
                 scope: "one selected electrical net label".to_owned(),
@@ -1074,7 +1075,7 @@ fn object_summary(
                 }
             ),
             preview: SelectionPreview::NetLabel {
-                position: draft.original.preview_position,
+                position: preview_point(draft.original.preview_position),
                 label: draft.name.trim().to_owned(),
             },
             scope: "one resolved logical named net".to_owned(),
@@ -1098,9 +1099,9 @@ fn object_summary(
         ObjectPropertiesDraft::DesignNote(draft) => ObjectSummary {
             object: format!("NOTE-{} · {}", draft.original.id, draft.kind.label()),
             preview: SelectionPreview::DesignNote {
-                position: draft.original.pos,
+                position: preview_point(draft.original.pos),
                 label: draft.text.trim().to_owned(),
-                kind: draft.kind,
+                style: note_preview_style(draft.kind),
             },
             scope: "one selected non-electrical design note".to_owned(),
             effect: if legal {
@@ -1126,9 +1127,13 @@ fn object_summary(
                     draft.original.id,
                     draft.original.kind().label()
                 ),
-                preview: SelectionPreview::DocumentationShape {
-                    geometry,
-                    label: format!("{} documentation shape", draft.original.kind().label()),
+                preview: {
+                    let (outline, stroke) = shape_preview_outline(&geometry);
+                    SelectionPreview::DocumentationShape {
+                        outline,
+                        stroke,
+                        label: format!("{} documentation shape", draft.original.kind().label()),
+                    }
                 },
                 scope: "one selected non-electrical documentation shape".to_owned(),
                 effect: if legal {
@@ -2164,5 +2169,84 @@ mod tests {
                 node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
             }));
         }
+    }
+}
+
+// =============================================================================
+// Design-system preview adapters
+// =============================================================================
+//
+// The selection-command widget draws previews from plain coordinate pairs and
+// a small presentation vocabulary. Translating the schematic model into that
+// vocabulary is this dialog's job, not the design system's: `crate::ui` stays
+// free of any dependency on `crate::state`.
+
+/// Project a schematic point into the preview's coordinate pair.
+fn preview_point(point: Point) -> PreviewPoint {
+    (point.x, point.y)
+}
+
+fn preview_points(points: &[Point]) -> Vec<PreviewPoint> {
+    points.iter().copied().map(preview_point).collect()
+}
+
+/// Map a design-note kind onto how the preview should read it.
+fn note_preview_style(kind: DesignNoteKind) -> NotePreviewStyle {
+    match kind {
+        DesignNoteKind::PlainText => NotePreviewStyle::Muted,
+        DesignNoteKind::PropertyDisplay => NotePreviewStyle::Accent,
+        DesignNoteKind::RequirementLink => NotePreviewStyle::AccentUnderlined,
+        DesignNoteKind::ReviewNote => NotePreviewStyle::Warning,
+    }
+}
+
+/// Tessellate a documentation shape for preview and say how to stroke it.
+///
+/// Arcs are flattened to a polyline here so the widget never needs the curve
+/// solver. A degenerate arc falls back to its three defining points, which is
+/// what the previous in-widget helper did.
+fn shape_preview_outline(
+    geometry: &DocumentationShapeGeometry,
+) -> (Vec<PreviewPoint>, ShapePreviewStroke) {
+    match geometry {
+        DocumentationShapeGeometry::Arc {
+            start,
+            through,
+            end,
+        } => {
+            let Some((cx, cy, radius, start_angle, sweep)) = arc_parameters(*start, *through, *end)
+            else {
+                return (
+                    preview_points(&[*start, *through, *end]),
+                    ShapePreviewStroke::Polyline,
+                );
+            };
+            let outline = (0..=48)
+                .map(|index| {
+                    let angle = start_angle + sweep * f64::from(index) / 48.0;
+                    (
+                        (cx + radius * angle.cos()).round() as i32,
+                        (cy + radius * angle.sin()).round() as i32,
+                    )
+                })
+                .collect();
+            (outline, ShapePreviewStroke::Polyline)
+        }
+        DocumentationShapeGeometry::Rectangle { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::Rectangle,
+        ),
+        DocumentationShapeGeometry::Polygon { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::ClosedPolyline,
+        ),
+        DocumentationShapeGeometry::Callout { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::Callout,
+        ),
+        DocumentationShapeGeometry::Line { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::Polyline,
+        ),
     }
 }

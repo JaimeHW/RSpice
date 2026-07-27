@@ -122,7 +122,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("simulation", "schematic", 3),
     ("services", "properties", 2),
     ("services", "schematic", 2),
-    ("ui", "state", 1),
 ];
 
 /// Whole-application mutable access, frozen at its current level.
