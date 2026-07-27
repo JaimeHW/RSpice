@@ -408,6 +408,22 @@ fn emit_partitioned_noise_schedule(
         if fragment.is_empty() {
             continue;
         }
+        // Schedule fragments are hoisted into unit-returning helpers, so a
+        // `return` inside one either fails to compile or silently skips the
+        // rest of the schedule. Control flow that has to escape a statement
+        // must record itself on the eval context instead. Catch it here, where
+        // the offending statement is still identifiable, rather than in rustc
+        // against a multi-megabyte generated file.
+        if fragment_contains_return(&fragment) {
+            return Err(RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!(
+                    "noise schedule statement {index} emits `return` into the unit-returning \
+                     helper `{prefix}`; report the condition on the eval context instead"
+                ),
+            ));
+        }
         let fragment_lines = fragment.lines().count();
         if !body.is_empty() && body_lines + fragment_lines > MAX_NOISE_HELPER_SOURCE_LINES {
             helper_bodies.push(std::mem::take(&mut body));
@@ -588,6 +604,38 @@ fn emit_noise_statements(
         }
     }
     Ok(())
+}
+
+/// Whether emitted Rust contains a `return` keyword outside a string literal.
+///
+/// Deliberately conservative: it matches the bare keyword only, so identifiers
+/// like `returned_value` and the text of a `&str` operand do not trip it.
+fn fragment_contains_return(fragment: &str) -> bool {
+    let bytes = fragment.as_bytes();
+    let mut index = 0usize;
+    let mut in_string = false;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if in_string => {
+                index += 2;
+                continue;
+            }
+            b'"' => in_string = !in_string,
+            b'r' if !in_string && fragment[index..].starts_with("return") => {
+                let before_is_boundary = index == 0
+                    || !(bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'_');
+                let after = bytes.get(index + "return".len());
+                let after_is_boundary =
+                    after.is_none_or(|byte| !(byte.is_ascii_alphanumeric() || *byte == b'_'));
+                if before_is_boundary && after_is_boundary {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    false
 }
 
 fn noise_schedule_selection(
@@ -1090,4 +1138,52 @@ fn option_str(value: Option<&str>) -> String {
 
 fn option_usize(value: Option<u32>) -> String {
     value.map_or_else(|| "None".to_string(), |value| format!("Some({value})"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fragment_contains_return;
+
+    #[test]
+    fn bare_return_keyword_is_detected() {
+        assert!(fragment_contains_return("    return;\n"));
+        assert!(fragment_contains_return("if x > 1.0 { return Err(e); }"));
+        assert!(fragment_contains_return("return"));
+    }
+
+    #[test]
+    fn identifiers_containing_return_are_not_detected() {
+        assert!(!fragment_contains_return("let returned_value = 1.0;"));
+        assert!(!fragment_contains_return("let x = early_return + 2.0;"));
+        assert!(!fragment_contains_return("w[3] = noreturn_flag;"));
+    }
+
+    #[test]
+    fn return_inside_a_string_literal_is_not_detected() {
+        assert!(!fragment_contains_return(
+            "ctx.report_analog_loop_limit(\"return\", n, limit);"
+        ));
+        assert!(!fragment_contains_return(
+            "let q: &str = \"a return b\"; let y = 1.0;"
+        ));
+    }
+
+    #[test]
+    fn escaped_quote_does_not_unbalance_string_tracking() {
+        // The escaped quote must not close the literal, or the `return` that
+        // follows inside it would be misread as live code.
+        assert!(!fragment_contains_return("let s = \"a \\\" return b\";"));
+        // ...and a real return after a literal containing an escape is found.
+        assert!(fragment_contains_return("let s = \"a \\\" b\"; return;"));
+    }
+
+    #[test]
+    fn the_emitted_loop_limit_report_is_accepted() {
+        // Exactly what emit_noise_statements writes for an analog loop bound.
+        assert!(!fragment_contains_return(
+            "    if p_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS \
+             { ctx.report_analog_loop_limit(\"noise\", p_iterations, \
+             Self::MAX_ANALOG_LOOP_ITERATIONS); break; }"
+        ));
+    }
 }
