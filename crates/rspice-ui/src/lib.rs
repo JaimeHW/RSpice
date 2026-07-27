@@ -5,22 +5,50 @@
 //!
 //! # Architecture
 //!
-//! The crate is organized by domain following professional EDA tool patterns:
+//! This crate is the RSpice application, deliberately kept whole. The
+//! simulation engine lives in `rspice-core` and `rspice-veriloga`; everything
+//! the application itself owns — persisted design state, project I/O, run
+//! orchestration, viewer mathematics, and chrome — stays here. Modules that
+//! never mention `egui` are therefore expected, not misplaced: they are the
+//! application layer, not the presentation layer.
 //!
-//! - `analysis/` - Analysis viewers (Bode, FFT, Smith chart, etc.)
-//! - `schematic/` - Schematic editor (canvas, export, toolbar, symbols)
-//! - `waveform/` - Waveform viewer with cursors and measurements
-//! - `simulation/` - Simulation controller and dialogs
-//! - `panels/` - Side panels (project browser, properties)
-//! - `properties/` - Property editing and design variables
-//! - `common/` - Shared components (menu bar, status bar, theme)
-//! - `services/` - Backend services (file I/O, simulation runner)
-//! - `state/` - Application state management
-//! - `utils/` - Utility functions
+//! Because there is no crate boundary to lean on, the module layering is
+//! enforced by `tests/module_layering.rs` instead. A module may reference
+//! any module below it and none at or above it. Lowest layer first:
+//!
+//! | Layer | Modules | Owns |
+//! |-------|---------|------|
+//! | 0 | `product`, `quantity`, `utils` | Framework-independent contracts, typed identities, unit-safe presentation policy |
+//! | 1 | `results`, `ui` | Versioned result documents; the design system (tokens, palette, widgets, plot engine) |
+//! | 2 | `state` | The persisted design, library, and project model |
+//! | 3 | `analysis`, `automation_workflow`, `io`, `waveform` | Viewer mathematics, the CI workflow language, file formats |
+//! | 4 | `services` | DRC, licensing, and the per-analysis engine adapters |
+//! | 5 | `simulation` | Analysis plans, netlist generation, run orchestration |
+//! | 6 | `properties` | Component property editing |
+//! | 7 | `panels` | Docked auxiliary panels |
+//! | 8 | `schematic` | The schematic document engine |
+//! | 9 | `workbench` | Application chrome, surfaces, navigation, commands |
+//! | 10 | `common` | The application root: [`RSpiceApp`], dialogs, workflows |
+//!
+//! Known departures from this order are recorded, counted, and ratcheted
+//! down in that test's `ALLOWED_VIOLATIONS` table. Adding to it is not a way
+//! to unblock new code — a fresh violation means the code is in the wrong
+//! module.
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
-#![allow(deprecated)]
+// NOTE: this crate previously carried a blanket `#![allow(deprecated)]`. It
+// was hiding 63 real egui 0.34 migration sites across 20 APIs — the panel
+// constructors (`TopBottomPanel`/`SidePanel` -> `Panel::top`/`left`, and
+// `Panel::show(ctx)` -> `show_inside(ui)`), `Frame::rounding`,
+// `Ui::set_enabled`, `Context::screen_rect`, and the `Popup` family. Those
+// warnings are left visible on purpose: the migration is an egui API change
+// with layout consequences that needs its own visual verification pass, and a
+// silent allow is how it stayed invisible in the first place.
+// The desktop build detaches from its console on Windows and the browser
+// build has no stderr at all, so anything printed is a diagnostic nobody
+// will ever read. Route it through `log` and the application log buffer.
+#![deny(clippy::print_stdout, clippy::print_stderr)]
 #![cfg_attr(
     test,
     allow(

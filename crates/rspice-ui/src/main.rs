@@ -3,8 +3,6 @@
 //! Cross-platform entry point for RSpice UI.
 //! Uses egui for commercial-grade GPU-accelerated rendering.
 
-#![allow(deprecated)]
-
 // =============================================================================
 // Desktop Entry Point - Commercial-grade GPU-native UI
 // =============================================================================
