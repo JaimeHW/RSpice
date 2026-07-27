@@ -38,9 +38,11 @@ The crate-level entry point is `Engine` (re-exported from `engine/`), with
 ```rust
 use rspice_core::{Engine, Netlist};
 
-let netlist = Netlist::parse("V1 1 0 10\nR1 1 0 1k\n.end")?;
+// The first line of a SPICE deck is the title, never an element.
+let netlist = Netlist::parse("divider\nV1 1 0 10\nR1 1 0 1k\n.end")?;
 let engine = Engine::default();
 let result = engine.run_dc_op(&netlist)?;
+assert_eq!(result.voltage(1), 10.0);
 ```
 
 `SimulationConfig`, `ConvergenceConfig`, `ConvergencePreset`, and
@@ -59,13 +61,13 @@ backs Ctrl-C in the CLI and `KeyboardInterrupt` in the Python bindings).
 | `engine/` | The orchestrator: DC, AC, transient, harmonic balance (`hb/`), PSS (`pss.rs`, `pss_noise.rs`), stability (`stb.rs`), transfer functions, matrix assembly and stamping, source value evaluation, behavioral-expression hooks, circuit builder, configuration and config resolution, convergence-aid drivers |
 | `analysis/` | Analysis algorithms and result types — see [Analyses](#analyses) — plus `.MEAS` evaluation (`measurements.rs`, `advanced/measure.rs`), post-processing, signal-integrity helpers, and result export (`output/`: rawfile export, waveforms, streaming waveforms) |
 | `expr/` | Expression engine for behavioral sources and parameters: parser, AST, bytecode compiler, and a small VM so expressions evaluate cheaply inside the Newton loop |
-| `library/` | `.lib` / model-library parsing and a library manager |
-| `xspice/` | XSPICE code-model subsystem: `CodeModel` trait, `CodeModelRegistry`, instance/context types, event and digital value types, and bundled analog/digital/bridge models |
+| `library/` | `.lib` / model-library parsing, a library manager, and filesystem discovery of shipped Verilog-A model packs |
+| `xspice/` | XSPICE code-model subsystem: `CodeModel` trait, `CodeModelRegistry`, instance/context types, event and digital value types, bundled analog/digital/bridge models, plus an `ifspec.ifs` parser and conformance helpers that diff the registry against an ngspice checkout |
 | `compat/` | Compatibility readers (`ltspice_raw.rs`: LTspice RAW files) |
 | `constants` | Physical and simulation constants |
 | `abort_signal` | `AbortSignal` trait with `AtomicAbort`/`NoAbort` implementations for cancelling long runs |
 | `simd/` | SIMD math, reduction, and integration kernels (only with the `simd` feature) |
-| `testing/` | The ngspice conformance harness — see [Testing](#testing) |
+| `testing/` | The ngspice and Xyce conformance harnesses — see [Testing](#testing) |
 | `time_compat` | Wall-clock shim: real `std::time::Instant` natively, a no-op stub on `wasm32` (bare WASM has no clock) |
 
 ## Device models
@@ -86,7 +88,9 @@ rejection for unsupported advanced BJT levels).
 - Legacy BSIM1/BSIM2 levels 4/5 (`legacy_bsim.rs`)
 - BSIM3v3 (`bsim3.rs`, `bsim3v3/` — params/temp/eval split)
 - BSIM4 v4.8 (`bsim4.rs`)
-- EKV (`ekv.rs`)
+- EKV (`ekv.rs`), plus a narrow native EKV3 `LEVEL=301` slice (`ekv3.rs`)
+  covering the VA-Models/Xyce 150 nm NMOS/PMOS cards; other EKV3 cards fail
+  closed in the builder
 - VDMOS power MOSFET (`vdmos/` — device, recovery, thermal submodules)
 - B3SOI silicon-on-insulator, in DD/FD/PD variants (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
 - JFET level 1 and native Parker-Skellern JFET2 (`jfet/`, `jfet.rs`;
@@ -127,6 +131,11 @@ submodules; the LTRA path is checked by `tests/ltra_ac_oracle.rs`), and
 coupled multi-conductor lines (`coupled_transmission_line.rs`,
 `cpl_native.rs`).
 
+**Memristors** — native Xyce `YMEMRISTOR` families: the TEAM model at
+`LEVEL=2` (`memristor_team.rs`) and the threshold-adaptive PEM model at
+`LEVEL=4` (`memristor_pem.rs`), both solving an internal state variable
+alongside the terminal equations.
+
 **Other** — switches (`switch.rs`), ideal op-amp (`opamp.rs`), GaN HEMT
 (`gan_hemt.rs`, in-tree physics-style model; ASM-HEMT/MVSG CMC
 qualification is feature-gated work through generated Rust from Verilog-A), thermal network elements (`thermal.rs`), tristate
@@ -164,6 +173,7 @@ Advanced analyses (`analysis/advanced/`):
 | Analysis | Module |
 | :--- | :--- |
 | Fourier / THD (`.FOUR`) | `fourier.rs` |
+| Volterra distortion (`.DISTO`) | `distortion.rs`, `engine/distortion.rs` |
 | Noise | `noise.rs`, `engine/advanced/noise.rs` |
 | Pole-zero | `pole_zero.rs`, `pole_zero/` |
 | Sensitivity (DC and AC) | `sensitivity.rs` |
@@ -228,7 +238,7 @@ exercise the parallel + SIMD paths.
 # Build (library only)
 cargo build -p rspice-core
 
-# Full test suite — 75 integration test files under tests/
+# Full test suite — 99 integration test files under tests/
 cargo test -p rspice-core
 
 # With Verilog-A device tests (veriloga_*.rs oracle tests need the JIT)
@@ -250,22 +260,37 @@ cargo run --release -p rspice-core --example klu_bench
 
 Library unit tests are excluded from the default package test target by
 `[lib] test = false`; run them explicitly with `cargo test -p rspice-core
---lib`. The integration suite in `tests/` includes oracle tests that pin
+--lib`. Doctests are off as well (`[lib] doctest = false`), so examples in
+rustdoc are checked by review rather than by `cargo test`.
+
+The integration suite in `tests/` includes oracle tests that pin
 device and analysis behavior to reference values (diode rectifier, VBIC
 excess phase, LTRA AC, native BSIM4, PSP103 via Verilog-A), RF-analysis tests
 (HB Jacobian/Krylov/varactor, PSS shooting, pnoise folding, PAC conversion,
 STB loop gain), parser robustness tests, and a determinism test.
 
-### ngspice conformance harness
+### Conformance harnesses
 
-`src/testing/ngspice_runner/` is a framework for running netlist decks
-through both ngspice (as reference) and this engine, comparing per-analysis
-results under explicit tolerances: suite discovery, execution, reference
-datasets, and validation live there, and `tests/ngspice_regression.rs` /
-`tests/ngspice_oracle_audit.rs` drive it. The crate also ships one binary,
-`rspice-ngspice-case-runner` (`src/bin/ngspice_case_runner.rs`), for
-orchestrating those case runs. For whole-process performance comparison
-against ngspice, see [rspice-bench](../rspice-bench/README.md) instead.
+`src/testing/ngspice_runner/` runs netlist decks through both ngspice (as
+reference) and this engine, comparing per-analysis results under explicit
+tolerances: suite discovery, execution, reference datasets, and validation
+live there, and `tests/ngspice_regression.rs` /
+`tests/ngspice_oracle_audit.rs` drive it.
+
+`src/testing/xyce_runner.rs` does the same for the vendored Xyce regression
+corpus, driven by `tests/xyce_regression.rs`. Every retained `.cir` deck is
+discovered and reported, but a deck is numerically executed only when its
+checked-in, relational, or explicitly qualified generated-oracle contract
+can be reproduced without the upstream platform harness, which is not
+vendored.
+
+The crate ships three binaries: `rspice-ngspice-case-runner` and
+`rspice-xyce-case-runner` orchestrate case runs for those two harnesses, and
+`xspice_ifspec_audit` diffs the XSPICE code-model registry against the
+`ifspec.ifs` files in an ngspice checkout.
+
+For whole-process performance comparison against ngspice, see
+[rspice-bench](../rspice-bench/README.md) instead.
 
 ## License
 
