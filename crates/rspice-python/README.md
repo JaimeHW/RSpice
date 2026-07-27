@@ -92,7 +92,7 @@ engine = rspice.Engine()
 result = engine.run_dc_op(netlist)
 print(f"V(out) = {result.voltage('out'):.3f} V")     # 5.000 V
 
-# Transient analysis (max_step defaults to stop_time / 50)
+# Transient analysis (max_step defaults to the output window / 50)
 tran = engine.run_tran(netlist, stop_time=1e-3)
 time = tran.time                                # NumPy array
 v_out = tran.voltage_waveform("out")            # NumPy array
@@ -125,23 +125,28 @@ def test_rc_step_response():
     assert report.measurement("trise").value == pytest.approx(219.7e-6, rel=0.02)
 ```
 
-`engine.run` executes the netlist's `.op`, `.dc`, `.ac`/`.ac data`, `.disto`,
-`.hb`, `.sp`, `.tran`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC
-and AC `.sens`, and `.four` directives in order and returns a `RunReport`:
+`engine.run` executes the netlist's `.op`, `.dc`, `.tran`, `.ac`/`.ac data`,
+`.disto`, `.hb`, `.sp`, `.noise`/`.noise data`, `.tf`, `.stb`, `.pz`, `.mc`,
+`.step`, `.temp`, DC and AC `.sens`, and `.four` directives in deck order and
+returns a `RunReport`:
 
-- `report.tran` / `report.ac` / `report.hb` / `report.distortion` / `report.op` /
-  `report.dc` / `report.noise` / `report.s_parameters` / `report.tf` /
-  `report.stb` / `report.pz` / `report.sensitivity` /
+- `report.op` / `report.dc` / `report.tran` / `report.ac` /
+  `report.distortion` / `report.hb` / `report.s_parameters` / `report.noise` /
+  `report.tf` / `report.stb` / `report.pz` / `report.monte_carlo` /
+  `report.step` / `report.temperature` / `report.sensitivity` /
   `report.sensitivity_ac` / `report.fourier` — the analysis results
 - `report.measurements`, `report.measurement(name)`, `report.failures`,
   `report.all_passed` — `.MEAS` outcomes for TRAN, DC, AC, and NOISE analyses
   (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data;
   `.MEAS NOISE` supports `ONOISE`/`INOISE` spectral densities)
-- `report.records` — one record per directive; anything the engine could not
-  execute is listed with `skipped=True` and a reason, never dropped silently
-- `report.assert_passed()` — raises `MeasurementError` unless at least one
-  measurement ran and all of them passed, so a deck whose measurements were
-  skipped cannot green-wash a pipeline
+- `report.records` / `report.analyses_run` / `report.skipped` — at least one
+  record per directive (`.four` adds one per output, `.sp donoise` adds a
+  noise record); anything the engine could not execute is listed with
+  `skipped=True` and a reason, never dropped silently
+- `report.assert_passed()` — raises `MeasurementError` unless every directive
+  ran, at least one measurement was evaluated, and all of them passed, so
+  neither a skipped analysis nor a skipped measurement can green-wash a
+  pipeline
 
 Measurements can also run against transient and DC-sweep results you already
 have:
@@ -157,10 +162,20 @@ matching TRAN, DC, AC, and NOISE `.MEAS` statements after it executes the deck.
 Standalone `Engine.measure(...)` is intentionally narrower today: it accepts
 `TransientResult` and `DcSweepResult` only.
 
-Supported `.MEAS` forms: `MAX`, `MIN`, `AVG`, `RMS`, `PP`, `INTEG`
-(`FROM=`/`TO=` windows), `FIND ... AT=` / `FIND ... WHEN ...` (including
-`FIND TIME WHEN ...`), and `TRIG ... TARG ...` delay measurements. Signals
-address node voltages (`V(out)`) and branch currents (`I(V1)`). For AC,
+Supported `.MEAS` forms:
+
+- Windowed statistics over `FROM=`/`TO=`: `MAX`, `MIN`, `PP`, `AVG`, `RMS`,
+  `INTEG` (`INTEGRAL`)
+- Point queries: `FIND ... AT=` / `FIND ... WHEN ...` (including
+  `FIND TIME WHEN ...`), standalone `WHEN`, and `DERIV` (`DERIVATIVE`)
+- `TRIG ... TARG ...` delay measurements
+- Expressions over earlier results: `PARAM='expr'`, and `EQN` for Xyce
+  continuous equation measures re-evaluated at every accepted point
+- Waveform comparison: `ERR`/`ERR1` (RMS norm) and `ERR2` (mean-absolute
+  norm) between two signals, and `ERROR ... FILE=` against a column of an
+  external Xyce PRN, CSV, or CSDF table
+
+Signals address node voltages (`V(out)`) and branch currents (`I(V1)`). For AC,
 plain `V(out)` / `VM(out)` measure magnitude; `VDB(out)` measures dB
 magnitude, `VP(out)` phase in degrees, `VR(out)` real, and `VI(out)`
 imaginary. The AC sweep axis is available as `TIME`, `FREQUENCY`, or `FREQ`;
@@ -357,8 +372,11 @@ for value, sol in engine.run_step(divider, "rval", [1e3, 2e3, 5e3]):
     print(value, sol.voltage("out"))
 ```
 
-Node arguments accept names or indices everywhere, including the advanced
-analyses.
+Node arguments accept a name or a node index wherever the signature is typed
+`int | str` — every result accessor, plus `run_noise`, `run_pz`, and the
+sensitivity runners. The RF and periodic entry points (`run_pac`,
+`run_pnoise`, `run_transfer_function`, `run_stb`) and the `HbResult` /
+`PacResult` accessors take names only.
 
 Autonomous oscillator noise uses the same complete device-noise model as
 stationary noise analysis, including resistor noise switches and temperature
@@ -385,6 +403,26 @@ except rspice.ConvergenceError:
     engine = rspice.Engine(robust_config)      # retry with stronger aids
 except rspice.RSpiceError as e:
     print(f"simulation failed: {e}")
+```
+
+Both error families carry structured attributes so automation never has to
+parse a display message. `SimulationError` (and its subclasses) expose the
+stable snake-case `kind`, `code`, and `category` tags, a conservative
+`retryable` flag, `iterations` for convergence failures, and
+`resource`/`requested`/`limit` when a `ResourceLimits` ceiling was hit.
+`ParseError` adds `kind`, `category`, and the source provenance for the
+failure — `line`/`source`, the `primary_*`/`related_*` pair for two-location
+errors, and error-specific fields such as `unresolved_output_symbols`. The
+`.pyi` stub declares the full set.
+
+```python
+try:
+    report = engine.run(netlist)
+except rspice.SimulationError as e:
+    if e.code == "resource_limit":
+        print(f"{e.resource}: requested {e.requested}, limit {e.limit}")
+    elif e.retryable:
+        report = engine.run(netlist)
 ```
 
 Result accessors raise standard Python exceptions: `IndexError` for
