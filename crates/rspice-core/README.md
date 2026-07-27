@@ -79,20 +79,28 @@ inductors (`K`), saturable inductor, and a Jiles-Atherton magnetic
 hysteresis model.
 
 **Semiconductors** (`semiconductor/`) — junction diode; BJT (legacy
-Gummel-Poon by default / `LEVEL=1`, VBIC at `LEVEL=4`, and explicit
-rejection for unsupported advanced BJT levels).
+Gummel-Poon with no `LEVEL` or `LEVEL=1/2`, native VBIC at
+`LEVEL=4/9/11/12/13`). Other BJT levels are rejected with a typed error
+naming the supported set; advanced CMC bipolar models are reached through
+generated Rust from Verilog-A rather than a hand-written path.
 
 **MOSFETs and FET-family models** (`mosfet/`) —
 
-- Classic Berkeley MOS1/MOS2/MOS3/MOS6 (`mosfet.rs`, `mos_models.rs`)
-- Legacy BSIM1/BSIM2 levels 4/5 (`legacy_bsim.rs`)
-- BSIM3v3 (`bsim3.rs`, `bsim3v3/` — params/temp/eval split)
-- BSIM4 v4.8 (`bsim4.rs`)
-- EKV (`ekv.rs`), plus a narrow native EKV3 `LEVEL=301` slice (`ekv3.rs`)
-  covering the VA-Models/Xyce 150 nm NMOS/PMOS cards; other EKV3 cards fail
-  closed in the builder
-- VDMOS power MOSFET (`vdmos/` — device, recovery, thermal submodules)
-- B3SOI silicon-on-insulator, in DD/FD/PD variants (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
+- Classic Berkeley MOS1/MOS2/MOS3/MOS6 at `LEVEL=1/2/3/6` (`mosfet.rs`,
+  `mos_models.rs`)
+- Legacy BSIM1/BSIM2 at `LEVEL=4/5` (`legacy_bsim.rs`)
+- MOS9 at `LEVEL=9`, which is also where Xyce-style BSIM3 cards land: a
+  decisive BSIM3 parameter signature routes to BSIM3v3, and an
+  ngspice-shaped card stays MOS9
+- BSIM3v3 at `LEVEL=8/49/53` (`bsim3.rs`, `bsim3v3/` — params/temp/eval split)
+- BSIM4 v4.8 at `LEVEL=14/54` (`bsim4.rs`, `bsim4v8/`)
+- EKV 2.6 at `LEVEL=260` (`ekv.rs`), plus a narrow native EKV3 `LEVEL=301`
+  slice (`ekv3.rs`) covering the VA-Models/Xyce 150 nm NMOS/PMOS cards;
+  other EKV3 cards fail closed in the builder
+- VDMOS power MOSFET at `LEVEL=18` (`vdmos/` — device, recovery, thermal
+  submodules)
+- B3SOI silicon-on-insulator at `LEVEL=10/55/56/57`, in DD/FD/PD variants
+  (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
 - JFET level 1 and native Parker-Skellern JFET2 (`jfet/`, `jfet.rs`;
   `NJF`/`PJF LEVEL=2`) with ngspice-compatible `P`, `Q`, `XI`, `Z`,
   `VST`, `MVST`, `MXI`, `LFGAM`, `LFG1`, `LFG2`, `HFGAM`, `HFG1`,
