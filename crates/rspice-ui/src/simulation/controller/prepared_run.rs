@@ -672,12 +672,12 @@ fn validate_prepared_periodic_sources(
 fn prepared_configuration_veriloga_runtimes(
     state: &AppState,
     projection: &crate::state::workspace::ConfigurationExecutionProjection,
-) -> Result<crate::workbench::code_workspace::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some(plan) = projection.plan() else {
         return Ok(Default::default());
     };
     let mut prepared =
-        HashMap::<String, crate::workbench::code_workspace::PreparedVerilogARuntime>::new();
+        HashMap::<String, crate::simulation::veriloga::PreparedVerilogARuntime>::new();
     for execution in plan.bindings() {
         let Some(binding) = execution.project_veriloga() else {
             continue;
@@ -705,7 +705,7 @@ fn prepared_configuration_veriloga_runtimes(
                 ),
             ));
         }
-        let runtime = crate::workbench::code_workspace::compile_project_source_bundle_runtime(
+        let runtime = crate::simulation::veriloga::compile_project_source_bundle_runtime(
             state.workspace.project.id(),
             bundle,
             binding.selected_module(),
@@ -766,7 +766,7 @@ fn prepared_configuration_veriloga_runtimes(
             prepared.insert(runtime.source_key().to_owned(), runtime);
         }
     }
-    crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(
+    crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(
         prepared.into_values().collect(),
     )
     .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
@@ -774,7 +774,7 @@ fn prepared_configuration_veriloga_runtimes(
 
 fn prepared_project_veriloga_runtimes(
     state: &AppState,
-) -> Result<crate::workbench::code_workspace::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some(bundle) = state.workspace.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
@@ -790,13 +790,16 @@ fn prepared_project_veriloga_runtimes(
         && receipt.token.revision == bundle.revision().get()
         && receipt.token.closure_digest == bundle.closure_digest()
     {
-        let runtime = crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
-                state.workspace.project.id(),
-                bundle,
-                receipt,
-            )
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        return crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![
+        let runtime = crate::simulation::veriloga::PreparedVerilogARuntime::try_new(
+            state.workspace.project.id(),
+            bundle,
+            &receipt.token,
+            &receipt.module_name,
+            &receipt.report,
+            receipt.module_name.clone(),
+        )
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        return crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![
             runtime,
         ])
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
@@ -832,20 +835,20 @@ fn prepared_project_veriloga_runtimes(
         )
     })?;
     let runtime =
-        crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
+        crate::simulation::veriloga::PreparedVerilogARuntime::try_from_current_bundle_receipt(
             state.workspace.project.id(),
             bundle,
             &receipt,
         )
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-    crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+    crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
 fn project_veriloga_runtimes_referenced_by(
     state: &AppState,
     source: &str,
-) -> Result<crate::workbench::code_workspace::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some(bundle) = state.workspace.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
@@ -1211,7 +1214,7 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
 
 fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
-    project_runtimes: &crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+    project_runtimes: &crate::simulation::veriloga::PreparedVerilogARuntimeSet,
 ) -> Result<(), PreparationError> {
     for (line_number, logical_line) in executable_logical_lines(netlist) {
         if project_runtimes.iter().any(|runtime| {
@@ -2195,7 +2198,7 @@ mod tests {
         )
         .expect("derive exact project source key");
         let exact_directive =
-            crate::workbench::code_workspace::project_veriloga_directive(&source_key, "owned");
+            crate::simulation::veriloga::project_veriloga_directive(&source_key, "owned");
         let exact_runtimes = project_veriloga_runtimes_referenced_by(&state, &exact_directive)
             .expect("inspect exact project directive");
         assert_eq!(exact_runtimes.len(), 1);
@@ -2204,7 +2207,7 @@ mod tests {
 
         let altered_key = source_key.replacen("__rspice_project__", "__RSPICE_PROJECT__", 1);
         let altered_directive =
-            crate::workbench::code_workspace::project_veriloga_directive(&altered_key, "owned");
+            crate::simulation::veriloga::project_veriloga_directive(&altered_key, "owned");
         let altered_runtimes = project_veriloga_runtimes_referenced_by(&state, &altered_directive)
             .expect("inspect altered project directive");
         assert!(
@@ -2331,7 +2334,7 @@ mod tests {
                 .netlist
                 .lines()
                 .filter(|line| line.trim().eq_ignore_ascii_case(
-                    &crate::workbench::code_workspace::project_veriloga_directive(
+                    &crate::simulation::veriloga::project_veriloga_directive(
                         runtime.source_key(),
                         runtime.netlist_alias(),
                     )

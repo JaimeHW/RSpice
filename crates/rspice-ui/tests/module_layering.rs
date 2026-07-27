@@ -136,7 +136,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // stay in the editor where it belongs. That is a design change, not a
     // relocation, so it is not folded in here.
     ("schematic", "workbench", 98),
-    ("simulation", "workbench", 60),
+    ("simulation", "workbench", 28),
     ("io", "workbench", 12),
     // The persisted model reaching up into orchestration and editors.
     ("state", "simulation", 26),
@@ -872,7 +872,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/chrome/title_bar.rs", 2775),
     ("state/project_sources.rs", 2709),
     ("io/project_execution.rs", 2709),
-    ("simulation/controller/prepared_run.rs", 2676),
+    ("simulation/controller/prepared_run.rs", 2679),
     ("state/schematic/state/editor_ops/movement_ops.rs", 2629),
     ("workbench/shortcut_artifacts/merge.rs", 2597),
     ("state/netlist_document/document.rs", 2579),

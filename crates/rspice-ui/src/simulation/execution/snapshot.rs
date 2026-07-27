@@ -555,7 +555,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     task: QueuedAnalysis,
     saved_output_contracts: Vec<PreparedSavedOutput>,
     executable_netlist: Arc<str>,
-    project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+    project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     touchstone_export: TouchstoneExportPolicy,
 }
 
@@ -714,7 +714,7 @@ impl ResolvedTaskDispatch {
     ) -> (
         QueuedAnalysis,
         Arc<str>,
-        crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+        crate::simulation::veriloga::PreparedVerilogARuntimeSet,
         ResolvedExecutionDependencies,
     ) {
         (
@@ -742,7 +742,7 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) model_identities: Vec<ModelSourceIdentity>,
     pub(in crate::simulation) project_model_sources: Vec<PreparedModelSourceIdentity>,
     pub(in crate::simulation) project_veriloga_runtimes:
-        crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+        crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
     pub(in crate::simulation) receipt: RunSourceReceipt,
     pub(in crate::simulation) advisories: Vec<String>,
@@ -771,7 +771,7 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     save_policy: SavePolicy,
     model_identities: Vec<ModelSourceIdentity>,
     project_model_sources: Vec<PreparedModelSourceIdentity>,
-    project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+    project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
@@ -1092,7 +1092,7 @@ impl PreparedRunSnapshot {
                     format!("Project Verilog-A runtime is invalid: {error}"),
                 )
             })?;
-            let directive = crate::workbench::code_workspace::project_veriloga_directive(
+            let directive = crate::simulation::veriloga::project_veriloga_directive(
                 runtime.source_key(),
                 runtime.netlist_alias(),
             );
@@ -2202,7 +2202,7 @@ mod tests {
         }
     }
 
-    fn project_runtime() -> crate::workbench::code_workspace::PreparedVerilogARuntime {
+    fn project_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
         let project_id = crate::product::ProjectId::new();
         let bundle = crate::state::ProjectSourceBundle::try_new(
             crate::state::ProjectSourceOwner::code_workspace(
@@ -2221,7 +2221,7 @@ mod tests {
             Some("snapshot_owned"),
         )
         .unwrap();
-        crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
+        crate::simulation::veriloga::PreparedVerilogARuntime::try_from_current_bundle_receipt(
             project_id, &bundle, &receipt,
         )
         .unwrap()
@@ -2232,7 +2232,7 @@ mod tests {
         let runtime = project_runtime();
         let mut missing = parts();
         missing.project_veriloga_runtimes =
-            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![
+            crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![
                 runtime.clone(),
             ])
             .unwrap();
@@ -2244,14 +2244,14 @@ mod tests {
             })
         ));
 
-        let directive = crate::workbench::code_workspace::project_veriloga_directive(
+        let directive = crate::simulation::veriloga::project_veriloga_directive(
             runtime.source_key(),
             runtime.netlist_alias(),
         );
         let mut suffixed = parts();
         suffixed.executable_netlist = format!("deck\n{directive} unexpected\n.op\n.end\n");
         suffixed.project_veriloga_runtimes =
-            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![
+            crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![
                 runtime.clone(),
             ])
             .unwrap();
@@ -2260,7 +2260,7 @@ mod tests {
         let mut exact = parts();
         exact.executable_netlist = format!("deck\n{directive}\n.op\n.end\n");
         exact.project_veriloga_runtimes =
-            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+            crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
                 .unwrap();
         assert!(PreparedRunSnapshot::new(exact).is_ok());
     }
@@ -2268,12 +2268,12 @@ mod tests {
     #[test]
     fn snapshot_rejects_unsealed_or_duplicate_veriloga_directives() {
         let runtime = project_runtime();
-        let directive = crate::workbench::code_workspace::project_veriloga_directive(
+        let directive = crate::simulation::veriloga::project_veriloga_directive(
             runtime.source_key(),
             runtime.netlist_alias(),
         );
         let runtime_set =
-            crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+            crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
                 .unwrap();
 
         let mut unsealed = parts();

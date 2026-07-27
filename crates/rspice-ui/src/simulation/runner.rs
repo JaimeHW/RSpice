@@ -55,7 +55,7 @@ pub(crate) enum SimulationRequest {
 pub(crate) struct NetlistInput {
     netlist: String,
     source_path: Option<PathBuf>,
-    project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+    project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     dependencies: ResolvedExecutionDependencies,
 }
 

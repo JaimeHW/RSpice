@@ -324,7 +324,7 @@ fn generated_project_source_dependencies(
             .compile_virtual_runtime_diagnosed(
                 &virtual_bundle,
                 binding.selected_module(),
-                super::super::code_workspace::project_virtual_compile_limits(),
+                crate::simulation::veriloga::project_virtual_compile_limits(),
             )
             .map_err(|failure| {
                 format!(
