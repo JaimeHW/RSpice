@@ -4,55 +4,7 @@
 
 use super::data::FftData;
 use super::pipeline::{MIN_FFT_SAMPLES, prepare_fft_input};
-
-/// Window function types
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum WindowFunction {
-    /// No windowing (rectangular)
-    #[default]
-    Rectangular,
-    /// Hanning window
-    Hanning,
-    /// Hamming window
-    Hamming,
-    /// Blackman window
-    Blackman,
-}
-
-impl WindowFunction {
-    /// Get display name
-    pub fn name(&self) -> &'static str {
-        match self {
-            WindowFunction::Rectangular => "Rectangular",
-            WindowFunction::Hanning => "Hanning",
-            WindowFunction::Hamming => "Hamming",
-            WindowFunction::Blackman => "Blackman",
-        }
-    }
-
-    /// Apply window function to a sample at position i of n total samples
-    pub fn apply(&self, i: usize, n: usize) -> f64 {
-        let i = i as f64;
-        let n = n as f64;
-
-        match self {
-            WindowFunction::Rectangular => 1.0,
-            WindowFunction::Hanning => {
-                0.5 * (1.0 - (2.0 * std::f64::consts::PI * i / (n - 1.0)).cos())
-            }
-            WindowFunction::Hamming => {
-                0.54 - 0.46 * (2.0 * std::f64::consts::PI * i / (n - 1.0)).cos()
-            }
-            WindowFunction::Blackman => {
-                let a0 = 0.42;
-                let a1 = 0.5;
-                let a2 = 0.08;
-                let pi2 = 2.0 * std::f64::consts::PI;
-                a0 - a1 * (pi2 * i / (n - 1.0)).cos() + a2 * (2.0 * pi2 * i / (n - 1.0)).cos()
-            }
-        }
-    }
-}
+use super::window::{WindowFunction, apply_window, generate_window};
 
 /// FFT result containing frequency and magnitude data
 #[derive(Debug, Clone, PartialEq)]
@@ -119,7 +71,7 @@ pub fn compute_fft(time: &[f64], values: &[f64], window: WindowFunction) -> Opti
         "compute_fft",
         &prepared.samples,
         prepared.sample_rate,
-        map_window(window),
+        window,
     );
     if fft.is_empty() {
         return None;
@@ -153,11 +105,3 @@ pub fn compute_psd(time: &[f64], values: &[f64], window: WindowFunction) -> Opti
     Some(result)
 }
 
-fn map_window(window: WindowFunction) -> super::window::WindowFunction {
-    match window {
-        WindowFunction::Rectangular => super::window::WindowFunction::Rectangular,
-        WindowFunction::Hanning => super::window::WindowFunction::Hanning,
-        WindowFunction::Hamming => super::window::WindowFunction::Hamming,
-        WindowFunction::Blackman => super::window::WindowFunction::Blackman,
-    }
-}
