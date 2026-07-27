@@ -2746,6 +2746,8 @@ impl XyceDLegacyDff {
                 // the current-state vector remains unchanged.  Activate the
                 // finite-output transition at the scheduled event time.
                 && pending_time <= ctx.time + 1.0e-18
+                && (!deferred_until.is_finite()
+                    || ctx.evaluation_phase() == EvaluationPhase::AcceptedStep)
             {
                 transition_from = q;
                 q = Some(target);
