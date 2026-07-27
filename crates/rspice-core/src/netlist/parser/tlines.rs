@@ -75,7 +75,26 @@ pub(super) fn parse_coupling(
     // multi-winding cards are retained as one shared Core device so the
     // builder can assemble Xyce's common magnetization state and mutual Q
     // matrix.
-    let model = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
+    // A coupling card may name a nonlinear Core model after its coefficient,
+    // and model names are not restricted to a particular prefix.  However,
+    // an element designator followed by another inductor list is the
+    // unmistakable adjacent-coupling form that Xyce rejects as a trailing
+    // token (for example `K1 L1 L2 0.75 K2 L1 L3 0.8`).  Leave that designator
+    // for the normal tail validator so the parser reports the first invalid
+    // token rather than silently treating it as a model name.
+    let adjacent_coupling = match (&stream.peek().kind, &stream.peek_n(1).kind) {
+        (TokenKind::Ident(candidate), TokenKind::Ident(next)) => {
+            let candidate = candidate.as_bytes();
+            let next = next.as_bytes();
+            candidate.first().is_some_and(|byte| byte.eq_ignore_ascii_case(&b'k'))
+                && candidate.get(1..).is_some_and(|suffix| {
+                    !suffix.is_empty() && suffix.iter().all(u8::is_ascii_digit)
+                })
+                && next.first().is_some_and(|byte| byte.eq_ignore_ascii_case(&b'l'))
+        }
+        _ => false,
+    };
+    let model = if matches!(stream.peek().kind, TokenKind::Ident(_)) && !adjacent_coupling {
         Some(expect_ident(stream, line_num)?)
     } else {
         None
