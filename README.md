@@ -81,10 +81,10 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Time domain | `.TRAN`, with LTE-controlled adaptive timestepping and checkpoint/resume segmentation |
 | Small-signal | `.AC`, `.NOISE`, `.PZ`, `.TF`, `.SENS`, third-order Volterra `.DISTO` (harmonic and two-tone intermodulation) |
 | Statistical | Operating-point Monte Carlo parameter variation, process corners † |
-| Periodic / RF | Periodic steady state (shooting), harmonic balance, two-port S-parameters with Touchstone export † |
+| Periodic / RF | Periodic steady state (shooting), harmonic balance with envelope continuation, S-parameters with Touchstone export, periodic AC, phase noise, periodic transfer function, periodic stability † |
 | Post-processing | `.MEAS` over TRAN/DC/AC/NOISE with `GOAL`/`TOL` pass-fail gating, `.FOUR`; THD/IMD, eye-diagram, and jitter metrics † |
 
-† selected through a mix of deck cards and CLI/IDE surfaces: `.mc` and `.stb` have deck-card paths, while Monte Carlo, process corners, PSS, HB, and S-parameters are also exposed through CLI flags such as `--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, and `--sparam`. PAC, PNoise, PXF, PSTB, envelope, and multi-rate ship as engine-level mathematics (conversion-matrix and monodromy kernels) without a circuit-extraction layer yet; they are not end-to-end analyses and are not claimed as such.
+† Reachability differs by analysis. `.MC`, `.STB`, `.HB`, `.SP`, `.DISTO`, and `.STEP` have deck cards; Monte Carlo, process corners, PSS, HB, and S-parameters are additionally exposed as CLI flags (`--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, `--sparam`). PAC and phase noise have no deck card and run from the engine API (`Engine::run_pac`, `run_pnoise`, `run_pnoise_oscillator`); PXF and PSTB are composed on top of PSS by the desktop IDE's simulation runner. `.FFT` parses but is rejected at run time until the post-processing lands.
 
 ### Devices
 
