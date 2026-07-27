@@ -2,11 +2,11 @@
 {
   "schema_version": 3,
   "source_tree_digest": "03a9a6835c7712ce70196b1b62a83bbfd6cf5a15a6ff1bbbba51f4a09582e712",
-  "generator_digest": "555ffe7e61938f959f4778b3c361f859e8a17f5b963575db0353369250dec653",
-  "bundle_digest": "ee88a78f49d64224f58eae9016b443d2f72328bd3e5322a14cb88b2faaac4f35",
+  "generator_digest": "cbeadc2cbc7575192ab470d59c17eff252baf4a85fe0458b1c7590e1e34a894a",
+  "bundle_digest": "b6c5cdba3700ea19400dc78f2c2e5b4975c49c3b157781f3e2b979b985c58ffb",
   "device_count": 42,
-  "file_count": 654,
-  "source_bytes": 109046684,
+  "file_count": 655,
+  "source_bytes": 109058427,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -1167,7 +1167,7 @@
     {
       "relative_path": "angelov__angelov__98b92059/state.rs",
       "bytes": 55846,
-      "blake3": "6af582c775cebd19a082da537a34dc2c3b2dbfe63ef36381c4b665087c297f5a"
+      "blake3": "3bf5091e07f0f98a15fd5a7b260667edec9f50a3c66572a7dd047334610aad5d"
     },
     {
       "relative_path": "angelov_gan__angelov_gan__98687686/.rspice-veriloga-generated",
@@ -1192,7 +1192,7 @@
     {
       "relative_path": "angelov_gan__angelov_gan__98687686/state.rs",
       "bytes": 64952,
-      "blake3": "bfbe39a59c26beade62a3aa9fc2686fec619a19e1102d43bba52fbb44bd008d7"
+      "blake3": "d0d9b9db0ef6011a6752c4460cae91ec53b11da0701b81784e298ad528b22ff3"
     },
     {
       "relative_path": "asmesd__asmesd__fbe2f3a4/.rspice-veriloga-generated",
@@ -1217,7 +1217,7 @@
     {
       "relative_path": "asmesd__asmesd__fbe2f3a4/state.rs",
       "bytes": 53311,
-      "blake3": "01374affd6b0507f6eeac84d43e13400f15e4122838d747fa385dbf8d96bd62d"
+      "blake3": "f3f88ec500610ab80def3e7efa152d45700832130ea565d0809b721d163bd385"
     },
     {
       "relative_path": "asmesd_dio__asmesd_dio__b913dc15/.rspice-veriloga-generated",
@@ -1242,7 +1242,7 @@
     {
       "relative_path": "asmesd_dio__asmesd_dio__b913dc15/state.rs",
       "bytes": 41813,
-      "blake3": "e194c0895da26db546375fe09b19c9d8f09e11d8fe1513615857ff0a293acece"
+      "blake3": "c53ff6990f4c73fbd081f2517f5b8631dbd1114f08fadce2e6f826393d23fdff"
     },
     {
       "relative_path": "asmhemt__asmhemt__9d86ed5b/.rspice-veriloga-generated",
@@ -1392,7 +1392,12 @@
     {
       "relative_path": "asmhemt__asmhemt__9d86ed5b/state.rs",
       "bytes": 61047,
-      "blake3": "68471c80d99bbfe804a5b372e61cec8e8d745283a9a22fd6a1864b8b9e9faee3"
+      "blake3": "7eee0c1e99db0b2568e9c9234da8afcfc9b5a0d64c6ced8e3e4ca425a6457a0c"
+    },
+    {
+      "relative_path": "bench.rs",
+      "bytes": 11684,
+      "blake3": "2aa20930f923bf917e1a689e63d6429a2744d046daf3f98135ccbb68428b2979"
     },
     {
       "relative_path": "bjt505__bjt505_va__6ac090e2/.rspice-veriloga-generated",
@@ -1417,7 +1422,7 @@
     {
       "relative_path": "bjt505__bjt505_va__6ac090e2/state.rs",
       "bytes": 159815,
-      "blake3": "6513353e77b67962e03a89b0e2fcedbf2c4e306ea312e0eaac4f95be19423507"
+      "blake3": "d1956b77a0e2206788edb85e6e7cdcc7138974fed8160c56062da723e2c7a46e"
     },
     {
       "relative_path": "bjt505t__bjt505t_va__48d754e7/.rspice-veriloga-generated",
@@ -1442,7 +1447,7 @@
     {
       "relative_path": "bjt505t__bjt505t_va__48d754e7/state.rs",
       "bytes": 93219,
-      "blake3": "e86e8b37d240dc4c983ce4a475e81ae0a65779aa036d9349a3f8be2b97fb018b"
+      "blake3": "e85b227e94ae817a6fa3a180ace5f5628c0c0d79ce98ba4831a8389a8bc7dc51"
     },
     {
       "relative_path": "bjtd505__bjtd505_va__3cb9ae22/.rspice-veriloga-generated",
@@ -1467,7 +1472,7 @@
     {
       "relative_path": "bjtd505__bjtd505_va__3cb9ae22/state.rs",
       "bytes": 148824,
-      "blake3": "284df2adecf1b907dfa71cf80ed305abe6c8ae22082d7409fd5b778e0c4f464e"
+      "blake3": "373fe16dde0bc0a3e1f70b67c49257471e627536c6146b454c56cb9c8d233522"
     },
     {
       "relative_path": "bjtd505t__bjtd505t_va__06e24760/.rspice-veriloga-generated",
@@ -1492,7 +1497,7 @@
     {
       "relative_path": "bjtd505t__bjtd505t_va__06e24760/state.rs",
       "bytes": 88347,
-      "blake3": "5630e3b2068dbffb08456f6c01c6045333f72b461ebf768066865e834c63a268"
+      "blake3": "b8b087663a59ed21d19b6d1cb5e6040f9eb329c1162364bcefa9c074279c1717"
     },
     {
       "relative_path": "bsimbulk__bsimbulk__0f953aae/.rspice-veriloga-generated",
@@ -1587,7 +1592,7 @@
     {
       "relative_path": "bsimbulk__bsimbulk__0f953aae/state.rs",
       "bytes": 189130,
-      "blake3": "ec36889ace8135f7d2042fb43433292fd444af854560c89720dbfc99a5a0f1ea"
+      "blake3": "cbeb4d8a0241f5e431b8363b5e2293c82bc24970804b77372f8ea31d76878d6f"
     },
     {
       "relative_path": "bsimcmg__bsimcmg_va__f3a4082f/.rspice-veriloga-generated",
@@ -1712,7 +1717,7 @@
     {
       "relative_path": "bsimcmg__bsimcmg_va__f3a4082f/state.rs",
       "bytes": 341730,
-      "blake3": "3d045440d034a90948be420b81dc586ed6f3103aaa2ccd3ca864b076303e5935"
+      "blake3": "d59f22819aa3a4e8ff95b8f3c9425c9b568d28d61781d9f97aa3d0564309796d"
     },
     {
       "relative_path": "bsimimg__bsimimg__25eb6a31/.rspice-veriloga-generated",
@@ -1782,7 +1787,7 @@
     {
       "relative_path": "bsimimg__bsimimg__25eb6a31/state.rs",
       "bytes": 115615,
-      "blake3": "50c21fd99be06448b6d0c0364be6108481c2208c5a674c80155fcd32341515a3"
+      "blake3": "8452729fce1be7ffa1608342b50099bba46afb37d7f4d41ac14297c222ba03ab"
     },
     {
       "relative_path": "bsimsoi__bsimsoi__18c250bc/.rspice-veriloga-generated",
@@ -1857,7 +1862,7 @@
     {
       "relative_path": "bsimsoi__bsimsoi__18c250bc/state.rs",
       "bytes": 167926,
-      "blake3": "48d680b6b2f62bb3cb5a58141241abc1bf753843839df7bee3412fe7cd6cbdae"
+      "blake3": "c76f22a716aabc2100a0e4b327a394eb3f8d2a6580af0c7c59397e18d6bafb23"
     },
     {
       "relative_path": "bsimsoi__bsimsoi__e2aff994/.rspice-veriloga-generated",
@@ -2037,7 +2042,7 @@
     {
       "relative_path": "bsimsoi__bsimsoi__e2aff994/state.rs",
       "bytes": 212864,
-      "blake3": "fda53db7cb266348af117a7068a4652c0a6690b6cbde080810e7da32d361a6aa"
+      "blake3": "e0eb018f1493cb933af42b47d2056a5a13fd5b7538853886f3b07861d7b544cc"
     },
     {
       "relative_path": "bsimsoi__bsimsoi_va__8ee5e64d/.rspice-veriloga-generated",
@@ -2137,7 +2142,7 @@
     {
       "relative_path": "bsimsoi__bsimsoi_va__8ee5e64d/state.rs",
       "bytes": 159159,
-      "blake3": "3b7da1ff6e8285cdd3317d442de83e92190f2d785e2639de819591ae01d6a115"
+      "blake3": "7e18e3b8d48f635ab2df1a60e502d4c9e70ada0f6b586928f1408450697e45f4"
     },
     {
       "relative_path": "diode_cmc__diode_cmc__cdfab304/.rspice-veriloga-generated",
@@ -2287,7 +2292,7 @@
     {
       "relative_path": "diode_cmc__diode_cmc__cdfab304/state.rs",
       "bytes": 38414,
-      "blake3": "a570b41e2f111ee20fb7c5adae7c7fd5ff20cfa88484730719961b3dfb7300f6"
+      "blake3": "861cc0b25cc27c6afb7bf41bd513ac2b36ed44e427781faa3c6c70305d25ca4b"
     },
     {
       "relative_path": "ekv26_sdext_verilog_a__ekv_va__0adf5df4/.rspice-veriloga-generated",
@@ -2312,7 +2317,7 @@
     {
       "relative_path": "ekv26_sdext_verilog_a__ekv_va__0adf5df4/state.rs",
       "bytes": 72482,
-      "blake3": "0a670f72e1773c48ae6628f7c0b57aacbc726d570a6234d6b32e208c08270036"
+      "blake3": "cc22a4d9cc4ed5f451fb84ea10c1acbe6d34fc9cf3c0a397e206285a3189cb94"
     },
     {
       "relative_path": "epfl_hemt__epfl_hemt_10a__671606cd/.rspice-veriloga-generated",
@@ -2337,7 +2342,7 @@
     {
       "relative_path": "epfl_hemt__epfl_hemt_10a__671606cd/state.rs",
       "bytes": 39469,
-      "blake3": "55fb8813cda18a05db5cc3c31dd1910cb427813f3326aa7e81a75b3da565b7a2"
+      "blake3": "62ba45baf84a915b0fb3a6b6717514f5254facd34dcd12799e225f5547217708"
     },
     {
       "relative_path": "hicuml0_v2p1p0__hicuml0va__91cb3377/.rspice-veriloga-generated",
@@ -2362,7 +2367,7 @@
     {
       "relative_path": "hicuml0_v2p1p0__hicuml0va__91cb3377/state.rs",
       "bytes": 103941,
-      "blake3": "3678ad0342183c37d1e7cea25c3b60eedda4974f0144b31169dd85e42eadab2c"
+      "blake3": "9a2503a1147244a9936873e4066a342989b84b7f0670db7a23adcc148e2996e6"
     },
     {
       "relative_path": "hicuml2_v320__hicuml2va__25e676cf/.rspice-veriloga-generated",
@@ -2417,7 +2422,7 @@
     {
       "relative_path": "hicuml2_v320__hicuml2va__25e676cf/state.rs",
       "bytes": 48300,
-      "blake3": "88951a08ccbe2c617bfba43ef0eea77f18078833eb54d7150ea7542a951d0c43"
+      "blake3": "e2810d16ae36ccf3b454a46d125fb2d4accb6467bb9e2e2ac7a5efd71d20f3bc"
     },
     {
       "relative_path": "hisimhv__hisimhv_va__57d0ff0e/.rspice-veriloga-generated",
@@ -2597,7 +2602,7 @@
     {
       "relative_path": "hisimhv__hisimhv_va__57d0ff0e/state.rs",
       "bytes": 149562,
-      "blake3": "007e1fde04a92a7662ec1082f964b816dbb6fd2115f909bd9c2903661720c904"
+      "blake3": "4e21a7645ad713c6fda2f69a4f00c74794f3308b46361d1ac450c8eff710bd73"
     },
     {
       "relative_path": "hisimhv_n4__hisimhv_n4_va__69344dcf/.rspice-veriloga-generated",
@@ -2777,7 +2782,7 @@
     {
       "relative_path": "hisimhv_n4__hisimhv_n4_va__69344dcf/state.rs",
       "bytes": 149573,
-      "blake3": "1fafa14928337b10224eec796531753cc136cbc07a6bea6ae5bb7651527826ba"
+      "blake3": "4f140a87ca9745a9402a7d898b167b4c1c5348b3964ad2e3c35fc288ec6fa73c"
     },
     {
       "relative_path": "hisimhv_n5__hisimhv_n5_va__89bf8539/.rspice-veriloga-generated",
@@ -2957,7 +2962,7 @@
     {
       "relative_path": "hisimhv_n5__hisimhv_n5_va__89bf8539/state.rs",
       "bytes": 149573,
-      "blake3": "d4e511ac5f5be1545fd369a74ecf7dc7a85d0913269f191c3ce0dbdb15027365"
+      "blake3": "49f2553acb56e773884442d82b75bbb7a0d0c2df48474193993b0e766c0b7c66"
     },
     {
       "relative_path": "hisimsoi__hisimsoi_va__5be18005/.rspice-veriloga-generated",
@@ -3047,7 +3052,7 @@
     {
       "relative_path": "hisimsoi__hisimsoi_va__5be18005/state.rs",
       "bytes": 58464,
-      "blake3": "13fb02509c51978daae273c4ea212c2ff735a7d4204bba84d8d357c0ac162f4e"
+      "blake3": "b2676e8bf1a9f87881d70729f4c9762ea3830763effe033485e4f81aabbc5aa6"
     },
     {
       "relative_path": "hisimsoi_n4__hisimsoi_va__242bc21d/.rspice-veriloga-generated",
@@ -3137,7 +3142,7 @@
     {
       "relative_path": "hisimsoi_n4__hisimsoi_va__242bc21d/state.rs",
       "bytes": 58476,
-      "blake3": "9c513865d08eb4b97169ec81ea4c67056106d5d94858ee530ab41bd46add8da4"
+      "blake3": "21ab0da14471ee64a59d330a018285e96c14912a3d138fba09c3b95f4b12ca03"
     },
     {
       "relative_path": "hisimsoi_n5__hisimsoi_va__38074d06/.rspice-veriloga-generated",
@@ -3227,7 +3232,7 @@
     {
       "relative_path": "hisimsoi_n5__hisimsoi_va__38074d06/state.rs",
       "bytes": 58470,
-      "blake3": "4763dd058a984a9b553e662679877250d6130b883626d25eeee0a5d8dcf2bc98"
+      "blake3": "b020f53fca3c6ded5f7ef4a17111456eed62ef13a2b52c1557a718c94575aac3"
     },
     {
       "relative_path": "hisimsotb__hisimsotb_va__41200697/.rspice-veriloga-generated",
@@ -3322,7 +3327,7 @@
     {
       "relative_path": "hisimsotb__hisimsotb_va__41200697/state.rs",
       "bytes": 63597,
-      "blake3": "f3a52e91c40e0e2bb6551c221a66130d452afb4e8c7232ff171aa57a1b1431b6"
+      "blake3": "66cfb9fd41644be9afbfd5cf136a5cc795332f13e60a6b72f1c98054ac373305"
     },
     {
       "relative_path": "juncap200__juncap200__94ba75b4/.rspice-veriloga-generated",
@@ -3347,7 +3352,7 @@
     {
       "relative_path": "juncap200__juncap200__94ba75b4/state.rs",
       "bytes": 619497,
-      "blake3": "3b71a351393210bc611a3cec78234978078b7cabb7ce054c9dce9f3b44350e76"
+      "blake3": "027d91774dcbdc46cad76c716499a871b30d7e0ed667bfbe6c28483c5bfa5389"
     },
     {
       "relative_path": "kernel_runtime.rs",
@@ -3467,7 +3472,7 @@
     {
       "relative_path": "l_utsoi_102__l_utsoi__832ce87d/state.rs",
       "bytes": 81136,
-      "blake3": "f4fafaa4be1924501e6a940ddf67396e3fc526d10fc6ff59eaaa6a3960041baa"
+      "blake3": "ae054e25dd5cdc00b06174e9f65887de4415fae3514472e60e4c9c1cd2c64ea9"
     },
     {
       "relative_path": "l_utsoi_102_nqs__l_utsoi__485e0ac9/.rspice-veriloga-generated",
@@ -3582,7 +3587,7 @@
     {
       "relative_path": "l_utsoi_102_nqs__l_utsoi__485e0ac9/state.rs",
       "bytes": 82551,
-      "blake3": "6f173e0498d883b7ff74db4b375fe8ad9454238cb4772105068737c378ac1ca4"
+      "blake3": "afc543aa1b3a46a85d2110e668667c62a7ff1a626faf09a218c7d8bb9b85e853"
     },
     {
       "relative_path": "limiting.rs",
@@ -3591,8 +3596,8 @@
     },
     {
       "relative_path": "mod.rs",
-      "bytes": 206752,
-      "blake3": "1e262f0c4d233b086a6a98904dfc695d3a94646ffc32e975b396f0dc61c5967b"
+      "bytes": 206811,
+      "blake3": "e8e4cd7b6db34f378735e2c30831cf38b184bdd0be99a7c03029ef6b4a850d2d"
     },
     {
       "relative_path": "mosvar__mosvar__0a88ed4a/.rspice-veriloga-generated",
@@ -3617,7 +3622,7 @@
     {
       "relative_path": "mosvar__mosvar__0a88ed4a/state.rs",
       "bytes": 81378,
-      "blake3": "58e768a1af041782af658eb7e17e6860d1c23e1ce29e05f5a298350c13bccec7"
+      "blake3": "1c112825da7da9819b1d8ce810c67759cf204bacabd3069c9d64c64d33134471"
     },
     {
       "relative_path": "mvsg_cmc_4__mvsg_cmc__7d7f784b/.rspice-veriloga-generated",
@@ -3737,7 +3742,7 @@
     {
       "relative_path": "mvsg_cmc_4__mvsg_cmc__7d7f784b/state.rs",
       "bytes": 70121,
-      "blake3": "ff4899f922a8135100e0fff4980046ab953b5df8953655e68eb1d5e08a6f3dbd"
+      "blake3": "a2646791a14f578877a0b12b15c8140f42171518ab5d82812816ad782c702bcf"
     },
     {
       "relative_path": "psp104__psp104va__75652357/.rspice-veriloga-generated",
@@ -3897,7 +3902,7 @@
     {
       "relative_path": "psp104__psp104va__75652357/state.rs",
       "bytes": 120895,
-      "blake3": "1379e266ec5e3ddf6a8e0ea17127351e0957164fb9ba00dfc3d332fe026cdd19"
+      "blake3": "befaa6af04fa03cf4e46a0e1da6972a4412dcbf64189f4698ab265dd5788a802"
     },
     {
       "relative_path": "psp104_nqs__pspnqs104va__1d25ee14/.rspice-veriloga-generated",
@@ -4072,7 +4077,7 @@
     {
       "relative_path": "psp104_nqs__pspnqs104va__1d25ee14/state.rs",
       "bytes": 123982,
-      "blake3": "380252e0415ad59131fe7ba7f38941044f6df9b2c54f10cafed3f2848a85ded0"
+      "blake3": "3a2b00a85d72cb611553120bfad40b029bbe40cff794762074f099a3efada4ad"
     },
     {
       "relative_path": "psp104t__psp104tva__0878692d/.rspice-veriloga-generated",
@@ -4232,7 +4237,7 @@
     {
       "relative_path": "psp104t__psp104tva__0878692d/state.rs",
       "bytes": 122910,
-      "blake3": "1cb0d1ac0fccd2ac04e67f9356e2d0e6aa70c7e41bf94d4b39a472bbf17cc428"
+      "blake3": "5c6007522a0efd9602d877ad1a6d380bd5284843fcdcbc390ff2a04ada2ddf64"
     },
     {
       "relative_path": "r2_cmc__r2_cmc__bc71a915/.rspice-veriloga-generated",
@@ -4257,7 +4262,7 @@
     {
       "relative_path": "r2_cmc__r2_cmc__bc71a915/state.rs",
       "bytes": 41722,
-      "blake3": "5efd42b383fb7a93d73fa69d26d06197bb05222341d33f7ecf6ab1708870fd48"
+      "blake3": "6a20e1466e86698b7678102c9ca198f46abf5fe8b5f71e80f0eefd288cca2cb0"
     },
     {
       "relative_path": "r2_et_cmc__r2_et_cmc__a8425039/.rspice-veriloga-generated",
@@ -4282,7 +4287,7 @@
     {
       "relative_path": "r2_et_cmc__r2_et_cmc__a8425039/state.rs",
       "bytes": 42873,
-      "blake3": "5f90ec1f5dac8e423ba1405da22055b9f4cb33460691eb727ede8ad9524ca455"
+      "blake3": "677ba19618353728a8cf5218f8e5d321322c6e05fa0f80b636feca9fc73eb59b"
     },
     {
       "relative_path": "r3_cmc__r3_cmc__2e3554ae/.rspice-veriloga-generated",
@@ -4307,7 +4312,7 @@
     {
       "relative_path": "r3_cmc__r3_cmc__2e3554ae/state.rs",
       "bytes": 79071,
-      "blake3": "c0882f21b6844bf03a5319db5bc8ea340a42627e406d5310c6642ba58061351e"
+      "blake3": "c18071cc215b300445a5158026c964c839dd9696ea530910b365fd12e7bb18d1"
     },
     {
       "relative_path": "registry.rs",
@@ -4337,7 +4342,7 @@
     {
       "relative_path": "vbic_1p3__vbic13_4t__132cb4e0/state.rs",
       "bytes": 90718,
-      "blake3": "a31e21c0ff23baf73817320af3fdb6bb1e8cc3c2c9f5a79957d1d6e19cd9595e"
+      "blake3": "cebf2997d0b55d5bbe40d8c1263131f0cec28ba56ca62363097f008af2bf7339"
     },
     {
       "relative_path": "vbic_3t__vbic13__aa00e2e7/.rspice-veriloga-generated",
@@ -4362,7 +4367,7 @@
     {
       "relative_path": "vbic_3t__vbic13__aa00e2e7/state.rs",
       "bytes": 84077,
-      "blake3": "4202a1ffbf8b406f2ac52582432d10360fc2542171fdb89e2cce2c9632791d45"
+      "blake3": "87ff204fe2c8a92be14f1721e0921c31c7fbf1a42f5f991c2245bca11ff30ebd"
     },
     {
       "relative_path": "vbic_3t_et__vbic13_3t_et__bd2f63d4/.rspice-veriloga-generated",
@@ -4387,7 +4392,7 @@
     {
       "relative_path": "vbic_3t_et__vbic13_3t_et__bd2f63d4/state.rs",
       "bytes": 84077,
-      "blake3": "4901dca3f6c3333b61f5e75272a42671a3c87e5cc382253091da02d8dc8b7b57"
+      "blake3": "d124e1680b4b934989638c4594d9a41600321d202f77f03a6b650578bc39efc6"
     },
     {
       "relative_path": "vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1/.rspice-veriloga-generated",
@@ -4412,7 +4417,7 @@
     {
       "relative_path": "vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1/state.rs",
       "bytes": 73177,
-      "blake3": "116dda637846a183ef503e441b3c156d48370ed288831be104deb48faadaf9b8"
+      "blake3": "8fe0a05d55b11ea32e9561bf1ed9e1b9e0f63016c6f4e8a5d9a32c6d6af7e0b1"
     }
   ]
 }
