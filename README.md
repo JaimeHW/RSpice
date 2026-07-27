@@ -206,8 +206,6 @@ cargo test --release -p rspice-core --test ngspice_regression  # ngspice suite
 cargo test --release -p rspice-core --test xyce_regression     # Xyce corpus
 ```
 
-The harness design uses oracle replay, comparison gating, and debug environment variables to keep simulator-corpus results explicit and reproducible.
-
 ## Production operations
 
 The native backend is a stateless, one-shot worker process. Production service
