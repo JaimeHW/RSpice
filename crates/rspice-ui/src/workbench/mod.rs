@@ -15,7 +15,6 @@ pub mod code_workspace;
 pub mod commands;
 mod cross_probe;
 pub mod design_system;
-pub mod engineering_table;
 mod feature_availability;
 pub mod feature_availability_data;
 pub mod hardcopy;
@@ -61,12 +60,6 @@ pub use capability_workflow::{
     CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
 };
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
-pub use engineering_table::{
-    EngineeringColumnView, EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule,
-    EngineeringTableView, EngineeringTableViewStore, EngineeringViewScope,
-    EngineeringVirtualizationPolicy, FrozenIdentifierPolicy, SavedEngineeringTableView,
-    SortDirection,
-};
 pub use hardcopy_mapping_store::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
     PrintMappingSaveDisposition, PrintMappingSaveReceipt,

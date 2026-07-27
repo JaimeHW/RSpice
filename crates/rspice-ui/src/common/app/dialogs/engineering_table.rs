@@ -5,7 +5,7 @@ use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 use crate::common::export_workflow::{ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-use crate::workbench::{
+use crate::state::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy, SortDirection,
 };
@@ -355,7 +355,7 @@ impl RSpiceApp {
             .selected_row_ids
             .is_empty())
         .then_some(&self.state.dialogs.engineering_table.selected_row_ids);
-        match crate::workbench::engineering_table::delimited_text_selected(
+        match crate::state::engineering_table::delimited_text_selected(
             dataset, view, b'\t', true, true, false, selected,
         ) {
             Ok(text) => {
@@ -481,7 +481,7 @@ impl RSpiceApp {
             let observed = io.observe_destination(&destination)?;
             match format {
                 EngineeringTableExportFormat::CsvSchema => {
-                    let text = crate::workbench::engineering_table::delimited_text_selected(
+                    let text = crate::state::engineering_table::delimited_text_selected(
                         dataset,
                         &view,
                         b',',
@@ -490,7 +490,7 @@ impl RSpiceApp {
                         include_hidden,
                         selected_rows,
                     )?;
-                    let schema = crate::workbench::engineering_table::schema_json(
+                    let schema = crate::state::engineering_table::schema_json(
                         dataset,
                         &view,
                         include_hidden,
@@ -522,7 +522,7 @@ impl RSpiceApp {
                     }
                 }
                 EngineeringTableExportFormat::Tsv => {
-                    let text = crate::workbench::engineering_table::delimited_text_selected(
+                    let text = crate::state::engineering_table::delimited_text_selected(
                         dataset,
                         &view,
                         b'\t',
@@ -532,7 +532,7 @@ impl RSpiceApp {
                         selected_rows,
                     )?;
                     if include_metadata {
-                        let metadata = crate::workbench::engineering_table::schema_json(
+                        let metadata = crate::state::engineering_table::schema_json(
                             dataset,
                             &view,
                             include_hidden,
@@ -567,7 +567,7 @@ impl RSpiceApp {
                     }
                 }
                 EngineeringTableExportFormat::Xlsx => {
-                    let bytes = crate::workbench::engineering_table::xlsx_bytes(
+                    let bytes = crate::state::engineering_table::xlsx_bytes(
                         dataset,
                         &view,
                         include_headers,
@@ -583,7 +583,7 @@ impl RSpiceApp {
                     )
                 }
                 EngineeringTableExportFormat::Parquet => {
-                    let bytes = crate::workbench::engineering_table::parquet_bytes(
+                    let bytes = crate::state::engineering_table::parquet_bytes(
                         dataset,
                         &view,
                         include_metadata,
@@ -868,8 +868,8 @@ fn manager_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
     state: &mut crate::common::app::EngineeringTableDialogState,
-    personal: &[crate::workbench::SavedEngineeringTableView],
-    project: &[crate::workbench::SavedEngineeringTableView],
+    personal: &[crate::state::SavedEngineeringTableView],
+    project: &[crate::state::SavedEngineeringTableView],
 ) -> Option<BodyAction> {
     let tokens = Tokens::get(ui.ctx());
     let view = state.draft.as_mut()?;
@@ -1158,7 +1158,7 @@ fn manager_body(
 fn engineering_grid_preview(
     ui: &mut Ui,
     view: &EngineeringTableView,
-    projection: &crate::workbench::engineering_table::EngineeringProjection,
+    projection: &crate::state::engineering_table::EngineeringProjection,
     selected_rows: &mut std::collections::BTreeSet<String>,
     active_cell: &mut Option<(usize, usize)>,
     focus_cell: &mut Option<(usize, usize)>,
@@ -1336,7 +1336,7 @@ fn engineering_grid_preview(
         ui.small(format!(
             "{} matching rows · viewport rendering with overscan {}",
             projection.rows.len(),
-            crate::workbench::engineering_table::VIRTUALIZATION_OVERSCAN
+            crate::state::engineering_table::VIRTUALIZATION_OVERSCAN
         ));
     }
     action
@@ -1381,8 +1381,8 @@ fn saved_views_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
     state: &mut crate::common::app::EngineeringTableDialogState,
-    personal: &[crate::workbench::SavedEngineeringTableView],
-    project: &[crate::workbench::SavedEngineeringTableView],
+    personal: &[crate::state::SavedEngineeringTableView],
+    project: &[crate::state::SavedEngineeringTableView],
 ) -> Option<BodyAction> {
     let mut action = None;
     ui.horizontal(|ui| {
@@ -1619,7 +1619,7 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .grid_id,
-            crate::workbench::engineering_table::ACTIVE_SCHEMATIC_GRID_ID
+            crate::state::engineering_table::ACTIVE_SCHEMATIC_GRID_ID
         );
     }
 

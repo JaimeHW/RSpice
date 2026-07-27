@@ -78,14 +78,24 @@ const LAYERS: &[(&str, u32)] = &[
 /// a new violation means the code is in the wrong module.
 const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Phase 1 — break the `common` <-> `workbench` cycle.
-    // `common` owns `RSpiceApp`/`AppState`; `workbench` reaches back up for
-    // it. Extracting the application root to `crate::app` retires this.
+    //
+    // The cycle is not fixed by moving the application root up: `workbench`
+    // reaches for `RSpiceApp` 861 times and `AppState` 356 times, so hoisting
+    // `common/app` to `crate::app` would only rename this edge. It is fixed by
+    // pushing state *down*. Inside `workbench`, `app.state.` appears 2679
+    // times while `RSpiceApp`'s non-state fields appear about 30 times, so
+    // nearly all of the coupling is really to `AppState`.
+    //
+    // The plan: move the egui-free state modules (`state.rs`, `session.rs`,
+    // `preferences.rs`, `engineering_table.rs`, `hardcopy.rs`, `shortcuts/`,
+    // and the `Command` enum) out of `workbench` into `state`, then convert
+    // `workbench` signatures from `&mut RSpiceApp` to `&mut AppState`.
     ("workbench", "common", 294),
-    // Phase 2 — un-invert `state`.
-    // The persisted project model stores hardcopy, print-mapping,
-    // engineering-table, and netlist-document types that live in the UI
-    // shell. Moving those definitions down into `state` retires these.
-    ("state", "workbench", 39),
+    // The persisted project model still stores hardcopy, print-mapping, and
+    // netlist-document types that live in the UI shell. Each module that moves
+    // down lowers this count; `engineering_table` accounted for two of the
+    // original 39.
+    ("state", "workbench", 37),
     ("state", "simulation", 26),
     ("state", "properties", 10),
     ("state", "services", 7),

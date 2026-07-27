@@ -815,7 +815,7 @@ pub struct UiSessionState {
     /// Device-local working and named engineering-table views. Project-owned
     /// named views live in `ProjectWorkspace`; this store is the personal
     /// preference authority restored on desktop, web, and tablet hosts.
-    pub engineering_table_views: super::engineering_table::EngineeringTableViewStore,
+    pub engineering_table_views: crate::state::engineering_table::EngineeringTableViewStore,
     /// One-shot request to export the visible waveforms as CSV (needs the
     /// app's IO backend, so it is handled at the workbench boundary).
     pub export_csv_requested: bool,
@@ -923,7 +923,7 @@ pub struct UiSessionStateSer {
     #[serde(default)]
     schematic_routing_mode: Option<crate::state::WireRoutingMode>,
     #[serde(default)]
-    engineering_table_views: super::engineering_table::EngineeringTableViewStore,
+    engineering_table_views: crate::state::engineering_table::EngineeringTableViewStore,
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
     #[serde(default)]
@@ -1123,15 +1123,15 @@ mod symbol_selection_tests {
     #[test]
     fn personal_engineering_table_views_round_trip_with_the_ui_session() {
         let mut session = UiSessionState::new();
-        let dataset = crate::workbench::engineering_table::EngineeringDataset::active_schematic(
+        let dataset = crate::state::engineering_table::EngineeringDataset::active_schematic(
             &Default::default(),
         );
-        let view = crate::workbench::engineering_table::EngineeringTableView::for_dataset(&dataset);
+        let view = crate::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
         session
             .engineering_table_views
             .save(
                 "My device view",
-                crate::workbench::engineering_table::EngineeringViewScope::Personal,
+                crate::state::engineering_table::EngineeringViewScope::Personal,
                 view,
                 true,
                 &dataset,

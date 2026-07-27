@@ -6,6 +6,7 @@
 mod configuration_set;
 mod connectivity_contract;
 mod design_management;
+pub mod engineering_table;
 pub mod library_browser;
 mod model_bound_symbol;
 pub mod model_library;
@@ -36,6 +37,12 @@ pub use connectivity_contract::{
     TechnologyGlobalNetCatalog,
 };
 pub use design_management::*;
+pub use engineering_table::{
+    EngineeringColumnView, EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule,
+    EngineeringTableView, EngineeringTableViewStore, EngineeringViewScope,
+    EngineeringVirtualizationPolicy, FrozenIdentifierPolicy, SavedEngineeringTableView,
+    SortDirection,
+};
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryCellPlacementParameter, LibraryManager,
     NavColumn, View, ViewType, library_cell_placement_candidates,

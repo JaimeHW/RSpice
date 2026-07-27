@@ -2456,7 +2456,7 @@ pub struct ProjectWorkspace {
     /// views are device preferences; only explicitly project-scoped views
     /// participate in project revisioning and collaboration.
     #[serde(default)]
-    pub engineering_table_views: crate::workbench::EngineeringTableViewStore,
+    pub engineering_table_views: crate::state::EngineeringTableViewStore,
     /// Ordered, exact source aggregates used by all-sheets/all-panes and
     /// named print-set publication. Every member pins its document revision
     /// and content digest; stale members fail closed when resolved.
@@ -2547,7 +2547,7 @@ impl Default for ProjectWorkspace {
             project_print_mappings: crate::workbench::PrintMappingPresetCatalog::new(
                 crate::workbench::PrintMappingCatalogOwner::Project,
             ),
-            engineering_table_views: crate::workbench::EngineeringTableViewStore::default(),
+            engineering_table_views: crate::state::EngineeringTableViewStore::default(),
             hardcopy_source_sets: Vec::new(),
             report_documents: Vec::new(),
             netlist_source: None,

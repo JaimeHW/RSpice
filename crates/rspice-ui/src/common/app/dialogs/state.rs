@@ -202,11 +202,11 @@ impl EngineeringTableExportFormat {
 pub(crate) struct EngineeringTableDialogState {
     pub(crate) open: bool,
     pub(crate) page: EngineeringTableDialogPage,
-    pub(crate) draft: Option<crate::workbench::EngineeringTableView>,
+    pub(crate) draft: Option<crate::state::EngineeringTableView>,
     pub(crate) source_revision: u64,
     pub(crate) selected_saved_id: Option<String>,
     pub(crate) save_name: String,
-    pub(crate) save_scope: crate::workbench::EngineeringViewScope,
+    pub(crate) save_scope: crate::state::EngineeringViewScope,
     pub(crate) save_as_default: bool,
     pub(crate) saved_query: String,
     pub(crate) export_scope: EngineeringTableExportScope,
@@ -229,7 +229,7 @@ pub(crate) struct EngineeringTableDialogState {
 impl EngineeringTableDialogState {
     pub(crate) fn open(
         &mut self,
-        view: crate::workbench::EngineeringTableView,
+        view: crate::state::EngineeringTableView,
         source_revision: u64,
     ) {
         *self = Self {
