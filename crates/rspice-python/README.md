@@ -38,6 +38,10 @@ regression tests in CI the same way you run unit tests.
 
 ## Installation
 
+Requires CPython 3.10 or newer and `numpy>=2.0,<3`. Release wheels are built
+against the stable ABI (abi3-py310), so one wheel per platform covers every
+supported interpreter.
+
 The Python package is private and is not published to PyPI. Install it from an
 authorized source checkout or from a privately supplied build artifact. Its
 use and distribution are governed by the same RSpice Personal Use License as
@@ -207,14 +211,24 @@ netlist = rspice.Netlist.parse_file(
 # From a string, resolving includes against a directory
 netlist = rspice.Netlist.parse_with_includes(content, "circuits/")
 
-netlist.element_names, netlist.model_names, netlist.analyses
-netlist.measurement_names, netlist.title
+netlist.element_names, netlist.model_names, netlist.subcircuit_names
+netlist.analyses, netlist.measurement_names, netlist.measurement_specs
+netlist.title, netlist.is_global("vdd")
+netlist.num_elements, netlist.num_models, netlist.num_subcircuits
+netlist.num_analyses, netlist.num_measurements
 ```
 
 `Netlist.parse` treats its input as statements: if the first non-blank line
 is not a `*` comment, a synthetic title is prepended, so a malformed first
 element raises `ParseError` instead of silently becoming the title. Use
 `parse_spice` when you need classic first-line-title semantics.
+
+Syntax that parsed but was downgraded or ignored surfaces as non-fatal
+diagnostics rather than warnings on stderr. `netlist.diagnostics` carries
+`line`/`severity`/`code`/`message` entries, and `netlist.startup_diagnostics`
+adds structured `.IC`/`.NODESET` findings whose `code`, `stage`, `directive`,
+`origins`, `scopes`, and `canonical_nodes` are stable API values, so a linting
+job can branch on them without matching message text.
 
 ### Engine and Configuration
 

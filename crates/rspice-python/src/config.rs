@@ -8,8 +8,9 @@
 //! - `DampingStrategy` - Newton iteration damping methods
 //! - `IntegrationMethod` - Transient integration schemes
 //!
-//! All four config classes accept keyword arguments in their constructors so
-//! a complete configuration can be built in one expression. This matters
+//! `SimulationConfig`, `ConvergenceConfig`, `BypassConfig`, and
+//! `ResourceLimits` all accept keyword arguments in their constructors so a
+//! complete configuration can be built in one expression. This matters
 //! because property getters return *copies* (Rust value semantics): mutating
 //! `config.convergence.gmin_stepping` modifies a temporary and is lost.
 //! Either build with keywords or assign whole sub-objects back.
