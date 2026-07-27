@@ -19,6 +19,8 @@
 mod error;
 mod generate;
 mod generated_rust;
+#[cfg(feature = "generated-stamp")]
+mod generated_stamp;
 mod native_jit;
 mod runner;
 
@@ -41,6 +43,9 @@ enum BenchCommand {
     Gen(generate::GenArgs),
     /// Authenticate and gate generated Verilog-A Rust source resources.
     GeneratedRust(generated_rust::GeneratedRustArgs),
+    /// Measure and gate generated Verilog-A built-in stamp throughput.
+    #[cfg(feature = "generated-stamp")]
+    GeneratedStamp(generated_stamp::GeneratedStampArgs),
     /// Run the in-process native Verilog-A JIT benchmark gate.
     NativeJit(native_jit::NativeJitArgs),
     /// Run the benchmark suite and emit a JSON scoreboard.
@@ -52,6 +57,8 @@ fn main() -> ExitCode {
     let outcome = match cli.command {
         BenchCommand::Gen(args) => generate::generate(&args).map(|()| ExitCode::SUCCESS),
         BenchCommand::GeneratedRust(args) => generated_rust::run(&args),
+        #[cfg(feature = "generated-stamp")]
+        BenchCommand::GeneratedStamp(args) => generated_stamp::run(&args),
         BenchCommand::NativeJit(args) => native_jit::run(&args),
         BenchCommand::Run(args) => runner::run(&args),
     };
