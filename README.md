@@ -90,8 +90,8 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 | Family | Models |
 | :--- | :--- |
-| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/9/49`, `CAPMOD=2/3`), VDMOS, EKV3, Berkeley MOS1/MOS2/MOS3/MOS6, and legacy BSIM1/BSIM2; generated Verilog-A builtins are canonical for BSIM-SOI (`LEVEL=10/55/56/57`) and EKV 2.6 (`LEVEL=260`); unsupported MOS levels fail closed until generated or native support and validation are added |
-| Bipolar | Gummel-Poon BJT (default / `LEVEL=1`) plus generated Verilog-A builtins for VBIC (`LEVEL=4/9/11/12/13`), HICUM, and MEXTRAM where bundled sources are available; unsupported advanced BJT levels fail explicitly until generated support lands |
+| MOSFET | Every accepted `M`-card level is native: BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49` plus BSIM3-shaped `LEVEL=9`, `CAPMOD=2/3`), BSIM-SOI in DD/FD/PD variants (`LEVEL=10/55/56/57`), VDMOS (`LEVEL=18`), EKV 2.6 (`LEVEL=260`) and EKV3 (`LEVEL=301`), Berkeley MOS1/MOS2/MOS3/MOS6 and ngspice MOS9, and legacy BSIM1/BSIM2 (`LEVEL=4/5`). Any other level fails closed rather than falling through to the simplified MOS approximation |
+| Bipolar | Native Gummel-Poon (`LEVEL=0/1/2`) and native VBIC 1.3 (`LEVEL=4/9/11/12/13`). HICUM/L0, HICUM/L2, MEXTRAM, and Xyce HBT_X `Q` levels are rejected by name; those families are reachable instead as generated Verilog-A devices (below) |
 | Junction | Diode, JFET level 1 and native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`, default/best-available), an internal Xyce modified-Shockley JFET2 compatibility mode, MES/MESA/HFET-family `Z` devices, GaN HEMT |
 | Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |
 | Transmission lines | Ideal, lossy (LTRA, TXL), coupled (CPL) |
