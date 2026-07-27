@@ -490,7 +490,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_188_0_body_1_e1293;
                 }
                 noise_metadata_schedule_188_0_iterations += 1;
-                if noise_metadata_schedule_188_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_188_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_188_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_188_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -869,7 +869,7 @@ impl Instance {
                     w[562] = noise_metadata_schedule_282_0_body_1_e1932;
                 }
                 noise_metadata_schedule_282_0_iterations += 1;
-                if noise_metadata_schedule_282_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_282_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_282_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_282_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -1989,7 +1989,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_505_0_body_1_e3379;
                 }
                 noise_metadata_schedule_505_0_iterations += 1;
-                if noise_metadata_schedule_505_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_505_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_505_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_505_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -3937,7 +3937,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_741_0_body_32_e5352;
                 }
                 noise_metadata_schedule_741_0_iterations += 1;
-                if noise_metadata_schedule_741_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_741_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_741_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_741_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -4384,7 +4384,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_788_0_body_1_e5801;
                 }
                 noise_metadata_schedule_788_0_iterations += 1;
-                if noise_metadata_schedule_788_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_788_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_788_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_788_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -4688,7 +4688,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_820_0_body_1_e6103;
                 }
                 noise_metadata_schedule_820_0_iterations += 1;
-                if noise_metadata_schedule_820_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_820_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_820_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_820_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -5660,7 +5660,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_916_0_body_1_e7468;
                 }
                 noise_metadata_schedule_916_0_iterations += 1;
-                if noise_metadata_schedule_916_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_916_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_916_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_916_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -6405,7 +6405,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_953_0_body_33_e8450;
                 }
                 noise_metadata_schedule_953_0_iterations += 1;
-                if noise_metadata_schedule_953_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_953_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_953_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_953_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -7258,7 +7258,7 @@ impl Instance {
                     w[562] = noise_metadata_schedule_1012_0_body_29_e9519;
                 }
                 noise_metadata_schedule_1012_0_iterations += 1;
-                if noise_metadata_schedule_1012_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1012_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1012_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1012_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {let noise_metadata_schedule_1013_0_e9526: f64 = if ((params[117] <= 0.0) || (w[73] <= 0.0)) { 1.0 } else { 0.0 };w[847] = noise_metadata_schedule_1013_0_e9526;}
@@ -7831,7 +7831,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1072_0_body_1_e10506;
                 }
                 noise_metadata_schedule_1072_0_iterations += 1;
-                if noise_metadata_schedule_1072_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1072_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1072_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1072_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -8537,7 +8537,7 @@ impl Instance {
                             w[44] = noise_metadata_schedule_1116_0_body_27_body_1_e11431;
                         }
                         noise_metadata_schedule_1116_0_body_27_iterations += 1;
-                        if noise_metadata_schedule_1116_0_body_27_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1116_0_body_27_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                        if noise_metadata_schedule_1116_0_body_27_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1116_0_body_27_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                     }
                 }
                 if (active[0] & 0xff) != 0 {
@@ -8926,7 +8926,7 @@ impl Instance {
                             w[54] = noise_metadata_schedule_1116_0_body_69_body_1_e11843;
                         }
                         noise_metadata_schedule_1116_0_body_69_iterations += 1;
-                        if noise_metadata_schedule_1116_0_body_69_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1116_0_body_69_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                        if noise_metadata_schedule_1116_0_body_69_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1116_0_body_69_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                     }
                 }
                 if (active[0] & 0xff) != 0 {
@@ -9278,7 +9278,7 @@ impl Instance {
                             w[54] = noise_metadata_schedule_1116_0_body_106_body_1_e12206;
                         }
                         noise_metadata_schedule_1116_0_body_106_iterations += 1;
-                        if noise_metadata_schedule_1116_0_body_106_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1116_0_body_106_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                        if noise_metadata_schedule_1116_0_body_106_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1116_0_body_106_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                     }
                 }
                 if (active[0] & 0xff) != 0 {
@@ -9906,7 +9906,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_1116_0_body_172_e12892;
                 }
                 noise_metadata_schedule_1116_0_iterations += 1;
-                if noise_metadata_schedule_1116_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1116_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1116_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1116_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
     }
@@ -10547,7 +10547,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1186_0_body_1_e13511;
                 }
                 noise_metadata_schedule_1186_0_iterations += 1;
-                if noise_metadata_schedule_1186_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1186_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1186_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1186_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -11712,7 +11712,7 @@ impl Instance {
                     w[168] = noise_metadata_schedule_1272_0_body_32_e15476;
                 }
                 noise_metadata_schedule_1272_0_iterations += 1;
-                if noise_metadata_schedule_1272_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1272_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1272_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1272_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
     }
@@ -12082,7 +12082,7 @@ impl Instance {
                     w[168] = noise_metadata_schedule_1277_0_body_32_e16249;
                 }
                 noise_metadata_schedule_1277_0_iterations += 1;
-                if noise_metadata_schedule_1277_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1277_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1277_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1277_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -12486,7 +12486,7 @@ impl Instance {
                             w[44] = noise_metadata_schedule_1292_0_body_26_body_1_e16747;
                         }
                         noise_metadata_schedule_1292_0_body_26_iterations += 1;
-                        if noise_metadata_schedule_1292_0_body_26_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1292_0_body_26_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                        if noise_metadata_schedule_1292_0_body_26_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1292_0_body_26_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                     }
                 }
                 if (active[0] & 0xff) != 0 {
@@ -12864,7 +12864,7 @@ impl Instance {
                             w[54] = noise_metadata_schedule_1292_0_body_67_body_1_e17258;
                         }
                         noise_metadata_schedule_1292_0_body_67_iterations += 1;
-                        if noise_metadata_schedule_1292_0_body_67_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1292_0_body_67_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                        if noise_metadata_schedule_1292_0_body_67_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1292_0_body_67_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                     }
                 }
                 if (active[0] & 0xff) != 0 {
@@ -13216,7 +13216,7 @@ impl Instance {
                             w[54] = noise_metadata_schedule_1292_0_body_104_body_1_e17720;
                         }
                         noise_metadata_schedule_1292_0_body_104_iterations += 1;
-                        if noise_metadata_schedule_1292_0_body_104_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1292_0_body_104_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                        if noise_metadata_schedule_1292_0_body_104_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1292_0_body_104_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                     }
                 }
                 if (active[0] & 0xff) != 0 {
@@ -13844,7 +13844,7 @@ impl Instance {
                     w[168] = noise_metadata_schedule_1292_0_body_170_e18580;
                 }
                 noise_metadata_schedule_1292_0_iterations += 1;
-                if noise_metadata_schedule_1292_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1292_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1292_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1292_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
     }
@@ -14292,7 +14292,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1342_0_body_1_e19108;
                 }
                 noise_metadata_schedule_1342_0_iterations += 1;
-                if noise_metadata_schedule_1342_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1342_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1342_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1342_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -14620,7 +14620,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1378_0_body_1_e19534;
                 }
                 noise_metadata_schedule_1378_0_iterations += 1;
-                if noise_metadata_schedule_1378_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1378_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1378_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1378_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -14968,7 +14968,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1414_0_body_1_e19963;
                 }
                 noise_metadata_schedule_1414_0_iterations += 1;
-                if noise_metadata_schedule_1414_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1414_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1414_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1414_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -16459,7 +16459,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_1507_0_body_65_e21878;
                 }
                 noise_metadata_schedule_1507_0_iterations += 1;
-                if noise_metadata_schedule_1507_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1507_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1507_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1507_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
     }
@@ -17119,7 +17119,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1579_0_body_1_e22546;
                 }
                 noise_metadata_schedule_1579_0_iterations += 1;
-                if noise_metadata_schedule_1579_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1579_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1579_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1579_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -18118,7 +18118,7 @@ impl Instance {
                     w[168] = noise_metadata_schedule_1625_0_body_57_e23840;
                 }
                 noise_metadata_schedule_1625_0_iterations += 1;
-                if noise_metadata_schedule_1625_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1625_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1625_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1625_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
     }
@@ -18854,7 +18854,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1701_0_body_1_e24619;
                 }
                 noise_metadata_schedule_1701_0_iterations += 1;
-                if noise_metadata_schedule_1701_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1701_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1701_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1701_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xff) != 0 {
@@ -21184,7 +21184,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_1949_0_body_1_e27042;
                 }
                 noise_metadata_schedule_1949_0_iterations += 1;
-                if noise_metadata_schedule_1949_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_1949_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_1949_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_1949_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xfd) != 0 {
@@ -22354,7 +22354,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_2072_0_body_1_e28632;
                 }
                 noise_metadata_schedule_2072_0_iterations += 1;
-                if noise_metadata_schedule_2072_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_2072_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_2072_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_2072_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xfd) != 0 {
@@ -23405,7 +23405,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_2132_0_body_55_e30178;
                 }
                 noise_metadata_schedule_2132_0_iterations += 1;
-                if noise_metadata_schedule_2132_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_2132_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_2132_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_2132_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
     }
@@ -23910,7 +23910,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_2185_0_body_1_e30661;
                 }
                 noise_metadata_schedule_2185_0_iterations += 1;
-                if noise_metadata_schedule_2185_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_2185_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_2185_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_2185_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xfd) != 0 {
@@ -24654,7 +24654,7 @@ impl Instance {
                     w[54] = noise_metadata_schedule_2264_0_body_1_e31798;
                 }
                 noise_metadata_schedule_2264_0_iterations += 1;
-                if noise_metadata_schedule_2264_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_2264_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_2264_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_2264_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0xfc) != 0 {
@@ -28057,7 +28057,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_2624_0_body_31_e36511;
                 }
                 noise_metadata_schedule_2624_0_iterations += 1;
-                if noise_metadata_schedule_2624_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_2624_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_2624_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_2624_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0x4) != 0 {let noise_metadata_schedule_2626_0_e36517: f64 = if w[1442] < 5.0 { 1.0 } else { 0.0 };w[1494] = noise_metadata_schedule_2626_0_e36517;}
@@ -29817,7 +29817,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_2779_0_body_31_e39454;
                 }
                 noise_metadata_schedule_2779_0_iterations += 1;
-                if noise_metadata_schedule_2779_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_2779_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_2779_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_2779_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0x4) != 0 {let noise_metadata_schedule_2781_0_e39460: f64 = if w[1442] < 5.0 { 1.0 } else { 0.0 };w[1512] = noise_metadata_schedule_2781_0_e39460;}
@@ -31910,7 +31910,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_2979_0_body_31_e43014;
                 }
                 noise_metadata_schedule_2979_0_iterations += 1;
-                if noise_metadata_schedule_2979_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_2979_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_2979_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_2979_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0x4) != 0 {let noise_metadata_schedule_2981_0_e43020: f64 = if w[1571] < 5.0 { 1.0 } else { 0.0 };w[1624] = noise_metadata_schedule_2981_0_e43020;}
@@ -33737,7 +33737,7 @@ impl Instance {
                     w[167] = noise_metadata_schedule_3139_0_body_31_e46250;
                 }
                 noise_metadata_schedule_3139_0_iterations += 1;
-                if noise_metadata_schedule_3139_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_3139_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_3139_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_3139_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
         if (active[0] & 0x4) != 0 {let noise_metadata_schedule_3141_0_e46256: f64 = if w[1571] < 5.0 { 1.0 } else { 0.0 };w[1644] = noise_metadata_schedule_3141_0_e46256;}

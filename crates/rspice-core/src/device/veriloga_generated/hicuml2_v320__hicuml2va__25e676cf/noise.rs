@@ -5158,7 +5158,7 @@ impl Instance {
                     w[224] = noise_metadata_schedule_647_0_body_87_e8091;
                 }
                 noise_metadata_schedule_647_0_iterations += 1;
-                if noise_metadata_schedule_647_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_647_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
+                if noise_metadata_schedule_647_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("noise", noise_metadata_schedule_647_0_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             }
         }
     }
