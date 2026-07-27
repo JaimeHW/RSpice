@@ -209,7 +209,9 @@ pub(super) fn parse_command(
         ".CODEMODEL" | ".RSPICE_UNSUPPORTED_CODEMODEL" => {
             parse_xspice_codemodel_command(stream, line_num, &cmd)?;
         }
-        ".PARAM" | ".CSPARAM" => {
+        // `.PARAMS` is the plural spelling ngspice accepts for `.PARAM`; IHP's
+        // SG13G2 device subcircuits are written with it.
+        ".PARAM" | ".PARAMS" | ".CSPARAM" => {
             parse_param_statement(stream, line_num, params, deferred_body_params, false)?;
         }
         ".GLOBAL_PARAM" => {
