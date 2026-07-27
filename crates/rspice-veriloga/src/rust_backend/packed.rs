@@ -26,7 +26,137 @@
 //! finite. A garbage lane would otherwise turn into a NaN that spreads to
 //! every downstream lane.
 
-use crate::canonical_ir::{OptBinaryOp, OptUnaryOp};
+use std::collections::HashSet;
+
+use crate::canonical_ir::{OptBinaryOp, OptModel, OptUnaryOp, OptValueKind, ValueId};
+
+/// Where a value's derivative comes from, structurally.
+///
+/// Derived from the value's own operator rather than from a `derivatives`
+/// list, because the primal graph the packed lowering reads has none — that is
+/// the whole point of reading it before the expansion pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Dependence {
+    /// Independent of every unknown; costs one binding, not two.
+    None,
+    /// A seed: this value *is* an unknown, so its array is a unit vector.
+    Seed,
+    /// Differentiated exactly when its listed operands are.
+    Propagates,
+    /// Differentiated regardless of its operands.
+    ///
+    /// `$limit` is the case: it contributes an affine correction lane whether
+    /// or not the proposed value depends on an unknown.
+    Always,
+}
+
+/// How a value's derivative relates to its operands, before any lane arithmetic.
+pub(super) fn dependence(kind: &OptValueKind) -> Dependence {
+    match kind {
+        // The three ways an unknown enters a model.
+        OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. } => Dependence::Seed,
+
+        OptValueKind::Limit { .. } => Dependence::Always,
+
+        // Runtime loop carriers keep a derivative on every lane, because the
+        // trip count is not known until the model runs.
+        OptValueKind::RuntimeLoopVariable { .. } | OptValueKind::RuntimeLoopResult { .. } => {
+            Dependence::Always
+        }
+
+        OptValueKind::Unary { op, .. } => {
+            if unary_rule(*op, "", "") == LaneRule::Zero {
+                Dependence::None
+            } else {
+                Dependence::Propagates
+            }
+        }
+        OptValueKind::Binary { op, .. } => {
+            if binary_rule(*op, "", "", "") == LaneRule::Zero {
+                Dependence::None
+            } else {
+                Dependence::Propagates
+            }
+        }
+
+        OptValueKind::Select { .. }
+        | OptValueKind::Ddt { .. }
+        | OptValueKind::CountedSum { .. }
+        | OptValueKind::SimParam { .. } => Dependence::Propagates,
+
+        // Constants, model parameters, ambient quantities, and the values that
+        // deliberately break the derivative chain. `Ddx` is among them: it
+        // reports a derivative rather than carrying one, and `LimitPrevious`
+        // holds the previous iterate, which Newton treats as fixed.
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::SimParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity
+        | OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::Ddx { .. }
+        | OptValueKind::DdtScale
+        | OptValueKind::LimitPrevious { .. }
+        | OptValueKind::LoopIndex { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. }
+        | OptValueKind::EquationValue { .. } => Dependence::None,
+    }
+}
+
+/// Operands whose derivative feeds this value's.
+///
+/// Only the operands the chain rule actually reads: a `Select`'s condition is
+/// excluded because it is boolean, and `Limit`'s candidate because the affine
+/// correction is formed from the primal displacement rather than a derivative.
+fn differentiating_operands(kind: &OptValueKind) -> Vec<ValueId> {
+    match kind {
+        OptValueKind::Unary { input, .. } => vec![*input],
+        OptValueKind::Binary { left, right, .. } => vec![*left, *right],
+        OptValueKind::Select {
+            then_value,
+            else_value,
+            ..
+        } => vec![*then_value, *else_value],
+        OptValueKind::Ddt { input, .. } => vec![*input],
+        OptValueKind::SimParam { fallback, .. } => vec![*fallback],
+        OptValueKind::CountedSum { initial, term, .. } => vec![*initial, *term],
+        OptValueKind::Limit { proposed, .. } => vec![*proposed],
+        _ => Vec::new(),
+    }
+}
+
+/// Values that need a derivative array emitted.
+///
+/// Everything reachable from a seed through operators that propagate. Values
+/// outside this set — a compact model's temperature scaling, geometry
+/// arithmetic and parameter preprocessing, which is a large share of it — cost
+/// a single primal binding.
+///
+/// Relies on operands preceding their consumers in the value list, which the
+/// graph builder guarantees by construction.
+pub(super) fn differentiated_values(opt: &OptModel) -> HashSet<ValueId> {
+    let mut differentiated = HashSet::new();
+    for value in &opt.values {
+        let needs = match dependence(&value.kind) {
+            Dependence::None => false,
+            Dependence::Seed | Dependence::Always => true,
+            Dependence::Propagates => differentiating_operands(&value.kind)
+                .into_iter()
+                .any(|operand| differentiated.contains(&operand)),
+        };
+        if needs {
+            differentiated.insert(value.id);
+        }
+    }
+    differentiated
+}
 
 /// How a value's derivative array is built from its operands'.
 ///
@@ -283,6 +413,98 @@ mod tests {
         assert!(binary.contains("from_fn::<f64, 7, _>"), "{binary}");
         assert!(binary.contains("let l = &da;"), "{binary}");
         assert!(binary.contains("let r = &db;"), "{binary}");
+    }
+
+    #[test]
+    fn the_three_unknown_sources_seed_derivatives() {
+        use crate::canonical_ir::{BranchId, BranchUnknownId, NodeId};
+        assert_eq!(
+            dependence(&OptValueKind::NodePotential {
+                node: NodeId::from(0)
+            }),
+            Dependence::Seed
+        );
+        assert_eq!(
+            dependence(&OptValueKind::BranchFlow {
+                branch: BranchId::from(0)
+            }),
+            Dependence::Seed
+        );
+        assert_eq!(
+            dependence(&OptValueKind::BranchUnknownFlow {
+                branch_unknown: BranchUnknownId::from(0)
+            }),
+            Dependence::Seed
+        );
+    }
+
+    #[test]
+    fn derivative_killing_operators_stop_propagation() {
+        // A comparison over a node potential is still independent of every
+        // unknown. Treating it as dependent would emit a derivative array for
+        // every guard in the model.
+        assert_eq!(
+            dependence(&OptValueKind::Binary {
+                op: OptBinaryOp::Lt,
+                left: ValueId::from(0),
+                right: ValueId::from(1),
+            }),
+            Dependence::None
+        );
+        assert_eq!(
+            dependence(&OptValueKind::Unary {
+                op: OptUnaryOp::Floor,
+                input: ValueId::from(0),
+            }),
+            Dependence::None
+        );
+    }
+
+    #[test]
+    fn ddx_and_previous_iterate_break_the_chain() {
+        // `ddx` reports a derivative rather than carrying one, and Newton holds
+        // the previous iterate fixed. Both must terminate propagation or the
+        // Jacobian picks up terms the reference does not have.
+        assert_eq!(
+            dependence(&OptValueKind::Ddx {
+                value: ValueId::from(0),
+                pos_node: None,
+                neg_node: None,
+            }),
+            Dependence::None
+        );
+        assert_eq!(
+            dependence(&OptValueKind::LimitPrevious {
+                operator: crate::canonical_ir::ExprId::from(0),
+                proposed: ValueId::from(0),
+            }),
+            Dependence::None
+        );
+    }
+
+    #[test]
+    fn limit_is_differentiated_even_when_its_input_is_not() {
+        // $limit contributes an affine correction lane regardless, so it cannot
+        // be gated on the proposed value depending on an unknown.
+        assert_eq!(
+            dependence(&OptValueKind::Limit {
+                operator: crate::canonical_ir::ExprId::from(0),
+                proposed: ValueId::from(0),
+                candidate: ValueId::from(1),
+            }),
+            Dependence::Always
+        );
+    }
+
+    #[test]
+    fn select_propagates_through_arms_not_its_condition() {
+        // The condition is boolean; only the arms can carry a derivative.
+        let operands = differentiating_operands(&OptValueKind::Select {
+            condition: ValueId::from(7),
+            then_value: ValueId::from(8),
+            else_value: ValueId::from(9),
+        });
+        assert_eq!(operands, vec![ValueId::from(8), ValueId::from(9)]);
     }
 
     #[test]
