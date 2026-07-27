@@ -108,16 +108,21 @@ ngspice-46's `src/spicelib/devices/bsim4/`; those upstream BSIM4 files carry
 UC Berkeley BSIM4 / ECL-2.0 terms tracked in the root `NOTICE`. It is wired through the builder,
 matrix reservation, nonlinear Newton stamping, AC small-signal stamping, and
 transient charge integration; `tests/bsim4_native.rs` pins the engine wiring
-against OP, DC sweep, transient, and `LEVEL=54` decks. The port supports
-internal and external bias-dependent S/D resistance (`rdsMod=0/1`) and still
-rejects unported mode selectors with typed errors rather than silently changing
-physics: distributed body and gate-resistance networks (`rbodyMod`, `rgateMod`), NQS,
-unknown `cvchargeMod` charge paths, `mtrlMod=1`, and
-other unported mode selectors. `GEOMOD=0..10` implicit diffusion geometry,
-`RGEOMOD=1..8` implicit S/D resistance geometry, `WPEMOD=1` well-proximity
-adjustment, `igcMod`/`igbMod` gate tunneling currents, BSIM4 stress layout
-correction, and `dioMod=0/1/2` junction diode selectors are implemented. See
-`src/device/mosfet/bsim4v8/params.rs` and `device.rs` for the exact
+against OP, DC sweep, transient, and `LEVEL=54` decks. Implemented: internal
+and external bias-dependent S/D resistance (`rdsMod=0/1`), distributed body
+and gate-resistance networks (`rbodyMod=0/1/2`, `rgateMod=0/1/2/3`),
+transient and AC charge-deficit NQS, `mtrlMod=1` material constants for both
+compatibility modes, `capMod=0/1/2` with integer `cvchargeMod=0/1/2/3`,
+`mobMod=0..6` (including the high-k/Synopsys variants), `tempMod=0/1/2/3`,
+`geoMod=0..10` implicit diffusion geometry, `rgeoMod=1..8` implicit S/D
+resistance geometry for omitted `NRD`/`NRS`, `wpemod=1` well-proximity for
+`SC` and explicit `SCA`/`SCB`/`SCC` inputs, `igcMod`/`igbMod` gate tunneling
+currents, the stress layout correction for active `SA`/`SB` layouts
+including the multi-finger `SD` path, and `dioMod=0/1/2` junction diode
+selectors.
+
+Selector values outside those ranges are typed errors rather than silent
+changes of physics. See `src/device/mosfet/bsim4v8/mod.rs` for the exact
 ported/not-ported inventory.
 
 **Sources and behavioral** — independent sources (`sources.rs`), the four

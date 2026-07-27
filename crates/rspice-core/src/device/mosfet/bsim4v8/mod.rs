@@ -44,17 +44,23 @@
 //!
 //! Rejected at construction ([`Bsim4v8::new`]):
 //!
-//! - invalid `rgateMod` and `rbodyMod` selector values. Transient NQS is
-//!   native for the supported source/drain, body, and gate-resistance
-//!   topologies, and it may coexist with AC NQS on the same model card.
+//! - `rgateMod > 3` and `rbodyMod > 2`; every selector at or below those
+//!   bounds is implemented.
+//! - `mobMod` outside `0..=6`.
+//! - `trnqsMod=1` or `acnqsMod=1` combined with an out-of-range `rgateMod`.
+//!   Transient NQS is otherwise native for the supported source/drain, body,
+//!   and gate-resistance topologies, and may coexist with AC NQS on the same
+//!   model card.
+//! - `SAREF`/`SBREF` that are not positive while the stress effect is active.
 //!
 //! AC charge-deficit NQS (`acnqsMod=1`) is native for `rbodyMod = 0/1/2`,
 //! `rdsMod = 0/1`, and `rgateMod = 0/1/2/3`.
 //!
-//! Rejected at charge-request time (DC is unaffected): unknown `cvchargeMod`
-//! selectors beyond `0/1/2`; selectors `1` and `2` share ngspice's nonzero
-//! branch. The `capMod=0/1/2` charge paths are ported; after those selectors are validated,
-//! `xpart < 0` suppresses intrinsic channel charge as ngspice does.
+//! Rejected at charge-request time (DC is unaffected): non-integer
+//! `cvchargeMod`, and integer selectors outside `0/1/2/3`. Every nonzero
+//! selector shares ngspice's nonzero `VgsteffCV` branch. The `capMod=0/1/2`
+//! charge paths are ported; after those selectors are validated, `xpart < 0`
+//! suppresses intrinsic channel charge as ngspice does.
 //!
 //! Noise selectors (`fnoiMod`/`tnoiMod`) and the SOA limits are accepted
 //! and stored — they do not affect the DC/charge load. ngspice-46's BSIM4
