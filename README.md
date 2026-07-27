@@ -4,37 +4,44 @@
 
 # RSpice
 
-**An analog circuit simulator written in Rust.**
+**An analog and mixed-signal circuit simulator written in Rust.**
 
-SPICE-compatible netlists, validated against ngspice — with a CLI, a desktop UI,
-Python and WebAssembly bindings, and a Verilog-A compiler.
+SPICE netlists, measured continuously against ngspice and Xyce, with a CLI, a
+desktop IDE, Python and WebAssembly bindings, and a Verilog-A compiler.
 
 [![License](https://img.shields.io/badge/license-source--available-informational?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.94-orange?style=flat-square)](rust-toolchain.toml)
 [![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-lightgrey?style=flat-square)](https://github.com/JaimeHW/RSpice)
 
+[Quick start](#quick-start) · [Analyses](#analyses) · [Devices](#devices) ·
+[Dialect](#netlist-dialect) · [Interfaces](#interfaces) ·
+[Validation](#validation) · [Status](#status)
+
 </div>
 
-## Overview
+---
 
-RSpice simulates analog and mixed-signal circuits described as SPICE netlists. The engine assembles modified-nodal-analysis systems and solves them with a damped Newton iteration — merit-based line search, gmin and source stepping, pseudo-transient continuation — under an adaptive-timestep transient loop with local-truncation-error control. The real-valued path defaults to an in-tree KLU-class sparse solver, while [faer](https://crates.io/crates/faer) backs complex/AC-family sparse solves; AC sweeps and Monte Carlo runs parallelize across cores with rayon, and the hottest device-evaluation paths have optional SIMD batch implementations.
+RSpice assembles modified-nodal-analysis systems and solves them with a damped
+Newton iteration — merit-based line search, gmin and source stepping,
+pseudo-transient and arc-length continuation — under an adaptive-timestep
+transient loop with local-truncation-error control. Real-valued factorization
+uses an in-tree KLU-class sparse solver whose stored pivots make refactorization
+on a frozen sparsity pattern cheap; [faer](https://crates.io/crates/faer) backs
+the complex solves for AC-family analyses.
 
-Around the engine sit a CLI built for batch runs and CI, a desktop application for schematic capture and waveform inspection, and Python and WebAssembly bindings; a Verilog-A compiler brings behavioral models to the runtimes where that pipeline is enabled.
-
-## Status
-
-RSpice is a young project under active development. The surface area below is broad: major paths are implemented and covered by focused tests, but maturity and validation depth vary by subsystem. Accuracy is measured against ngspice continuously rather than assumed, and the current repository should not be presented as a substitute for hardened EDA tooling.
-
-Platform support is tracked by CI coverage and release gates: native backends ship for six Linux, macOS, and Windows target triples, under the artifact contract described in [Production operations](#production-operations). Mobile and tablet browser use remains launch-gated separately.
+Where physics is unported, RSpice raises a typed error naming the parameter or
+mode selector rather than falling back to an approximation. A model card that
+would silently produce plausible but wrong currents fails closed instead.
 
 ## Quick start
 
-The toolchain is pinned to Rust 1.94 via [rust-toolchain.toml](rust-toolchain.toml); rustup picks it up automatically.
+The toolchain is pinned to Rust 1.94 by [rust-toolchain.toml](rust-toolchain.toml);
+rustup picks it up automatically.
 
 ```bash
 git clone https://github.com/JaimeHW/RSpice.git
 cd RSpice
-cargo build --release -p rspice-cli   # the first optimized build compiles the full dependency graph
+cargo build --release -p rspice-cli
 ```
 
 Describe a circuit, `rc_lowpass.sp`:
@@ -63,7 +70,7 @@ $ target/release/rspice run rc_lowpass.sp --meas
 Simulation complete in 0.003s.
 ```
 
-Results can be written to a file instead — SPICE raw, CSV, TSV, JSON, or HDF5:
+Write results to a file instead — SPICE raw, ASCII raw, CSV, TSV, JSON, or HDF5:
 
 ```bash
 target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
@@ -71,76 +78,127 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 `cargo install --path crates/rspice-cli` puts `rspice` on your `PATH`.
 
-## What's implemented
+## Analyses
 
-### Analyses
+Every analysis below runs end to end on a real circuit. The second column is the
+complete set of ways to reach it.
 
-| Domain | Analyses |
-| :--- | :--- |
-| Operating point & sweeps | `.OP`, `.DC` (including two-source sweeps), temperature sweeps, `.STEP` |
-| Time domain | `.TRAN`, with LTE-controlled adaptive timestepping and checkpoint/resume segmentation |
-| Small-signal | `.AC`, `.NOISE`, `.PZ`, `.TF`, `.SENS`, third-order Volterra `.DISTO` (harmonic and two-tone intermodulation) |
-| Statistical | Operating-point Monte Carlo parameter variation, process corners † |
-| Periodic / RF | Periodic steady state (shooting), harmonic balance with envelope continuation, S-parameters with Touchstone export, periodic AC, phase noise, periodic transfer function, periodic stability † |
-| Post-processing | `.MEAS` over TRAN/DC/AC/NOISE with `GOAL`/`TOL` pass-fail gating, `.FOUR`; THD/IMD, eye-diagram, and jitter metrics † |
+| Analysis | Invoked by | Notes |
+| :--- | :--- | :--- |
+| Operating point | `.OP` | |
+| DC sweep | `.DC` | single source, or nested two-source |
+| Temperature sweep | `.TEMP` | list of temperatures |
+| Parametric sweep | `.STEP` | parameter, device, or `DATA=` table |
+| Transient | `.TRAN` | LTE-controlled timestep, breakpoint handling, `--checkpoint`/`--resume` segmentation |
+| AC small-signal | `.AC` | sweep parallelized across cores |
+| Noise | `.NOISE` | |
+| Pole-zero | `.PZ` | |
+| Transfer function | `.TF` | |
+| Sensitivity | `.SENS` | DC and AC |
+| Distortion | `.DISTO` | third-order Volterra; harmonic and two-tone intermodulation |
+| Fourier / THD | `.FOUR` | |
+| Monte Carlo | `.MC`, `--monte-carlo` | operating-point parameter variation; gaussian, uniform, or worst-case |
+| Process corners | `--corners` | corner definitions via `--corner-lib` |
+| Harmonic balance | `.HB`, `--hb-freq` | with envelope continuation |
+| Periodic steady state | `--pss-freq` | shooting method |
+| S-parameters | `.SP`, `--sparam` | Touchstone export; `--sparam` drives two ports |
+| Stability (loop gain) | `.STB` | probes a 0 V source placed in the loop |
+| Periodic AC | `Engine::run_pac`, IDE | conversion matrix around the PSS/HB solution |
+| Phase noise | `Engine::run_pnoise`, IDE | Floquet projection; PPV for oscillators |
+| Periodic transfer function | IDE | composed on PSS |
+| Periodic stability | IDE | Floquet multipliers from the monodromy matrix |
+| Measurements | `.MEAS` | over TRAN/DC/AC/NOISE; `GOAL`/`TOL` gates the exit status |
 
-† Reachability differs by analysis. `.MC`, `.STB`, `.HB`, `.SP`, `.DISTO`, and `.STEP` have deck cards; Monte Carlo, process corners, PSS, HB, and S-parameters are additionally exposed as CLI flags (`--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, `--sparam`). PAC and phase noise have no deck card and run from the engine API (`Engine::run_pac`, `run_pnoise`, `run_pnoise_oscillator`); PXF and PSTB are composed on top of PSS by the desktop IDE's simulation runner. `.FFT` parses but is rejected at run time until the post-processing lands.
+`.FFT` parses but is rejected at run time until its post-processing lands.
 
-### Devices
+## Devices
 
 | Family | Models |
 | :--- | :--- |
-| MOSFET | Every accepted `M`-card level is native: BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49` plus BSIM3-shaped `LEVEL=9`, `CAPMOD=2/3`), BSIM-SOI in DD/FD/PD variants (`LEVEL=10/55/56/57`), VDMOS (`LEVEL=18`), EKV 2.6 (`LEVEL=260`) and EKV3 (`LEVEL=301`), Berkeley MOS1/MOS2/MOS3/MOS6 and ngspice MOS9, and legacy BSIM1/BSIM2 (`LEVEL=4/5`). Any other level fails closed rather than falling through to the simplified MOS approximation |
-| Bipolar | Native Gummel-Poon (`LEVEL=0/1/2`) and native VBIC 1.3 (`LEVEL=4/9/11/12/13`). HICUM/L0, HICUM/L2, MEXTRAM, and Xyce HBT_X `Q` levels are rejected by name; those families are reachable instead as generated Verilog-A devices (below) |
-| Junction | Diode, JFET level 1 and native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`, default/best-available), an internal Xyce modified-Shockley JFET2 compatibility mode, MES/MESA/HFET-family `Z` devices, GaN HEMT |
-| Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |
-| Transmission lines | Ideal, lossy (LTRA, TXL), coupled (CPL) |
-| Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `PAT`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL file sources |
+| MOSFET | Every accepted `M`-card level is native: BSIM4 v4.8 (`LEVEL=14/54`), BSIM3v3.3 (`LEVEL=8/49` plus BSIM3-shaped `LEVEL=9`, `CAPMOD=2/3`), BSIM-SOI in DD/FD/PD variants (`LEVEL=10/55/56/57`), VDMOS (`LEVEL=18`), EKV 2.6 (`LEVEL=260`) and EKV3 (`LEVEL=301`), Berkeley MOS1/MOS2/MOS3/MOS6 and ngspice MOS9, legacy BSIM1/BSIM2 (`LEVEL=4/5`) |
+| Bipolar | Native Gummel-Poon (`LEVEL=0/1/2`) and native VBIC 1.3 (`LEVEL=4/9/11/12/13`) |
+| Junction | Diode, JFET level 1, native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`) with an internal Xyce modified-Shockley compatibility mode, MES/MESA/HFET-family `Z` devices, GaN HEMT |
+| Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor with Jiles–Atherton hysteresis |
+| Transmission lines | Ideal, lossy (LTRA, TXL), coupled multi-conductor (CPL) |
+| Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `PAT`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL-from-file sources |
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
-| Mixed-signal | XSPICE-style analog/digital elements, tri-state drivers, A/D–D/A bridges |
-| Verilog-A | Compiled behavioral modules (below) |
+| Mixed-signal | XSPICE-style analog and digital code models, tri-state drivers, A/D–D/A bridges |
+| Verilog-A | Generated CMC devices and externally compiled modules — below |
 
-CMC compact-model families with redistributable Verilog-A sources under
+Unlisted `M` levels fail closed rather than falling through to the simplified
+MOS approximation. HICUM/L0, HICUM/L2, MEXTRAM, and Xyce HBT_X `Q` levels are
+rejected by name; those families are reachable as generated Verilog-A devices.
+
+BSIM-class cards raise typed errors when they request unported physics —
+distributed gate and body resistance networks, NQS, material-mode effects,
+unknown charge paths. BSIM4 `RDSMOD=0/1` source/drain resistance is native,
+including `RGEOMOD=1..8` implicit geometry when `NRD`/`NRS` are omitted, as are
+`GEOMOD=0..10`, `WPEMOD=1`, gate tunneling, stress layout correction, and
+`DIOMOD=0/1/2`.
+
+### Generated Verilog-A devices
+
+CMC compact-model families with redistributable sources under
 [models/veriloga/cmc/](models/veriloga/cmc/) are not hand-ported. They are
-generated to Rust from the upstream source and checked in under
+generated to Rust from the upstream Verilog-A and checked in under
 `crates/rspice-core/src/device/veriloga_generated/` — 42 devices today, among
 them ASM-HEMT, BSIM-BULK, BSIM-CMG, BSIM-IMG, BSIM-SOI, DIODE_CMC, HICUM/L0
 and /L2, HiSIM-HV, HiSIM-SOI, JUNCAP200, L-UTSOI, MEXTRAM 505, MVSG-CMC,
-PSP104, and VBIC 1.3. A generated device is instantiated by its module name on
-an `X` line rather than through an `M`/`Q` `LEVEL` selector, and each compiles
-in only when its `veriloga-model-*` feature is enabled. Where a bundled source
-exists the generated device is the canonical implementation, and a hand-written
-native port of the same family serves the `LEVEL`-card decks that reach it.
+PSP104, and VBIC 1.3.
 
-BSIM-class models fail with typed errors when a model card requests unported
-physics such as BSIM4 gate/body resistance networks, NQS, material-mode
-effects, or unsupported mode selectors. BSIM4 `RDSMOD=0/1` source/drain
-resistance paths are native, including `RGEOMOD=1..8` implicit S/D resistance
-geometry when `NRD`/`NRS` are omitted. That is deliberate: a commercial simulator should
-reject unsupported physics rather than silently produce plausible but wrong
-currents. The `Z`-device GaN HEMT is an in-tree physics-style model; generated
-ASM-HEMT and MVSG-CMC devices are present but not yet oracle-qualified.
+A generated device is instantiated by its module name on an `X` line, not
+through an `M`/`Q` `LEVEL` selector, and each compiles in only when its
+`veriloga-model-*` feature is enabled — granular features keep compile time,
+peak rustc memory, and binary size proportional to the models you actually use.
+Where a bundled source exists the generated device is the canonical
+implementation; a hand-written native port of the same family serves the
+`LEVEL`-card decks that reach it. The generated ASM-HEMT and MVSG-CMC devices
+are present but not yet oracle-qualified; the in-tree `Z`-device GaN HEMT is a
+physics-style model, not a CMC one.
 
-### Netlist dialect
+## Netlist dialect
 
-`.SUBCKT` subcircuits (flattened during elaboration), `.PARAM`/`.CSPARAM` and `.FUNC` with expression evaluation, `.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF` conditionals, `.INCLUDE` and `.LIB`, `.MODEL`, `.GLOBAL`, `.IC` and `.NODESET`, `.SAVE`/`.PROBE` and `.PRINT`/`.PLOT`, `.OPTIONS`, `.TEMP`, and the usual engineering suffixes. Unrecognized dot-commands are reported as diagnostics rather than silently dropped. Starter `.lib` device libraries — diodes, MOSFETs, transistors, op-amps — ship under [crates/rspice-core/models/spice/](crates/rspice-core/models/spice/).
+`.SUBCKT` subcircuits are flattened during elaboration, with hierarchical path
+handling and scoped parameters. `.PARAM`/`.CSPARAM` and `.FUNC` evaluate through
+a bytecode expression VM that also backs B-sources; `.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF`
+select at parse time. `.INCLUDE`, `.LIB`, and `.MODEL` bring in model cards —
+starter `.lib` libraries for diodes, MOSFETs, transistors, and op-amps ship under
+[crates/rspice-core/models/spice/](crates/rspice-core/models/spice/). `.GLOBAL`,
+`.IC`, `.NODESET`, `.SAVE`/`.PROBE`, `.PRINT`/`.PLOT`, `.OPTIONS`, and `.TEMP`
+behave as expected, and the usual engineering suffixes are accepted. Unrecognized
+dot-commands surface as diagnostics rather than being silently dropped.
+
+Beyond plain SPICE, the parser ingests SPEF (IEEE 1481) parasitics as
+back-annotation onto a parsed netlist, XSPICE code-model cards, and Laplace-defined
+sources. LTspice `.raw` files can be read back for comparison.
 
 ## Interfaces
 
 ### Command line
 
-The CLI is built for scripted runs and CI: it executes the analyses a netlist requests, validates and inspects netlists, converts between output formats, and compares results against golden references. The exit status is the verification contract — failed `.MEAS` checks exit 3, non-finite results exit 1, comparison mismatches exit 3, `--timeout` overruns exit 124 — and runs can emit JUnit or TAP reports, a versioned JSON run summary (`--summary`), and machine-readable measurement files. Production wrappers can select newline-delimited JSON logs with `--log-format json` and structured fatal diagnostics with `--error-format json`.
+Built for scripted runs and CI. The exit status is the verification contract.
 
-| Command | Description |
+| Command | Purpose |
 | :--- | :--- |
-| `rspice run` | Execute simulations |
-| `rspice health` | Probe process liveness or parser-to-solver readiness |
-| `rspice info` | Print parsed netlist information |
+| `rspice run` | Execute the analyses a netlist requests |
 | `rspice check` | Validate syntax and connectivity |
+| `rspice info` | Print parsed netlist information |
 | `rspice compare` | Compare output against a golden result |
-| `rspice convert` | Convert between RAW, ASCII RAW, CSV, JSON, TSV, and HDF5 |
-| `rspice compile-va` | Compile Verilog-A models |
+| `rspice convert` | Convert between raw, ASCII raw, CSV, TSV, JSON, and HDF5 |
+| `rspice health` | Probe process liveness or parser-to-solver readiness |
+| `rspice compile-va` | Compile a Verilog-A model |
 | `rspice completions` | Generate shell completion scripts |
+
+| Exit code | Meaning |
+| :--- | :--- |
+| `0` | Success |
+| `1` | General error, including non-finite results |
+| `2` | Invalid arguments |
+| `3` | Verification failure — a `.MEAS` goal missed, or a golden mismatch |
+| `65` / `66` | Malformed input / input not found |
+| `70` / `74` / `78` | Internal, I/O, or configuration error |
+| `124` | `--timeout` exceeded |
+| `130` | Interrupted |
 
 ```bash
 # Quiet batch run with a JUnit report and a time budget
@@ -149,18 +207,25 @@ rspice run circuit.sp -q --report-format junit --report-file results.xml --timeo
 # Deployment readiness probe (versioned JSON, nonzero when not ready)
 rspice health --json
 
-# Compare results to a golden file (mismatches exit 3)
+# Compare against a golden file, then accept a reviewed change
 rspice compare results.csv golden.csv --abstol 1e-9 --reltol 1e-6
-
-# Accept a reviewed waveform change as the new reference
 rspice compare results.csv golden.csv --bless
 ```
 
-Full command and option reference: [crates/rspice-cli/README.md](crates/rspice-cli/README.md).
+Runs can emit JUnit or TAP reports, a versioned JSON run summary (`--summary`),
+and machine-readable measurement files. Production wrappers can select
+newline-delimited JSON logs with `--log-format json` and structured fatal
+diagnostics with `--error-format json`. Full option reference:
+[crates/rspice-cli/README.md](crates/rspice-cli/README.md).
 
-### Desktop UI
+### Desktop IDE
 
-An IDE built on egui with a wgpu renderer, organized as seven workspaces — Project, Design, Simulate, Results, Verify, Models, and Netlist. Between them they cover schematic and symbol editing, analysis-plan setup, waveform and RF result views (harmonic-balance tones, phase noise), verification evidence, model and PDK binding, and direct netlist editing. The IDE also drives analyses that have no deck card of their own, including PAC, PXF, PSTB, SOA, and reliability:
+An egui application with a wgpu renderer, organized as seven workspaces —
+Project, Design, Simulate, Results, Verify, Models, and Netlist — covering
+schematic and symbol editing, analysis-plan setup, waveform and RF result views,
+verification evidence, model and PDK binding, and direct netlist editing. Its
+simulation runner is the only surface that reaches PXF, PSTB, SOA, and
+reliability analyses.
 
 ```bash
 cargo run --release -p rspice-ui
@@ -190,15 +255,54 @@ full API reference, the maturin/pytest workflow CI uses, and the Windows
 
 ### WebAssembly
 
-`rspice-wasm` exposes netlist summaries plus DC operating-point, AC, and transient runs to JavaScript through `wasm-bindgen`, returning JSON-serializable result snapshots.
+`rspice-wasm` exposes netlist summaries, DC operating-point, AC, and transient
+runs to JavaScript through `wasm-bindgen`, returning JSON-serializable snapshots
+under configurable resource limits.
 
 ### Verilog-A
 
-`rspice-veriloga` compiles behavioral modules through parser, semantic analysis, canonical IR, bytecode VM paths, and the RSpice-owned x64-first native JIT backend. When native JIT mode is requested, model construction is full native JIT or a typed error; it does not fall back to the interpreter. It also owns the Rust backend that produces `rspice-core`'s generated built-in devices described under [Devices](#devices). External models compile standalone with `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
+`rspice-veriloga` compiles behavioral modules through parser, semantic analysis,
+canonical IR, and either a bytecode VM or the RSpice-owned native JIT (x86-64
+hosts). When native mode is requested, construction is full JIT or a typed
+error — never a silent fall back to the interpreter. The same crate owns the
+Rust backend that produces the generated built-in devices above. External models
+compile standalone with `rspice compile-va`; examples live in
+[models/veriloga/](models/veriloga/).
+
+### Rust
+
+`rspice-core` is the engine every other crate wraps. `Netlist::parse` is the
+front door and `Engine` the orchestrator; `AbortSignal` lets a frontend cancel a
+long run cooperatively.
+
+```rust
+use rspice_core::{Engine, Netlist};
+
+let netlist = Netlist::parse("V1 1 0 10\nR1 1 0 1k\n.end")?;
+let result = Engine::default().run_dc_op(&netlist)?;
+```
+
+API details and the feature-flag matrix: [crates/rspice-core/README.md](crates/rspice-core/README.md).
 
 ## Validation
 
-Correctness is measured rather than assumed, at four levels: unit tests in each crate, integration tests, oracle-replay fixtures for history-coupled device runtimes, and simulator corpus harnesses. The ngspice harness runs the vendored `tests/ngspice/` suite deck-by-deck against the RSpice engine, comparing row-by-row against ngspice reference outputs at 2% relative tolerance with probe-aware absolute floors. The Xyce harness runs separately against the trimmed `tests/xyce/` runtime corpus, discovers every retained `.cir` file, records removed `.cir.sh` wrapper contracts in `RSPICE-HARNESS-MANIFEST.tsv`, and reports unsupported Xyce contracts explicitly instead of omitting decks. Every executed analysis must be backed by a validation oracle, so no deck can pass silently, and each ngspice deck runs in a watchdog-supervised process so a hung simulation cannot stall that suite. Current CI separates harness discipline from conformance status: nightly release runs ratchet against the recorded failure watermark in `.github/workflows/nightly.yml`; that watermark should only tighten as decks are fixed.
+Correctness is measured at four levels: unit tests per crate, 99 integration
+test files in `rspice-core` alone, oracle-replay fixtures for history-coupled
+device runtimes, and two simulator corpus harnesses.
+
+The **ngspice harness** runs the vendored `tests/ngspice/` suite deck by deck,
+comparing row by row against ngspice reference output at 2% relative tolerance
+with probe-aware absolute floors. Each deck runs in a watchdog-supervised
+process, so one hung simulation cannot stall the suite. The **Xyce harness**
+runs against the trimmed `tests/xyce/` runtime corpus, discovers every retained
+`.cir`, records removed `.cir.sh` wrapper contracts in
+`RSPICE-HARNESS-MANIFEST.tsv`, and reports unsupported Xyce contracts explicitly
+instead of omitting the deck.
+
+Every executed analysis must be backed by a validation oracle, so no deck passes
+silently. Nightly release runs ratchet against the recorded failure watermark in
+[.github/workflows/nightly.yml](.github/workflows/nightly.yml); that number only
+tightens as decks are fixed.
 
 ```bash
 cargo test --release -p rspice-core                            # unit + integration
@@ -206,41 +310,73 @@ cargo test --release -p rspice-core --test ngspice_regression  # ngspice suite
 cargo test --release -p rspice-core --test xyce_regression     # Xyce corpus
 ```
 
-## Production operations
+Performance is tracked the same way. `rspice-bench` times whole simulator
+processes against a locally installed ngspice over the shared decks in
+[benchmarks/circuits/](benchmarks/circuits/); no optimization claim lands without
+a before/after scoreboard.
 
-The native backend is a stateless, one-shot worker process. Production service
-operators should use the checked conservative worker profile in
+## Operations
+
+The native backend is a stateless, one-shot worker process. Service operators
+should start from the conservative worker profile in
 [config/production.toml](config/production.toml) and follow the isolation,
 admission, observability, capacity, backup, restore, upgrade, rollback, and
 incident procedures in the
-[backend production runbook](docs/operations/production-runbook.md).
+[production runbook](docs/operations/production-runbook.md).
 
-Native releases are produced from annotated version tags for six target triples,
-then bound to deterministic archives, SHA-256 sidecars, CycloneDX SBOMs, and
-GitHub artifact attestations, and published without permitting an existing asset
-to be replaced. The complete operator procedure is in the
-[native release runbook](docs/operations/native-release.md). Release archives
-include both runbooks, the production profile, and a manifest that records the
-exact source commit and payload hashes.
+Releases are cut from annotated version tags for six Linux, macOS, and Windows
+target triples, bound to deterministic archives, SHA-256 sidecars, CycloneDX
+SBOMs, and GitHub artifact attestations, and published without permitting an
+existing asset to be replaced. Archives carry both runbooks, the production
+profile, and a manifest recording the exact source commit and payload hashes.
+Operator procedure: [native release runbook](docs/operations/native-release.md).
 
-## Workspace
+## Repository
 
 | Crate | Purpose |
 | :--- | :--- |
-| `rspice-core` | Simulation engine: device models, analyses, netlist parser, validation harnesses |
+| `rspice-core` | Simulation engine: parser, device models, solvers, analyses, validation harnesses |
 | `rspice-cli` | Command-line interface for simulation, validation, conversion, and reporting |
-| `rspice-ui` | Desktop application for schematic editing and waveform inspection |
-| `rspice-veriloga` | Verilog-A parser, semantic pipeline, bytecode VM/native JIT runtime, generated-Rust backend |
+| `rspice-ui` | Desktop IDE for schematic capture, simulation setup, and result analysis |
+| `rspice-veriloga` | Verilog-A parser, semantic pipeline, bytecode VM, native JIT, generated-Rust backend |
 | `rspice-python` | Python bindings built with PyO3 |
-| `rspice-wasm` | WebAssembly bindings for the simulation engine |
+| `rspice-wasm` | WebAssembly bindings for the engine |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
-Beyond the crates: [models/](models/) holds the bundled Verilog-A sources (including the redistributable CMC packages), [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, and [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards.
+[models/](models/) holds the bundled Verilog-A sources including the
+redistributable CMC packages, [tests/](tests/) the vendored simulator corpora
+with their manifests and notices, and [benchmarks/](benchmarks/) the
+macro-benchmark decks and published scoreboards.
+
+## Status
+
+RSpice is a young project under active development. The surface area above is
+broad and every entry is implemented and exercised, but maturity and validation
+depth vary by subsystem: a `.TRAN` on a BSIM4 deck rests on far more evidence
+than a periodic-stability run. Accuracy is measured against reference simulators
+continuously rather than assumed, and the repository should not be presented as
+a substitute for hardened commercial EDA tooling.
+
+Platform support is tracked by CI coverage and release gates across the six
+target triples above. Mobile and tablet browser use remains launch-gated
+separately.
 
 ## License
 
-RSpice is source-available software under the [RSpice Personal Use License](LICENSE): personal, educational, and open academic use are permitted; commercial use requires a separate license. See the license text for details, and [NOTICE](NOTICE) for third-party attributions.
+RSpice is source-available under the
+[RSpice Personal Use License](LICENSE): personal, educational, and open academic
+use are permitted; commercial use requires a separate license. See [NOTICE](NOTICE)
+for third-party attributions and [SECURITY.md](SECURITY.md) for vulnerability
+reporting.
 
 ## Acknowledgments
 
-RSpice's device models and transient engine owe a great deal to [ngspice](https://ngspice.sourceforge.io/): several models are ported from BSD-licensed portions of ngspice 46, native BSIM4 acknowledges the UC Berkeley BSIM Research Group under the upstream BSIM4 terms, and the ngspice test suite is RSpice's primary accuracy reference. The Xyce Regression Suite is vendored under its GPL terms and drives the second corpus harness. Sparse linear algebra uses the in-tree KLU-class real solver plus [faer](https://crates.io/crates/faer) for complex/AC-family paths.
+RSpice's device models and transient engine owe a great deal to
+[ngspice](https://ngspice.sourceforge.io/): several models are ported from
+BSD-licensed portions of ngspice 46, native BSIM4 acknowledges the UC Berkeley
+BSIM Research Group under the upstream BSIM4 terms, and the ngspice test suite is
+RSpice's primary accuracy reference. The Xyce Regression Suite is vendored under
+its GPL terms and drives the second corpus harness. Compact models come from the
+Compact Model Coalition under their respective package licenses. Sparse linear
+algebra uses the in-tree KLU-class real solver plus
+[faer](https://crates.io/crates/faer) for complex and AC-family paths.
