@@ -38,6 +38,7 @@ mod kernel_ir;
 mod lanes;
 mod manifest;
 mod names;
+mod packed;
 mod noise;
 mod registry;
 mod scalar;
