@@ -9,10 +9,23 @@ alongside a generated ``pack.toml`` recording provenance, licensing and a
 content digest. Nothing under ``upstream/`` is ever edited by hand: re-running
 this script must reproduce the tree byte for byte.
 
+Files whose own text restricts redistribution are dropped here, at the
+vendoring boundary, and never enter the repository. This is deliberate: the
+repository is public, so committing such a file *is* the redistribution its
+terms forbid. Filtering at packaging time would be far too late, and filtering
+by a hand-maintained exclusion list would let a future upstream update
+reintroduce one silently. The scan runs against every candidate file on every
+sync, so new restricted material is caught the moment it appears upstream.
+
+The dropped files remain fully available for development: they stay in the
+gitignored cache under .model-src-cache/, and any of them can be re-materialized
+on demand from the pinned upstream.
+
 Usage:
     python tools/models/sync_packs.py                 sync every pack
     python tools/models/sync_packs.py --pack sky130   sync one pack
     python tools/models/sync_packs.py --check         verify, write nothing
+    python tools/models/sync_packs.py --list-dropped  report what was excluded
 """
 
 from __future__ import annotations
@@ -26,6 +39,8 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+import license_audit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPICE_ROOT = REPO_ROOT / "models" / "spice"
@@ -306,18 +321,32 @@ def fetch_http(pack: Pack) -> Path:
 #==============================================================================
 
 
-def collect_files(root: Path, filt: Filter) -> list[Path]:
-    """Return accepted paths relative to *root*, sorted for determinism."""
+def collect_files(root: Path, filt: Filter) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Select paths under *root*, dropping files whose terms forbid redistribution.
+
+    Returns the accepted paths and the dropped ones with the marker that
+    excluded each, both sorted for determinism.
+    """
     selected: list[Path] = []
+    dropped: list[tuple[Path, str]] = []
     for path in root.rglob("*"):
         if not path.is_file():
             continue
         rel = path.relative_to(root).as_posix()
         if rel.startswith(".git/"):
             continue
-        if filt.accepts(rel):
-            selected.append(path.relative_to(root))
-    return sorted(selected, key=lambda p: p.as_posix())
+        if not filt.accepts(rel):
+            continue
+
+        restriction = license_audit.restriction_in_file(path)
+        if restriction is not None:
+            dropped.append((path.relative_to(root), restriction.id))
+            continue
+        selected.append(path.relative_to(root))
+
+    selected.sort(key=lambda p: p.as_posix())
+    dropped.sort(key=lambda item: item[0].as_posix())
+    return selected, dropped
 
 
 def file_digest(path: Path) -> str:
@@ -461,9 +490,15 @@ def sync_pack(pack: Pack, check: bool) -> tuple[int, int]:
         pack.source.get("include", []),
         pack.source.get("exclude", []),
     )
-    files = collect_files(cache, filt)
+    files, dropped = collect_files(cache, filt)
     if not files:
         raise SyncError(f"pack {pack.id!r}: include globs matched no files")
+    if dropped:
+        by_marker: dict[str, int] = {}
+        for _, marker in dropped:
+            by_marker[marker] = by_marker.get(marker, 0) + 1
+        summary = ", ".join(f"{count} {marker}" for marker, count in sorted(by_marker.items()))
+        print(f"  dropped {len(dropped)} restricted file(s): {summary}")
 
     total_bytes = sum((cache / rel).stat().st_size for rel in files)
     digest = pack_digest(cache, files)

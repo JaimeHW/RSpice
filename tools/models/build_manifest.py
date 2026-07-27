@@ -15,7 +15,12 @@ PACKS.tsv and CATALOG.tsv are what the application reads to enumerate packs and
 resolve parts without opening 140 MB of model files. All three come from one
 in-memory index, so they cannot drift.
 
+Run tools/models/license_audit.py FIRST. The catalog's per-file `restricted`
+column is joined from LICENSE-AUDIT.tsv, so regenerating in the other order
+stamps the catalog with a stale view of what may be shipped.
+
 Usage:
+    python tools/models/license_audit.py             (must run first)
     python tools/models/build_manifest.py
     python tools/models/build_manifest.py --check    fail if any is stale
 """

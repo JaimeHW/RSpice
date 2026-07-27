@@ -4,12 +4,12 @@
 # id	category	path	tier	spdx	redistributable	entry	models	subcircuits	files	bytes	devices	name
 mosis-bsim	academic	academic/mosis-bsim	permissive	BSD-3-Clause	1		1818	0	2528	8197250	nmos,pmos	MOSIS wafer-test BSIM model collections
 sjtu-bsim-ptm	academic	academic/sjtu-bsim-ptm	ambiguous	CC-BY-4.0	1		58	20	58	532414	nmos,pmos,finfet	SJTU BSIM and PTM model collection
-builtin	builtin	builtin	own	LicenseRef-RSpice	1	lib/diode.lib	59	11	6	42848	diode,zener,led,bjt,mosfet,opamp	RSpice built-in starter library
-microcap-library	community	community/microcap-library	ambiguous	NOASSERTION	0		109508	38485	181	43897783	opamp,comparator,regulator,mosfet,igbt,bipolar,diode,rectifier,passive,logic,optocoupler,tube	Micro-Cap 12 model library, ngspice port
+builtin	builtin	builtin	own	LicenseRef-RSpice	1	lib/diode.lib	60	11	6	43435	diode,zener,led,bjt,mosfet,opamp	RSpice built-in starter library
+microcap-library	community	community/microcap-library	ambiguous	NOASSERTION	0		70285	28285	153	28719414	opamp,comparator,regulator,mosfet,igbt,bipolar,diode,rectifier,passive,logic,optocoupler,tube	Micro-Cap 12 model library, ngspice port
 ngspice-74hc-kicad	community	community/ngspice-74hc-kicad	ambiguous	NOASSERTION	0		11	26	14	10567	logic	74HC logic models for KiCad
 ngspice-74xx-logic	community	community/ngspice-74xx-logic	ambiguous	NOASSERTION	0		338	481	1	370594	logic	74-series logic model collection
 ngspice-basic-models	community	community/ngspice-basic-models	ambiguous	NOASSERTION	0		74	52	28	61224	bipolar,diode,jfet,led,mosfet,opamp,regulator	ngspice basic device model set
-ngspice-models-ugr	community	community/ngspice-models-ugr	ambiguous	NOASSERTION	0		65896	27674	1828	36213168	bipolar,diode,jfet,mosfet,opamp,subcircuit	University of Granada legacy model collection
+ngspice-models-ugr	community	community/ngspice-models-ugr	ambiguous	NOASSERTION	0		56298	25610	1122	32183891	bipolar,diode,jfet,mosfet,opamp,subcircuit	University of Granada legacy model collection
 ngspice-special-models	community	community/ngspice-special-models	ambiguous	NOASSERTION	0		32	11	8	24824	timer,opamp,function-generator	ngspice special-function IC models
 asap7	foundry	foundry/asap7	permissive	BSD-3-Clause	1	upstream/models/hspice/7nm_TT.pm	24	0	7	128156	nfet,pfet	ASAP7 7 nm predictive FinFET models
 gf180mcu	foundry	foundry/gf180mcu	permissive	Apache-2.0	1	upstream/models/ngspice/sm141064.ngspice	542	162	9	2196792	nmos,pmos,diode,resistor,capacitor,bipolar	GlobalFoundries GF180MCU primitive device models

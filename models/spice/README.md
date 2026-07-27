@@ -8,13 +8,16 @@ indexed by license. Verilog-A compact models live separately in
 
 ```
 models/spice/
-  sources.toml     upstream registry - the single source of truth
-  MANIFEST.toml    generated pack index, including redistribution flags
-  CATALOG.tsv      generated part index, one row per .MODEL/.SUBCKT
-  foundry/         open process design kits
-  academic/        university and measured-silicon model sets
-  community/       curated third-party collections
-  vendor/          manufacturer-published libraries
+  sources.toml       upstream registry - the single source of truth
+  MANIFEST.toml      generated pack index, for humans and packaging
+  PACKS.tsv          the same pack data, read by the engine at runtime
+  CATALOG.tsv        generated part index, one row per .MODEL/.SUBCKT
+  LICENSE-AUDIT.tsv  generated per-file restriction findings
+  builtin/           the pack compiled into the binary
+  foundry/           open process design kits
+  academic/          university and measured-silicon model sets
+  community/         curated third-party collections
+  vendor/            manufacturer-published libraries
 ```
 
 Every pack is a directory holding:
@@ -30,7 +33,10 @@ vendored copy, so that the recorded digest keeps meaning.
 
 ## Contents
 
-14 packs, 5,701 files, 147 MB: **191,094 model cards and 68,854 subcircuits**.
+15 packs, 4,973 files, 128 MB: **142,333 model cards and 56,601 subcircuits**.
+
+That is what remains after the vendoring filter described under
+[Licensing](#licensing) drops files whose terms forbid redistribution.
 
 ### Foundry PDKs
 
@@ -88,16 +94,27 @@ python tools/models/license_audit.py
 ```
 
 scans every vendored file for restriction language and writes
-`LICENSE-AUDIT.tsv`, one row per finding. Packaging should exclude on that
-table, not on the pack.
+`LICENSE-AUDIT.tsv`, one row per finding.
 
-The current result: **733 files carrying 59,810 model and subcircuit
-definitions are marked `restricted`** — 23% of the tree.
+**The current result is zero.** Restricted files are not filtered at packaging
+time — they are dropped at the *vendoring* boundary by `sync_packs.py` and never
+enter the repository at all. This repository is public, so committing a file
+whose terms forbid redistribution would itself be the redistribution those terms
+forbid; a packaging-time filter would be far too late.
 
-| Marker | Files | What it is |
+The scan runs against every candidate file on every sync, so a future upstream
+update cannot quietly reintroduce restricted material. The audit is now a safety
+net that verifies the vendoring filter did its job, and CI fails if it ever
+reports a finding.
+
+733 files carrying 59,810 definitions were excluded on that basis — 23% of what
+upstream ships.
+
+| Marker | Files excluded | What it is |
 | --- | --- | --- |
-| `commercial-use-restricted` | 732 | Symmetry/MODPEX generated cards. The header asserts unpublished licensed software containing proprietary information and restricts commercial use or resale under an agreement RSpice does not hold |
-| `confidential` | 2 | `nation.lib` and `nichicon.LIB` are marked confidential by their originators |
+| `commercial-use-restricted` | 4 | Symmetry/MODPEX cards restricting commercial use or resale under an agreement RSpice does not hold |
+| `unpublished-proprietary` | 729 | The same Symmetry header without the commercial-use line. An assertion that the material is unpublished licensed software is on its own reason enough |
+| `confidential` | 1 | `nation.lib` was marked "NATIONAL SEMICONDUCTOR CONFIDENTIAL"; `nichicon.LIB` likewise |
 
 The restricted set is concentrated in exactly the mainstream vendor libraries:
 `On_Semi.lib` (21,923 definitions), `irf.lib` (7,333),
@@ -111,8 +128,11 @@ commercial use.
 
 The remainder is unaffected: `diodes-inc` (6,927 models), `interfet-jfet` (898),
 `ngspice-basic-models`, the logic packs and the special-function models carry no
-restriction marker at all. That is where the built-in library draws from, and
-`tools/models/build_builtin.py` fails rather than reading a restricted file.
+restriction marker at all. That is where the built-in library draws from.
+
+Dropping a file loses nothing permanent. Every pack is pinned, so
+`sync_packs.py` can re-materialize any excluded file into the gitignored
+`.model-src-cache/` on demand for development or oracle work.
 
 `diodes-inc` and `interfet-jfet` remain `ambiguous` for a different reason: they
 are published for direct download with no agreement and no licence header — no
@@ -132,9 +152,14 @@ error, so upstream cannot change silently under a pin.
 python tools/models/build_manifest.py
 ```
 
-Regenerates `MANIFEST.toml` and `CATALOG.tsv`. Both are committed, and
-`--check` fails when either has drifted from the tree. This runs in CI: it
-needs no network, since it only reads what is already vendored.
+Regenerates `MANIFEST.toml`, `PACKS.tsv` and `CATALOG.tsv`. All are committed,
+and `--check` fails when any has drifted. This runs in CI: it needs no network,
+since it only reads what is already vendored.
+
+Regenerate in dependency order — `license_audit.py`, then `build_manifest.py`,
+then `build_builtin.py`. The catalog's per-file `restricted` column is joined
+from the audit, and the built-in generator refuses to read a restricted file, so
+running them out of order stamps a stale view of what may be shipped.
 
 `sync_packs.py --check` verifies the vendored files still match their pinned
 upstream. That one does reach the network, so it is a maintenance command
@@ -153,5 +178,7 @@ them too:
   the parser and orphans the `.ENDL` at line 2552. ngspice-46 also fails on this
   file, at line 3260. It is a catalog to extract cards from, not a library to
   include.
-- `ihp-sg13g2`: diode subcircuits pass arithmetic in instance parameters
-  (`area=mf*aws`), which RSpice does not yet evaluate at diode instance sites.
+`ihp-sg13g2` previously failed for a different reason — its diode subcircuits
+pass arithmetic in instance parameters (`area=mf*aws`) and use the plural
+`.PARAMS` spelling. Both are now supported; see
+`crates/rspice-core/tests/pdk_subcircuit_grammar.rs`.
