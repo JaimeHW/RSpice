@@ -409,19 +409,47 @@ pub(super) fn emit_body(
     ctx: &PackedContext,
 ) -> Result<PackedBody, String> {
     let mut source = String::new();
+    // Bound once so a rule can name it wherever an undifferentiated operand
+    // appears, instead of every such value paying for its own zero array.
+    source.push_str(&format!("const {ZERO_ARRAY}: [f64; {width}] = [0.0; {width}];
+"));
     let mut primal_bindings = 0usize;
     let mut derivative_bindings = 0usize;
 
+    // Values whose result changes with a counted sum's loop index cannot be
+    // bound at the top level, where no index is in scope. They are emitted
+    // inside the loop that owns them instead, and skipped here.
+    let loop_interior = loop_dependent_values(opt);
+
     for value in &opt.values {
+        if loop_interior.contains(&value.id) {
+            continue;
+        }
         let id = usize::from(value.id);
-        let primal = primal_expr(value.id, &value.kind, ctx)?;
+        let primal = match &value.kind {
+            OptValueKind::CountedSum {
+                count,
+                initial,
+                term,
+                ..
+            } => counted_sum_expr(
+                opt,
+                value.id,
+                *count,
+                *initial,
+                *term,
+                &loop_interior,
+                ctx,
+            )?,
+            other => primal_expr(value.id, other, ctx)?,
+        };
         source.push_str(&format!("let v{id} = {primal};\n"));
         primal_bindings += 1;
 
         if !differentiated.contains(&value.id) {
             continue;
         }
-        let Some(rendered) = derivative_binding(value.id, &value.kind, width, lane_slot, ctx)?
+        let Some(rendered) = derivative_binding(value.id, &value.kind, width, lane_slot, differentiated, ctx)?
         else {
             continue;
         };
@@ -436,14 +464,139 @@ pub(super) fn emit_body(
     })
 }
 
+/// Values whose result depends on some counted sum's loop index.
+///
+/// These are the loop's interior. They must not be bound at the top level,
+/// where no index exists, and are instead re-emitted inside the loop that owns
+/// them — which is also why a counted sum cannot simply be an expression over
+/// already-computed values.
+///
+/// Relies on operands preceding consumers, as everything else here does.
+fn loop_dependent_values(opt: &OptModel) -> HashSet<ValueId> {
+    let mut dependent = HashSet::new();
+    for value in &opt.values {
+        let carries = match &value.kind {
+            OptValueKind::LoopIndex { .. } => true,
+            // A counted sum closes over its own index: the sum's *result* is a
+            // plain value again, so propagation stops here rather than
+            // spreading the whole downstream graph into the loop.
+            OptValueKind::CountedSum { count, initial, .. } => {
+                dependent.contains(count) || dependent.contains(initial)
+            }
+            other => operand_values(other)
+                .into_iter()
+                .any(|operand| dependent.contains(&operand)),
+        };
+        if carries {
+            dependent.insert(value.id);
+        }
+    }
+    dependent
+}
+
+/// Every direct value operand of a kind.
+fn operand_values(kind: &OptValueKind) -> Vec<ValueId> {
+    match kind {
+        OptValueKind::Unary { input, .. } => vec![*input],
+        OptValueKind::Binary { left, right, .. } => vec![*left, *right],
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => vec![*condition, *then_value, *else_value],
+        OptValueKind::Ddx { value, .. } => vec![*value],
+        OptValueKind::Ddt { input, .. } => vec![*input],
+        OptValueKind::SimParam { fallback, .. } => vec![*fallback],
+        OptValueKind::LimitPrevious { proposed, .. } => vec![*proposed],
+        OptValueKind::Limit {
+            proposed,
+            candidate,
+            ..
+        } => vec![*proposed, *candidate],
+        OptValueKind::CountedSum {
+            count,
+            initial,
+            term,
+            ..
+        } => vec![*count, *initial, *term],
+        _ => Vec::new(),
+    }
+}
+
+/// Emit a counted sum as an accumulating loop.
+///
+/// The term varies with the loop index, so the part of the graph that depends
+/// on the index is re-emitted inside the loop body. Values that do not depend
+/// on it are already bound outside and are referenced directly.
+fn counted_sum_expr(
+    opt: &OptModel,
+    owner: ValueId,
+    count: ValueId,
+    initial: ValueId,
+    term: ValueId,
+    loop_interior: &HashSet<ValueId>,
+    ctx: &PackedContext,
+) -> Result<String, String> {
+    let id = usize::from(owner);
+    let index = format!("li{id}");
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str(&format!("    let mut acc{id} = v{};\n", usize::from(initial)));
+    out.push_str(&format!("    let n{id} = v{};\n", usize::from(count)));
+    out.push_str(&format!("    let mut c{id}: i64 = 0;\n"));
+    out.push_str(&format!("    while (c{id} as f64) < n{id} {{\n"));
+    out.push_str(&format!("        let {index} = c{id} as f64;\n"));
+
+    // Re-emit the interior in definition order. Shadowing the outer binding is
+    // intended: inside the loop the indexed value is the live one.
+    for value in &opt.values {
+        if !loop_interior.contains(&value.id) || value.id == owner {
+            continue;
+        }
+        if usize::from(value.id) > usize::from(term) {
+            break;
+        }
+        let inner = usize::from(value.id);
+        let expr = match &value.kind {
+            OptValueKind::LoopIndex { .. } => index.clone(),
+            other => primal_expr(value.id, other, ctx)?,
+        };
+        out.push_str(&format!("        let v{inner} = {expr};\n"));
+    }
+
+    out.push_str(&format!("        acc{id} += v{};\n", usize::from(term)));
+    out.push_str(&format!("        c{id} += 1;\n"));
+    out.push_str("    }\n");
+    out.push_str(&format!("    acc{id}\n"));
+    out.push_str("}");
+    Ok(out)
+}
+
+/// Name of the shared all-zero derivative array.
+///
+/// A differentiated value can read an operand that is not itself
+/// differentiated — `x * 2.0`, or an arm of a select that depends on no
+/// unknown. Uniform width means the rule still wants an array there, so it
+/// reads this one rather than forcing a binding for every constant in the
+/// model, which would undo what reachability just saved.
+pub(super) const ZERO_ARRAY: &str = "DZERO";
+
 fn derivative_binding(
     id: ValueId,
     kind: &OptValueKind,
     width: usize,
     lane_slot: &dyn Fn(&OptValueKind) -> Option<usize>,
+    differentiated: &HashSet<ValueId>,
     ctx: &PackedContext,
 ) -> Result<Option<String>, String> {
     let own = format!("v{}", usize::from(id));
+    let array_of = |operand: &ValueId| {
+        if differentiated.contains(operand) {
+            format!("d{}", usize::from(*operand))
+        } else {
+            ZERO_ARRAY.to_string()
+        }
+    };
     let rule = match kind {
         OptValueKind::NodePotential { .. }
         | OptValueKind::BranchFlow { .. }
@@ -470,25 +623,17 @@ fn derivative_binding(
     };
 
     let (input, left, right) = match kind {
-        OptValueKind::Unary { input, .. } | OptValueKind::Ddt { input, .. } => (
-            format!("d{}", usize::from(*input)),
-            String::new(),
-            String::new(),
-        ),
-        OptValueKind::Binary { left, right, .. } => (
-            String::new(),
-            format!("d{}", usize::from(*left)),
-            format!("d{}", usize::from(*right)),
-        ),
+        OptValueKind::Unary { input, .. } | OptValueKind::Ddt { input, .. } => {
+            (array_of(input), String::new(), String::new())
+        }
+        OptValueKind::Binary { left, right, .. } => {
+            (String::new(), array_of(left), array_of(right))
+        }
         OptValueKind::Select {
             then_value,
             else_value,
             ..
-        } => (
-            String::new(),
-            format!("d{}", usize::from(*then_value)),
-            format!("d{}", usize::from(*else_value)),
-        ),
+        } => (String::new(), array_of(then_value), array_of(else_value)),
         _ => (String::new(), String::new(), String::new()),
     };
 
@@ -781,6 +926,9 @@ endmodule
                     body.source.len() / 1024
                 );
                 assert!(body.derivative_bindings > 0);
+                if let Ok(path) = std::env::var("RSPICE_PACKED_DUMP") {
+                    std::fs::write(&path, &body.source).expect("dump packed body");
+                }
                 assert!(
                     body.derivative_bindings < body.primal_bindings,
                     "reachability should spare the parameter and geometry arithmetic"
