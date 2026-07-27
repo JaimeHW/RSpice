@@ -952,6 +952,183 @@ endmodule
         }
     }
 
+    /// Root value of the first equation, in either lowering.
+    fn first_equation_root(opt: &OptModel) -> ValueId {
+        use crate::canonical_ir::{InvalidationClass, OptOp};
+        let newton = opt
+            .schedules
+            .iter()
+            .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+            .expect("NewtonIteration schedule");
+        let position = newton
+            .ops
+            .iter()
+            .position(|op| matches!(op, OptOp::EvaluateEquation { .. }))
+            .expect("an equation to evaluate");
+        newton.ops[..position]
+            .iter()
+            .rev()
+            .find_map(|op| match op {
+                OptOp::ComputeValue { value } => Some(*value),
+                OptOp::EvaluateEquation { .. } => None,
+            })
+            .expect("a value feeding the equation")
+    }
+
+    #[test]
+    fn packed_derivatives_match_the_scalarized_reference() {
+        // The claim the whole rewrite rests on: packing the lanes changes how
+        // derivatives are *written*, not what they are. Everything else here
+        // checks emitted text; this compiles the emitted body, runs it, and
+        // compares against the reference evaluator on the same inputs.
+        use crate::canonical_ir::{DerivativeLane, NodeId, OptEvalInputs};
+
+        let source = r#"
+module parity_check(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real is = 1e-14;
+    parameter real vth = 0.025;
+    parameter real rs = 12.0;
+    analog begin
+        real vd, ratio, shaped;
+        vd = V(p, n);
+        ratio = vd / vth;
+        shaped = exp(ratio) - 1.0;
+        if (vd > 0.4)
+            shaped = shaped * (1.0 + vd * vd);
+        I(p, n) <+ is * shaped + vd / rs;
+    end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile parity fixture");
+        let primal = OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir)
+            .expect("primal OptIR");
+
+        let node_potentials = vec![0.55, 0.0];
+        let parameters: Vec<f64> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.default.unwrap_or(0.0))
+            .collect();
+        let inputs = OptEvalInputs {
+            parameters: parameters.clone(),
+            node_potentials: node_potentials.clone(),
+            branch_flows: Vec::new(),
+        };
+
+        let reference = artifact.opt.evaluate(&inputs).expect("evaluate reference");
+        let reference_root = first_equation_root(&artifact.opt);
+        let expected: Vec<f64> = (0..node_potentials.len())
+            .map(|node| {
+                reference
+                    .derivative(reference_root, DerivativeLane::node(NodeId::from(node)))
+                    .unwrap_or(0.0)
+            })
+            .collect();
+
+        // Emit the packed body and read the same root's array back out.
+        let width = node_potentials.len();
+        let differentiated = differentiated_values(&primal);
+        let ctx = PackedContext {
+            parameter: |index| format!("p[{index}]"),
+            param_given: |_| "1.0f64".to_string(),
+            node_potential: |index| format!("nv[{index}]"),
+            temperature: "300.15f64".to_string(),
+            thermal_voltage: "0.025852f64".to_string(),
+            multiplicity: "1.0f64".to_string(),
+            ddt_scale: "0.0f64".to_string(),
+            simparam: |_, fallback| fallback.to_string(),
+            simparam_given: |_| "0.0f64".to_string(),
+        };
+        let body = emit_body(
+            &primal,
+            width,
+            &|kind| match kind {
+                OptValueKind::NodePotential { node } => Some(usize::from(*node)),
+                _ => None,
+            },
+            &differentiated,
+            &ctx,
+        )
+        .expect("emit packed body");
+
+        let packed_root = first_equation_root(&primal);
+        assert!(
+            differentiated.contains(&packed_root),
+            "the equation root must depend on the terminal voltage"
+        );
+
+        let params_literal = parameters
+            .iter()
+            .map(|value| format!("{value:e}f64"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let nodes_literal = node_potentials
+            .iter()
+            .map(|value| format!("{value:e}f64"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let program = format!(
+            "#![allow(unused_parens, unused_variables, dead_code, non_snake_case)]\n\
+             fn main() {{\n\
+             let p = [{params_literal}];\n\
+             let nv = [{nodes_literal}];\n\
+             {body_source}\
+             let out = d{root};\n\
+             println!(\"{{:?}}\", out);\n\
+             }}\n",
+            body_source = body.source,
+            root = usize::from(packed_root),
+        );
+
+        let dir = std::env::temp_dir().join(format!("rspice-packed-parity-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let source_path = dir.join("parity.rs");
+        let binary_path = dir.join(if cfg!(windows) { "parity.exe" } else { "parity" });
+        std::fs::write(&source_path, program).expect("write parity program");
+
+        let compile = std::process::Command::new("rustc")
+            .arg("-O")
+            .arg("-o")
+            .arg(&binary_path)
+            .arg(&source_path)
+            .output()
+            .expect("run rustc");
+        assert!(
+            compile.status.success(),
+            "packed body did not compile:\n{}",
+            String::from_utf8_lossy(&compile.stderr)
+        );
+
+        let run = std::process::Command::new(&binary_path)
+            .output()
+            .expect("run parity program");
+        assert!(run.status.success(), "parity program failed");
+        let printed = String::from_utf8_lossy(&run.stdout);
+        let actual: Vec<f64> = printed
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(", ")
+            .map(|token| token.parse().expect("parse derivative"))
+            .collect();
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(actual.len(), expected.len(), "lane count");
+        for (lane, (got, want)) in actual.iter().zip(expected.iter()).enumerate() {
+            let tolerance = want.abs() * 1e-12 + 1e-15;
+            assert!(
+                (got - want).abs() <= tolerance,
+                "lane {lane}: packed {got:e} vs reference {want:e}"
+            );
+        }
+    }
+
     #[test]
     fn unsupported_kinds_fail_loudly_rather_than_emitting_something_wrong() {
         // A model reaching a kind with no rule must stop generation. Silently
