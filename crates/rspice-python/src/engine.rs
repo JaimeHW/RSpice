@@ -2256,9 +2256,11 @@ impl PyEngine {
 
     /// Run transient analysis with error-bounded voltage waveform compression.
     ///
-    /// A sample is dropped when linear interpolation from its neighbours
-    /// reproduces it within `abs_tol + rel_tol * |v|`, so the stored waveform
-    /// carries a bounded reconstruction error rather than a fixed decimation.
+    /// The solver runs unchanged; the finished waveform is then decimated by
+    /// recursively splitting each time span at its worst-fitting sample until
+    /// linear interpolation between the retained samples reproduces every
+    /// dropped one within `abs_tol + rel_tol * |v|`. The result therefore
+    /// carries a bounded reconstruction error rather than a fixed stride.
     ///
     /// Args:
     ///     netlist: Parsed netlist to simulate
@@ -2267,10 +2269,13 @@ impl PyEngine {
     ///               stop_time / 50.
     ///     abs_tol: Absolute interpolation error budget in volts
     ///     rel_tol: Relative interpolation error budget
-    ///     max_interval: Minimum time in seconds between two stored samples.
-    ///                   0.0 (the default) applies no spacing floor; a
-    ///                   positive value compresses further by discarding
-    ///                   samples that fall within it of the last stored one.
+    ///     max_interval: Upper bound in seconds on the gap between two
+    ///                   retained samples. 0.0 (the default) imposes no
+    ///                   bound, leaving decimation purely error-driven. A
+    ///                   positive value forces a retained sample roughly
+    ///                   every `max_interval` seconds, so it *lowers* the
+    ///                   compression ratio in exchange for a guaranteed
+    ///                   sampling cadence on long, slow-moving runs.
     ///
     /// Returns:
     ///     CompressedTransientResult: Decimated node-voltage waveforms
