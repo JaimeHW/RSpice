@@ -164,37 +164,6 @@ impl Engine {
         (normalized, normalized_steps)
     }
 
-    /// Xyce restores OneStep history and drops to order one after a rejected
-    /// adaptive attempt.  A locked verification grid contains only accepted
-    /// points, so the rejected attempt is not directly represented.  A sharp
-    /// contraction of an interior accepted interval is the observable trace
-    /// of that restart; preserve it by solving that interval with the same
-    /// order-one companion.  The final interval is excluded because stopping
-    /// exactly at TSTOP is an ordinary endpoint clip, not a rejected step.
-    /// An interval that lands on a source breakpoint is still the already
-    /// proposed Xyce step; the OneStep restart applies only after that point
-    /// has been accepted.
-    #[inline]
-    fn locked_grid_requires_xyce_order_restart(
-        grid: &[Value],
-        cursor: usize,
-        target_is_breakpoint: bool,
-    ) -> bool {
-        if target_is_breakpoint {
-            return false;
-        }
-        if cursor < 2 || cursor + 1 >= grid.len() {
-            return false;
-        }
-        let previous_step = grid[cursor - 1] - grid[cursor - 2];
-        let current_step = grid[cursor] - grid[cursor - 1];
-        previous_step.is_finite()
-            && previous_step > 0.0
-            && current_step.is_finite()
-            && current_step > 0.0
-            && current_step < 0.75 * previous_step
-    }
-
     /// Xyce IC capacitors use an operating-point-only branch unknown. Their
     /// transient lead current is reconstructed by the time integrator from
     /// the capacitor charge history, rather than being solved as an MNA
@@ -2524,14 +2493,10 @@ impl Engine {
                     || Self::xyce_one_step_requires_order_one_for_stateful_topology(&circuit)
                     || !circuit.tlines.is_empty()
                     || !circuit.coupled_tlines.is_empty();
-            let locked_reference_order_restart = !xyce_one_step_stateful_topology
-                && locked_grid.as_ref().is_some_and(|grid| {
-                    Self::locked_grid_requires_xyce_order_restart(
-                        grid,
-                        locked_cursor,
-                        breakpoints.at_breakpoint(step_time),
-                    )
-                });
+            // A locked oracle grid contains accepted points only.  Its interval
+            // ratios therefore cannot identify the rejected candidates that
+            // changed Xyce's OneStep order; the replay path above preserves
+            // those candidates and the estimator's accepted-state history.
             // Resume is a breakpoint-style integration restart. The checkpoint
             // supplies the accepted solution but deliberately omits nonlinear
             // charge histories and their timestep provenance, so the first real
@@ -2552,8 +2517,7 @@ impl Engine {
                     trap_order,
                     (at_breakpoint
                         && Self::breakpoint_landing_forces_order_one(self.config.spice_dialect))
-                        || locked_edge_order_reset
-                        || locked_reference_order_restart,
+                        || locked_edge_order_reset,
                 )
             };
             let xyce_one_step_order2 = self.config.spice_dialect == SpiceDialect::Xyce
@@ -5646,34 +5610,6 @@ mod tests {
             Engine::step_trapezoidal_order(IntegrationMethod::Trapezoidal, 2, true),
             1
         );
-    }
-
-    #[test]
-    fn xyce_locked_grid_restart_detects_interior_interval_contraction() {
-        let grid = [2.0, 6.0, 14.0, 24.0, 30.0, 40.0];
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(
-            &grid, 0, false
-        ));
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(
-            &grid, 1, false
-        ));
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(
-            &grid, 2, false
-        ));
-        assert!(Engine::locked_grid_requires_xyce_order_restart(
-            &grid, 4, false
-        ));
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(
-            &grid, 5, false
-        ));
-    }
-
-    #[test]
-    fn xyce_locked_grid_preserves_order_when_target_is_source_breakpoint() {
-        let grid = [2.0, 6.0, 14.0, 24.0, 30.0, 40.0];
-        assert!(!Engine::locked_grid_requires_xyce_order_restart(
-            &grid, 4, true
-        ));
     }
 
     #[test]
