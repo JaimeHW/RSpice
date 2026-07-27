@@ -3631,15 +3631,11 @@ fn rust_backend_compacts_generated_scratch_storage_field_names() {
         "{support}"
     );
     assert!(
-        support.contains(
-            "pub(crate) dn: DerivativeMatrix<{ VARIABLE_COUNT }, { NODE_COUNT }>,"
-        ),
+        support.contains("pub(crate) dn: DerivativeMatrix<{ VARIABLE_COUNT }, { NODE_COUNT }>,"),
         "{support}"
     );
     assert!(
-        support.contains(
-            "pub(crate) db: DerivativeMatrix<{ VARIABLE_COUNT }, { BRANCH_COUNT }>,"
-        ),
+        support.contains("pub(crate) db: DerivativeMatrix<{ VARIABLE_COUNT }, { BRANCH_COUNT }>,"),
         "{support}"
     );
     assert!(
@@ -14109,7 +14105,7 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
 }
 
 #[test]
-fn rust_backend_generates_restore_without_per_instance_scratch_buffers() {
+fn rust_backend_generates_dynamic_rollback_without_per_instance_scratch_buffers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_assignment_chain_source(320))
         .expect("canonical IR");
@@ -14134,8 +14130,13 @@ fn rust_backend_generates_restore_without_per_instance_scratch_buffers() {
         .as_str();
 
     assert!(
-        state.contains("pub fn restore_from_snapshot(&mut self, snapshot: Self)"),
+        state.contains("pub(crate) fn capture_rollback_state(&self)")
+            && state.contains("pub(crate) fn restore_rollback_state(&mut self"),
         "{state}"
+    );
+    assert!(
+        !state.contains("pub fn restore_from_snapshot(&mut self, snapshot: Self)"),
+        "full instance restores clone immutable parameter and topology state:\n{state}"
     );
     assert!(
         !state.contains("KernelScratch") && !state.contains("scratch:"),
@@ -14478,6 +14479,12 @@ pub mod runtime {{
         pub idt_initialized: Vec<bool>,
         pub limiter_anchor: Vec<f64>,
         pub limiter_initialized: Vec<bool>,
+    }}
+
+    #[derive(Debug, Clone, Default, PartialEq)]
+    pub struct GeneratedVerilogARollbackState {{
+        pub values: Vec<f64>,
+        pub flags: Vec<bool>,
     }}
 
     #[derive(Debug, Clone, Copy)]
@@ -15360,6 +15367,12 @@ pub mod runtime {{
         pub idt_initialized: Vec<bool>,
         pub limiter_anchor: Vec<f64>,
         pub limiter_initialized: Vec<bool>,
+    }}
+
+    #[derive(Debug, Clone, Default, PartialEq)]
+    pub struct GeneratedVerilogARollbackState {{
+        pub values: Vec<f64>,
+        pub flags: Vec<bool>,
     }}
 
     #[derive(Debug, Clone, Copy)]

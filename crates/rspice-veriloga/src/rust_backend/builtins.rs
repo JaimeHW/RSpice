@@ -1865,26 +1865,47 @@ fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
     out.push_str("}\n\n");
 
     out.push_str("impl GeneratedBuiltinKind {\n");
-    out.push_str("    pub fn restore_from_snapshot(&mut self, snapshot: Self) {\n");
+    out.push_str(
+        "    pub(crate) fn capture_rollback_state(&self) -> super::GeneratedVerilogARollbackState {\n",
+    );
     if devices.is_empty() {
-        out.push_str("        let _ = (self, snapshot);\n");
+        out.push_str("        let _ = self;\n");
         out.push_str(
-            "        unreachable!(\"empty generated Verilog-A registry cannot be restored\")\n",
+            "        unreachable!(\"empty generated Verilog-A registry has no rollback state\")\n",
         );
     } else {
-        out.push_str("        #[allow(unreachable_patterns)]\n");
-        out.push_str("        match (self, snapshot) {\n");
+        out.push_str("        match self {\n");
         for (index, feature) in feature_names.iter().enumerate() {
             writeln!(
                 out,
-                "            #[cfg(feature = {feature:?})]\n            (Self::Device{index}(active), Self::Device{index}(snapshot)) => active.restore_from_snapshot(*snapshot),"
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.capture_rollback_state(),"
             )?;
         }
-        out.push_str("            (active, snapshot) => *active = snapshot,\n");
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
         out.push_str("        }\n");
     }
-    out.push_str("    }\n");
-    out.push('\n');
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    pub(crate) fn restore_rollback_state(&mut self, state: &super::GeneratedVerilogARollbackState) {\n",
+    );
+    out.push_str("        let _ = state;\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no rollback state\")\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.restore_rollback_state(state),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str("    pub(crate) fn checkpoint_model_identity(&self) -> &'static str {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");

@@ -131,7 +131,7 @@ fn generated_stamper_uses_linked_static_stamp_slots() {
 }
 
 #[test]
-fn generated_runtime_restores_snapshots_without_discarding_scratch_storage() {
+fn generated_runtime_snapshots_only_mutable_evaluation_state() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let generated_root = manifest_root.join("src/device/veriloga_generated");
     let runtime_path = generated_root.join("mod.rs");
@@ -147,26 +147,29 @@ fn generated_runtime_restores_snapshots_without_discarding_scratch_storage() {
     let nonlinear_lf = nonlinear.replace("\r\n", "\n");
 
     assert!(
-        runtime.contains("pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self)"),
-        "generated runtime should restore snapshots in place:\n{runtime}"
+        runtime.contains("pub(crate) struct BuiltinVerilogADevicesRollback")
+            && runtime.contains("capture_rollback_state(&self)")
+            && runtime.contains("restore_rollback_state(&mut self"),
+        "generated runtime should use compact rollback state:\n{runtime}"
     );
     assert!(
-        runtime.contains("active.restore_from_snapshot(snapshot)"),
-        "generated device vectors should preserve active instance storage when counts match:\n{runtime}"
+        runtime.contains(".map(|device| device.kind.capture_rollback_state())"),
+        "generated device snapshots should exclude instance storage:\n{runtime}"
     );
     assert!(
-        registry.contains("pub fn restore_from_snapshot(&mut self, snapshot: Self)"),
-        "generated registry should dispatch variant-matched restores in place:\n{registry}"
+        registry.contains("capture_rollback_state(&self)")
+            && registry.contains("restore_rollback_state(&mut self"),
+        "generated registry should dispatch compact rollback state:\n{registry}"
     );
     assert!(
-        registry.contains("active.restore_from_snapshot(*snapshot)"),
-        "boxed generated registry variants should restore from the boxed snapshot value:\n{registry}"
+        registry.contains("device.restore_rollback_state(state)"),
+        "boxed generated registry variants should restore only mutable state:\n{registry}"
     );
     assert!(
         nonlinear_lf.contains(
-            "self.generated_veriloga_devices\n                .restore_from_snapshot(snapshot.generated_veriloga_devices);"
+            "self.generated_veriloga_devices\n                .restore_rollback_state(snapshot.generated_veriloga_devices);"
         ),
-        "nonlinear restore should not replace generated devices wholesale:\n{nonlinear}"
+        "nonlinear restore should retain generated device parameters and topology:\n{nonlinear}"
     );
 }
 

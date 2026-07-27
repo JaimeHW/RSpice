@@ -1815,13 +1815,18 @@ fn push_scalar_limit_state_fields(
     extensions.new_initializers.push_str(
         "            scalar_limit: ScalarLimitState::new_box(),\n            scalar_limit_active: false,\n",
     );
-    extensions
-        .restore_destructure_fields
-        .push_str("            scalar_limit,\n            scalar_limit_active,\n");
-    extensions
-        .restore_initializers
-        .push_str("            scalar_limit,\n            scalar_limit_active,\n");
     extensions.limiter_converged_expr = "!self.scalar_limit_active".to_string();
+    extensions.rollback_value_count = count;
+    extensions.rollback_flag_count = count + 1;
+    extensions
+        .rollback_capture_values
+        .push_str("        values.extend_from_slice(&self.scalar_limit.previous);\n");
+    extensions.rollback_capture_flags.push_str(
+        "        flags.extend_from_slice(&self.scalar_limit.initialized);\n        flags.push(self.scalar_limit_active);\n",
+    );
+    extensions.rollback_restore_fields.push_str(&format!(
+        "        let (field, remaining) = rollback_values.split_at({count});\n        self.scalar_limit.previous.copy_from_slice(field);\n        rollback_values = remaining;\n        let (field, remaining) = rollback_flags.split_at({count});\n        self.scalar_limit.initialized.copy_from_slice(field);\n        rollback_flags = remaining;\n        let (active, remaining) = rollback_flags.split_first().expect(\"generated limiter rollback active flag\");\n        self.scalar_limit_active = *active;\n        rollback_flags = remaining;\n"
+    ));
     extensions.checkpoint_capture_fields =
         "            limiter_anchor: self.scalar_limit.previous.to_vec(),\n            limiter_initialized: self.scalar_limit.initialized.to_vec(),\n"
             .to_string();
@@ -1866,12 +1871,6 @@ fn push_scalar_static_cache_state_fields(
     extensions
         .new_initializers
         .push_str("            scalar_static: ScalarStaticState::new_box(),\n");
-    extensions
-        .restore_destructure_fields
-        .push_str("            scalar_static,\n");
-    extensions
-        .restore_initializers
-        .push_str("            scalar_static,\n");
 }
 
 fn push_temperature_cache_state_fields(extensions: &mut device::StateFileExtensions) {
@@ -1883,12 +1882,6 @@ fn push_temperature_cache_state_fields(extensions: &mut device::StateFileExtensi
     );
     extensions.new_initializers.push_str(
         "            scalar_temperature_static_valid: false,\n            scalar_temperature_static_temperature: 0.0,\n            scalar_temperature_static_thermal_voltage: 0.0,\n",
-    );
-    extensions.restore_destructure_fields.push_str(
-        "            scalar_temperature_static_valid,\n            scalar_temperature_static_temperature,\n            scalar_temperature_static_thermal_voltage,\n",
-    );
-    extensions.restore_initializers.push_str(
-        "            scalar_temperature_static_valid,\n            scalar_temperature_static_temperature,\n            scalar_temperature_static_thermal_voltage,\n",
     );
 }
 

@@ -1,6 +1,6 @@
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
-use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState};
+use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -919,7 +919,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 1911;
     pub const DDT_STATE_COUNT: usize = 24;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "65493ff867386d3a0a782e7021b4a26ef1fbdbd91ddd6fdb3c61a934ad5f6250";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "60c28dc67bbe5512e5344794260674d0979bf97997e9b27b59f022d173166a56";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -940,30 +940,55 @@ impl Instance {
         }
     }
 
-    #[inline]
-    pub fn restore_from_snapshot(&mut self, snapshot: Self) {
-        let Self {
-            nodes,
-            branches,
-            params,
-            param_given,
-            multiplicity,
-            stamp_state,
-            time,
-            timestep,
-            ddt_coefficients,
-        } = snapshot;
-        *self = Self {
-            nodes,
-            branches,
-            params,
-            param_given,
-            multiplicity,
-            stamp_state,
-            time,
-            timestep,
-            ddt_coefficients,
-        };
+    pub(crate) fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {
+        let mut values = Vec::with_capacity(120);
+        values.extend_from_slice(&self.stamp_state.ddt_current);
+        values.extend_from_slice(&self.stamp_state.ddt_previous);
+        values.extend_from_slice(&self.stamp_state.ddt_older);
+        values.extend_from_slice(&self.stamp_state.ddt_derivative_current);
+        values.extend_from_slice(&self.stamp_state.ddt_derivative_previous);
+        values.extend_from_slice(&self.stamp_state.idt_current);
+        values.extend_from_slice(&self.stamp_state.idt_previous);
+        let mut flags = Vec::with_capacity(24);
+        flags.extend_from_slice(&self.stamp_state.ddt_initialized);
+        flags.extend_from_slice(&self.stamp_state.idt_initialized);
+        GeneratedVerilogARollbackState { values, flags }
+    }
+
+    pub(crate) fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
+        debug_assert_eq!(state.values.len(), 120);
+        debug_assert_eq!(state.flags.len(), 24);
+        let mut rollback_values = state.values.as_slice();
+        let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
+        self.stamp_state.ddt_current.copy_from_slice(field);
+        rollback_values = remaining;
+        let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
+        self.stamp_state.ddt_previous.copy_from_slice(field);
+        rollback_values = remaining;
+        let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
+        self.stamp_state.ddt_older.copy_from_slice(field);
+        rollback_values = remaining;
+        let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
+        self.stamp_state.ddt_derivative_current.copy_from_slice(field);
+        rollback_values = remaining;
+        let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
+        self.stamp_state.ddt_derivative_previous.copy_from_slice(field);
+        rollback_values = remaining;
+        let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
+        self.stamp_state.idt_current.copy_from_slice(field);
+        rollback_values = remaining;
+        let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
+        self.stamp_state.idt_previous.copy_from_slice(field);
+        rollback_values = remaining;
+        let mut rollback_flags = state.flags.as_slice();
+        let (field, remaining) = rollback_flags.split_at(Self::DDT_STATE_COUNT);
+        self.stamp_state.ddt_initialized.copy_from_slice(field);
+        rollback_flags = remaining;
+        let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);
+        self.stamp_state.idt_initialized.copy_from_slice(field);
+        rollback_flags = remaining;
+        debug_assert!(rollback_values.is_empty());
+        debug_assert!(rollback_flags.is_empty());
     }
 
     pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {

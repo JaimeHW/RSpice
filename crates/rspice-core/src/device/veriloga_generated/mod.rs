@@ -95,6 +95,17 @@ pub(crate) struct GeneratedVerilogAPersistentState {
     pub limiter_initialized: Vec<bool>,
 }
 
+/// Mutable evaluation state captured around rejected nonlinear trial points.
+///
+/// Parameter values, topology, static caches, and linked matrix locations are
+/// deliberately excluded. Generated models pack only their DDT/IDT and limiter
+/// state into these two contiguous buffers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct GeneratedVerilogARollbackState {
+    pub values: Vec<Value>,
+    pub flags: Vec<bool>,
+}
+
 pub(crate) const GENERATED_PERSISTENT_STATE_VERSION: u32 = 1;
 
 /// Persistent state plus exact generated-model and instance provenance.
@@ -460,6 +471,12 @@ pub struct BuiltinVerilogADevices {
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct BuiltinVerilogADevicesRollback {
+    states: Vec<GeneratedVerilogARollbackState>,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogADevices {
     #[inline]
     pub fn new() -> Self {
@@ -519,10 +536,10 @@ impl BuiltinVerilogADevices {
         states: &[GeneratedVerilogAInstanceCheckpoint],
     ) -> Result<(), String> {
         self.validate_checkpoint_states(states)?;
-        let rollback = self.clone();
+        let rollback = self.capture_rollback_state();
         for (index, (device, state)) in self.devices.iter_mut().zip(states).enumerate() {
             if let Err(error) = device.restore_checkpoint_state(state) {
-                self.restore_from_snapshot(rollback);
+                self.restore_rollback_state(rollback);
                 return Err(format!(
                     "generated Verilog-A checkpoint instance {index} restore failed: {error}"
                 ));
@@ -532,13 +549,21 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self) {
-        if self.devices.len() == snapshot.devices.len() {
-            for (active, snapshot) in self.devices.iter_mut().zip(snapshot.devices) {
-                active.restore_from_snapshot(snapshot);
-            }
-        } else {
-            *self = snapshot;
+    pub(crate) fn capture_rollback_state(&self) -> BuiltinVerilogADevicesRollback {
+        BuiltinVerilogADevicesRollback {
+            states: self
+                .devices
+                .iter()
+                .map(|device| device.kind.capture_rollback_state())
+                .collect(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn restore_rollback_state(&mut self, rollback: BuiltinVerilogADevicesRollback) {
+        debug_assert_eq!(self.devices.len(), rollback.states.len());
+        for (device, state) in self.devices.iter_mut().zip(&rollback.states) {
+            device.kind.restore_rollback_state(state);
         }
     }
 
@@ -707,18 +732,6 @@ impl BuiltinVerilogAInstance {
     ) -> Result<(), String> {
         self.validate_checkpoint_state(checkpoint)?;
         self.kind.restore_persistent_state(&checkpoint.state)
-    }
-
-    #[inline]
-    pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self) {
-        debug_assert_eq!(self.model_name, snapshot.model_name);
-        debug_assert_eq!(self.instance_name, snapshot.instance_name);
-        debug_assert_eq!(self.nodes, snapshot.nodes);
-        debug_assert_eq!(self.branches, snapshot.branches);
-        self.temperature = snapshot.temperature;
-        self.analysis_initial_step = snapshot.analysis_initial_step;
-        self.analysis_final_step = snapshot.analysis_final_step;
-        self.kind.restore_from_snapshot(snapshot.kind);
     }
 
     #[inline]

@@ -43,7 +43,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
     #[cfg(feature = "veriloga-builtins-base")]
-    generated_veriloga_devices: crate::device::veriloga_generated::BuiltinVerilogADevices,
+    generated_veriloga_devices: crate::device::veriloga_generated::BuiltinVerilogADevicesRollback,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -581,7 +581,7 @@ impl CircuitData {
             #[cfg(feature = "veriloga")]
             veriloga_devices: self.veriloga_devices.clone(),
             #[cfg(feature = "veriloga-builtins-base")]
-            generated_veriloga_devices: self.generated_veriloga_devices.clone(),
+            generated_veriloga_devices: self.generated_veriloga_devices.capture_rollback_state(),
         }
     }
 
@@ -622,7 +622,7 @@ impl CircuitData {
         #[cfg(feature = "veriloga-builtins-base")]
         {
             self.generated_veriloga_devices
-                .restore_from_snapshot(snapshot.generated_veriloga_devices);
+                .restore_rollback_state(snapshot.generated_veriloga_devices);
         }
     }
 

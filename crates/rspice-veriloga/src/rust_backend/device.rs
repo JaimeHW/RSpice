@@ -15557,11 +15557,14 @@ pub(super) struct StateFileExtensions {
     pub clone_fields: String,
     pub new_initializers: String,
     pub after_new: String,
-    pub restore_destructure_fields: String,
-    pub restore_initializers: String,
     pub set_parameter_hook: String,
     pub impl_methods: String,
     pub limiter_converged_expr: String,
+    pub rollback_value_count: usize,
+    pub rollback_flag_count: usize,
+    pub rollback_capture_values: String,
+    pub rollback_capture_flags: String,
+    pub rollback_restore_fields: String,
     pub checkpoint_capture_fields: String,
     pub checkpoint_shape_checks: String,
     pub checkpoint_restore_fields: String,
@@ -15576,11 +15579,14 @@ impl Default for StateFileExtensions {
             clone_fields: String::new(),
             new_initializers: String::new(),
             after_new: String::new(),
-            restore_destructure_fields: String::new(),
-            restore_initializers: String::new(),
             set_parameter_hook: String::new(),
             impl_methods: String::new(),
             limiter_converged_expr: "true".to_string(),
+            rollback_value_count: 0,
+            rollback_flag_count: 0,
+            rollback_capture_values: String::new(),
+            rollback_capture_flags: String::new(),
+            rollback_restore_fields: String::new(),
             checkpoint_capture_fields:
                 "            limiter_anchor: Vec::new(),\n            limiter_initialized: Vec::new(),\n"
                     .to_string(),
@@ -15622,7 +15628,7 @@ pub(super) fn generate_state_file_with_extensions(
     let mut out = String::new();
     out.push_str("#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n");
     out.push_str(&format!(
-        "use {}::{{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState}};\n",
+        "use {}::{{GeneratedDdtCoefficients, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState}};\n",
         options.runtime_path
     ));
     out.push('\n');
@@ -15828,33 +15834,78 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        instance\n");
     }
     out.push_str("    }\n\n");
-    out.push_str("    #[inline]\n");
-    out.push_str("    pub fn restore_from_snapshot(&mut self, snapshot: Self) {\n");
-    out.push_str("        let Self {\n");
-    out.push_str("            nodes,\n");
-    out.push_str("            branches,\n");
-    out.push_str("            params,\n");
-    out.push_str("            param_given,\n");
-    out.push_str("            multiplicity,\n");
-    out.push_str("            stamp_state,\n");
-    out.push_str("            time,\n");
-    out.push_str("            timestep,\n");
-    out.push_str("            ddt_coefficients,\n");
-    out.push_str(&extensions.restore_destructure_fields);
-    out.push_str("        } = snapshot;\n");
-    out.push_str("        *self = Self {\n");
-    out.push_str("            nodes,\n");
-    out.push_str("            branches,\n");
-    out.push_str("            params,\n");
-    out.push_str("            param_given,\n");
-    out.push_str("            multiplicity,\n");
-    out.push_str("            stamp_state,\n");
-    out.push_str("            time,\n");
-    out.push_str("            timestep,\n");
-    out.push_str("            ddt_coefficients,\n");
-    out.push_str(&extensions.restore_initializers);
-    out.push_str("        };\n");
+    let rollback_value_count = ddt_state_count
+        .saturating_mul(5)
+        .saturating_add(idt_state_count.saturating_mul(2))
+        .saturating_add(extensions.rollback_value_count);
+    let rollback_flag_count = ddt_state_count
+        .saturating_add(idt_state_count)
+        .saturating_add(extensions.rollback_flag_count);
+    out.push_str(
+        "    pub(crate) fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {\n",
+    );
+    out.push_str(&format!(
+        "        let mut values = Vec::with_capacity({rollback_value_count});\n"
+    ));
+    out.push_str("        values.extend_from_slice(&self.stamp_state.ddt_current);\n");
+    out.push_str("        values.extend_from_slice(&self.stamp_state.ddt_previous);\n");
+    out.push_str("        values.extend_from_slice(&self.stamp_state.ddt_older);\n");
+    out.push_str("        values.extend_from_slice(&self.stamp_state.ddt_derivative_current);\n");
+    out.push_str("        values.extend_from_slice(&self.stamp_state.ddt_derivative_previous);\n");
+    out.push_str("        values.extend_from_slice(&self.stamp_state.idt_current);\n");
+    out.push_str("        values.extend_from_slice(&self.stamp_state.idt_previous);\n");
+    out.push_str(&extensions.rollback_capture_values);
+    out.push_str(&format!(
+        "        let mut flags = Vec::with_capacity({rollback_flag_count});\n"
+    ));
+    out.push_str("        flags.extend_from_slice(&self.stamp_state.ddt_initialized);\n");
+    out.push_str("        flags.extend_from_slice(&self.stamp_state.idt_initialized);\n");
+    out.push_str(&extensions.rollback_capture_flags);
+    out.push_str("        GeneratedVerilogARollbackState { values, flags }\n");
     out.push_str("    }\n\n");
+
+    out.push_str(
+        "    pub(crate) fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {\n",
+    );
+    out.push_str(&format!(
+        "        debug_assert_eq!(state.values.len(), {rollback_value_count});\n"
+    ));
+    out.push_str(&format!(
+        "        debug_assert_eq!(state.flags.len(), {rollback_flag_count});\n"
+    ));
+    out.push_str("        let mut rollback_values = state.values.as_slice();\n");
+    for field in [
+        "ddt_current",
+        "ddt_previous",
+        "ddt_older",
+        "ddt_derivative_current",
+        "ddt_derivative_previous",
+    ] {
+        out.push_str(&format!(
+            "        let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);\n        self.stamp_state.{field}.copy_from_slice(field);\n        rollback_values = remaining;\n"
+        ));
+    }
+    for field in ["idt_current", "idt_previous"] {
+        out.push_str(&format!(
+            "        let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);\n        self.stamp_state.{field}.copy_from_slice(field);\n        rollback_values = remaining;\n"
+        ));
+    }
+    out.push_str("        let mut rollback_flags = state.flags.as_slice();\n");
+    out.push_str(
+        "        let (field, remaining) = rollback_flags.split_at(Self::DDT_STATE_COUNT);\n",
+    );
+    out.push_str("        self.stamp_state.ddt_initialized.copy_from_slice(field);\n");
+    out.push_str("        rollback_flags = remaining;\n");
+    out.push_str(
+        "        let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);\n",
+    );
+    out.push_str("        self.stamp_state.idt_initialized.copy_from_slice(field);\n");
+    out.push_str("        rollback_flags = remaining;\n");
+    out.push_str(&extensions.rollback_restore_fields);
+    out.push_str("        debug_assert!(rollback_values.is_empty());\n");
+    out.push_str("        debug_assert!(rollback_flags.is_empty());\n");
+    out.push_str("    }\n\n");
+
     out.push_str(
         "    pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
     );
