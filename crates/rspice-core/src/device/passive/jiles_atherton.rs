@@ -1474,7 +1474,9 @@ impl JilesAthertonInductor {
                     };
                     trial
                 };
-                self.xyce_mag_update = trial.magnetization_update;
+                if self.params.xyce_core_level2 {
+                    self.xyce_mag_update = trial.magnetization_update;
+                }
                 trial
             }
             None => {
@@ -1500,13 +1502,13 @@ impl JilesAthertonInductor {
                     };
                     trial
                 };
-                // Xyce retains the endpoint MagVarUpdate produced by the
-                // accepted updateIntermediateVars call.  The cached Newton
-                // probe normally already installed this value, but a final
-                // projection can produce an endpoint that is not bitwise
-                // identical to the cached iterate.  Preserve the fallback
-                // result as the carried update for the next timepoint.
-                self.xyce_mag_update = trial.magnetization_update;
+                // LEVEL=2 retains the endpoint MagVarUpdate produced by the
+                // accepted updateIntermediateVars call.  LEVEL=1 has no
+                // accepted delta state; its hidden M is already committed
+                // directly into `state.m` below.
+                if self.params.xyce_core_level2 {
+                    self.xyce_mag_update = trial.magnetization_update;
+                }
                 trial
             }
         };
@@ -1528,7 +1530,7 @@ impl JilesAthertonInductor {
         if !self.params.xyce_core_level2 {
             self.xyce_level1_rate = trial.level1_rate;
             self.xyce_level1_p = trial.p;
-            self.xyce_mag_update = trial.magnetization_update;
+            self.xyce_mag_update = 0.0;
         }
         self.state.m_irr = self.state.m;
 
