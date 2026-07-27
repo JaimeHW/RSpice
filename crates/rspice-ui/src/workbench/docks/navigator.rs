@@ -10,7 +10,7 @@ use crate::state::{CellViewRef, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::workbench::code_workspace::{NetlistOutline, OutlineEntry, OutlineEntryKind};
+use crate::state::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 
 use super::super::commands::Command;
 use super::super::design_system::{
@@ -1724,7 +1724,7 @@ fn active_netlist_artifact_name(state: &crate::common::AppState) -> String {
 
 fn active_canonical_netlist_document(
     state: &crate::common::AppState,
-) -> Option<&super::super::code_workspace::NetlistDocument> {
+) -> Option<&crate::state::NetlistDocument> {
     match state.ui.netlist.active_document {
         super::super::netlist_document::ActiveNetlistDocument::Generated => {
             state.ui.netlist.generated_document.as_ref()
@@ -1743,7 +1743,7 @@ fn netlist_dependency_status(state: &crate::common::AppState) -> &'static str {
     if document.dependencies().iter().any(|dependency| {
         matches!(
             dependency.resolution(),
-            super::super::code_workspace::DependencyResolution::Missing { .. }
+            crate::state::DependencyResolution::Missing { .. }
         )
     }) {
         "error"

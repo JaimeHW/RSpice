@@ -2477,7 +2477,7 @@ pub struct ProjectWorkspace {
     /// `netlist_source` projection remains for backwards compatibility and
     /// must exactly match this document when both are present.
     #[serde(default)]
-    pub netlist_document: Option<crate::workbench::code_workspace::NetlistDocument>,
+    pub netlist_document: Option<crate::state::NetlistDocument>,
     /// Ownership-dialog selection for the project-owned source artifact.
     #[serde(default)]
     pub netlist_descriptor: Option<OwnedNetlistDescriptor>,
@@ -2686,7 +2686,7 @@ impl ProjectWorkspace {
         })?;
         if let Some(document) = &self.netlist_document {
             if document.ownership()
-                == crate::workbench::code_workspace::DocumentOwnership::Generated
+                == crate::state::DocumentOwnership::Generated
             {
                 return Err(
                     SimulationConfigurationError::InvalidNetlistDocumentProjection {

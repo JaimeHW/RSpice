@@ -182,7 +182,7 @@ fn acknowledge_canonical_dependencies(
                 continue;
             }
             let record =
-                crate::workbench::code_workspace::DependencyMetadata::unresolved_direct_to(
+                crate::state::DependencyMetadata::unresolved_direct_to(
                     index,
                     dependency.requested_path(),
                     locator,
@@ -209,7 +209,7 @@ fn acknowledge_canonical_dependencies(
                 continue;
             }
             let record =
-                crate::workbench::code_workspace::DependencyMetadata::unresolved_transitive_to(
+                crate::state::DependencyMetadata::unresolved_transitive_to(
                     parent,
                     index,
                     dependency.requested_path(),
@@ -223,7 +223,7 @@ fn acknowledge_canonical_dependencies(
 
     if dependencies_belong_to_generated_base {
         let backing = document.generated_artifact();
-        let next = crate::workbench::code_workspace::GeneratedArtifact::try_from_utf8(
+        let next = crate::state::GeneratedArtifact::try_from_utf8(
             backing.provenance().clone(),
             backing.source_bytes().to_vec(),
             dependencies,
@@ -285,20 +285,20 @@ fn dependency_locator(
     path: &std::path::Path,
     root_directory: &std::path::Path,
     source: &str,
-) -> Result<crate::workbench::code_workspace::SourceLocator, String> {
+) -> Result<crate::state::SourceLocator, String> {
     let display = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "dependency.sp".to_owned());
     let identity = path.strip_prefix(root_directory).map_or_else(
         |_| {
-            let digest = crate::workbench::code_workspace::content_digest(source);
+            let digest = crate::state::content_digest(source);
             format!("external/{}-{display}", &digest.to_string()[..12])
         },
         |relative| relative.to_string_lossy().replace('\\', "/"),
     );
     let native_origin = path.to_string_lossy().into_owned();
-    crate::workbench::code_workspace::SourceLocator::try_new(identity.clone(), display)
+    crate::state::SourceLocator::try_new(identity.clone(), display)
         .and_then(|locator| locator.with_native_origin(native_origin))
         .map_err(|error| error.to_string())
 }
@@ -308,14 +308,14 @@ fn dependency_locator(
     path: &std::path::Path,
     _root_directory: &std::path::Path,
     _source: &str,
-) -> Result<crate::workbench::code_workspace::SourceLocator, String> {
+) -> Result<crate::state::SourceLocator, String> {
     let identity = path.to_string_lossy().replace('\\', "/");
     let display = identity
         .rsplit('/')
         .find(|segment| !segment.is_empty())
         .unwrap_or("dependency.sp")
         .to_owned();
-    crate::workbench::code_workspace::SourceLocator::try_new(identity, display)
+    crate::state::SourceLocator::try_new(identity, display)
         .map_err(|error| error.to_string())
 }
 
@@ -376,16 +376,16 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
             .map(|diagnostic| {
                 let severity = match diagnostic.severity {
                     crate::workbench::netlist_document::DiagnosticSeverity::Info => {
-                        crate::workbench::code_workspace::DiagnosticSeverity::Info
+                        crate::state::DiagnosticSeverity::Info
                     }
                     crate::workbench::netlist_document::DiagnosticSeverity::Warning => {
-                        crate::workbench::code_workspace::DiagnosticSeverity::Warning
+                        crate::state::DiagnosticSeverity::Warning
                     }
                     crate::workbench::netlist_document::DiagnosticSeverity::Error => {
-                        crate::workbench::code_workspace::DiagnosticSeverity::Error
+                        crate::state::DiagnosticSeverity::Error
                     }
                 };
-                crate::workbench::code_workspace::ValidationDiagnostic::try_new(
+                crate::state::ValidationDiagnostic::try_new(
                     severity,
                     diagnostic.message.clone(),
                     diagnostic.line.unwrap_or(0) + 1,
@@ -693,7 +693,7 @@ pub(crate) fn save_owned_netlist_source(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
-        let locator = crate::workbench::code_workspace::SourceLocator::try_new(
+        let locator = crate::state::SourceLocator::try_new(
             path.display().to_string(),
             display_name,
         )
@@ -820,12 +820,12 @@ fn canonical_import_document(
     display_name: &str,
 ) -> Result<
     (
-        crate::workbench::code_workspace::NetlistDocument,
+        crate::state::NetlistDocument,
         crate::state::OwnedNetlistDescriptor,
     ),
     String,
 > {
-    use crate::workbench::code_workspace::{
+    use crate::state::{
         GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
         NetlistDocumentId, SourceLocator,
     };

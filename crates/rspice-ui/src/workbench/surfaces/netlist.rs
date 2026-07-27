@@ -11,7 +11,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 
-use super::super::code_workspace::{
+use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
 };
@@ -264,8 +264,8 @@ fn publish_generated_document(
 fn generated_project_source_dependencies(
     state: &AppState,
     source: &str,
-) -> Result<Vec<super::super::code_workspace::DependencyMetadata>, String> {
-    let include_directives = super::super::code_workspace::parse_include_directives(source);
+) -> Result<Vec<crate::state::DependencyMetadata>, String> {
+    let include_directives = crate::state::parse_include_directives(source);
     let mut dependencies = Vec::new();
 
     let projection = state
@@ -313,7 +313,7 @@ fn generated_project_source_dependencies(
                     execution.instance_path()
                 )
             })?;
-        let root_locator = super::super::code_workspace::SourceLocator::try_new(
+        let root_locator = crate::state::SourceLocator::try_new(
             binding.source_key(),
             bundle.root().logical_path(),
         )
@@ -346,7 +346,7 @@ fn generated_project_source_dependencies(
                 )
             })?;
         dependencies.push(
-            super::super::code_workspace::DependencyMetadata::unresolved_direct_to(
+            crate::state::DependencyMetadata::unresolved_direct_to(
                 include_index,
                 binding.source_key(),
                 root_locator.clone(),
@@ -397,7 +397,7 @@ fn generated_project_source_dependencies(
                 &root_locator,
             )?;
             dependencies.push(
-                super::super::code_workspace::DependencyMetadata::unresolved_transitive_to(
+                crate::state::DependencyMetadata::unresolved_transitive_to(
                     parent_locator,
                     edge.include_index,
                     edge.requested_path.clone(),
@@ -415,8 +415,8 @@ fn generated_project_source_dependencies(
 fn project_bundle_locator(
     source_key: &str,
     logical_path: &str,
-) -> Result<super::super::code_workspace::SourceLocator, String> {
-    super::super::code_workspace::SourceLocator::try_new(
+) -> Result<crate::state::SourceLocator, String> {
+    crate::state::SourceLocator::try_new(
         format!("{source_key}#/{logical_path}"),
         logical_path,
     )
@@ -427,8 +427,8 @@ fn compiler_dependency_locator(
     source_key: &str,
     root_path: &str,
     dependency: &rspice_veriloga::VirtualSourceDependency,
-    root_locator: &super::super::code_workspace::SourceLocator,
-) -> Result<super::super::code_workspace::SourceLocator, String> {
+    root_locator: &crate::state::SourceLocator,
+) -> Result<crate::state::SourceLocator, String> {
     if dependency.logical_path.eq_ignore_ascii_case(root_path) {
         return Ok(root_locator.clone());
     }
@@ -439,7 +439,7 @@ fn compiler_dependency_locator(
             .next()
             .filter(|name| !name.is_empty())
             .ok_or_else(|| "Compiler returned a built-in dependency without a name".to_owned())?;
-        return super::super::code_workspace::SourceLocator::try_new(
+        return crate::state::SourceLocator::try_new(
             format!("__rspice_builtin__/veriloga/{name}"),
             dependency.logical_path.clone(),
         )
@@ -975,7 +975,7 @@ struct NetlistSearchDocument {
 #[derive(Debug, Clone)]
 struct NetlistSearchMatch {
     document: NetlistSearchDocument,
-    found: super::super::code_workspace::FindMatch,
+    found: crate::state::FindMatch,
 }
 
 fn netlist_search_documents(
@@ -1696,7 +1696,7 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
-    use super::super::code_workspace::{
+    use crate::state::{
         FindDirection, FindOptions, ReplaceScope, find_all_in_source, replace_in_source,
     };
     use super::super::netlist_document::NetlistFindScope;
@@ -1710,7 +1710,7 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         regular_expression: find.regular_expression,
     };
     let documents = netlist_search_documents(&app.state, find.scope);
-    let matches: Result<Vec<NetlistSearchMatch>, super::super::code_workspace::FindError> =
+    let matches: Result<Vec<NetlistSearchMatch>, crate::state::FindError> =
         if find.find.is_empty() {
             Ok(Vec::new())
         } else {
@@ -2091,7 +2091,7 @@ fn open_owned_source(state: &mut AppState) -> bool {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            super::super::code_workspace::SourceLocator::try_new(
+            crate::state::SourceLocator::try_new(
                 path.display().to_string(),
                 display_name,
             )

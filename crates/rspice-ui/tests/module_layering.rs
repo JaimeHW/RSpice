@@ -98,11 +98,13 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // and the `Command` enum) out of `workbench` into `state`, then convert
     // `workbench` signatures from `&mut RSpiceApp` to `&mut AppState`.
     ("workbench", "common", 294),
-    // The persisted project model still reaches up for the netlist document.
-    // Each module that moves down lowers this count: it started at 39,
-    // `engineering_table` took it to 37, the page-setup contract to 16, the
-    // schematic visibility policy to 9, and the source-set records to 2.
-    ("state", "workbench", 2),
+    // `state -> workbench` is retired. It started at 39 and was cleared by
+    // moving what the project actually persists down out of the UI shell:
+    // the engineering-table views (39 -> 37), the page-setup contract and
+    // print mappings (-> 16), the schematic visibility policy (-> 9), the
+    // hardcopy source-set records (-> 2), and the netlist document (-> 0).
+    // The persisted project model no longer reaches up into chrome to
+    // describe its own saved data. Do not reintroduce this edge.
     ("state", "simulation", 26),
     ("state", "properties", 10),
     ("state", "services", 7),

@@ -22,7 +22,7 @@ pub use tuner::right_panel as show_parameter_inspector;
 
 /// Stable identity for the exact UTF-8 source bytes visible in the editor.
 pub fn source_content_digest(source: &str) -> crate::product::ContentDigest {
-    super::code_workspace::content_digest(source)
+    crate::state::content_digest(source)
 }
 
 /// Invalidate byte-bound review evidence after any ownership or source edit.
@@ -107,7 +107,7 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
         .netlist
         .generated_document
         .as_ref()
-        .map(super::code_workspace::NetlistDocument::generated_artifact)
+        .map(crate::state::NetlistDocument::generated_artifact)
         .ok_or_else(|| "No current generated artifact is available.".to_owned())?;
     let previous_label = format!("generated-{}", short_digest(previous.content_digest()));
     let current_label = format!("generated-{}", short_digest(current.content_digest()));
@@ -253,12 +253,12 @@ impl Default for NetlistOwnershipDialogState {
 pub struct NetlistDocumentState {
     /// Canonical immutable document, including generated provenance,
     /// dependency identities, source map, outline, and validation state.
-    pub generated_document: Option<super::code_workspace::NetlistDocument>,
+    pub generated_document: Option<crate::state::NetlistDocument>,
     /// Canonical project-owned document retained independently from the
     /// generated primary.
-    pub owned_document: Option<super::code_workspace::NetlistDocument>,
+    pub owned_document: Option<crate::state::NetlistDocument>,
     /// Prior immutable artifacts retained for deterministic revision compare.
-    pub generated_history: Vec<super::code_workspace::GeneratedArtifact>,
+    pub generated_history: Vec<crate::state::GeneratedArtifact>,
     /// Read-only unified comparison document (`generated.diff`).
     pub generated_diff_source: String,
     /// Runtime-generated primary artifact retained independently from any

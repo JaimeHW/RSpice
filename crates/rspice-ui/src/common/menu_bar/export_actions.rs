@@ -278,7 +278,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
 
 fn publish_generated_source(
     state: &mut AppState,
-    artifact: &crate::workbench::code_workspace::GeneratedArtifact,
+    artifact: &crate::state::GeneratedArtifact,
     format: crate::io::NetlistFormat,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
@@ -354,11 +354,11 @@ struct BundleEntry {
 }
 
 fn build_generated_bundle(
-    artifact: &crate::workbench::code_workspace::GeneratedArtifact,
+    artifact: &crate::state::GeneratedArtifact,
     format: crate::io::NetlistFormat,
     include_source_map: bool,
 ) -> Result<Vec<u8>, String> {
-    use crate::workbench::code_workspace::DependencyResolution;
+    use crate::state::DependencyResolution;
 
     if include_source_map && format != crate::io::NetlistFormat::Spice {
         return Err(
@@ -370,11 +370,11 @@ fn build_generated_bundle(
     let mut ordered_dependencies = dependencies.iter().enumerate().collect::<Vec<_>>();
     ordered_dependencies.sort_by(|(_, left), (_, right)| {
         left.parent()
-            .map(crate::workbench::code_workspace::SourceLocator::logical_identity)
+            .map(crate::state::SourceLocator::logical_identity)
             .cmp(
                 &right
                     .parent()
-                    .map(crate::workbench::code_workspace::SourceLocator::logical_identity),
+                    .map(crate::state::SourceLocator::logical_identity),
             )
             .then_with(|| {
                 left.direct_include_index()
@@ -500,14 +500,14 @@ fn build_generated_bundle(
             "requested_locator": dependency.requested_locator(),
             "logical_identity": dependency.locator().logical_identity(),
             "bundle_entry": entry_names[index],
-            "content_digest": crate::workbench::code_workspace::content_digest(&materialized).to_string(),
+            "content_digest": crate::state::content_digest(&materialized).to_string(),
             "retained_entry": retained_entry,
             "retained_content_digest": dependency.resolution().content_digest().map(|digest| digest.to_string()),
             "edge": if let Some(include_index) = dependency.direct_include_index() {
                 serde_json::json!({ "owner": "generated", "include_index": include_index })
             } else {
                 serde_json::json!({
-                    "owner": dependency.parent().map(crate::workbench::code_workspace::SourceLocator::logical_identity),
+                    "owner": dependency.parent().map(crate::state::SourceLocator::logical_identity),
                     "include_index": dependency.parent_include_index(),
                 })
             },
@@ -529,7 +529,7 @@ fn build_generated_bundle(
     let manifest = serde_json::json!({
         "schema": "rspice-generated-netlist-bundle/v1",
         "main": main_name,
-        "main_content_digest": crate::workbench::code_workspace::content_digest(&main_source).to_string(),
+        "main_content_digest": crate::state::content_digest(&main_source).to_string(),
         "dialect": format.extension(),
         "retained_generated_source": retained_main_name,
         "generated_content_digest": artifact.content_digest().to_string(),

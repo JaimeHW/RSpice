@@ -16,6 +16,7 @@ pub mod property_types;
 mod schematic;
 mod simulation;
 mod symbol;
+pub mod netlist_document;
 pub mod symbol_resolver;
 pub mod workspace;
 
@@ -60,6 +61,16 @@ pub use model_bound_symbol::{
     SymbolTestFixtureContract,
 };
 pub use model_library::ModelLibraryManager;
+pub use netlist_document::{
+    DependencyMetadata, DependencyResolution, DiagnosticSeverity, DocumentError, DocumentOwnership,
+    FindDirection, FindError, FindMatch, FindOptions, GeneratedArtifact, GeneratedProvenance,
+    GeneratedSourceMapEntry, GenerationInput, ImportedProvenance, IncludeDirective, IncludeKind,
+    NetlistDocument, NetlistDocumentId, NetlistOutline, OutlineEntry, OutlineEntryKind,
+    OutlineSection, OutlineSectionKind, ReplaceOutcome, ReplaceScope, SaveAcknowledgement,
+    SourceLocator, SourcePosition, SourceProvenance, TransitionReceipt, ValidationDiagnostic,
+    ValidationReport, content_digest, find_all_in_source, find_in_source, replace_in_source,
+};
+pub(crate) use netlist_document::parse_include_directives;
 pub use pdk_config::{ConfigError, DiscoveredFile, LibraryPathEntry, PdkConfig};
 pub(crate) use project_sources::{CanonicalCellViewOwnerKey, canonical_cell_view_owner_key};
 pub use project_sources::{
