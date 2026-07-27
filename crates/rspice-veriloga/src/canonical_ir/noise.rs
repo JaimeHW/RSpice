@@ -1,3 +1,14 @@
+//! Extraction of the small-signal noise plan from HIR and MIR.
+//!
+//! Noise functions appear inside ordinary contribution expressions, but in
+//! `.noise` they behave as separate sources injected at the originating
+//! branch. [`CanonicalNoiseSourcePlan::from_hir_and_mir`] lifts them out into
+//! an explicit plan: each source records its injection endpoints, its kind
+//! (white, flicker, or table), and the activation guard it inherited from the
+//! control flow it sat under, so a conditionally-contributed source stays
+//! conditional. It mutates both models because the lifted expressions must be
+//! removed from the time-domain equations they came from.
+
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 

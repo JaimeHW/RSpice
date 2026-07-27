@@ -1,3 +1,11 @@
+//! Diagnostics raised while building and validating canonical IR.
+//!
+//! Every diagnostic names the [`CompilerPhase`] that raised it and, where the
+//! construct came from source, a [`SourceSpanRef`] pointing back at it. The
+//! span is stored as raw source-file id and byte offsets rather than a
+//! [`crate::source::Span`] so that an artifact stays serializable and
+//! self-describing once it leaves the compiler.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

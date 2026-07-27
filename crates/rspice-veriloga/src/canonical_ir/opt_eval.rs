@@ -1,3 +1,14 @@
+//! Reference interpreter for [`OptModel`].
+//!
+//! [`evaluate_opt_model`] walks the OptIR value graph directly, returning both
+//! values and derivative lanes for a given set of parameters, node potentials,
+//! and branch flows. It exists to be the answer the compiled backends are
+//! checked against: the canonical IR and Rust backend test suites evaluate a
+//! model here and compare, which catches a backend that lowers OptIR wrongly
+//! without needing a full circuit solve to expose it.
+//!
+//! It is deliberately unoptimized, and is not on any simulation path.
+
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;

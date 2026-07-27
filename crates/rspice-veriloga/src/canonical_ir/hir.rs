@@ -1,3 +1,12 @@
+//! HIR: the first canonical level, still shaped like the source module.
+//!
+//! [`HirModel::from_analyzed_module`] takes the semantic analyzer's output and
+//! assigns stable ids to every port, node, branch, parameter, variable, array,
+//! and contribution. Control flow is preserved as written — `if`/`case`/loops
+//! remain nested statements — so HIR is where a construct can still be
+//! reported against the shape the author wrote. Flattening happens later, in
+//! [`super::mir`].
+
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashSet;

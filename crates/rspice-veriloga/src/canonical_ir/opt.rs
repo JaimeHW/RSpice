@@ -1,3 +1,18 @@
+//! OptIR: the third canonical level, a scalarized value graph.
+//!
+//! [`OptModel::from_hir_and_mir`] lowers the equations to a flat list of
+//! [`OptValue`]s, each a single arithmetic operation over earlier values, with
+//! control flow folded into guards and compile-time-bounded loops unrolled
+//! (the `MAX_SCALAR_*` constants below cap how far, so a pathological model
+//! degrades instead of exploding). Derivatives ride alongside as
+//! [`DerivativeLane`]s — one per node or branch unknown — which is how the
+//! Jacobian stays analytic rather than being re-derived per backend.
+//!
+//! Two pieces of scheduling metadata make the difference between a correct
+//! backend and a fast one. [`InvalidationClass`] records the coarsest event
+//! that can change a value, so instance-static work does not re-run per Newton
+//! iteration; [`OptSchedule`] records the resulting evaluation order.
+
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};

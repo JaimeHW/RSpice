@@ -1,3 +1,12 @@
+//! Provenance metadata and the reproducible digest used to stamp it.
+//!
+//! [`CanonicalMetadata`] records which source package a model was compiled
+//! from; [`StableDigest`] provides the content hash each IR level is stamped
+//! with. Note the digest's deliberately narrow contract: it is a fast FNV-1a
+//! hash for change detection and reproducibility, explicitly not a
+//! cryptographic one. Identity that has to resist tampering uses the BLAKE3
+//! chain in [`crate::virtual_source`] instead.
+
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 

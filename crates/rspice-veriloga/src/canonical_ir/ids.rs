@@ -1,3 +1,10 @@
+//! Typed indices used throughout the canonical IR.
+//!
+//! Every entity kind gets its own `u32` newtype from the `id_type!` macro, so
+//! a [`NodeId`] cannot be passed where a [`ParamId`] belongs even though both
+//! are indices into a `Vec`. The ids are dense and assigned in declaration
+//! order, which is what makes an artifact's digests reproducible.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

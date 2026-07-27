@@ -1,3 +1,11 @@
+//! The sealed canonical IR artifact handed to backends.
+//!
+//! [`CanonicalIrArtifact`] carries all three levels — HIR, MIR, OptIR — plus
+//! the noise plan and source metadata, with a content digest per level. The
+//! digests are what let a backend, a cache, or a runtime report assert it is
+//! looking at the same compilation the front end produced, so the levels
+//! travel together and are validated as a unit rather than separately.
+
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::fmt::Write;

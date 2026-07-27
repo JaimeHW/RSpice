@@ -1,9 +1,21 @@
 //! Canonical multi-level Verilog-A IR.
 //!
-//! This module is the new semantic compiler target for Verilog-A models.
-//! The bytecode VM remains the non-native runtime path while native mode is
-//! owned by the RSpice native JIT contract/backend as this IR is introduced
-//! and verified.
+//! The semantic compiler target for Verilog-A models, and the input every
+//! backend other than the bytecode VM consumes. Three levels are built in
+//! sequence, each preserved in the final artifact rather than discarded:
+//!
+//! | Level | Module | Shape |
+//! | :--- | :--- | :--- |
+//! | HIR | [`hir`] | Source-shaped: nested control flow, named entities |
+//! | MIR | [`mir`] | Solver-shaped: flat equations, branch unknowns, state slots |
+//! | OptIR | [`opt`] | Scalarized value graph with derivative lanes and a schedule |
+//!
+//! [`noise`] lifts noise sources out into a separate plan along the way, since
+//! they are contribution expressions in the time domain but independent
+//! injected sources in `.noise`. [`artifact`] seals the result, [`opt_eval`]
+//! provides the reference interpreter backends are checked against, and
+//! [`ids`], [`metadata`], and [`diagnostic`] supply the typed indices,
+//! provenance digests, and phase-tagged diagnostics used across all levels.
 
 pub mod artifact;
 pub mod diagnostic;

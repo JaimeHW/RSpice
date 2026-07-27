@@ -1,3 +1,13 @@
+//! MIR: the second canonical level, flattened into solver equations.
+//!
+//! [`MirModel::from_hir`] turns the source-shaped HIR into the rows the MNA
+//! solver actually assembles. Each [`MirEquation`] is a current, potential, or
+//! indirect contribution; branch unknowns are materialized for the potential
+//! and indirect kinds that need an extra column; and parameters and operator
+//! state get numbered slots. Equations also carry the [`MirAnalysisDomain`]s
+//! they participate in, which is what lets a backend skip work an analysis
+//! cannot observe.
+
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
