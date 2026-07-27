@@ -54,9 +54,11 @@ class NativeReleasePackageTests(unittest.TestCase):
             self.assertTrue(manifest["build"]["locked_dependencies"])
             payload_paths = [entry["path"] for entry in manifest["files"]]
             for required in [
+                "CLI-README.md",
                 "Cargo.lock",
-                "NATIVE-RELEASE.md",
-                "PRODUCTION-RUNBOOK.md",
+                "LICENSE",
+                "NOTICE",
+                "README.md",
                 "production.toml",
             ]:
                 self.assertIn(required, payload_paths)
