@@ -25,7 +25,7 @@ Around the engine sit a CLI built for batch runs and CI, a desktop application f
 
 RSpice is a young project under active development. The surface area below is broad: major paths are implemented and covered by focused tests, but maturity and validation depth vary by subsystem. Accuracy is measured against ngspice continuously rather than assumed, and the current repository should not be presented as a substitute for hardened EDA tooling.
 
-Platform support is tracked by CI coverage and release gates. Native backend releases are built for six Linux, macOS, and Windows targets with deterministic archives, SHA-256 sidecars, CycloneDX SBOMs, exact source identity, and GitHub artifact attestations. Mobile/tablet browser use remains launch-gated separately.
+Platform support is tracked by CI coverage and release gates: native backends ship for six Linux, macOS, and Windows target triples, under the artifact contract described in [Production operations](#production-operations). Mobile and tablet browser use remains launch-gated separately.
 
 ## Quick start
 
@@ -218,8 +218,9 @@ incident procedures in the
 [backend production runbook](docs/operations/production-runbook.md).
 
 Native releases are produced from annotated version tags for six target triples,
-then checksummed, attested, SBOM-bound, and published without permitting an
-existing asset to be replaced. The complete operator procedure is in the
+then bound to deterministic archives, SHA-256 sidecars, CycloneDX SBOMs, and
+GitHub artifact attestations, and published without permitting an existing asset
+to be replaced. The complete operator procedure is in the
 [native release runbook](docs/operations/native-release.md). Release archives
 include both runbooks, the production profile, and a manifest that records the
 exact source commit and payload hashes.
