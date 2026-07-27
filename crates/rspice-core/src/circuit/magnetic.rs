@@ -484,10 +484,12 @@ impl CircuitData {
         // A nonlinear K-card with multiple windings is one MutIndNonLin2
         // instance in Xyce.  Assemble its dense constant vacuum Q matrix and
         // shared constitutive mid factor in the same branch-row orientation
-        // as the single-winding path above.  Xyce 7.10's K-card bundling
-        // passes both the authored scalar and the winding geometry into its
-        // constant LO matrix.  Keep the coefficient in the Q matrix; it is
-        // independent of the nonlinear constitutive `mid` factor.
+        // as the single-winding path above.  Xyce's K-card bundling stores the
+        // authored scalar in the `COUPLING` metadata vector, while the
+        // nonlinear device's constant LO matrix uses its separate
+        // `COUP_VAL` parameter, whose default is unity.  The K-card scalar
+        // therefore does not scale this Q matrix; it remains independent of
+        // the nonlinear constitutive `mid` factor.
         let hidden_base = self.num_nodes + self.num_branches;
         for group in &mut self.xyce_core_groups {
             if !group.device.is_xyce_core() || group.windings.len() < 2 {
@@ -647,7 +649,7 @@ impl CircuitData {
                     let l0 = group.device.xyce_core_vacuum_mutual_inductance(
                         winding_i.turns,
                         winding_j.turns,
-                        group.coupling,
+                        1.0,
                     );
                     let mut current_delta = charge_coeff * (currents[j] - previous[j]);
                     if !one_step_order2 && coeff.needs_two_history {
@@ -727,7 +729,7 @@ impl CircuitData {
                     let l0 = group.device.xyce_core_vacuum_mutual_inductance(
                         winding_i.turns,
                         winding_j.turns,
-                        group.coupling,
+                        1.0,
                     );
                     let current_happ_slope =
                         group.device.xyce_core_happ_slope_for_turns(winding_j.turns);
