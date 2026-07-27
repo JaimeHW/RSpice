@@ -15,6 +15,9 @@ dist/
 # Separately versioned local prototypes
 /mockups/
 
+# Upstream checkouts backing models/spice (repopulated by tools/models/sync_packs.py)
+/.model-src-cache/
+
 # Tauri
 src-tauri/target/
 
