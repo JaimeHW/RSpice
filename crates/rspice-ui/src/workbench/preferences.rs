@@ -1526,6 +1526,22 @@ mod tests {
     }
 
     #[test]
+    fn hierarchical_edit_in_place_defaults_on_and_round_trips_an_opt_out() {
+        let mut preferences = UserPreferences::default();
+        assert!(preferences.toggle(TogglePreference::HierarchicalEditInPlace));
+
+        preferences.set_toggle(TogglePreference::HierarchicalEditInPlace, false);
+        let encoded = serde_json::to_value(&preferences).unwrap();
+        assert_eq!(
+            encoded["toggles"]["hierarchical-edit-in-place"],
+            serde_json::Value::Bool(false)
+        );
+
+        let restored: UserPreferences = serde_json::from_value(encoded).unwrap();
+        assert!(!restored.toggle(TogglePreference::HierarchicalEditInPlace));
+    }
+
+    #[test]
     fn units_compatibility_controls_write_the_typed_domain() {
         let mut preferences = UserPreferences::default();
         preferences

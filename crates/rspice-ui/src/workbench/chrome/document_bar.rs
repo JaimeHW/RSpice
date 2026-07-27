@@ -97,8 +97,154 @@ struct WorkspaceDocument {
     dirty: bool,
 }
 
+/// Read-only document metadata used by shell-owned document/session managers.
+///
+/// The descriptor is deliberately derived from the same authoritative source
+/// as the tab strip. Consumers cannot mutate project documents by editing a
+/// cached presentation model.
+#[derive(Debug, Clone)]
+pub(crate) struct WorkspaceDocumentDescriptor {
+    pub(crate) id: WorkspaceDocumentId,
+    pub(crate) label: String,
+    pub(crate) dirty: bool,
+    pub(crate) active: bool,
+    pub(crate) open: bool,
+    pub(crate) closable: bool,
+    pub(crate) owner: crate::workbench::ApplicationWindowId,
+}
+
+pub(crate) fn document_descriptors(state: &AppState) -> Vec<WorkspaceDocumentDescriptor> {
+    let available = available_documents(state);
+    let active = authoritative_active_document(state, &available);
+    available
+        .into_iter()
+        .enumerate()
+        .map(|(index, document)| WorkspaceDocumentDescriptor {
+            open: index == 0
+                || !state.workbench.documents.is_closed(&document.id)
+                || active.as_ref() == Some(&document.id),
+            active: active.as_ref() == Some(&document.id),
+            closable: index > 0,
+            owner: state.workbench.window_session.owner(&document.id),
+            id: document.id,
+            label: document.label,
+            dirty: document.dirty,
+        })
+        .collect()
+}
+
+pub(crate) fn all_document_descriptors(state: &AppState) -> Vec<WorkspaceDocumentDescriptor> {
+    Workspace::ALL
+        .into_iter()
+        .flat_map(|workspace| {
+            available_documents_for_workspace(state, workspace)
+                .into_iter()
+                .enumerate()
+                .map(move |(index, document)| {
+                    let owner = state.workbench.window_session.owner(&document.id);
+                    let active = state
+                        .workbench
+                        .window_session
+                        .state(owner)
+                        .and_then(|window| window.active_document.as_ref())
+                        == Some(&document.id);
+                    WorkspaceDocumentDescriptor {
+                        open: index == 0
+                            || !state.workbench.documents.is_closed(&document.id)
+                            || active,
+                        active,
+                        closable: index > 0,
+                        owner,
+                        id: document.id,
+                        label: document.label,
+                        dirty: document.dirty,
+                    }
+                })
+        })
+        .collect()
+}
+
+pub(crate) fn active_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
+    let available = owned_available_documents(state);
+    authoritative_active_document(state, &available)
+}
+
+pub(crate) fn activate_document_by_id(
+    state: &mut AppState,
+    document: &WorkspaceDocumentId,
+) -> bool {
+    activate_document(state, document)
+}
+
+pub(crate) fn cycle_document(state: &mut AppState, previous: bool) -> bool {
+    reconcile_document_registry(state);
+    let documents = visible_documents(state);
+    if documents.len() < 2 {
+        return false;
+    }
+    let active = authoritative_active_document(state, &documents);
+    let current = active
+        .as_ref()
+        .and_then(|active| documents.iter().position(|document| document.id == *active))
+        .unwrap_or_default();
+    let next = if previous {
+        (current + documents.len() - 1) % documents.len()
+    } else {
+        (current + 1) % documents.len()
+    };
+    activate_document(state, &documents[next].id)
+}
+
+pub(crate) fn close_other_documents(state: &mut AppState) -> usize {
+    reconcile_document_registry(state);
+    let documents = owned_available_documents(state);
+    let active = authoritative_active_document(state, &documents);
+    let mut closed = 0;
+    for document in &documents {
+        if document_is_closable(state, &document.id) && active.as_ref() != Some(&document.id) {
+            let was_closed = state.workbench.documents.is_closed(&document.id);
+            state.workbench.documents.close(&document.id);
+            closed += usize::from(!was_closed);
+        }
+    }
+    closed
+}
+
+pub(crate) fn close_all_documents(state: &mut AppState) -> usize {
+    reconcile_document_registry(state);
+    let documents = owned_available_documents(state);
+    let root = documents
+        .iter()
+        .find(|document| !document_is_closable(state, &document.id))
+        .or_else(|| documents.first())
+        .map(|document| document.id.clone());
+    let Some(root) = root else {
+        return 0;
+    };
+    if !activate_document(state, &root) {
+        return 0;
+    }
+    let mut closed = 0;
+    for document in &documents {
+        if !document_is_closable(state, &document.id) {
+            continue;
+        }
+        let was_closed = state.workbench.documents.is_closed(&document.id);
+        state.workbench.documents.close(&document.id);
+        closed += usize::from(!was_closed);
+    }
+    closed
+}
+
 fn available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
-    match state.workbench.workspace {
+    available_documents_for_workspace(state, state.workbench.workspace)
+}
+
+fn available_documents_for_workspace(
+    state: &AppState,
+    workspace: Workspace,
+) -> Vec<WorkspaceDocument> {
+    match workspace {
         Workspace::Project => vec![WorkspaceDocument {
             id: WorkspaceDocumentId::Project,
             label: "Project overview".to_owned(),
@@ -168,6 +314,38 @@ fn available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     }
 }
 
+fn owned_available_documents(state: &AppState) -> Vec<WorkspaceDocument> {
+    let current = state.workbench.window_session.current();
+    let order = state
+        .workbench
+        .window_session
+        .state(current)
+        .map(|window| window.documents.clone())
+        .unwrap_or_default();
+    let mut documents = available_documents(state)
+        .into_iter()
+        .filter(|document| {
+            state
+                .workbench
+                .window_session
+                .belongs_to_current(&document.id)
+        })
+        .collect::<Vec<_>>();
+    documents.sort_by_key(|document| {
+        order
+            .iter()
+            .position(|candidate| candidate == &document.id)
+            .unwrap_or(usize::MAX)
+    });
+    documents
+}
+
+fn document_is_closable(state: &AppState, document: &WorkspaceDocumentId) -> bool {
+    available_documents_for_workspace(state, document.workspace())
+        .first()
+        .is_some_and(|root| root.id != *document)
+}
+
 fn netlist_document_label(state: &AppState) -> String {
     state
         .workspace
@@ -182,6 +360,18 @@ fn authoritative_active_document(
     state: &AppState,
     available: &[WorkspaceDocument],
 ) -> Option<WorkspaceDocumentId> {
+    let current_window = state.workbench.window_session.current();
+    if let Some(document) = state
+        .workbench
+        .window_session
+        .active_document(current_window, state.workbench.workspace)
+        .filter(|document| {
+            available.iter().any(|candidate| candidate.id == **document)
+                && state.workbench.window_session.owner(document) == current_window
+        })
+    {
+        return Some(document.clone());
+    }
     let candidate = match state.workbench.workspace {
         Workspace::Design => Some(WorkspaceDocumentId::CellView(
             state.workspace.active_view.clone(),
@@ -193,12 +383,22 @@ fn authoritative_active_document(
         workspace => state.workbench.documents.active(workspace).cloned(),
     };
     candidate
-        .filter(|candidate| available.iter().any(|document| document.id == *candidate))
-        .or_else(|| available.first().map(|document| document.id.clone()))
+        .filter(|candidate| {
+            available.iter().any(|document| document.id == *candidate)
+                && state.workbench.window_session.owner(candidate) == current_window
+        })
+        .or_else(|| {
+            available
+                .iter()
+                .find(|document| {
+                    state.workbench.window_session.owner(&document.id) == current_window
+                })
+                .map(|document| document.id.clone())
+        })
 }
 
 fn visible_documents(state: &AppState) -> Vec<WorkspaceDocument> {
-    let available = available_documents(state);
+    let available = owned_available_documents(state);
     let active = authoritative_active_document(state, &available);
     available
         .into_iter()
@@ -222,6 +422,15 @@ fn reconcile_document_registry(state: &mut AppState) {
     if let Some(active) = authoritative_active_document(state, &available) {
         state.workbench.documents.activate(active);
     }
+    let all_available = Workspace::ALL
+        .into_iter()
+        .flat_map(|workspace| available_documents_for_workspace(state, workspace))
+        .map(|document| document.id)
+        .collect::<Vec<_>>();
+    state
+        .workbench
+        .window_session
+        .retain_documents(all_available);
 }
 
 fn document_strip_visible(document_count: usize) -> bool {
@@ -251,7 +460,7 @@ fn document_tabs(
                         label: &document.label,
                         selected,
                         dirty: document.dirty,
-                        closable: index > 0,
+                        closable: document_is_closable(state, &document.id),
                         height,
                     },
                 )
@@ -291,7 +500,9 @@ fn document_tabs(
                 Some(TabKey::Next) => focus_index = Some((index + 1) % documents.len()),
                 Some(TabKey::First) => focus_index = Some(0),
                 Some(TabKey::Last) => focus_index = Some(documents.len() - 1),
-                Some(TabKey::Close) if index > 0 => close = Some((index, document.id.clone())),
+                Some(TabKey::Close) if document_is_closable(state, &document.id) => {
+                    close = Some((index, document.id.clone()))
+                }
                 Some(TabKey::Close) | None => {}
             }
         }
@@ -365,6 +576,11 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
     };
     if activated {
         state.workbench.documents.activate(document.clone());
+        let window = state.workbench.window_session.current();
+        let _ = state
+            .workbench
+            .window_session
+            .set_active_document(window, document.clone());
     }
     activated
 }
@@ -380,7 +596,7 @@ fn close_document(
     else {
         return false;
     };
-    if closed_index == 0 || document.workspace() != state.workbench.workspace {
+    if !document_is_closable(state, document) || document.workspace() != state.workbench.workspace {
         return false;
     }
     let fallback = documents
@@ -401,6 +617,14 @@ fn close_document(
         }
     };
     if closed && let Some(fallback) = fallback {
+        let source = state.workbench.window_session.owner(document);
+        let primary = state.workbench.window_session.primary();
+        if source != primary {
+            let _ = state
+                .workbench
+                .window_session
+                .move_document(document.clone(), source, primary);
+        }
         activate_document(state, &fallback);
     }
     closed
@@ -442,7 +666,7 @@ fn document_tab(
         height,
     } = presentation;
     let t = Tokens::get(ui.ctx());
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let intrinsic_label_width = ui
         .painter()
         .layout_no_wrap(label.to_owned(), font.clone(), t.color.text)
@@ -816,6 +1040,47 @@ mod tests {
     }
 
     #[test]
+    fn document_cycle_and_bulk_close_are_presentation_only() {
+        let mut state = AppState::default();
+        state.workbench.workspace = Workspace::Results;
+        let first = SimulationRun::new(1);
+        let first_dataset = first.dataset_id;
+        let second = SimulationRun::new(2);
+        let second_dataset = second.dataset_id;
+        let third = SimulationRun::new(3);
+        let third_dataset = third.dataset_id;
+        state.simulation.runs = vec![first, second, third];
+        assert!(state.simulation.select_run(0));
+
+        assert!(cycle_document(&mut state, false));
+        assert_eq!(
+            state.simulation.active_run().map(|run| run.dataset_id),
+            Some(second_dataset)
+        );
+        assert_eq!(close_other_documents(&mut state), 1);
+        assert!(
+            state
+                .workbench
+                .documents
+                .is_closed(&WorkspaceDocumentId::ResultDataset(third_dataset))
+        );
+        assert_eq!(state.simulation.runs.len(), 3);
+
+        assert_eq!(close_all_documents(&mut state), 1);
+        assert_eq!(
+            state.simulation.active_run().map(|run| run.dataset_id),
+            Some(first_dataset)
+        );
+        assert!(
+            state
+                .workbench
+                .documents
+                .is_closed(&WorkspaceDocumentId::ResultDataset(second_dataset))
+        );
+        assert_eq!(state.simulation.runs.len(), 3);
+    }
+
+    #[test]
     fn document_tab_geometry_matches_the_mockup() {
         assert_eq!(TAB_MAX_WIDTH, 190.0);
         assert_eq!(TAB_PADDING_X, 10.0);
@@ -824,7 +1089,7 @@ mod tests {
         assert_eq!(TAB_CLOSE_SIZE, 16.0);
         assert_eq!(TAB_DIRTY_SIZE, 6.0);
         assert_eq!(OVERFLOW_WIDTH, 31.0);
-        assert_eq!(tokens::FS_0, 11.0);
+        assert_eq!(tokens::FS_1, 12.0);
     }
 
     #[test]
@@ -843,7 +1108,7 @@ mod tests {
         let mut fitted = String::new();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+                let font = theme::sans(tokens::FS_1, FontWeight::Regular);
                 fitted = ellipsize_document_label(
                     ui.painter(),
                     "precision_sensor_front_end · schematic",

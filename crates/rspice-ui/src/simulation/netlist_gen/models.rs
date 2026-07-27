@@ -54,7 +54,10 @@ impl<'a> NetlistGenerator<'a> {
         if !self.models.contains_key(&model_name) {
             self.models.insert(
                 model_name.clone(),
-                format!(".MODEL {} {} (LEVEL=4 IS=1e-16 RTH=50)", model_name, polarity),
+                format!(
+                    ".MODEL {} {} (LEVEL=4 IS=1e-16 RTH=50)",
+                    model_name, polarity
+                ),
             );
         }
 

@@ -52,8 +52,10 @@ impl SchematicState {
         let zoom_y = viewport_height / total_height;
         let fit_zoom = zoom_x.min(zoom_y);
 
-        // Clamp zoom to reasonable bounds (0.25x to 4x)
-        self.zoom = fit_zoom.clamp(0.25, 4.0);
+        // Use the same 25%–800% contract as direct canvas zoom. Keeping one
+        // range avoids a fit operation silently producing a scale that the
+        // wheel and toolbar cannot subsequently reach.
+        self.zoom = fit_zoom.clamp(0.25, 8.0);
 
         // Calculate pan to center the content in the viewport
         // Screen position formula: screen = bounds.min + pan + schematic * zoom

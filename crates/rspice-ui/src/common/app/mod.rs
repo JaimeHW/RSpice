@@ -29,6 +29,34 @@ use crate::state::{SchematicState, SimulationState};
 const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;
 const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
 
+/// Small, exact frame boundary for mutable inputs that can change through
+/// canvas, dock, or modal ownership in the same egui frame.
+///
+/// Individual workflows still invalidate at their commit boundary where
+/// practical. This key is the final authority that prevents an otherwise
+/// valid edit path from leaving a prepared run or preflight receipt behind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FrameSimulationInput {
+    topology_version: u64,
+    analysis_plan: Option<(
+        crate::product::SimulationPlanId,
+        crate::product::ObjectRevision,
+    )>,
+}
+
+impl FrameSimulationInput {
+    fn capture(state: &AppState) -> Self {
+        Self {
+            topology_version: state.schematic.topology_version(),
+            analysis_plan: state
+                .sim_setup
+                .analysis_plan
+                .as_ref()
+                .map(|plan| (plan.id(), plan.revision())),
+        }
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 const BROWSER_UNLOAD_WARNING: &str = "RSpice has unsaved changes.";
 
@@ -42,174 +70,151 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+mod actions;
 mod active_viewer;
+mod command_palette;
+mod console;
+mod design_history;
+mod dialogs;
+mod interaction_state;
+mod schematic;
+mod session;
+mod sim_setup;
+mod viewer_capabilities;
 pub use active_viewer::ActiveViewer;
 
-mod app_confirmation_state;
-pub use app_confirmation_state::{
+pub use dialogs::confirmation_state::{
     ConfirmationAction, ConfirmationDialogState, ConfirmationResponse,
 };
-pub(crate) use app_confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
+pub(crate) use dialogs::confirmation_state::{ProjectReviewDialogState, ProjectReviewRequest};
 
-mod app_configuration_sets_dialog;
-pub(crate) use app_configuration_sets_dialog::{
+pub(crate) use dialogs::configuration_sets::{
     ConfigurationSetsDialogState, open_configuration_binding_dialog, open_configuration_sets_dialog,
 };
 
-mod app_design_management_dialog;
-pub(crate) use app_design_management_dialog::{
+pub(crate) use dialogs::design_management::{
     DesignManagementDialogState, open_design_management_dialog,
 };
 
-mod app_create_model_bound_symbol_dialog;
-pub(crate) use app_create_model_bound_symbol_dialog::{
+pub(crate) use dialogs::connectivity_manager::{
+    ConnectivityManagerDialogState, open_connectivity_manager,
+};
+
+pub(crate) use dialogs::selection::bulk_edit::{
+    SelectionBulkEditDialogState, open_selection_bulk_edit_dialog,
+};
+
+pub(crate) use dialogs::design_review_comments::{
+    DesignReviewCommentsDialogState, open_design_review_comments,
+};
+
+pub(crate) use dialogs::project_revision_history::{
+    ProjectRevisionHistoryDialogState, open_project_revision_history,
+};
+
+pub(crate) use dialogs::create_model_bound_symbol::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
 };
 
-mod app_hardcopy_dialog;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use app_hardcopy_dialog::run_worker_request_value as run_hardcopy_worker_request_value;
-pub(crate) use app_hardcopy_dialog::{
-    HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow,
-};
+pub(crate) use dialogs::hardcopy::run_worker_request_value as run_hardcopy_worker_request_value;
+pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 
-mod app_dialog_state;
-pub(crate) use app_dialog_state::{
+pub(crate) use dialogs::state::{
     ArraySelectionDialogState, ArraySelectionPreviewCache, BusObjectPropertiesDraft,
-    BusTapDialogState, BusTapObjectPropertiesDraft, DesignNoteDialogState,
-    DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
-    DocumentationShapeObjectPropertiesDraft, MoveSelectionDialogState,
-    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, PinPortDialogState,
-    RenameSelectionTarget, ReplaceInstanceOpen, StretchSelectionDialogState,
+    BusTapDialogState, BusTapObjectPropertiesDraft, DescendHierarchyDialogState,
+    DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
+    DocumentationShapeObjectPropertiesDraft, EngineeringTableDialogPage,
+    EngineeringTableDialogState, EngineeringTableExportFormat, EngineeringTableExportScope,
+    FullScreenPanels, FullScreenScope, HelpCenterPage, HierarchyDescendEditMode,
+    HierarchyParentContext, MoveSelectionDialogState, NamedNetObjectPropertiesDraft,
+    NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState, NewWindowInitialContent,
+    ObjectPropertiesDraft, PinPortDialogState, RenameSelectionTarget, ReplaceInstanceOpen,
+    StretchSelectionDialogState, ViewOperation, ViewOperationDialogState, WindowLayoutChoice,
+    WindowSessionPage, WindowWorkflow,
 };
-pub use app_dialog_state::{DialogState, LicenseDialogState, LicensePhase};
+pub use dialogs::state::{DialogState, LicenseDialogState, LicensePhase};
 
-mod app_schematic_edit_authority;
-pub(crate) use app_schematic_edit_authority::SchematicEditAuthority;
+pub(crate) use schematic::edit_authority::SchematicEditAuthority;
 
-mod app_check_and_save_dialog;
-mod app_check_and_save_validation;
-mod app_create_hierarchy_dialog;
-mod app_hierarchy_reference_impact;
-mod app_instance_catalog;
-mod app_mockup_operation;
-mod app_mockup_review;
-mod app_replace_instance_dialog;
-pub(crate) use app_check_and_save_dialog::open_check_and_save_dialog;
-pub(crate) use app_create_hierarchy_dialog::{
+pub(crate) use dialogs::selection::workflow::{
+    SelectionWorkflowDialogState, open_cut_selection_dialog, open_delete_selection_dialog,
+    open_duplicate_selection_dialog, open_duplicate_selection_dialog_at, open_select_all_dialog,
+};
+
+pub(crate) use schematic::named_net::{
+    NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,
+};
+
+pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
+pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
+pub(crate) use dialogs::hierarchy::create::{
     create_hierarchy_available, open_create_hierarchy_dialog,
 };
-pub(crate) use app_replace_instance_dialog::{
+pub(crate) use dialogs::hierarchy::descend::open_descend_hierarchy_dialog;
+pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,
 };
-mod app_schematic_command_dialog;
+pub(crate) use dialogs::view_operations::{
+    open_full_screen_workflow, open_reset_active_view_workflow,
+};
+pub(crate) use dialogs::window_session::open_window_workflow;
 
-mod app_preference_runtime;
-mod app_serialization;
+pub use console::{ConsoleLevel, ConsoleMessage};
 
-mod app_console;
-pub use app_console::{ConsoleLevel, ConsoleMessage};
+pub(crate) use interaction_state::SchematicKeyboardFocus;
+pub use interaction_state::{ContextTarget, DragType, InteractionState};
 
-mod app_interaction_state;
-pub use app_interaction_state::{ContextTarget, DragType, InteractionState};
-
-mod app_veriloga_library;
-use app_veriloga_library::{
+use session::veriloga_library::{
     VERILOGA_LIBRARY_NAME, restore_global_veriloga_library, save_global_veriloga_library,
 };
 
-mod app_property_edit;
-pub(crate) use app_property_edit::{
+pub(crate) use actions::property_edit::{
     open_property_editor, open_selected_object_properties, selected_object_properties_available,
 };
 
-mod app_modal_workflows;
-mod app_project_design_history;
-pub(crate) use app_project_design_history::{
+pub(crate) use design_history::{
     DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta,
     publish_symbol_definition_candidate, publish_symbol_definition_candidate_with_fixture,
 };
 
-mod app_bus_tap_dialog;
-mod app_design_note_dialog;
-mod app_documentation_shape_dialog;
-mod app_move_selection_dialog;
-pub(crate) use app_move_selection_dialog::{
-    armed_move_selection_authority, cancel_armed_move_selection, open_move_selection_dialog,
-};
-mod app_stretch_selection_dialog;
-pub(crate) use app_stretch_selection_dialog::{
-    armed_stretch_selection_authority, cancel_armed_stretch_selection,
-    open_stretch_selection_dialog, stretch_delta_for_policy,
-};
-mod app_symbol_definition_dialog;
-#[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) use app_symbol_definition_dialog::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
-pub(crate) use app_symbol_definition_dialog::{
-    SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,
-    open_symbol_parameter_form_dialog,
-};
-mod app_array_selection_dialog;
-pub(crate) use app_array_selection_dialog::{
+pub(crate) use dialogs::placement::net_label::open_net_label_placement;
+pub(crate) use dialogs::selection::array::{
     armed_array_selection_authority, armed_array_selection_plan, cancel_armed_array_selection,
     open_array_selection_dialog,
 };
-mod app_object_properties_dialog;
-mod app_pin_port_dialog;
+pub(crate) use dialogs::selection::move_selection::{
+    armed_move_selection_authority, cancel_armed_move_selection, open_move_selection_dialog,
+};
+pub(crate) use dialogs::selection::stretch::{
+    armed_stretch_selection_authority, cancel_armed_stretch_selection,
+    open_stretch_selection_dialog, stretch_delta_for_policy,
+};
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) use dialogs::symbol_definition::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
+pub(crate) use dialogs::symbol_definition::{
+    SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,
+    open_symbol_parameter_form_dialog,
+};
+pub(crate) use dialogs::visibility_options::open_schematic_visibility_options;
 
-mod app_rename_selection_dialog;
-pub(crate) use app_rename_selection_dialog::{
+pub(crate) use dialogs::selection::rename::{
     open_selected_object_rename, rename_selection_available,
 };
 
-mod app_shortcuts;
-pub(crate) use app_shortcuts::{
+pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
 };
 
-mod app_shortcut_library_persistence;
+pub use viewer_capabilities::ViewerCapability;
 
-mod app_actions;
-
-mod app_autosave;
-mod app_file_actions;
-
-mod app_viewer_capabilities;
-pub use app_viewer_capabilities::ViewerCapability;
-
-mod sim_setup_state;
-pub use sim_setup_state::{
-    AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, TranSetup,
-};
-mod sim_setup_plan_catalog;
-pub use sim_setup_plan_catalog::{
+pub use sim_setup::plan_catalog::{
     SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
     SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
 };
-mod sim_setup_analysis_drafts;
+pub use sim_setup::{AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, TranSetup};
 
-mod app_simulation_dialogs;
-
-mod app_library_dialogs;
-
-mod app_help_dialogs;
-
-mod app_confirmation_dialog;
-
-mod app_preferences_dialog;
-
-mod app_license_dialog;
-
-mod app_command_palette;
-
-mod app_export_image;
-
-mod app_workspace_actions;
-
-mod app_pdk_workflow;
-
-mod app_state_init;
-pub(crate) use app_state_init::default_model_library_manager;
+pub(crate) use session::state_init::default_model_library_manager;
 
 /// Analysis viewer state grouped behind a dedicated workspace surface.
 #[derive(Clone, Default)]
@@ -290,7 +295,7 @@ pub struct AppState {
     pub(crate) active_schematic_epoch: u64,
     /// Runtime-only cross-document design transactions. Schematic-local undo
     /// cannot own operations that also create cells, views, or buffers.
-    pub(crate) project_design_history: app_project_design_history::ProjectDesignHistory,
+    pub(crate) project_design_history: design_history::ProjectDesignHistory,
     /// Dialog visibility
     pub(crate) dialogs: DialogState,
     /// Typed analysis configuration behind the Simulate view.
@@ -356,19 +361,19 @@ pub struct AppState {
     pub(crate) workbench: crate::workbench::WorkbenchState,
     /// Runtime-only chord/prefix authority. Partial sequences are never
     /// serialized or restored across application sessions.
-    pub(crate) shortcut_resolver: app_shortcuts::ShortcutResolverState,
+    pub(crate) shortcut_resolver: session::shortcuts::ShortcutResolverState,
     /// Canonical device-local shortcut-library CAS authority. The recoverable
     /// eframe session copy never replaces this owner after startup.
     pub(crate) shortcut_library_persistence:
-        app_shortcut_library_persistence::ShortcutLibraryPersistenceRuntime,
+        session::shortcut_library::ShortcutLibraryPersistenceRuntime,
     /// UI transaction paired with the single browser shortcut-library CAS.
     pub(crate) shortcut_library_publication_continuation:
-        Option<app_shortcut_library_persistence::ShortcutLibraryPublicationContinuation>,
+        Option<session::shortcut_library::ShortcutLibraryPublicationContinuation>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        app_state_init::default_app_state()
+        session::state_init::default_app_state()
     }
 }
 
@@ -711,6 +716,12 @@ impl RSpiceApp {
         self.simulation_controller.clear_prepared_run();
     }
 
+    fn invalidate_simulation_preflight_after_frame_edit(&mut self, before: &FrameSimulationInput) {
+        if FrameSimulationInput::capture(&self.state) != *before {
+            self.invalidate_simulation_preflight();
+        }
+    }
+
     pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
         if let Some(reason) = self.state.manual_deck_run_block_reason() {
             return Some(reason);
@@ -760,6 +771,7 @@ impl RSpiceApp {
             .unwrap_or_default()
             .is_open();
         state.workbench.apply_console_launch_behavior(console_open);
+        state.workbench.window_session.normalize_after_restore();
 
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
         state
@@ -930,6 +942,132 @@ impl RSpiceApp {
         crate::workbench::show(ctx, self);
     }
 
+    fn capture_application_window_projection(
+        &mut self,
+        window: crate::workbench::ApplicationWindowId,
+    ) {
+        let workspace = self.state.workbench.workspace;
+        let route = self.state.workbench.current_route();
+        let layout = self.state.workbench.current_workspace_layout();
+        let full_screen = self.state.workbench.full_screen;
+        let active_document =
+            crate::workbench::chrome::document_bar::active_document_id(&self.state);
+        if let Some(window_state) = self.state.workbench.window_session.state_mut(window) {
+            window_state.workspace = workspace;
+            window_state.route = route;
+            window_state.layout = layout;
+            window_state.active_document = active_document;
+            window_state.full_screen = full_screen;
+        }
+    }
+
+    fn project_application_window(
+        &mut self,
+        window: crate::workbench::ApplicationWindowId,
+        fallback_layout: crate::workbench::state::WorkspaceLayoutState,
+    ) -> bool {
+        let Some(window_state) = self.state.workbench.window_session.state(window).cloned() else {
+            return false;
+        };
+        if self
+            .state
+            .workbench
+            .window_session
+            .set_current(window)
+            .is_err()
+        {
+            return false;
+        }
+        let layout = if window_state.synchronize_chrome_with_primary {
+            fallback_layout
+        } else {
+            window_state.layout
+        };
+        self.state.workbench.project_application_window(
+            window_state.workspace,
+            window_state.route,
+            layout,
+        );
+        self.state.workbench.full_screen = window_state.full_screen;
+        if let Some(document) = window_state.active_document {
+            let _ = crate::workbench::chrome::document_bar::activate_document_by_id(
+                &mut self.state,
+                &document,
+            );
+        }
+        true
+    }
+
+    fn render_secondary_application_windows(&mut self, ctx: &Context) {
+        let primary = self.state.workbench.window_session.primary();
+        self.capture_application_window_projection(primary);
+        let primary_state = self
+            .state
+            .workbench
+            .window_session
+            .state(primary)
+            .cloned()
+            .unwrap_or_default();
+        let secondary = self.state.workbench.window_session.secondary_window_ids();
+        let mut close_windows = Vec::new();
+
+        for (cascade_index, window) in secondary.into_iter().enumerate() {
+            self.state.sync_active_schematic_to_workspace();
+            if !self.project_application_window(window, primary_state.layout) {
+                continue;
+            }
+            let Some(presentation) = self.state.workbench.window_session.state(window).cloned()
+            else {
+                continue;
+            };
+            let render_plan = presentation.render_plan(cascade_index);
+            let mut builder = egui::ViewportBuilder::default()
+                .with_title(render_plan.title.clone())
+                .with_inner_size(render_plan.inner_size)
+                .with_clamp_size_to_monitor_size(true);
+            if let Some(position) = render_plan.position {
+                builder = builder.with_position(position);
+            }
+
+            let title = presentation.title.clone();
+            let (viewport_class, viewport_info, reattach_requested) =
+                ctx.show_viewport_immediate(window.viewport_id(), builder, |ui, class| {
+                    let reattach_requested = if class == egui::ViewportClass::EmbeddedWindow {
+                        crate::workbench::show_embedded_secondary(ui, self, &title)
+                    } else {
+                        crate::workbench::show_secondary(ui.ctx(), self);
+                        false
+                    };
+                    let viewport_info = ui.ctx().input(|input| input.viewport().clone());
+                    (class, viewport_info, reattach_requested)
+                });
+
+            self.state.sync_active_schematic_to_workspace();
+            self.capture_application_window_projection(window);
+            if viewport_class != egui::ViewportClass::EmbeddedWindow
+                && let Some(window_state) = self.state.workbench.window_session.state_mut(window)
+            {
+                window_state.bounds.observe(&viewport_info);
+                if render_plan.recovering {
+                    window_state.bounds.recovery_pending = false;
+                }
+            }
+            if (viewport_class != egui::ViewportClass::EmbeddedWindow
+                && viewport_info.close_requested())
+                || reattach_requested
+            {
+                close_windows.push(window);
+            }
+            let _ = self.project_application_window(primary, primary_state.layout);
+        }
+
+        self.state.sync_active_schematic_to_workspace();
+        let _ = self.project_application_window(primary, primary_state.layout);
+        for window in close_windows {
+            let _ = self.state.workbench.window_session.close_window(window);
+        }
+    }
+
     fn render_frame_dialogs(&mut self, ctx: &Context) {
         self.synchronize_design_management_route();
         self.render_confirmation_dialog(ctx);
@@ -940,22 +1078,34 @@ impl RSpiceApp {
         self.render_license_dialog(ctx);
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);
+        self.render_net_label_dialog(ctx);
+        self.render_schematic_visibility_dialog(ctx);
+        self.render_descend_hierarchy_dialog(ctx);
+        self.render_engineering_table_dialog(ctx);
         self.render_pin_port_dialog(ctx);
         self.render_design_note_dialog(ctx);
         self.render_documentation_shape_dialog(ctx);
+        self.render_selection_workflow_dialog(ctx);
         self.render_move_selection_dialog(ctx);
         self.render_stretch_selection_dialog(ctx);
         self.render_array_selection_dialog(ctx);
         self.render_replace_instance_dialog(ctx);
         self.render_create_hierarchy_dialog(ctx);
         self.render_check_and_save_dialog(ctx);
+        self.render_connectivity_manager_dialog(ctx);
         self.render_design_management_dialog(ctx);
+        self.render_selection_bulk_edit_dialog(ctx);
+        self.render_design_review_comments_dialog(ctx);
+        self.render_project_revision_history_dialog(ctx);
         self.render_create_model_bound_symbol_dialog(ctx);
         self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);
         self.render_hardcopy_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
+        self.render_view_operation_dialog(ctx);
+        self.render_window_session_dialog(ctx);
+        self.render_help_center_dialog(ctx);
         self.render_about_dialog(ctx);
         // The calculator is a modeless tool, not a modal: it renders beside
         // the dialog stack so the workspace stays live beneath it.
@@ -1289,6 +1439,7 @@ impl eframe::App for RSpiceApp {
     /// Called on each frame
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let simulation_input_before_frame = FrameSimulationInput::capture(&self.state);
         crate::ui::viewport::capture_root_viewport(&ctx, ui.max_rect());
         #[cfg(target_arch = "wasm32")]
         {
@@ -1307,8 +1458,11 @@ impl eframe::App for RSpiceApp {
         #[cfg(not(target_arch = "wasm32"))]
         self.autosave_tick(&ctx);
         self.render_frame_chrome(&ctx);
+        self.render_secondary_application_windows(&ctx);
         self.refresh_incremental_connectivity_checks();
         self.render_frame_dialogs(&ctx);
+        self.invalidate_simulation_preflight_after_frame_edit(&simulation_input_before_frame);
+        crate::workbench::synchronize_schematic_cross_probe(&mut self.state);
     }
 
     /// Called by eframe when the application is shutting down.
@@ -1497,6 +1651,25 @@ mod tests {
             assert_eq!(options.input_options.max_click_dist, 9.0);
             assert!(!options.zoom_with_keyboard);
         });
+    }
+
+    #[test]
+    fn frame_topology_edits_drop_preflight_authority_at_one_central_boundary() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.preflight.open = true;
+        app.state.workbench.preflight.pending_toast =
+            Some(crate::workbench::state::PreflightToast {
+                message: "prepared".to_owned(),
+                warning: false,
+            });
+        let before = FrameSimulationInput::capture(&app.state);
+
+        app.state.schematic.bump_topology_version();
+        app.invalidate_simulation_preflight_after_frame_edit(&before);
+
+        assert!(!app.state.workbench.preflight.open);
+        assert!(app.state.workbench.preflight.report.is_none());
+        assert!(app.state.workbench.preflight.pending_toast.is_none());
     }
 
     #[test]

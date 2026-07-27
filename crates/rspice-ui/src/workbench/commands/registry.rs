@@ -229,6 +229,10 @@ const OPEN_PROJECT: &[ShortcutBinding] = &[
     primary(chord(Key::O, true, false, false, "Ctrl+O"), DESKTOP),
     alternate(chord(Key::O, true, true, false, "Ctrl+Alt+O"), HOST),
 ];
+const OPEN_NETLIST: &[ShortcutBinding] = &[
+    primary(chord(Key::L, true, false, true, "Ctrl+Shift+L"), DESKTOP),
+    alternate(chord(Key::L, true, true, true, "Ctrl+Alt+Shift+L"), HOST),
+];
 const NEW_PROJECT: &[ShortcutBinding] = &[
     primary(chord(Key::N, true, false, true, "Ctrl+Shift+N"), DESKTOP),
     alternate(chord(Key::N, true, true, true, "Ctrl+Alt+Shift+N"), HOST),
@@ -308,6 +312,10 @@ const FULL_SCREEN: &[ShortcutBinding] = &[
     primary(chord(Key::F11, false, false, false, "F11"), DESKTOP),
     alternate(chord(Key::F, true, true, false, "Ctrl+Alt+F"), HOST),
 ];
+const ENGINEERING_TABLE_VIEW: &[ShortcutBinding] = &[primary(
+    chord(Key::T, true, false, true, "Ctrl+Shift+T"),
+    ALL,
+)];
 const TOGGLE_NAVIGATOR: &[ShortcutBinding] =
     &[primary(chord(Key::B, true, false, false, "Ctrl+B"), ALL)];
 const TOGGLE_INSPECTOR: &[ShortcutBinding] =
@@ -316,10 +324,36 @@ const TOGGLE_CONSOLE: &[ShortcutBinding] = &[
     primary(chord(Key::J, true, false, false, "Ctrl+J"), DESKTOP),
     alternate(chord(Key::J, true, true, false, "Ctrl+Alt+J"), HOST),
 ];
+const TOGGLE_RESULTS_SPLIT: &[ShortcutBinding] = &[primary(
+    chord(Key::Backslash, true, false, false, "Ctrl+\\"),
+    ALL,
+)];
 const FOCUS_WORKSPACE: &[ShortcutBinding] = &[primary(
     chord(Key::F, true, false, true, "Ctrl+Shift+F"),
     ALL,
 )];
+const PREVIOUS_DOCUMENT: &[ShortcutBinding] = &[
+    primary(
+        chord(Key::Tab, true, false, true, "Ctrl+Shift+Tab"),
+        DESKTOP,
+    ),
+    alternate(
+        chord(Key::PageUp, true, true, false, "Ctrl+Alt+Page Up"),
+        HOST,
+    ),
+];
+const NEXT_DOCUMENT: &[ShortcutBinding] = &[
+    primary(chord(Key::Tab, true, false, false, "Ctrl+Tab"), DESKTOP),
+    alternate(
+        chord(Key::PageDown, true, true, false, "Ctrl+Alt+Page Down"),
+        HOST,
+    ),
+];
+const NEW_APPLICATION_WINDOW: &[ShortcutBinding] = &[
+    primary(chord(Key::N, true, true, true, "Ctrl+Shift+Alt+N"), DESKTOP),
+    alternate(chord(Key::W, true, true, true, "Ctrl+Shift+Alt+W"), HOST),
+];
+const HELP_CENTER: &[ShortcutBinding] = &[primary(chord(Key::F1, false, false, false, "F1"), ALL)];
 const PROJECT_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num1, false, true, false, "Alt+1"), ALL)];
 const DESIGN_WORKSPACE: &[ShortcutBinding] =
@@ -350,11 +384,17 @@ const STRETCH_SELECTION: &[ShortcutBinding] =
     &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const SYMBOL_POLYLINE: &[ShortcutBinding] =
-    &[primary(chord(Key::W, false, false, false, "W"), ALL)];
+    &[primary(chord(Key::L, false, false, false, "L"), ALL)];
+const SYMBOL_RECTANGLE: &[ShortcutBinding] =
+    &[primary(chord(Key::R, false, false, false, "R"), ALL)];
 const SYMBOL_CIRCLE: &[ShortcutBinding] = &[primary(chord(Key::C, false, false, false, "C"), ALL)];
 const SYMBOL_ARC: &[ShortcutBinding] = &[primary(chord(Key::A, false, false, false, "A"), ALL)];
-const SYMBOL_ARROW: &[ShortcutBinding] = &[primary(chord(Key::D, false, false, false, "D"), ALL)];
-const SYMBOL_DOT: &[ShortcutBinding] = &[primary(chord(Key::O, false, false, false, "O"), ALL)];
+const SYMBOL_POLYGON: &[ShortcutBinding] = &[primary(chord(Key::G, false, false, false, "G"), ALL)];
+const SYMBOL_TEXT: &[ShortcutBinding] = &[primary(chord(Key::T, false, false, false, "T"), ALL)];
+const SYMBOL_ROTATE_PIN: &[ShortcutBinding] =
+    &[primary(chord(Key::R, true, false, false, "Ctrl+R"), ALL)];
+const SYMBOL_MIRROR_PIN: &[ShortcutBinding] =
+    &[primary(chord(Key::M, true, false, false, "Ctrl+M"), ALL)];
 const PLACE_RESISTOR: &[ShortcutBinding] = &[primary(chord(Key::R, false, false, false, "R"), ALL)];
 const PLACE_CAPACITOR: &[ShortcutBinding] =
     &[primary(chord(Key::C, false, false, false, "C"), ALL)];
@@ -370,6 +410,8 @@ const ASCEND_HIERARCHY: &[ShortcutBinding] =
     &[primary(chord(Key::H, false, false, true, "Shift+H"), ALL)];
 const DESCEND_HIERARCHY: &[ShortcutBinding] =
     &[primary(chord(Key::H, false, false, false, "H"), ALL)];
+const DESCEND_HIERARCHY_DIRECT: &[ShortcutBinding] =
+    &[primary(chord(Key::E, false, false, true, "Shift+E"), ALL)];
 const RUN_CHECKS: &[ShortcutBinding] = &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
 const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
     chord(Key::E, true, false, true, "Ctrl+Shift+E"),
@@ -417,8 +459,11 @@ impl Command {
                 | Self::SaveAll
                 | Self::RevertActiveDocument
                 | Self::CloseActiveDocument
+                | Self::CloseOtherDocuments
+                | Self::CloseAllDocuments
                 | Self::CloseProject
                 | Self::NewCell
+                | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::ExportSchematicSvg
@@ -428,9 +473,14 @@ impl Command {
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::FindInDesign
+                | Self::ToggleResultsSplit
                 | Self::CheckAndSave
+                | Self::ConnectivityManager
                 | Self::DesignManagement
+                | Self::SelectionBulkEdit
                 | Self::ConfigurationSets
+                | Self::ReviewComments
+                | Self::RevisionHistory
                 | Self::CreateHierarchy
                 | Self::ProjectPage(_)
                 | Self::PreflightChecks
@@ -455,6 +505,7 @@ impl Command {
                 | Self::SaveReportDocument
                 | Self::AddReportPage
                 | Self::ReportPageProperties
+                | Self::DescendHierarchyDirect
                 | Self::AddVisualizationPane
                 | Self::VisualizationTraceManager
                 | Self::VisualizationCursorManager
@@ -476,21 +527,40 @@ impl Command {
                 | Self::SaveReportDocument
                 | Self::RevertActiveDocument
                 | Self::CloseActiveDocument
+                | Self::CloseOtherDocuments
+                | Self::CloseAllDocuments
                 | Self::CloseProject
                 | Self::NewCell
                 | Self::OpenDocument
+                | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::PageSetup
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::CheckAndSave
+                | Self::ConnectivityManager
                 | Self::DesignManagement
+                | Self::SelectionBulkEdit
                 | Self::ConfigurationSets
+                | Self::ReviewComments
+                | Self::RevisionHistory
                 | Self::CreateHierarchy
                 | Self::ModelEditor
                 | Self::ModelSaveRevision
                 | Self::ModelRunQualificationTests
+        )
+    }
+
+    pub(crate) const fn mutates_window_session(self) -> bool {
+        matches!(
+            self,
+            Self::NewApplicationWindow
+                | Self::DetachDocument
+                | Self::MoveDocumentToWindow
+                | Self::ReattachDocument
+                | Self::ConsolidateWindows
+                | Self::MonitorRecovery
         )
     }
 
@@ -507,6 +577,7 @@ impl Command {
                 | Self::SaveReportDocument
                 | Self::AddReportPage
                 | Self::ReportPageProperties
+                | Self::DescendHierarchyDirect
         )
     }
 
@@ -526,9 +597,9 @@ impl Command {
             | Self::ZoomOut
             | Self::ZoomFit
             | Self::ZoomOneToOne
-            | Self::CycleGrid
             | Self::SelectTool => ShortcutContext::EditContext,
             Self::FindInDesign
+            | Self::CycleGrid
             | Self::PlaceInstance
             | Self::PlaceWire
             | Self::PlaceBus
@@ -551,10 +622,16 @@ impl Command {
             Self::Cancel => ShortcutContext::ApplicationChrome,
             Self::AscendHierarchy
             | Self::DescendHierarchy
+            | Self::DescendHierarchyDirect
+            | Self::VisibilityOptions
             | Self::RunChecks
             | Self::CheckAndSave
+            | Self::ConnectivityManager
             | Self::DesignManagement
-            | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
+            | Self::SelectionBulkEdit
+            | Self::ConfigurationSets
+            | Self::ReviewComments
+            | Self::RevisionHistory => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::ClearResults
@@ -570,10 +647,14 @@ impl Command {
             }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
+            | Self::SymbolRectangleTool
             | Self::SymbolCircleTool
             | Self::SymbolArcTool
-            | Self::SymbolArrowTool
-            | Self::SymbolDotTool => ShortcutContext::SymbolCanvas,
+            | Self::SymbolPolygonTool
+            | Self::SymbolTextTool
+            | Self::SymbolRotatePin
+            | Self::SymbolMirrorPin
+            | Self::SymbolSave => ShortcutContext::SymbolCanvas,
             Self::ToggleLinkedCursors => ShortcutContext::ResultsWorkspace,
             Self::EditSpecifications | Self::VerificationPage(_) => {
                 ShortcutContext::VerificationWorkspace
@@ -595,6 +676,7 @@ impl Command {
             Self::ProjectLauncher => PROJECT_LAUNCHER,
             Self::NewProject => NEW_PROJECT,
             Self::OpenProject => OPEN_PROJECT,
+            Self::OpenNetlist => OPEN_NETLIST,
             Self::Save => SAVE_PROJECT,
             Self::SaveAs => SAVE_PROJECT_AS,
             Self::SaveAll => SAVE_ALL,
@@ -620,11 +702,18 @@ impl Command {
             Self::ZoomOut => ZOOM_OUT,
             Self::ZoomFit => ZOOM_FIT,
             Self::CycleGrid => GRID,
+            Self::VisibilityOptions => NONE,
             Self::ToggleFullScreen => FULL_SCREEN,
+            Self::EngineeringTableView => ENGINEERING_TABLE_VIEW,
             Self::ToggleNavigator => TOGGLE_NAVIGATOR,
             Self::ToggleInspector => TOGGLE_INSPECTOR,
             Self::ToggleConsole => TOGGLE_CONSOLE,
+            Self::ToggleResultsSplit => TOGGLE_RESULTS_SPLIT,
             Self::ToggleFocusMode => FOCUS_WORKSPACE,
+            Self::NewApplicationWindow => NEW_APPLICATION_WINDOW,
+            Self::PreviousDocument => PREVIOUS_DOCUMENT,
+            Self::NextDocument => NEXT_DOCUMENT,
+            Self::HelpCenter => HELP_CENTER,
             Self::SelectTool => NONE,
             Self::PlaceInstance => PLACE_INSTANCE,
             Self::PlaceWire => PLACE_WIRE,
@@ -641,14 +730,22 @@ impl Command {
             Self::ArraySelection => NONE,
             Self::ReplaceInstance => NONE,
             Self::CreateHierarchy => NONE,
+            Self::ConnectivityManager => NONE,
             Self::DesignManagement => NONE,
+            Self::SelectionBulkEdit => NONE,
             Self::ConfigurationSets => NONE,
+            Self::ReviewComments => NONE,
+            Self::RevisionHistory => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
+            Self::SymbolRectangleTool => SYMBOL_RECTANGLE,
             Self::SymbolCircleTool => SYMBOL_CIRCLE,
             Self::SymbolArcTool => SYMBOL_ARC,
-            Self::SymbolArrowTool => SYMBOL_ARROW,
-            Self::SymbolDotTool => SYMBOL_DOT,
+            Self::SymbolPolygonTool => SYMBOL_POLYGON,
+            Self::SymbolTextTool => SYMBOL_TEXT,
+            Self::SymbolRotatePin => SYMBOL_ROTATE_PIN,
+            Self::SymbolMirrorPin => SYMBOL_MIRROR_PIN,
+            Self::SymbolSave => NONE,
             Self::Place(crate::state::ComponentType::Resistor) => PLACE_RESISTOR,
             Self::Place(crate::state::ComponentType::Capacitor) => PLACE_CAPACITOR,
             Self::Place(crate::state::ComponentType::Inductor) => PLACE_INDUCTOR,
@@ -658,6 +755,7 @@ impl Command {
             Self::Place(crate::state::ComponentType::CurrentSource) => PLACE_CURRENT_SOURCE,
             Self::AscendHierarchy => ASCEND_HIERARCHY,
             Self::DescendHierarchy => DESCEND_HIERARCHY,
+            Self::DescendHierarchyDirect => DESCEND_HIERARCHY_DIRECT,
             Self::RunChecks => RUN_CHECKS,
             Self::CheckAndSave => CHECK_AND_SAVE,
             Self::NextViolation => NEXT_VIOLATION,
@@ -698,6 +796,11 @@ impl Command {
         if self.requires_open_project() && !app.state.project_lifecycle.project_open {
             return CommandAvailability::Disabled("no project is open");
         }
+        if self.mutates_window_session() && app.state.application_modal_open() {
+            return CommandAvailability::Disabled(
+                "finish or cancel the active application dialog before changing window ownership",
+            );
+        }
         if self.is_enabled(app) {
             return CommandAvailability::Available;
         }
@@ -705,6 +808,13 @@ impl Command {
             Self::Save | Self::SaveAs | Self::SaveAll | Self::CloseProject => "no project is open",
             Self::RevertActiveDocument => "active document has no changes to revert",
             Self::CloseActiveDocument => "no closable document is active",
+            Self::DetachDocument => "no active document is available to detach",
+            Self::MoveDocumentToWindow => {
+                "create another application window before moving this document"
+            }
+            Self::ReattachDocument => "the active document is already in the main window",
+            Self::ConsolidateWindows => "there are no detached application windows",
+            Self::MonitorRecovery => "there are no secondary application windows to recover",
             Self::Undo => "nothing to undo",
             Self::Redo => "nothing to redo",
             Self::Cut
@@ -719,13 +829,19 @@ impl Command {
             | Self::RotateSelection
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => "select an editable object",
+            Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
+            Self::SelectionBulkEdit => "open a schematic project",
             Self::ConfigurationSets => "open a project",
+            Self::ReviewComments => "open a schematic project",
+            Self::RevisionHistory => "open a schematic project",
             Self::Paste => "clipboard has no compatible content",
             Self::RenameSelection => "select one editable component, net label, or declared bus",
             Self::ObjectProperties => "select one editable object",
             Self::AscendHierarchy => "already at top hierarchy",
-            Self::DescendHierarchy => "select one hierarchical instance",
+            Self::DescendHierarchy | Self::DescendHierarchyDirect => {
+                "select one hierarchical instance"
+            }
             Self::RunSimulation => "active plan is not runnable",
             Self::StopSimulation
                 if app.state.simulation.is_running
@@ -741,6 +857,10 @@ impl Command {
                 "an active simulation execution still owns result history"
             }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
+            Self::ToggleResultsSplit if !app.state.workbench.supports_results_split() => {
+                "open Design, Netlist, or Simulation setup"
+            }
+            Self::ToggleResultsSplit => "no retained result dataset is available",
             Self::ResultViewer(viewer) => {
                 crate::workbench::result_document::viewer_unavailability_reason(&app.state, viewer)
                     .unwrap_or("the active dataset is incompatible with this viewer")
@@ -748,7 +868,7 @@ impl Command {
             Self::VerificationPage(crate::workbench::state::VerificationPage::Drc) => {
                 "no retained layout, qualified rule deck, or immutable marker database is available"
             }
-            Self::ResetActiveView => "active workspace has no resettable view state",
+            Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
             Self::ModelEditor => super::selected_project_model_for_editor(app)
                 .err()
                 .unwrap_or("the selected model cannot be opened for inspection"),
@@ -913,11 +1033,14 @@ mod tests {
     fn symbol_tool_defaults_are_complete_portable_and_view_scoped() {
         for (command, label) in [
             (Command::SymbolPinTool, "P"),
-            (Command::SymbolPolylineTool, "W"),
+            (Command::SymbolPolylineTool, "L"),
+            (Command::SymbolRectangleTool, "R"),
             (Command::SymbolCircleTool, "C"),
             (Command::SymbolArcTool, "A"),
-            (Command::SymbolArrowTool, "D"),
-            (Command::SymbolDotTool, "O"),
+            (Command::SymbolPolygonTool, "G"),
+            (Command::SymbolTextTool, "T"),
+            (Command::SymbolRotatePin, "Ctrl+R"),
+            (Command::SymbolMirrorPin, "Ctrl+M"),
         ] {
             assert_eq!(command.shortcut_context(), ShortcutContext::SymbolCanvas);
             for platform in CommandPlatform::ALL {
@@ -1007,7 +1130,11 @@ mod tests {
             );
             assert_eq!(
                 binding_owners(PLACE_BUS_TAP[0].chord, platform),
-                vec![Command::PlaceBusTap]
+                vec![Command::PlaceBusTap, Command::SymbolTextTool]
+            );
+            assert_eq!(
+                Command::SymbolTextTool.shortcut_context(),
+                ShortcutContext::SymbolCanvas
             );
         }
     }
@@ -1042,6 +1169,24 @@ mod tests {
             assert_eq!(
                 binding_owners(STRETCH_SELECTION[0].chord, platform),
                 vec![Command::StretchSelection]
+            );
+        }
+    }
+
+    #[test]
+    fn split_results_owns_the_mockup_shortcut_on_every_platform() {
+        assert_eq!(
+            Command::ToggleResultsSplit.shortcut_context(),
+            ShortcutContext::Global
+        );
+        for platform in CommandPlatform::ALL {
+            assert_eq!(
+                Command::ToggleResultsSplit.default_shortcut_label(platform),
+                "Ctrl+\\"
+            );
+            assert_eq!(
+                binding_owners(TOGGLE_RESULTS_SPLIT[0].chord, platform),
+                vec![Command::ToggleResultsSplit]
             );
         }
     }

@@ -298,14 +298,20 @@ pub struct SchematicState {
     #[serde(default)]
     pub documentation_shapes: Vec<DocumentationShape>,
 
-    /// Current selection
+    /// Durable crosshair flags created by the schematic Probe tool.
+    #[serde(default)]
+    pub probes: Vec<super::probe::SchematicProbe>,
+
+    /// Current selection (runtime state, never part of the design document).
+    #[serde(skip)]
     pub selection: Selection,
 
     /// Current tool (runtime state, not persisted - always starts as Select)
     #[serde(skip)]
     pub tool: Tool,
 
-    /// Wire drawing state
+    /// Unfinished wire gesture (runtime state, never part of the design document).
+    #[serde(skip)]
     pub wire_drawing: WireDrawing,
 
     /// Bus drawing state (runtime only; unfinished gestures never persist).
@@ -341,7 +347,12 @@ pub struct SchematicState {
     #[serde(skip)]
     component_counters: HashMap<&'static str, u32>,
 
-    /// Clipboard for copy/paste operations
+    /// Clipboard for copy/paste operations.
+    ///
+    /// Clipboard ownership is session-local. Persisting it in a `.rsch` file
+    /// made an unrelated document reopen with stale copied design objects and
+    /// could retain data that the author had never committed to the drawing.
+    #[serde(skip)]
     pub clipboard: ClipboardData,
 
     /// Net labels for naming nodes
@@ -352,8 +363,17 @@ pub struct SchematicState {
     /// Only wires sharing an endpoint OR joined by an explicit junction are connected
     pub junctions: Vec<Junction>,
 
-    /// Preview rotation for component placement
+    /// Preview rotation for component placement (runtime interaction state).
+    #[serde(skip)]
     pub preview_rotation: Rotation,
+
+    /// Horizontal mirror for component-placement previews and commits.
+    ///
+    /// Runtime interaction state only. It is shared by click-armed placement
+    /// and component-shelf drag placement so the preview always matches the
+    /// object that will be committed.
+    #[serde(skip)]
+    pub preview_mirror_h: bool,
 
     /// Pending library/cell/view placement payload used with `Tool::Place(CellInstance)`.
     ///
@@ -463,6 +483,7 @@ impl Default for SchematicState {
             bus_taps: Vec::new(),
             design_notes: Vec::new(),
             documentation_shapes: Vec::new(),
+            probes: Vec::new(),
             selection: Selection::default(),
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
@@ -478,6 +499,7 @@ impl Default for SchematicState {
             net_labels: Vec::new(),
             junctions: Vec::new(),
             preview_rotation: Rotation::default(),
+            preview_mirror_h: false,
             pending_library_cell: None,
             pending_bus_tap: None,
             pending_port: None,

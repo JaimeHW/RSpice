@@ -43,10 +43,12 @@ impl<'a> NetlistGenerator<'a> {
         // floating in empty space must NOT mint a net (it warns instead).
         let mut by_row: HashMap<i32, Vec<i32>> = HashMap::new();
         let mut by_col: HashMap<i32, Vec<i32>> = HashMap::new();
+        let mut candidate_points: HashSet<Point> = HashSet::new();
         {
             let mut add_candidate = |p: Point| {
                 by_row.entry(p.y).or_default().push(p.x);
                 by_col.entry(p.x).or_default().push(p.y);
+                candidate_points.insert(p);
             };
             for point in point_graph.keys() {
                 add_candidate(*point);
@@ -109,9 +111,27 @@ impl<'a> NetlistGenerator<'a> {
                     }
                     link(&mut point_graph, prev, Point::new(a.x, y1));
                 } else {
-                    // Diagonal segments connect only at their endpoints,
-                    // matching `Wire::contains_point` semantics.
-                    link(&mut point_graph, a, b);
+                    // Any-angle conductors have the same exact attachment
+                    // semantics as Manhattan conductors. Terminals, labels,
+                    // junctions, bus-tap endpoints, and another wire's
+                    // endpoint on this segment all split its electrical
+                    // chain. Interior/interior crossings stay disconnected
+                    // unless an explicit junction is authored there.
+                    let segment = crate::state::WireSegment::new(a, b);
+                    let mut points = candidate_points
+                        .iter()
+                        .copied()
+                        .filter(|point| segment.contains_point(*point))
+                        .collect::<Vec<_>>();
+                    points.sort_unstable_by_key(|point| {
+                        let dx = i128::from(point.x) - i128::from(a.x);
+                        let dy = i128::from(point.y) - i128::from(a.y);
+                        dx * dx + dy * dy
+                    });
+                    points.dedup();
+                    for pair in points.windows(2) {
+                        link(&mut point_graph, pair[0], pair[1]);
+                    }
                 }
             }
         }
@@ -289,18 +309,24 @@ impl<'a> NetlistGenerator<'a> {
         let mut labels: Vec<_> = self.schematic.net_labels.iter().collect();
         labels.sort_by_key(|label| label.id);
         for label in labels {
-            let name = label.name.trim();
-            if name.is_empty() {
+            let authored_name = label.name.trim();
+            if authored_name.is_empty() {
                 continue;
             }
-            if let Err(error) = validate_net_name(name, self.schematic.document_policy.net_naming) {
+            if let Err(error) =
+                validate_net_name(authored_name, self.schematic.document_policy.net_naming)
+            {
                 self.errors
-                    .push(format!("Invalid net label \"{name}\": {error}"));
+                    .push(format!("Invalid net label \"{authored_name}\": {error}"));
                 continue;
             }
+            let promoted_name = self
+                .hierarchy
+                .and_then(|hierarchy| hierarchy.canonical_global_label(authored_name));
+            let name = promoted_name.as_deref().unwrap_or(authored_name);
             let Some(&net_id) = self.point_to_net.get(&label.pos) else {
                 self.warnings.push(format!(
-                    "Net label \"{name}\" at ({}, {}) is not on a wire or terminal",
+                    "Net label \"{authored_name}\" at ({}, {}) is not on a wire or terminal",
                     label.pos.x, label.pos.y
                 ));
                 continue;

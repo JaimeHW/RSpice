@@ -31,6 +31,9 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
         session.tuning_plan_id = None;
         session.tuning_plan_revision = None;
         session.tuning_variables.clear();
+        session.tuning_instance_binding = None;
+        session.tuning_selected_variable = None;
+        session.tuning_focus_variable = None;
         session.tuning_baseline_run = None;
         session.tuning_review_open = false;
         return;
@@ -44,6 +47,9 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
     session.tuning_plan_revision = Some(plan_revision);
     session.tuning_baseline_run = active_plan_run;
     session.tuning_review_open = false;
+    session.tuning_instance_binding = None;
+    session.tuning_selected_variable = None;
+    session.tuning_focus_variable = None;
     session.tuning_variables = variables
         .into_iter()
         .map(|variable| crate::workbench::state::TuningVariableDraft {
@@ -51,22 +57,37 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
             baseline_expression: variable.expression.clone(),
             candidate_expression: variable.expression,
             validation_error: None,
+            proposed: false,
         })
         .collect();
 }
 
 pub(super) fn tuning_is_dirty(app: &RSpiceApp) -> bool {
-    app.state
-        .workbench
-        .verification
+    let session = &app.state.workbench.verification;
+    session
         .tuning_variables
         .iter()
         .any(crate::workbench::state::TuningVariableDraft::is_dirty)
+        || session.tuning_instance_binding.as_ref().is_some_and(
+            crate::workbench::state::TuningInstanceBindingDraft::requires_schematic_edit,
+        )
 }
 
 pub(super) fn tuning_is_valid(app: &RSpiceApp) -> bool {
-    let drafts = &app.state.workbench.verification.tuning_variables;
-    !drafts.is_empty() && drafts.iter().all(|draft| draft.validation_error.is_none())
+    let session = &app.state.workbench.verification;
+    let drafts = &session.tuning_variables;
+    let binding_is_consistent = session
+        .tuning_instance_binding
+        .as_ref()
+        .is_none_or(|binding| {
+            drafts.iter().any(|draft| {
+                draft.variable_id == binding.variable.id
+                    && (!binding.creates_variable || draft.proposed)
+            })
+        });
+    !drafts.is_empty()
+        && binding_is_consistent
+        && drafts.iter().all(|draft| draft.validation_error.is_none())
 }
 
 pub(super) fn tuning_commit_block_reason(app: &RSpiceApp) -> String {
@@ -89,15 +110,40 @@ pub(super) fn tuning_commit_block_reason(app: &RSpiceApp) -> String {
 }
 
 pub(super) fn revert_tuning_session(app: &mut RSpiceApp) {
-    app.state.workbench.verification.tuning_review_open = false;
-    for draft in &mut app.state.workbench.verification.tuning_variables {
+    let session = &mut app.state.workbench.verification;
+    session.tuning_review_open = false;
+    session.tuning_variables.retain(|draft| !draft.proposed);
+    for draft in &mut session.tuning_variables {
         draft
             .candidate_expression
             .clone_from(&draft.baseline_expression);
         draft.validation_error = None;
     }
-    app.state.workbench.verification.action_receipt =
+    session.tuning_instance_binding = None;
+    session.tuning_selected_variable = None;
+    session.tuning_focus_variable = None;
+    session.action_receipt =
         "The tuning sandbox was restored to the committed active-plan values.".to_owned();
+}
+
+fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable> {
+    let session = &app.state.workbench.verification;
+    let mut variables = session
+        .tuning_plan_id
+        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id))
+        .map(|payload| payload.design_variables.clone())
+        .unwrap_or_default();
+    if let Some(binding) = session
+        .tuning_instance_binding
+        .as_ref()
+        .filter(|binding| binding.creates_variable)
+        && !variables
+            .iter()
+            .any(|variable| variable.id == binding.variable.id)
+    {
+        variables.push(binding.variable.clone());
+    }
+    variables
 }
 
 fn tuning_baseline_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
@@ -142,52 +188,166 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
                 .to_owned(),
         );
     }
+    let binding = verification.tuning_instance_binding.clone();
     let changes = verification
         .tuning_variables
         .iter()
-        .filter(|draft| draft.is_dirty())
+        .filter(|draft| draft.is_dirty() && !draft.proposed)
         .map(|draft| (draft.variable_id, draft.candidate_expression.clone()))
         .collect::<Vec<_>>();
+    let proposed_variable = binding
+        .as_ref()
+        .filter(|binding| binding.creates_variable)
+        .map(|binding| {
+            let draft = verification
+                .tuning_variables
+                .iter()
+                .find(|draft| draft.variable_id == binding.variable.id && draft.proposed)
+                .ok_or_else(|| {
+                    "the selected instance's proposed variable is missing from the sandbox"
+                        .to_owned()
+                })?;
+            let mut variable = binding.variable.clone();
+            variable.expression.clone_from(&draft.candidate_expression);
+            variable.validate().map_err(|error| {
+                format!(
+                    "the proposed variable '{}' is invalid: {error}",
+                    variable.name
+                )
+            })?;
+            Ok::<crate::state::DesignVariable, String>(variable)
+        })
+        .transpose()?;
+    let variable_change_count = changes.len() + usize::from(proposed_variable.is_some());
     let original_workspace = app.state.workspace.clone();
     let original_setup = app.state.sim_setup.clone();
+    let original_schematic = app.state.schematic.clone();
     let original_preflight = app.state.workbench.preflight.clone();
     let mut workspace = original_workspace.clone();
     let mut setup = original_setup.clone();
-    workspace
-        .update_design_variable_expressions(plan_id, &changes)
-        .map_err(|error| error.to_string())?;
+    let mut schematic = original_schematic.clone();
+    if !changes.is_empty() {
+        workspace
+            .update_design_variable_expressions(plan_id, &changes)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Some(variable) = proposed_variable {
+        workspace
+            .add_design_variable(plan_id, variable)
+            .map_err(|error| error.to_string())?;
+    }
+    let binding_changed = if let Some(binding) = binding.as_ref() {
+        if app.state.workspace.active_schematic_reference() != binding.source_view {
+            return Err(format!(
+                "the active schematic changed from {} while the tuning sandbox was open",
+                binding.source_view.display_path()
+            ));
+        }
+        if schematic.topology_version() != binding.source_topology_version {
+            return Err(format!(
+                "{} changed after its Value binding was staged; reopen Tune against the current revision",
+                binding.component_name
+            ));
+        }
+        let component = schematic
+            .components
+            .iter()
+            .find(|component| component.id == binding.component_id)
+            .ok_or_else(|| {
+                format!(
+                    "{} no longer exists in the staged schematic revision",
+                    binding.component_name
+                )
+            })?;
+        if component.name != binding.component_name || component.value != binding.source_value {
+            return Err(format!(
+                "{} no longer matches the exact Value row that opened the sandbox",
+                binding.component_name
+            ));
+        }
+        if binding.requires_schematic_edit() {
+            let component_id = binding.component_id;
+            let binding_expression = binding.binding_expression.clone();
+            let description = format!(
+                "bind {} to {}",
+                binding.component_name, binding.variable.name
+            );
+            let changed = schematic.with_undo(description, move |schematic| {
+                let index = schematic
+                    .components
+                    .iter()
+                    .position(|component| component.id == component_id)
+                    .expect("staged component identity was validated before the transaction");
+                schematic.components[index].value = binding_expression;
+                schematic.is_dirty = true;
+                schematic.bump_topology_version();
+            });
+            if !changed {
+                return Err(format!(
+                    "{} could not be bound because the schematic became read-only",
+                    binding.component_name
+                ));
+            }
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if binding_changed {
+        workspace.save_active_schematic(&schematic);
+    }
     workspace
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
+    let binding_change_count = usize::from(binding_changed);
     let receipt = setup
         .commit_active_plan_configuration_change(format!(
-            "committed {} tuned design variable{}",
-            changes.len(),
-            if changes.len() == 1 { "" } else { "s" }
+            "committed {} tuned design variable{} and {} instance binding{}",
+            variable_change_count,
+            if variable_change_count == 1 { "" } else { "s" },
+            binding_change_count,
+            if binding_change_count == 1 { "" } else { "s" }
         ))
         .map_err(|error| error.to_string())?;
 
     app.state.workspace = workspace;
     app.state.sim_setup = setup;
+    app.state.schematic = schematic;
     app.state.workbench.preflight = Default::default();
     if let Some(reason) = app.state.simulation_run_block_reason() {
         app.state.workspace = original_workspace;
         app.state.sim_setup = original_setup;
+        app.state.schematic = original_schematic;
         app.state.workbench.preflight = original_preflight;
         return Err(format!(
             "the tuned revision was not committed because its required run is blocked: {reason}"
         ));
     }
-    super::invalidate_plan_bound_preflight(app);
+    if let Err(error) = app
+        .simulation_controller
+        .prepare_run_set_for_preflight(&app.state)
+    {
+        app.state.workspace = original_workspace;
+        app.state.sim_setup = original_setup;
+        app.state.schematic = original_schematic;
+        app.state.workbench.preflight = original_preflight;
+        return Err(format!(
+            "the tuned revision was not committed because exact run preparation failed: {}",
+            error.message()
+        ));
+    }
     app.state.request_run_set_simulation();
     sync_tuning_session(app);
+    let candidate_count = variable_change_count + binding_change_count;
     app.state.workbench.analysis_lifecycle_status = format!(
         "Tuning receipt #{} · revision {} to {} · {} candidate{} queued.",
         receipt.sequence(),
         receipt.source_revision().get(),
         receipt.committed_revision().get(),
-        changes.len(),
-        if changes.len() == 1 { "" } else { "s" }
+        candidate_count,
+        if candidate_count == 1 { "" } else { "s" }
     );
     Ok(())
 }
@@ -203,15 +363,14 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
         app.state.workbench.verification.tuning_review_open = false;
         return;
     }
-    let variables = app
+    let variables = tuning_session_variables(app);
+    let instance_binding = app
         .state
         .workbench
         .verification
-        .tuning_plan_id
-        .and_then(|plan_id| app.state.workspace.active_plan_data(plan_id))
-        .map(|payload| payload.design_variables.clone())
-        .unwrap_or_default();
-    let rows = app
+        .tuning_instance_binding
+        .clone();
+    let mut rows = app
         .state
         .workbench
         .verification
@@ -222,15 +381,50 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
             let variable = variables
                 .iter()
                 .find(|variable| variable.id == draft.variable_id)?;
+            let committed = if draft.proposed {
+                "not in active plan".to_owned()
+            } else {
+                draft.baseline_expression.clone()
+            };
+            let delta = if draft.proposed {
+                "new typed variable".to_owned()
+            } else {
+                tuning_delta(variable, draft)
+            };
+            let destination = instance_binding
+                .as_ref()
+                .filter(|binding| binding.variable.id == variable.id)
+                .map_or_else(
+                    || variable.scope.label().to_owned(),
+                    |binding| {
+                        format!(
+                            "{} / {} Value",
+                            variable.scope.label(),
+                            binding.component_name
+                        )
+                    },
+                );
             Some(vec![
                 TableCell::mono(&variable.name),
-                TableCell::mono(&draft.baseline_expression),
+                TableCell::mono(committed),
                 TableCell::mono(&draft.candidate_expression),
-                TableCell::mono(tuning_delta(variable, draft)),
-                TableCell::text(variable.scope.label()),
+                TableCell::mono(delta),
+                TableCell::text(destination),
             ])
         })
         .collect::<Vec<_>>();
+    if let Some(binding) = instance_binding
+        .as_ref()
+        .filter(|binding| binding.requires_schematic_edit())
+    {
+        rows.push(vec![
+            TableCell::mono(format!("{}.Value", binding.component_name)),
+            TableCell::mono(&binding.source_value),
+            TableCell::mono(&binding.binding_expression),
+            TableCell::mono("instance binding"),
+            TableCell::text(binding.source_view.display_path()),
+        ]);
+    }
     if rows.is_empty() {
         app.state.workbench.verification.tuning_review_open = false;
         return;
@@ -368,7 +562,7 @@ fn tuning_delta(
 }
 
 pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some((_plan_id, plan_revision, variables, specs)) = app
+    let Some((_plan_id, plan_revision, _committed_variables, specs)) = app
         .state
         .sim_setup
         .stable_analysis_plan()
@@ -398,6 +592,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         });
         return;
     };
+    let variables = tuning_session_variables(app);
     let t = Tokens::get(ui.ctx());
     let dirty_count = app
         .state
@@ -406,7 +601,17 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         .tuning_variables
         .iter()
         .filter(|draft| draft.is_dirty())
-        .count();
+        .count()
+        + usize::from(
+            app.state
+                .workbench
+                .verification
+                .tuning_instance_binding
+                .as_ref()
+                .is_some_and(
+                    crate::workbench::state::TuningInstanceBindingDraft::requires_schematic_edit,
+                ),
+        );
     let invalid_count = app
         .state
         .workbench
@@ -553,18 +758,32 @@ fn tuning_variable_editor(
         return;
     };
     let t = Tokens::get(ui.ctx());
+    let proposed = app.state.workbench.verification.tuning_variables[index].proposed;
+    let selected = app.state.workbench.verification.tuning_selected_variable == Some(variable.id);
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(&variable.name)
                 .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                .color(t.color.text),
+                .color(if selected {
+                    t.color.accent
+                } else {
+                    t.color.text
+                }),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                egui::RichText::new(variable.quantity.label())
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
+                egui::RichText::new(if proposed {
+                    format!("PROPOSED / {}", variable.quantity.label())
+                } else {
+                    variable.quantity.label().to_owned()
+                })
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(if proposed {
+                    t.color.warn
+                } else {
+                    t.color.text_dim
+                }),
             );
         });
     });
@@ -573,9 +792,17 @@ fn tuning_variable_editor(
         ui.add_sized(
             [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
             egui::TextEdit::singleline(&mut draft.candidate_expression)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .id_source(("workbench.verify.tuning.variable", variable.id)),
         )
     };
+    if app.state.workbench.verification.tuning_focus_variable == Some(variable.id) {
+        response.request_focus();
+        app.state.workbench.verification.tuning_focus_variable = None;
+    }
+    if response.clicked() || response.gained_focus() {
+        app.state.workbench.verification.tuning_selected_variable = Some(variable.id);
+    }
     if response.changed() {
         let expression = app.state.workbench.verification.tuning_variables[index]
             .candidate_expression
@@ -619,8 +846,13 @@ fn tuning_variable_editor(
             || "No explicit tuning bounds".to_owned(),
             |range| format!("Allowed {} … {}", range.minimum, range.maximum),
         );
+        let baseline = if draft.proposed {
+            format!("Source literal {}", draft.baseline_expression)
+        } else {
+            format!("Committed {}", draft.baseline_expression)
+        };
         ui.label(
-            egui::RichText::new(format!("Committed {} · {range}", draft.baseline_expression))
+            egui::RichText::new(format!("{baseline} · {range}"))
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(t.color.text_dim),
         );

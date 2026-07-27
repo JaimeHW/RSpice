@@ -23,6 +23,7 @@ pub struct HierarchySource<'a> {
     libraries: Option<&'a LibraryManager>,
     schematic_buffers: Option<&'a HashMap<String, SchematicState>>,
     execution_plan: Option<ConfigurationExecutionPlan>,
+    connectivity: Option<&'a crate::state::ConnectivityContract>,
 }
 
 impl<'a> HierarchySource<'a> {
@@ -43,6 +44,7 @@ impl<'a> HierarchySource<'a> {
             libraries: None,
             schematic_buffers: None,
             execution_plan: None,
+            connectivity: None,
         }
     }
 
@@ -58,6 +60,19 @@ impl<'a> HierarchySource<'a> {
         source
     }
 
+    /// Index live workspace hierarchy together with its exact project-owned
+    /// connectivity contract. Inspection and executable generation then
+    /// resolve technology globals and dialect aliases identically.
+    pub fn from_workspace_with_connectivity(
+        libraries: &'a LibraryManager,
+        buffers: &'a HashMap<String, SchematicState>,
+        connectivity: &'a crate::state::ConnectivityContract,
+    ) -> Self {
+        let mut source = Self::from_workspace(libraries, buffers);
+        source.connectivity = Some(connectivity);
+        source
+    }
+
     /// Bind a frozen workspace/configuration projection to the generator.
     /// The plan is cloned into this read-only source so later workspace edits
     /// cannot change a deck that is already being prepared.
@@ -67,6 +82,7 @@ impl<'a> HierarchySource<'a> {
     ) -> Self {
         let mut source = Self::from_workspace(libraries, projection.schematic_buffers());
         source.execution_plan = projection.plan().cloned();
+        source.connectivity = Some(projection.connectivity());
         source
     }
 
@@ -78,7 +94,78 @@ impl<'a> HierarchySource<'a> {
             libraries: None,
             schematic_buffers: None,
             execution_plan: None,
+            connectivity: None,
         }
+    }
+
+    /// Canonical promoted global for an authored label, when the project
+    /// contract promotes that exact label.
+    pub(super) fn canonical_global_label(&self, name: &str) -> Option<String> {
+        let contract = self.connectivity?;
+        match contract.policy.global_promotion {
+            crate::state::GlobalNetPromotionPolicy::ExplicitReviewedDeclaration => {
+                if !name.ends_with('!') {
+                    return None;
+                }
+                if contract.policy.alias_comparison
+                    == crate::state::GlobalAliasComparisonPolicy::DialectCompatibility
+                    && let Some(canonical) = contract.dialect_canonical_name(name)
+                {
+                    return Some(format!("{canonical}!"));
+                }
+                Some(name.to_owned())
+            }
+            crate::state::GlobalNetPromotionPolicy::TechnologyDefinedOnly => contract
+                .technology_global_canonical_name(name)
+                .map(str::to_owned),
+        }
+    }
+
+    /// Canonical `.GLOBAL` node names in deterministic source order.
+    pub(super) fn global_net_names(&self) -> Vec<String> {
+        let Some(contract) = self.connectivity else {
+            return Vec::new();
+        };
+        match contract.policy.global_promotion {
+            crate::state::GlobalNetPromotionPolicy::ExplicitReviewedDeclaration => {
+                let mut canonical = std::collections::BTreeSet::<String>::new();
+                for declaration in self.explicit_global_declarations() {
+                    canonical.insert(
+                        self.canonical_global_label(&declaration)
+                            .unwrap_or(declaration),
+                    );
+                }
+                canonical.into_iter().collect()
+            }
+            crate::state::GlobalNetPromotionPolicy::TechnologyDefinedOnly => contract
+                .technology_global_nets
+                .as_ref()
+                .map(|catalog| {
+                    let mut names = catalog
+                        .nets
+                        .iter()
+                        .map(|group| group.canonical_name.clone())
+                        .collect::<Vec<_>>();
+                    names.sort();
+                    names.dedup();
+                    names
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    fn explicit_global_declarations(&self) -> Vec<String> {
+        let mut declarations = self
+            .schematic_buffers
+            .into_iter()
+            .flat_map(|buffers| buffers.values())
+            .flat_map(|schematic| schematic.net_labels.iter())
+            .filter(|label| label.name.ends_with('!'))
+            .map(|label| label.name.clone())
+            .collect::<Vec<_>>();
+        declarations.sort();
+        declarations.dedup();
+        declarations
     }
 
     /// Register a master directly (tests, ad-hoc callers).
@@ -108,11 +195,11 @@ impl<'a> HierarchySource<'a> {
             .and_then(|plan| plan.binding(instance_path))
     }
 
-    pub(super) const fn has_execution_plan(&self) -> bool {
+    pub(crate) const fn has_execution_plan(&self) -> bool {
         self.execution_plan.is_some()
     }
 
-    pub(super) fn schematic_master_for_binding(
+    pub(crate) fn schematic_master_for_binding(
         &self,
         binding: &LibraryCellInstance,
     ) -> Option<&'a SchematicState> {

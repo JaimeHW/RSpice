@@ -411,14 +411,6 @@ fn prepare_loaded_schematic(
             SchematicIoError::ParseError(format!("invalid design note object {}: {error}", note.id))
         })?;
     }
-    for note in &file.schematic.clipboard.design_notes {
-        note.validate().map_err(|error| {
-            SchematicIoError::ParseError(format!(
-                "invalid clipboard design note object {}: {error}",
-                note.id
-            ))
-        })?;
-    }
     for shape in &file.schematic.documentation_shapes {
         shape.validate().map_err(|error| {
             SchematicIoError::ParseError(format!(
@@ -427,11 +419,11 @@ fn prepare_loaded_schematic(
             ))
         })?;
     }
-    for shape in &file.schematic.clipboard.documentation_shapes {
-        shape.validate().map_err(|error| {
+    for probe in &file.schematic.probes {
+        probe.validate().map_err(|error| {
             SchematicIoError::ParseError(format!(
-                "invalid clipboard documentation shape object {}: {error}",
-                shape.id
+                "invalid schematic probe object {}: {error}",
+                probe.id
             ))
         })?;
     }
@@ -519,20 +511,10 @@ mod tests {
         let shapes = documentation_shape_fixture();
         let mut schematic = SchematicState::default();
         schematic.documentation_shapes = shapes.clone();
-        schematic.clipboard.documentation_shapes = shapes
-            .iter()
-            .cloned()
-            .map(|mut shape| {
-                shape.id += 100;
-                shape
-            })
-            .collect();
-        let clipboard_shapes = schematic.clipboard.documentation_shapes.clone();
 
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let loaded = load_schematic_text(&json, None).unwrap();
         assert_eq!(loaded.documentation_shapes, shapes);
-        assert_eq!(loaded.clipboard.documentation_shapes, clipboard_shapes);
 
         let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
         legacy["version"]["minor"] = serde_json::json!(1);
@@ -540,24 +522,102 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("documentation_shapes");
-        legacy["schematic"]["clipboard"]
-            .as_object_mut()
-            .unwrap()
-            .remove("documentation_shapes");
         let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
         assert!(loaded.documentation_shapes.is_empty());
-        assert!(loaded.clipboard.documentation_shapes.is_empty());
     }
 
     #[test]
-    fn malformed_serialized_live_and_clipboard_documentation_shapes_fail_closed() {
+    fn probe_flags_round_trip_and_legacy_documents_default_empty() {
+        let mut schematic = SchematicState::default();
+        schematic.probes.push(
+            crate::state::SchematicProbe::new(
+                44,
+                crate::state::Point::new(30, 20),
+                "V(out)",
+                Some("V(out)".to_owned()),
+            )
+            .unwrap(),
+        );
+
+        let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
+        let loaded = load_schematic_text(&json, None).unwrap();
+        assert_eq!(loaded.probes.len(), 1);
+        assert_eq!(
+            loaded.probes[0].source_expression.as_deref(),
+            Some("V(out)")
+        );
+
+        let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
+        legacy["schematic"]
+            .as_object_mut()
+            .unwrap()
+            .remove("probes");
+        let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
+        assert!(loaded.probes.is_empty());
+    }
+
+    #[test]
+    fn standalone_files_exclude_and_ignore_transient_editor_state() {
+        use crate::state::{ComponentType, Point, Rotation};
+
+        let mut schematic = SchematicState::default();
+        let component_id = schematic.add_component(ComponentType::Resistor, Point::new(10, 20));
+        schematic.selection.select_only_component(component_id);
+        schematic.copy_selection();
+        schematic.wire_drawing.start(Point::new(30, 40));
+        schematic.wire_drawing.update_preview(Point::new(50, 60));
+        schematic.preview_rotation = Rotation::R90;
+        schematic.preview_mirror_h = true;
+
+        let selection = serde_json::to_value(&schematic.selection).unwrap();
+        let wire_drawing = serde_json::to_value(&schematic.wire_drawing).unwrap();
+        let clipboard = serde_json::to_value(&schematic.clipboard).unwrap();
+        let preview_rotation = serde_json::to_value(schematic.preview_rotation).unwrap();
+        let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
+        let serialized: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let document = serialized["schematic"]
+            .as_object()
+            .expect("schematic is a JSON object");
+        for runtime_key in [
+            "selection",
+            "wire_drawing",
+            "clipboard",
+            "preview_rotation",
+            "preview_mirror_h",
+        ] {
+            assert!(
+                !document.contains_key(runtime_key),
+                "{runtime_key} must not be persisted in a design document"
+            );
+        }
+
+        // Older files may contain these fields. They remain readable, but the
+        // runtime-only values are deliberately discarded on import.
+        let mut legacy = serialized;
+        let document = legacy["schematic"]
+            .as_object_mut()
+            .expect("schematic is a JSON object");
+        document.insert("selection".to_owned(), selection);
+        document.insert("wire_drawing".to_owned(), wire_drawing);
+        document.insert("clipboard".to_owned(), clipboard);
+        document.insert("preview_rotation".to_owned(), preview_rotation);
+        document.insert("preview_mirror_h".to_owned(), serde_json::Value::Bool(true));
+
+        let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
+        assert!(loaded.selection.is_empty());
+        assert!(loaded.clipboard.is_empty());
+        assert!(!loaded.wire_drawing.active);
+        assert!(loaded.wire_drawing.points.is_empty());
+        assert_eq!(loaded.wire_drawing.preview_pos, None);
+        assert_eq!(loaded.preview_rotation, Rotation::R0);
+        assert!(!loaded.preview_mirror_h);
+    }
+
+    #[test]
+    fn malformed_serialized_live_documentation_shapes_fail_closed() {
         let shapes = documentation_shape_fixture();
         let mut schematic = SchematicState::default();
         schematic.documentation_shapes.push(shapes[0].clone());
-        schematic
-            .clipboard
-            .documentation_shapes
-            .push(shapes[1].clone());
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
 
         let mut malformed_live: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -570,18 +630,6 @@ mod tests {
             load_schematic_text(&malformed_live.to_string(), None),
             Err(SchematicIoError::ParseError(message))
                 if message.contains("invalid documentation shape object")
-        ));
-
-        let mut malformed_clipboard: serde_json::Value = serde_json::from_str(&json).unwrap();
-        malformed_clipboard["schematic"]["clipboard"]["documentation_shapes"][0]["geometry"] = serde_json::json!({
-            "kind": "line",
-            "start": { "x": -5, "y": 12 },
-            "end": { "x": -5, "y": 12 }
-        });
-        assert!(matches!(
-            load_schematic_text(&malformed_clipboard.to_string(), None),
-            Err(SchematicIoError::ParseError(message))
-                if message.contains("invalid clipboard documentation shape object")
         ));
     }
 
@@ -626,11 +674,10 @@ mod tests {
         schematic.selection.select_only_design_note(93);
         schematic.copy_selection();
         assert_eq!(schematic.clipboard.design_notes.len(), 1);
-        let clipboard = schematic.clipboard.design_notes.clone();
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let loaded = load_schematic_text(&json, None).unwrap();
         assert_eq!(loaded.design_notes, notes);
-        assert_eq!(loaded.clipboard.design_notes, clipboard);
+        assert!(loaded.clipboard.design_notes.is_empty());
 
         let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
         legacy["schematic"]
@@ -755,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn schematic_text_load_removes_malformed_wires_and_stale_selection() {
+    fn schematic_text_load_removes_malformed_wires_and_resets_runtime_state() {
         use crate::state::{ComponentType, Point, Wire};
 
         let mut original = SchematicState::default();
@@ -791,16 +838,15 @@ mod tests {
 
         assert_eq!(loaded.wires.len(), 1);
         assert_eq!(loaded.wires[0].id, 100);
-        assert_eq!(loaded.clipboard.wires.len(), 1);
-        assert_eq!(loaded.clipboard.wires[0].id, 102);
-        assert!(loaded.selection.has_component(live_component_id));
-        assert!(!loaded.selection.has_component(404));
-        assert!(loaded.selection.has_wire(100));
-        assert!(!loaded.selection.has_wire(98));
-        assert_eq!(loaded.selection.wire_segments.len(), 1);
-        assert!(loaded.selection.has_wire_segment(100, 0));
-        assert_eq!(loaded.selection.wire_vertices.len(), 1);
-        assert!(loaded.selection.has_wire_vertex(100, 1));
+        assert!(loaded.clipboard.is_empty());
+        assert!(loaded.selection.is_empty());
+        assert!(
+            loaded
+                .components
+                .iter()
+                .any(|component| component.id == live_component_id),
+            "durable component content still loads"
+        );
         assert_eq!(loaded.wire_vertex_at(Point::new(5, 5)), None);
 
         loaded.ensure_canvas_cache();
@@ -835,8 +881,8 @@ mod tests {
             "the original duplicate id must stay with exactly one wire"
         );
         assert!(
-            loaded.selection.has_wire(40),
-            "ambiguous selection should remain attached to the first retained wire"
+            loaded.selection.is_empty(),
+            "selection is session-local and never reopens with the document"
         );
 
         let fresh_id = loaded.add_wire(vec![Point::new(0, 20), Point::new(20, 20)]);

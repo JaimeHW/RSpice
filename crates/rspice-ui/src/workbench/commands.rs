@@ -20,6 +20,23 @@ fn stop_simulation_enabled(is_running: bool) -> bool {
     is_running && crate::simulation::execution::execution_target_supports_cancellation()
 }
 
+fn selection_layout_command(
+    command: Command,
+) -> Option<crate::schematic::view::selection_layout::SelectionLayoutCommand> {
+    use crate::schematic::view::selection_layout::SelectionLayoutCommand as Layout;
+    Some(match command {
+        Command::AlignSelectionLeft => Layout::AlignLeft,
+        Command::AlignSelectionCenter => Layout::AlignCenter,
+        Command::AlignSelectionRight => Layout::AlignRight,
+        Command::AlignSelectionTop => Layout::AlignTop,
+        Command::AlignSelectionMiddle => Layout::AlignMiddle,
+        Command::AlignSelectionBottom => Layout::AlignBottom,
+        Command::DistributeSelectionHorizontal => Layout::DistributeHorizontal,
+        Command::DistributeSelectionVertical => Layout::DistributeVertical,
+        _ => return None,
+    })
+}
+
 /// Resolve the catalog's single selection only when it is an exact,
 /// authenticated project-owned revision accepted by the model editor.
 ///
@@ -178,6 +195,7 @@ pub enum Command {
     CloseProject,
     NewCell,
     OpenDocument,
+    OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
     ExportSchematicSvg,
@@ -204,17 +222,32 @@ pub enum Command {
     ZoomFit,
     ZoomOneToOne,
     CycleGrid,
+    VisibilityOptions,
     ToggleFullScreen,
     ResetActiveView,
+    EngineeringTableView,
     ToggleNavigator,
     ToggleInspector,
     ToggleConsole,
+    ToggleResultsSplit,
     OpenConsole,
     OpenProblems,
     ToggleConsoleMaximized,
     ClearConsole,
     ToggleFocusMode,
     ResetLayout,
+    NewApplicationWindow,
+    DetachDocument,
+    MoveDocumentToWindow,
+    ReattachDocument,
+    ConsolidateWindows,
+    MonitorRecovery,
+    PreviousDocument,
+    NextDocument,
+    CloseOtherDocuments,
+    CloseAllDocuments,
+    WorkspaceLayouts,
+    WindowManager,
     PreviousWorkspace,
     NextWorkspace,
     SelectTool,
@@ -233,21 +266,40 @@ pub enum Command {
     ArraySelection,
     ReplaceInstance,
     CreateHierarchy,
+    ConnectivityManager,
     DesignManagement,
+    SelectionBulkEdit,
     ConfigurationSets,
+    ReviewComments,
+    RevisionHistory,
     SymbolPinTool,
     SymbolPolylineTool,
+    SymbolRectangleTool,
     SymbolCircleTool,
     SymbolArcTool,
-    SymbolArrowTool,
-    SymbolDotTool,
+    SymbolPolygonTool,
+    SymbolTextTool,
+    SymbolRotatePin,
+    SymbolMirrorPin,
+    SymbolSave,
     Place(ComponentType),
     RotateSelection,
     MirrorSelectionHorizontal,
     MirrorSelectionVertical,
+    AlignSelectionLeft,
+    AlignSelectionCenter,
+    AlignSelectionRight,
+    AlignSelectionTop,
+    AlignSelectionMiddle,
+    AlignSelectionBottom,
+    DistributeSelectionHorizontal,
+    DistributeSelectionVertical,
     Cancel,
     AscendHierarchy,
     DescendHierarchy,
+    /// Direct edit-in-place hierarchy gesture used by the toolbar and
+    /// Shift+E. The Design-menu command above owns the explicit transaction.
+    DescendHierarchyDirect,
     RunChecks,
     CheckAndSave,
     ClearChecks,
@@ -297,6 +349,12 @@ pub enum Command {
     ExportVisualizationDocument,
     FeatureAvailability,
     InteroperabilityMatrix,
+    HelpCenter,
+    ReleaseNotes,
+    MigrationGuide,
+    SystemDiagnostics,
+    SupportBundle,
+    LegalPrivacy,
     About,
 }
 
@@ -367,6 +425,7 @@ impl Command {
             Self::CloseProject => spec("close-project", "Close project…", "File"),
             Self::NewCell => spec("new-cell", "New cell…", "File"),
             Self::OpenDocument => spec("open-schematic", "Open schematic…", "File"),
+            Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
             Self::ExportSchematicSvg => {
@@ -406,11 +465,22 @@ impl Command {
             Self::ZoomFit => spec("fit-canvas", "Zoom active canvas to fit", "View"),
             Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
             Self::CycleGrid => spec("toggle-grid", "Canvas grid and snap", "View"),
+            Self::VisibilityOptions => spec(
+                "visibility-options",
+                "Hierarchy and annotation visibility\u{2026}",
+                "View",
+            ),
             Self::ToggleFullScreen => spec("full-screen", "Enter full screen", "View"),
             Self::ResetActiveView => spec("reset-active-view", "Reset active view", "View"),
+            Self::EngineeringTableView => spec(
+                "engineering-table-manager",
+                "Engineering table view\u{2026}",
+                "View",
+            ),
             Self::ToggleNavigator => spec("toggle-navigator", "Toggle navigator", "Window"),
             Self::ToggleInspector => spec("toggle-inspector", "Toggle inspector", "Window"),
             Self::ToggleConsole => spec("console", "Toggle console", "Window"),
+            Self::ToggleResultsSplit => spec("toggle-split-view", "Split with results", "Window"),
             Self::OpenConsole => spec("open-console", "Open console", "Window"),
             Self::OpenProblems => spec("open-problems", "Open Problems", "Window"),
             Self::ToggleConsoleMaximized => {
@@ -421,6 +491,48 @@ impl Command {
             Self::ResetLayout => spec(
                 "reset-workspace-layout",
                 "Reset workspace layout…",
+                "Window",
+            ),
+            Self::NewApplicationWindow => spec(
+                "new-application-window",
+                "New application window\u{2026}",
+                "Window",
+            ),
+            Self::DetachDocument => spec(
+                "detach-document",
+                "Detach active document\u{2026}",
+                "Window",
+            ),
+            Self::MoveDocumentToWindow => spec(
+                "move-document-window",
+                "Move active document to window\u{2026}",
+                "Window",
+            ),
+            Self::ReattachDocument => {
+                spec("reattach-document", "Reattach active document", "Window")
+            }
+            Self::ConsolidateWindows => spec(
+                "consolidate-windows",
+                "Consolidate all windows\u{2026}",
+                "Window",
+            ),
+            Self::MonitorRecovery => spec(
+                "monitor-recovery",
+                "Recover off-screen windows\u{2026}",
+                "Window",
+            ),
+            Self::PreviousDocument => spec("previous-document", "Previous document", "Window"),
+            Self::NextDocument => spec("next-document", "Next document", "Window"),
+            Self::CloseOtherDocuments => {
+                spec("close-other-documents", "Close other documents", "Window")
+            }
+            Self::CloseAllDocuments => spec("close-all-documents", "Close all documents", "Window"),
+            Self::WorkspaceLayouts => {
+                spec("workspace-layouts", "Workspace layouts\u{2026}", "Window")
+            }
+            Self::WindowManager => spec(
+                "window-manager",
+                "Windows, documents and session\u{2026}",
                 "Window",
             ),
             Self::PreviousWorkspace => spec("previous-workspace", "Previous workspace", "Window"),
@@ -445,22 +557,46 @@ impl Command {
                 "Create hierarchy from selection\u{2026}",
                 "Design",
             ),
+            Self::ConnectivityManager => spec(
+                "design-connectivity-tools",
+                "Connectivity and bus manager\u{2026}",
+                "Design",
+            ),
             Self::DesignManagement => spec(
                 "design-management",
                 "Sheets, variants and annotation\u{2026}",
                 "Design",
             ),
+            Self::SelectionBulkEdit => spec(
+                "design-bulk-tools",
+                "Selection and bulk editing\u{2026}",
+                "Design",
+            ),
             Self::ConfigurationSets => {
                 spec("configuration-sets", "Configuration sets\u{2026}", "Design")
             }
+            Self::ReviewComments => spec("review-comments", "Review comments\u{2026}", "Design"),
+            Self::RevisionHistory => spec("revision-history", "Revision history\u{2026}", "Design"),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
-            Self::SymbolPolylineTool => {
-                spec("symbol-polyline-tool", "Draw symbol polyline", "Design")
+            Self::SymbolPolylineTool => spec("symbol-line-tool", "Draw symbol line", "Design"),
+            Self::SymbolRectangleTool => {
+                spec("symbol-rectangle-tool", "Draw symbol rectangle", "Design")
             }
             Self::SymbolCircleTool => spec("symbol-circle-tool", "Draw symbol circle", "Design"),
             Self::SymbolArcTool => spec("symbol-arc-tool", "Draw symbol arc", "Design"),
-            Self::SymbolArrowTool => spec("symbol-arrow-tool", "Draw symbol arrow", "Design"),
-            Self::SymbolDotTool => spec("symbol-dot-tool", "Place symbol dot", "Design"),
+            Self::SymbolPolygonTool => spec("symbol-polygon-tool", "Draw symbol polygon", "Design"),
+            Self::SymbolTextTool => spec("symbol-text-tool", "Place symbol text", "Design"),
+            Self::SymbolRotatePin => spec(
+                "symbol-rotate-pin",
+                "Rotate selected pin to next side",
+                "Design",
+            ),
+            Self::SymbolMirrorPin => spec(
+                "symbol-mirror-pin",
+                "Mirror selected pin across body",
+                "Design",
+            ),
+            Self::SymbolSave => spec("save-symbol", "Validate and save symbol", "Design"),
             Self::Place(ComponentType::Resistor) => {
                 spec("place-resistor", "Place resistor", "Design")
             }
@@ -483,16 +619,45 @@ impl Command {
             Self::RotateSelection => spec("rotate-selection", "Rotate clockwise", "Design"),
             Self::MirrorSelectionHorizontal => spec(
                 "mirror-selection-horizontal",
-                "Mirror horizontally",
+                "Mirror about vertical axis",
                 "Design",
             ),
             Self::MirrorSelectionVertical => {
                 spec("mirror-selection-vertical", "Mirror vertically", "Design")
             }
+            Self::AlignSelectionLeft => spec("align-selection-left", "Align left", "Design"),
+            Self::AlignSelectionCenter => spec(
+                "align-selection-horizontal-centers",
+                "Align horizontal centers",
+                "Design",
+            ),
+            Self::AlignSelectionRight => spec("align-selection-right", "Align right", "Design"),
+            Self::AlignSelectionTop => spec("align-selection-top", "Align top", "Design"),
+            Self::AlignSelectionMiddle => spec(
+                "align-selection-vertical-centers",
+                "Align vertical centers",
+                "Design",
+            ),
+            Self::AlignSelectionBottom => spec("align-selection-bottom", "Align bottom", "Design"),
+            Self::DistributeSelectionHorizontal => spec(
+                "distribute-selection-horizontal",
+                "Distribute horizontally",
+                "Design",
+            ),
+            Self::DistributeSelectionVertical => spec(
+                "distribute-selection-vertical",
+                "Distribute vertically",
+                "Design",
+            ),
             Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
             Self::AscendHierarchy => spec("ascend-hierarchy", "Ascend hierarchy", "Design"),
             Self::DescendHierarchy => spec(
                 "descend-hierarchy",
+                "Descend into selected instance",
+                "Design",
+            ),
+            Self::DescendHierarchyDirect => spec(
+                "descend-selected-instance",
                 "Descend into selected instance",
                 "Design",
             ),
@@ -561,11 +726,9 @@ impl Command {
                 "Open specification results",
                 "Results",
             ),
-            Self::ResultViewer(crate::workbench::ResultViewer::Table) => spec(
-                "result-table",
-                "Open sample table",
-                "Results",
-            ),
+            Self::ResultViewer(crate::workbench::ResultViewer::Table) => {
+                spec("result-table", "Open sample table", "Results")
+            }
             Self::ResultViewer(crate::workbench::ResultViewer::Nyquist) => {
                 spec("result-nyquist", "Open Nyquist viewer", "Results")
             }
@@ -706,6 +869,26 @@ impl Command {
                 "Interoperability and format matrix…",
                 "Help",
             ),
+            Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
+            Self::ReleaseNotes => spec(
+                "release-notes",
+                "Release notes and compatibility changes\u{2026}",
+                "Help",
+            ),
+            Self::MigrationGuide => {
+                spec("migration-guide", "Project migration guide\u{2026}", "Help")
+            }
+            Self::SystemDiagnostics => spec(
+                "system-diagnostics",
+                "System diagnostics and log locations\u{2026}",
+                "Help",
+            ),
+            Self::SupportBundle => spec("support-bundle", "Create support bundle\u{2026}", "Help"),
+            Self::LegalPrivacy => spec(
+                "legal-privacy-center",
+                "Legal, privacy and notices\u{2026}",
+                "Help",
+            ),
             Self::About => spec("about", "About RSpice", "Help"),
         }
     }
@@ -777,6 +960,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic.read_only
+                        && !state.active_view_read_only()
                         && schematic_selection_has_live_object(&state.schematic)
                 }
             }
@@ -787,6 +971,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic.read_only
+                        && !state.active_view_read_only()
                         && schematic_selection_has_duplicable_object(&state.schematic)
                 }
             }
@@ -827,6 +1012,22 @@ impl Command {
                             .any(|component| component.id == *id)
                     })
             }
+            Self::AlignSelectionLeft
+            | Self::AlignSelectionCenter
+            | Self::AlignSelectionRight
+            | Self::AlignSelectionTop
+            | Self::AlignSelectionMiddle
+            | Self::AlignSelectionBottom
+            | Self::DistributeSelectionHorizontal
+            | Self::DistributeSelectionVertical => {
+                active_schematic_editor(app)
+                    && selection_layout_command(self).is_some_and(|command| {
+                        crate::schematic::view::selection_layout::selection_layout_availability(
+                            state, command,
+                        )
+                        .is_ok()
+                    })
+            }
             Self::MoveSelection => {
                 active_schematic_editor(app)
                     && !state.schematic.read_only
@@ -853,13 +1054,22 @@ impl Command {
                 active_schematic_editor(app)
                     && crate::common::app::create_hierarchy_available(state)
             }
+            Self::ConnectivityManager => {
+                active_schematic_editor(app) && state.project_lifecycle.project_open
+            }
             Self::DesignManagement => {
                 active_schematic_editor(app)
                     && state.project_lifecycle.project_open
                     && !state.schematic.read_only
                     && !state.active_view_read_only()
             }
+            Self::SelectionBulkEdit => {
+                active_schematic_editor(app) && state.project_lifecycle.project_open
+            }
             Self::ConfigurationSets => state.project_lifecycle.project_open,
+            Self::ReviewComments | Self::RevisionHistory => {
+                active_schematic_editor(app) && state.project_lifecycle.project_open
+            }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     let selection = state.ui.symbol.effective_selection();
@@ -878,7 +1088,66 @@ impl Command {
                 active_symbol_editor(app) || active_schematic_editor(app)
             }
             Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
+            Self::EngineeringTableView => active_schematic_editor(app),
+            Self::NewApplicationWindow
+            | Self::DetachDocument
+            | Self::MoveDocumentToWindow
+            | Self::ReattachDocument
+            | Self::ConsolidateWindows
+            | Self::MonitorRecovery
+                if state.application_modal_open() =>
+            {
+                false
+            }
+            Self::NewApplicationWindow => true,
+            Self::DetachDocument => {
+                crate::workbench::chrome::document_bar::document_descriptors(state)
+                    .iter()
+                    .any(|document| document.open && document.active)
+            }
+            Self::MoveDocumentToWindow => {
+                state.workbench.window_session.windows().count() > 1
+                    && crate::workbench::chrome::document_bar::document_descriptors(state)
+                        .iter()
+                        .any(|document| document.open && document.active)
+            }
+            Self::ReattachDocument => {
+                !state.workbench.window_session.current().is_primary()
+                    && crate::workbench::chrome::document_bar::document_descriptors(state)
+                        .iter()
+                        .any(|document| document.open && document.active)
+            }
+            Self::ConsolidateWindows | Self::MonitorRecovery => {
+                !state
+                    .workbench
+                    .window_session
+                    .secondary_window_ids()
+                    .is_empty()
+            }
+            Self::ToggleResultsSplit => {
+                state.project_lifecycle.project_open
+                    && state.workbench.supports_results_split()
+                    && state.simulation.has_retained_result_dataset()
+            }
+            Self::PreviousDocument | Self::NextDocument => {
+                crate::workbench::chrome::document_bar::document_descriptors(state)
+                    .iter()
+                    .filter(|document| document.open)
+                    .count()
+                    > 1
+            }
+            Self::CloseOtherDocuments => {
+                crate::workbench::chrome::document_bar::document_descriptors(state)
+                    .iter()
+                    .any(|document| document.open && document.closable && !document.active)
+            }
+            Self::CloseAllDocuments => {
+                crate::workbench::chrome::document_bar::document_descriptors(state)
+                    .iter()
+                    .any(|document| document.open && document.closable)
+            }
             Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::VisibilityOptions => active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
             Self::PlaceWire
             | Self::PlaceBus
@@ -899,16 +1168,25 @@ impl Command {
             }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
+            | Self::SymbolRectangleTool
             | Self::SymbolCircleTool
             | Self::SymbolArcTool
-            | Self::SymbolArrowTool
-            | Self::SymbolDotTool => active_symbol_editor(app) && !state.active_view_read_only(),
+            | Self::SymbolPolygonTool
+            | Self::SymbolTextTool => active_symbol_editor(app) && !state.active_view_read_only(),
+            Self::SymbolRotatePin | Self::SymbolMirrorPin => {
+                active_symbol_editor(app)
+                    && !state.active_view_read_only()
+                    && state.ui.symbol.effective_selection().pins.len() == 1
+                    && state.ui.symbol.effective_selection().shapes.is_empty()
+                    && state.ui.symbol.effective_selection().attributes.is_empty()
+                    && state.ui.symbol.effective_selection().texts.is_empty()
+            }
+            Self::SymbolSave => active_symbol_editor(app) && !state.active_view_read_only(),
             Self::AscendHierarchy => {
                 active_schematic_editor(app) && state.workspace.hierarchy_stack.len() > 1
             }
-            Self::DescendHierarchy => {
-                active_schematic_editor(app)
-                    && state.schematic.selection.single_component().is_some()
+            Self::DescendHierarchy | Self::DescendHierarchyDirect => {
+                active_schematic_editor(app) && state.selected_hierarchy_master().is_some()
             }
             // A symbol cellview checks its pin contract. The editor's own
             // keyboard route always did this; the command must agree, or the
@@ -1108,7 +1386,7 @@ impl Command {
             Self::CloseProject => file_action(app, FileMenuAction::CloseProject),
             Self::NewCell => open_new_cell_dialog(app),
             Self::OpenDocument => file_action(app, FileMenuAction::Open),
-            Self::ImportNetlist => {
+            Self::OpenNetlist | Self::ImportNetlist => {
                 file_action(app, FileMenuAction::ImportNetlist);
                 activate_workspace(app, Workspace::Netlist);
             }
@@ -1147,14 +1425,7 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(true);
                 } else {
-                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                        &mut app.state,
-                    );
-                    app.state.schematic.copy_selection();
-                    crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                        &mut app.state,
-                        |schematic| schematic.delete_selection(),
-                    );
+                    crate::common::app::open_cut_selection_dialog(&mut app.state);
                 }
             }
             Self::Copy => {
@@ -1168,7 +1439,7 @@ impl Command {
                     crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
                         &mut app.state,
                     );
-                    app.state.schematic.copy_selection();
+                    app.state.copy_active_schematic_selection();
                 }
             }
             Self::Paste => {
@@ -1189,45 +1460,21 @@ impl Command {
                     app.copy_selected_symbol_shape();
                     app.paste_symbol_shape();
                 } else {
-                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                        &mut app.state,
-                    );
-                    app.state.schematic.copy_selection();
-                    let anchor =
-                        app.state.schematic_paste_anchor() + crate::state::Point::new(2, 2);
-                    if !app.state.schematic.paste_at(anchor) {
-                        app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(
-                                "Duplicate could not be completed at the current canvas target",
-                            ));
-                    }
+                    crate::common::app::open_duplicate_selection_dialog(&mut app.state);
                 }
             }
             Self::Delete => {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(false);
                 } else {
-                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                        &mut app.state,
-                    );
-                    crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
-                        &mut app.state,
-                        |schematic| schematic.delete_selection(),
-                    );
+                    crate::common::app::open_delete_selection_dialog(&mut app.state);
                 }
             }
             Self::SelectAll => {
                 if active_symbol_editor(app) {
                     app.select_all_symbol_items();
                 } else {
-                    // Keep the menu/shortcut projection on the state layer's
-                    // complete object taxonomy. Repeating a hand-maintained
-                    // subset here previously made Ctrl+A silently omit buses,
-                    // taps, and net labels even though every downstream edit
-                    // operation already supported them.
-                    crate::schematic::view::sheet_visibility::select_all_on_active_sheet(
-                        &mut app.state,
-                    );
+                    crate::common::app::open_select_all_dialog(&mut app.state);
                 }
             }
             Self::RenameSelection => {
@@ -1275,7 +1522,7 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.state.ui.symbol.zoom = (app.state.ui.symbol.zoom / 1.25).max(0.1);
                 } else {
-                    app.state.schematic.zoom = (app.state.schematic.zoom / 1.25).max(0.1);
+                    app.state.schematic.zoom = (app.state.schematic.zoom / 1.25).max(0.25);
                 }
             }
             Self::ZoomFit => {
@@ -1295,16 +1542,24 @@ impl Command {
                     app.state.schematic.zoom = 1.0;
                 }
             }
-            Self::CycleGrid => app.state.ui.grid = app.state.ui.grid.cycled(),
+            Self::CycleGrid => toggle_canvas_grid_and_snap(app),
+            Self::VisibilityOptions => {
+                crate::common::app::open_schematic_visibility_options(&mut app.state);
+            }
             Self::ToggleFullScreen => {
-                let enabled = !app.state.workbench.full_screen;
-                app.state.workbench.full_screen = enabled;
-                app.state.ui.request_full_screen(enabled);
+                if app.state.workbench.full_screen_presentation {
+                    crate::workbench::exit_full_screen_presentation(app);
+                } else {
+                    crate::common::app::open_full_screen_workflow(&mut app.state);
+                }
             }
             Self::ResetActiveView => {
                 if reset_active_view_available(app.state.workbench.workspace) {
-                    reset_active_view(app);
+                    crate::common::app::open_reset_active_view_workflow(&mut app.state);
                 }
+            }
+            Self::EngineeringTableView => {
+                crate::common::app::open_engineering_table_dialog(&mut app.state);
             }
             Self::ToggleNavigator => {
                 if app.state.workbench.navigator_visible {
@@ -1329,6 +1584,21 @@ impl Command {
                 }
                 if !app.state.workbench.console_visible {
                     app.state.workbench.console_maximized = false;
+                }
+            }
+            Self::ToggleResultsSplit => {
+                let enabled = !app.state.workbench.split_with_results;
+                if enabled {
+                    if let Some(run_index) = app.state.simulation.newest_retained_result_run_index()
+                    {
+                        // The split starts on the newest materialized dataset,
+                        // but remains the one canonical Results selection:
+                        // there is no copied run, waveform, or document owner.
+                        app.state.simulation.select_run(run_index);
+                        app.state.workbench.split_with_results = true;
+                    }
+                } else {
+                    app.state.workbench.split_with_results = false;
                 }
             }
             Self::OpenProblems => {
@@ -1358,6 +1628,67 @@ impl Command {
                 }
             }
             Self::ResetLayout => app.state.workbench.reset_layout(),
+            Self::NewApplicationWindow => crate::common::app::open_window_workflow(
+                app,
+                crate::common::app::WindowWorkflow::NewApplicationWindow,
+            ),
+            Self::DetachDocument => crate::common::app::open_window_workflow(
+                app,
+                crate::common::app::WindowWorkflow::DetachDocument,
+            ),
+            Self::MoveDocumentToWindow => crate::common::app::open_window_workflow(
+                app,
+                crate::common::app::WindowWorkflow::MoveDocument,
+            ),
+            Self::ReattachDocument => crate::common::app::open_window_workflow(
+                app,
+                crate::common::app::WindowWorkflow::ReattachDocument,
+            ),
+            Self::ConsolidateWindows => crate::common::app::open_window_workflow(
+                app,
+                crate::common::app::WindowWorkflow::ConsolidateWindows,
+            ),
+            Self::MonitorRecovery => crate::common::app::open_window_workflow(
+                app,
+                crate::common::app::WindowWorkflow::MonitorRecovery,
+            ),
+            Self::PreviousDocument => {
+                crate::workbench::chrome::document_bar::cycle_document(&mut app.state, true);
+            }
+            Self::NextDocument => {
+                crate::workbench::chrome::document_bar::cycle_document(&mut app.state, false);
+            }
+            Self::CloseOtherDocuments => {
+                let count =
+                    crate::workbench::chrome::document_bar::close_other_documents(&mut app.state);
+                app.state
+                    .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                        "Closed {count} other document presentation(s); project data was retained"
+                    )));
+            }
+            Self::CloseAllDocuments => {
+                let count =
+                    crate::workbench::chrome::document_bar::close_all_documents(&mut app.state);
+                app.state
+                    .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                        "Closed {count} document presentation(s); pinned project data was retained"
+                    )));
+            }
+            Self::WorkspaceLayouts => {
+                let preset = app
+                    .state
+                    .ui
+                    .preferences
+                    .workspace()
+                    .map(|workspace| workspace.preset())
+                    .unwrap_or_default();
+                app.state.dialogs.workspace_layout_manager.open(preset);
+            }
+            Self::WindowManager => app
+                .state
+                .dialogs
+                .window_session
+                .open(crate::common::app::WindowSessionPage::Windows),
             Self::PreviousWorkspace => app.state.workbench.cycle_workspace(true),
             Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
             Self::SelectTool => {
@@ -1441,6 +1772,9 @@ impl Command {
             Self::CreateHierarchy => {
                 crate::common::app::open_create_hierarchy_dialog(&mut app.state);
             }
+            Self::ConnectivityManager => {
+                crate::common::app::open_connectivity_manager(&mut app.state);
+            }
             Self::DesignManagement => {
                 let route = super::SurfaceRoute::surface(super::SurfaceId::DesignManagement);
                 match app
@@ -1457,8 +1791,17 @@ impl Command {
                     }
                 }
             }
+            Self::SelectionBulkEdit => {
+                crate::common::app::open_selection_bulk_edit_dialog(&mut app.state);
+            }
             Self::ConfigurationSets => {
                 crate::common::app::open_configuration_sets_dialog(&mut app.state);
+            }
+            Self::ReviewComments => {
+                crate::common::app::open_design_review_comments(&mut app.state);
+            }
+            Self::RevisionHistory => {
+                crate::common::app::open_project_revision_history(&mut app.state);
             }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
@@ -1480,8 +1823,12 @@ impl Command {
                 }
             }
             Self::SymbolPolylineTool => {
-                app.state.ui.symbol.tool = super::SymbolTool::Polyline;
+                app.state.ui.symbol.tool = super::SymbolTool::Line;
                 app.state.ui.symbol.pending_polyline.clear();
+            }
+            Self::SymbolRectangleTool => {
+                app.state.ui.symbol.tool = super::SymbolTool::Rectangle;
+                app.state.ui.symbol.shape_start = None;
             }
             Self::SymbolCircleTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::Circle;
@@ -1491,8 +1838,21 @@ impl Command {
                 app.state.ui.symbol.tool = super::SymbolTool::Arc;
                 app.state.ui.symbol.shape_start = None;
             }
-            Self::SymbolArrowTool => app.state.ui.symbol.tool = super::SymbolTool::Arrow,
-            Self::SymbolDotTool => app.state.ui.symbol.tool = super::SymbolTool::Dot,
+            Self::SymbolPolygonTool => {
+                app.state.ui.symbol.tool = super::SymbolTool::Polygon;
+                app.state.ui.symbol.pending_polyline.clear();
+            }
+            Self::SymbolTextTool => app.state.ui.symbol.tool = super::SymbolTool::Text,
+            Self::SymbolRotatePin => {
+                crate::schematic::symbol_editor::rotate_selected_pin(&mut app.state)
+            }
+            Self::SymbolMirrorPin => {
+                crate::schematic::symbol_editor::mirror_selected_pin(&mut app.state)
+            }
+            Self::SymbolSave => {
+                app.state.ui.symbol.save_dialog_open = true;
+                app.state.ui.symbol.save_error = None;
+            }
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection => {
@@ -1537,8 +1897,48 @@ impl Command {
                     },
                 );
             }
+            Self::AlignSelectionLeft
+            | Self::AlignSelectionCenter
+            | Self::AlignSelectionRight
+            | Self::AlignSelectionTop
+            | Self::AlignSelectionMiddle
+            | Self::AlignSelectionBottom
+            | Self::DistributeSelectionHorizontal
+            | Self::DistributeSelectionVertical => {
+                let command =
+                    selection_layout_command(self).expect("selection layout command is mapped");
+                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                match crate::schematic::view::selection_layout::apply_selection_layout(
+                    &mut app.state,
+                    &symbol_context,
+                    command,
+                ) {
+                    Ok(true) => {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                                "{} completed as one undoable transaction.",
+                                command.label()
+                            )))
+                    }
+                    Ok(false) => {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                                "{} produced no geometry change.",
+                                command.label()
+                            )))
+                    }
+                    Err(error) => {
+                        app.state
+                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                                format!("{} was not applied: {error}.", command.label()),
+                            ))
+                    }
+                }
+            }
             Self::Cancel => {
-                if app.state.dialogs.move_selection.armed {
+                if app.state.dialogs.descend_hierarchy.open {
+                    app.state.dialogs.descend_hierarchy.close();
+                } else if app.state.dialogs.move_selection.armed {
                     crate::common::app::cancel_armed_move_selection(&mut app.state);
                 } else if app.state.dialogs.stretch_selection.armed {
                     crate::common::app::cancel_armed_stretch_selection(&mut app.state);
@@ -1555,15 +1955,16 @@ impl Command {
                 {
                     app.state.ui.results.clear_cursors();
                 } else {
-                    cancel_schematic_tool(&mut app.state.schematic);
-                    app.state.schematic.selection.clear();
-                    app.state.schematic.selection_rect.cancel();
+                    cancel_schematic_interaction_step(&mut app.state.schematic);
                 }
             }
             Self::AscendHierarchy => {
                 app.state.ascend_workspace_level();
             }
             Self::DescendHierarchy => {
+                crate::common::app::open_descend_hierarchy_dialog(&mut app.state);
+            }
+            Self::DescendHierarchyDirect => {
                 app.state.open_selected_instance_master();
             }
             Self::RunChecks if active_symbol_editor(app) => {
@@ -1737,11 +2138,10 @@ impl Command {
             }
             Self::ModelValidate => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate) {
-                    app.state.push_user_message(
-                        crate::common::app::ConsoleMessage::warning(
-                            "Model validation cannot be reviewed: no project-owned candidate is open",
-                        ),
-                    );
+                    app.state
+                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        "Model validation cannot be reviewed: no project-owned candidate is open",
+                    ));
                 }
             }
             Self::ModelRunQualificationTests => {
@@ -1822,6 +2222,36 @@ impl Command {
                         ));
                 }
             }
+            Self::HelpCenter => app
+                .state
+                .dialogs
+                .help_center
+                .open(crate::common::app::HelpCenterPage::Help),
+            Self::ReleaseNotes => app
+                .state
+                .dialogs
+                .help_center
+                .open(crate::common::app::HelpCenterPage::ReleaseNotes),
+            Self::MigrationGuide => app
+                .state
+                .dialogs
+                .help_center
+                .open(crate::common::app::HelpCenterPage::MigrationGuide),
+            Self::SystemDiagnostics => app
+                .state
+                .dialogs
+                .help_center
+                .open(crate::common::app::HelpCenterPage::Diagnostics),
+            Self::SupportBundle => app
+                .state
+                .dialogs
+                .help_center
+                .open(crate::common::app::HelpCenterPage::SupportBundle),
+            Self::LegalPrivacy => app
+                .state
+                .dialogs
+                .help_center
+                .open(crate::common::app::HelpCenterPage::LegalPrivacy),
             Self::About => app.state.dialogs.about = true,
         }
     }
@@ -1844,6 +2274,23 @@ fn active_symbol_editor(app: &RSpiceApp) -> bool {
         app.state.workbench.workspace,
         Workspace::Design | Workspace::Models
     ) && app.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+}
+
+/// Mockup-owned `G` command: grid visibility and the snap master switch move
+/// together. The toolbar popover intentionally remains richer and may still
+/// configure display style, target classes, spacing, and routing
+/// independently.
+fn toggle_canvas_grid_and_snap(app: &mut RSpiceApp) {
+    if active_symbol_editor(app) {
+        let enabled = !app.state.ui.symbol.show_grid;
+        app.state.ui.symbol.show_grid = enabled;
+        app.state.ui.symbol.snap_to_grid = enabled;
+        return;
+    }
+
+    let enabled = app.state.ui.toggle_grid_visibility();
+    app.state.schematic.snap_engine.enabled = enabled;
+    app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
 }
 
 fn active_schematic_editor(app: &RSpiceApp) -> bool {
@@ -1967,24 +2414,61 @@ pub(crate) fn cancel_schematic_tool(schematic: &mut crate::state::SchematicState
     schematic.tool = Tool::Select;
 }
 
+/// Apply one level of the schematic Escape contract.
+///
+/// Repeated Escape presses walk back an unfinished route, then the armed
+/// authoring tool, then the selection. Keeping these stages separate prevents
+/// a route cancellation from unexpectedly discarding the user's selection.
+pub(crate) fn cancel_schematic_interaction_step(schematic: &mut crate::state::SchematicState) {
+    if schematic.wire_drawing.active || schematic.bus_drawing.active {
+        schematic.cancel_routing_gestures();
+        return;
+    }
+    if schematic.tool != Tool::Select
+        || schematic.pending_bus_tap.is_some()
+        || schematic.pending_port.is_some()
+        || schematic.pending_design_note.is_some()
+        || schematic.pending_documentation_shape.is_some()
+        || !schematic.documentation_shape_drawing.points.is_empty()
+    {
+        cancel_schematic_tool(schematic);
+        return;
+    }
+    schematic.selection.clear();
+    schematic.selection_rect.cancel();
+}
+
 fn open_recent_projects(workbench: &mut WorkbenchState) {
     workbench.open_project_launcher();
     workbench.project_launcher_filter = ProjectLauncherFilter::Recent;
 }
 
-const fn reset_active_view_available(workspace: Workspace) -> bool {
-    !matches!(workspace, Workspace::Project)
+const fn reset_active_view_available(_workspace: Workspace) -> bool {
+    true
 }
 
-fn reset_active_view(app: &mut RSpiceApp) {
+pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
     app.state.workbench.navigator_query.clear();
     match app.state.workbench.workspace {
-        Workspace::Project => {}
+        Workspace::Project => {
+            app.state.workbench.command_query.clear();
+        }
         Workspace::Design => {
             if app.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                app.state.ui.symbol.zoom = 1.0;
+                app.state.ui.symbol.pan = (0.0, 0.0);
                 app.state.ui.symbol.needs_fit = true;
+                app.state.ui.symbol.clear_selection();
+                app.state.ui.symbol.marquee_start = None;
+                app.state.ui.symbol.marquee_current = None;
             } else {
+                app.state.schematic.zoom = 1.0;
+                app.state.schematic.pan = (0.0, 0.0);
                 app.state.schematic.needs_fit = true;
+                app.state.schematic.center_request = None;
+                app.state.schematic.selection.clear();
+                app.state.schematic.selection_rect.cancel();
+                app.state.schematic.net_highlight.clear();
             }
         }
         Workspace::Simulate => {
@@ -2003,6 +2487,10 @@ fn reset_active_view(app: &mut RSpiceApp) {
                 app.state.ui.results.hidden_strips.clear();
                 app.state.ui.results.maximized_strip = None;
             }
+            app.state
+                .workbench
+                .visualization_studio
+                .reset_transient_view();
         }
         Workspace::Verify => {
             app.state.workbench.selected_spec = None;
@@ -2076,6 +2564,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::CloseProject,
     Command::NewCell,
     Command::OpenDocument,
+    Command::OpenNetlist,
     Command::ImportNetlist,
     Command::ImportVerilogA,
     Command::ExportSchematicSvg,
@@ -2125,16 +2614,31 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomFit,
     Command::ZoomOneToOne,
     Command::CycleGrid,
+    Command::VisibilityOptions,
     Command::ToggleFullScreen,
     Command::ResetActiveView,
+    Command::EngineeringTableView,
     Command::ToggleNavigator,
     Command::ToggleInspector,
     Command::ToggleConsole,
+    Command::ToggleResultsSplit,
     Command::OpenConsole,
     Command::OpenProblems,
     Command::ToggleConsoleMaximized,
     Command::ClearConsole,
     Command::ToggleFocusMode,
+    Command::NewApplicationWindow,
+    Command::DetachDocument,
+    Command::MoveDocumentToWindow,
+    Command::ReattachDocument,
+    Command::ConsolidateWindows,
+    Command::MonitorRecovery,
+    Command::PreviousDocument,
+    Command::NextDocument,
+    Command::CloseOtherDocuments,
+    Command::CloseAllDocuments,
+    Command::WorkspaceLayouts,
+    Command::WindowManager,
     Command::ResetLayout,
     Command::SelectTool,
     Command::PlaceInstance,
@@ -2153,13 +2657,21 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ReplaceInstance,
     Command::CreateHierarchy,
     Command::DesignManagement,
+    Command::SelectionBulkEdit,
+    Command::ConnectivityManager,
     Command::ConfigurationSets,
+    Command::ReviewComments,
+    Command::RevisionHistory,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
+    Command::SymbolRectangleTool,
     Command::SymbolCircleTool,
     Command::SymbolArcTool,
-    Command::SymbolArrowTool,
-    Command::SymbolDotTool,
+    Command::SymbolPolygonTool,
+    Command::SymbolTextTool,
+    Command::SymbolRotatePin,
+    Command::SymbolMirrorPin,
+    Command::SymbolSave,
     Command::Place(ComponentType::Resistor),
     Command::Place(ComponentType::Capacitor),
     Command::Place(ComponentType::Inductor),
@@ -2170,8 +2682,17 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::RotateSelection,
     Command::MirrorSelectionHorizontal,
     Command::MirrorSelectionVertical,
+    Command::AlignSelectionLeft,
+    Command::AlignSelectionCenter,
+    Command::AlignSelectionRight,
+    Command::AlignSelectionTop,
+    Command::AlignSelectionMiddle,
+    Command::AlignSelectionBottom,
+    Command::DistributeSelectionHorizontal,
+    Command::DistributeSelectionVertical,
     Command::AscendHierarchy,
     Command::DescendHierarchy,
+    Command::DescendHierarchyDirect,
     Command::RunChecks,
     Command::CheckAndSave,
     Command::ClearChecks,
@@ -2228,6 +2749,12 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ExportVisualizationDocument,
     Command::FeatureAvailability,
     Command::InteroperabilityMatrix,
+    Command::HelpCenter,
+    Command::ReleaseNotes,
+    Command::MigrationGuide,
+    Command::SystemDiagnostics,
+    Command::SupportBundle,
+    Command::LegalPrivacy,
     Command::About,
     Command::Cancel,
 ];
@@ -2296,6 +2823,63 @@ mod tests {
     }
 
     #[test]
+    fn descend_requires_a_resolved_schematic_master() {
+        use crate::state::{Cell, Component, Library, LibraryCellInstance, Point, View, ViewType};
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state.schematic.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        app.state.schematic.selection.select_only_component(1);
+        assert!(
+            !Command::DescendHierarchy.availability(&app).is_available(),
+            "a primitive is not hierarchy"
+        );
+
+        let mut cell = Cell::new("child");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        let mut library = Library::new("work");
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+
+        app.state.schematic.components.clear();
+        app.state.schematic.components.push(
+            Component::new(2, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(LibraryCellInstance::new("work", "child", "schematic")),
+        );
+        app.state.schematic.selection.select_only_component(2);
+        assert!(
+            Command::DescendHierarchy.availability(&app).is_available(),
+            "a resolved schematic master is descendable"
+        );
+        let parent = app.state.workspace.active_view.clone();
+        Command::DescendHierarchy.execute(&mut app);
+        assert!(
+            app.state.dialogs.descend_hierarchy.open,
+            "the menu/palette command owns the explicit edit-context transaction"
+        );
+        assert_eq!(
+            app.state.workspace.active_view, parent,
+            "opening the transaction must not navigate before commit"
+        );
+        app.state.dialogs.descend_hierarchy.close();
+
+        app.state.schematic.components[0]
+            .library_cell
+            .as_mut()
+            .expect("binding")
+            .view = "symbol".to_owned();
+        assert!(
+            !Command::DescendHierarchy.availability(&app).is_available(),
+            "a symbol binding is not a descendable schematic master"
+        );
+    }
+
+    #[test]
     fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
         use crate::state::{Point, Rotation};
 
@@ -2327,6 +2911,68 @@ mod tests {
                 expected_rotation
             );
         }
+    }
+
+    #[test]
+    fn horizontal_coordinate_reflection_is_labeled_by_its_vertical_mirror_axis() {
+        assert_eq!(
+            Command::MirrorSelectionHorizontal.spec().label,
+            "Mirror about vertical axis"
+        );
+    }
+
+    #[test]
+    fn canvas_grid_command_truthfully_toggles_grid_and_snap_as_one_master() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state
+            .ui
+            .set_grid_style(crate::workbench::GridStyle::Lines);
+        app.state.schematic.snap_engine.enabled = true;
+        app.state.schematic.snap_engine.snap_to_wire_segments = false;
+        app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
+
+        assert_eq!(Command::CycleGrid.stable_id(), "toggle-grid");
+        assert_eq!(Command::CycleGrid.spec().label, "Canvas grid and snap");
+
+        Command::CycleGrid.execute(&mut app);
+
+        assert_eq!(app.state.ui.grid, crate::workbench::GridStyle::Off);
+        assert!(!app.state.schematic.snap_engine.enabled);
+        assert!(!app.state.ui.schematic_snap.enabled);
+        assert!(
+            !app.state.schematic.snap_engine.snap_to_wire_segments,
+            "the master toggle must preserve detailed target choices"
+        );
+
+        Command::CycleGrid.execute(&mut app);
+
+        assert_eq!(app.state.ui.grid, crate::workbench::GridStyle::Lines);
+        assert!(app.state.schematic.snap_engine.enabled);
+        assert!(app.state.ui.schematic_snap.enabled);
+        assert!(!app.state.schematic.snap_engine.snap_to_wire_segments);
+    }
+
+    #[test]
+    fn canvas_grid_command_uses_the_symbol_editors_grid_and_snap_pair() {
+        let mut app = app_with_selected_authored_symbol();
+        app.state
+            .open_workspace_view(crate::state::CellViewRef::new(
+                "command_test",
+                "amp",
+                "symbol",
+            ));
+        assert!(active_symbol_editor(&app));
+        app.state.ui.symbol.show_grid = true;
+        app.state.ui.symbol.snap_to_grid = false;
+
+        Command::CycleGrid.execute(&mut app);
+        assert!(!app.state.ui.symbol.show_grid);
+        assert!(!app.state.ui.symbol.snap_to_grid);
+
+        Command::CycleGrid.execute(&mut app);
+        assert!(app.state.ui.symbol.show_grid);
+        assert!(app.state.ui.symbol.snap_to_grid);
     }
 
     fn app_with_every_complete_schematic_object() -> RSpiceApp {
@@ -2422,19 +3068,14 @@ mod tests {
     }
 
     #[test]
-    fn select_all_command_delegates_to_the_complete_schematic_object_taxonomy() {
+    fn select_all_command_opens_the_governed_schematic_scope_workflow() {
         let mut app = app_with_every_complete_schematic_object();
 
         Command::SelectAll.execute(&mut app);
 
-        let selection = &app.state.schematic.selection;
-        assert_eq!(selection.count(), 6);
-        assert!(selection.has_component(1));
-        assert!(selection.has_wire(2));
-        assert!(selection.has_junction(crate::state::Point::new(10, 0)));
-        assert!(selection.has_net_label(4));
-        assert!(selection.has_bus(5));
-        assert!(selection.has_bus_tap(6));
+        assert!(app.state.dialogs.selection_workflow.open);
+        assert!(app.state.dialogs.application_modal_open());
+        assert!(app.state.schematic.selection.is_empty());
     }
 
     #[test]
@@ -3017,6 +3658,30 @@ mod tests {
     }
 
     #[test]
+    fn escape_walks_route_then_tool_then_selection_without_collapsing_stages() {
+        use crate::state::{ComponentType, Point};
+
+        let mut schematic = crate::state::SchematicState::default();
+        let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
+        schematic.selection.select_only_component(selected);
+        schematic.tool = Tool::Wire;
+        schematic.start_wire(Point::origin());
+        schematic.extend_wire(Point::new(10, 0));
+
+        cancel_schematic_interaction_step(&mut schematic);
+        assert!(!schematic.wire_drawing.active);
+        assert_eq!(schematic.tool, Tool::Wire);
+        assert!(schematic.selection.has_component(selected));
+
+        cancel_schematic_interaction_step(&mut schematic);
+        assert_eq!(schematic.tool, Tool::Select);
+        assert!(schematic.selection.has_component(selected));
+
+        cancel_schematic_interaction_step(&mut schematic);
+        assert!(schematic.selection.is_empty());
+    }
+
+    #[test]
     fn edit_specifications_opens_the_real_results_editor() {
         let mut app = RSpiceApp::test_instance();
 
@@ -3092,6 +3757,89 @@ mod tests {
         );
         assert_eq!(Command::WaveformCalculator.stable_id(), "calculator");
         assert_eq!(Command::ExportWaveformsCsv.stable_id(), "export-waveforms");
+    }
+
+    #[test]
+    fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
+        let mut app = RSpiceApp::test_instance();
+        let command = Command::ToggleResultsSplit;
+        app.state.workbench.activate(Workspace::Design);
+
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled("no retained result dataset is available")
+        );
+        app.state
+            .simulation
+            .start_run()
+            .add_analysis(crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::Transient,
+                "retained TRAN",
+            ));
+        assert_eq!(command.availability(&app), CommandAvailability::Available);
+
+        app.state.workbench.activate(Workspace::Results);
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled("open Design, Netlist, or Simulation setup")
+        );
+    }
+
+    #[test]
+    fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Design);
+        app.state.schematic.zoom = 0.251;
+        Command::ZoomOut.execute(&mut app);
+        assert_eq!(app.state.schematic.zoom, 0.25);
+
+        app.state.schematic.zoom = 7.99;
+        Command::ZoomIn.execute(&mut app);
+        assert_eq!(app.state.schematic.zoom, 8.0);
+
+        app.state.schematic.zoom = 3.5;
+        app.state.schematic.pan = (127.0, -81.0);
+        app.state.schematic.needs_fit = false;
+        Command::ZoomFit.execute(&mut app);
+        assert_eq!(app.state.schematic.zoom, 3.5);
+        assert_eq!(app.state.schematic.pan, (127.0, -81.0));
+        assert!(app.state.schematic.needs_fit);
+    }
+
+    #[test]
+    fn enabling_split_selects_latest_materialized_run_without_copying_results() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Design);
+        let retained_dataset = {
+            let run = app.state.simulation.start_run();
+            run.add_analysis(crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::Transient,
+                "retained TRAN",
+            ));
+            run.dataset_id
+        };
+        app.state.simulation.start_run();
+        assert_eq!(app.state.simulation.active_run_idx, Some(0));
+        let history_len = app.state.simulation.runs.len();
+
+        Command::ToggleResultsSplit.execute(&mut app);
+
+        assert!(app.state.workbench.split_with_results);
+        assert_eq!(app.state.simulation.active_run_idx, Some(1));
+        assert_eq!(
+            app.state.simulation.active_run().map(|run| run.dataset_id),
+            Some(retained_dataset)
+        );
+        assert_eq!(
+            app.state.simulation.runs.len(),
+            history_len,
+            "the split projects the canonical dataset instead of cloning it"
+        );
+
+        Command::ToggleResultsSplit.execute(&mut app);
+        assert!(!app.state.workbench.split_with_results);
     }
 
     #[test]
@@ -3220,12 +3968,28 @@ mod tests {
         assert_eq!(Command::RunSimulation.spec().id, "start-run");
         assert_eq!(Command::StopSimulation.spec().id, "stop-run");
         assert_eq!(Command::OpenProject.spec().id, "open-project");
+        assert_eq!(Command::OpenNetlist.spec().id, "open-netlist");
         assert_eq!(Command::NewProject.spec().id, "new-project");
         assert_eq!(Command::Save.spec().id, "save-project");
         assert_eq!(Command::CloseActiveDocument.spec().id, "close-document");
         assert_eq!(Command::ToggleFullScreen.spec().id, "full-screen");
         assert_eq!(Command::GenerateNetlist.spec().id, "generated-netlist");
         assert_eq!(Command::ToggleConsole.spec().id, "console");
+        assert_eq!(Command::PreviousDocument.spec().id, "previous-document");
+        assert_eq!(Command::NextDocument.spec().id, "next-document");
+        assert_eq!(
+            Command::CloseOtherDocuments.spec().id,
+            "close-other-documents"
+        );
+        assert_eq!(Command::CloseAllDocuments.spec().id, "close-all-documents");
+        assert_eq!(Command::WorkspaceLayouts.spec().id, "workspace-layouts");
+        assert_eq!(Command::WindowManager.spec().id, "window-manager");
+        assert_eq!(Command::HelpCenter.spec().id, "help-center");
+        assert_eq!(Command::ReleaseNotes.spec().id, "release-notes");
+        assert_eq!(Command::MigrationGuide.spec().id, "migration-guide");
+        assert_eq!(Command::SystemDiagnostics.spec().id, "system-diagnostics");
+        assert_eq!(Command::SupportBundle.spec().id, "support-bundle");
+        assert_eq!(Command::LegalPrivacy.spec().id, "legal-privacy-center");
         assert_eq!(Command::OpenConsole.spec().id, "open-console");
         assert_eq!(Command::OpenProblems.spec().id, "open-problems");
         assert_eq!(
@@ -3630,7 +4394,7 @@ mod tests {
         );
         assert_eq!(
             COMMAND_REGISTRY[registry_index + 1],
-            Command::ConfigurationSets
+            Command::SelectionBulkEdit
         );
 
         let mut app = RSpiceApp::test_instance();
@@ -3652,6 +4416,89 @@ mod tests {
         app.state.schematic.read_only = false;
         app.state.project_lifecycle.project_open = false;
         assert!(!Command::DesignManagement.is_enabled(&app));
+    }
+
+    #[test]
+    fn connectivity_manager_has_mockup_identity_and_supports_read_only_inspection() {
+        assert_eq!(
+            Command::ConnectivityManager.stable_id(),
+            "design-connectivity-tools"
+        );
+        assert_eq!(
+            Command::ConnectivityManager.spec().label,
+            "Connectivity and bus manager\u{2026}"
+        );
+        assert_eq!(Command::ConnectivityManager.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("design-connectivity-tools"),
+            Some(Command::ConnectivityManager)
+        );
+        assert!(Command::ConnectivityManager.shortcut_bindings().is_empty());
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::ConnectivityManager)
+            .expect("connectivity manager must be registered");
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index - 1],
+            Command::SelectionBulkEdit
+        );
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index + 1],
+            Command::ConfigurationSets
+        );
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state.schematic.read_only = true;
+        assert!(Command::ConnectivityManager.is_enabled(&app));
+        Command::ConnectivityManager.execute(&mut app);
+        assert!(app.state.dialogs.connectivity_manager.open);
+        assert!(app.state.dialogs.application_modal_open());
+
+        app.state.dialogs.connectivity_manager.open = false;
+        app.state.project_lifecycle.project_open = false;
+        assert!(!Command::ConnectivityManager.is_enabled(&app));
+    }
+
+    #[test]
+    fn selection_bulk_edit_has_mockup_identity_order_and_read_only_inspection() {
+        assert_eq!(Command::SelectionBulkEdit.stable_id(), "design-bulk-tools");
+        assert_eq!(
+            Command::SelectionBulkEdit.spec().label,
+            "Selection and bulk editing\u{2026}"
+        );
+        assert_eq!(Command::SelectionBulkEdit.spec().group, "Design");
+        assert_eq!(
+            Command::from_stable_id("design-bulk-tools"),
+            Some(Command::SelectionBulkEdit)
+        );
+        assert!(Command::SelectionBulkEdit.shortcut_bindings().is_empty());
+
+        let registry_index = COMMAND_REGISTRY
+            .iter()
+            .position(|command| *command == Command::SelectionBulkEdit)
+            .expect("selection bulk edit must be registered");
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index - 1],
+            Command::DesignManagement
+        );
+        assert_eq!(
+            COMMAND_REGISTRY[registry_index + 1],
+            Command::ConnectivityManager
+        );
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        app.state.schematic.read_only = true;
+        assert!(Command::SelectionBulkEdit.is_enabled(&app));
+        Command::SelectionBulkEdit.execute(&mut app);
+        assert!(app.state.dialogs.selection_bulk_edit.open);
+        assert!(app.state.dialogs.application_modal_open());
+
+        app.state.dialogs.selection_bulk_edit.open = false;
+        app.state.project_lifecycle.project_open = false;
+        assert!(!Command::SelectionBulkEdit.is_enabled(&app));
     }
 
     #[test]
@@ -3687,6 +4534,8 @@ mod tests {
             Command::ExportNetlist(crate::io::NetlistFormat::Spice),
             Command::FindInDesign,
             Command::CheckAndSave,
+            Command::SelectionBulkEdit,
+            Command::ConnectivityManager,
             Command::ProjectPage(ProjectPage::Configuration),
             Command::PreflightChecks,
             Command::SimulationOptions,
@@ -3793,16 +4642,50 @@ mod tests {
     }
 
     #[test]
-    fn reset_active_view_is_unavailable_only_for_the_no_op_project_workspace() {
-        assert!(!reset_active_view_available(Workspace::Project));
+    fn every_workspace_exposes_the_mockup_reset_active_view_workflow() {
         for workspace in Workspace::ALL {
-            if workspace != Workspace::Project {
-                assert!(
-                    reset_active_view_available(workspace),
-                    "{workspace:?} has implemented reset behavior"
-                );
-            }
+            assert!(
+                reset_active_view_available(workspace),
+                "{workspace:?} has implemented reset behavior"
+            );
         }
+    }
+
+    #[test]
+    fn full_screen_command_opens_review_before_host_or_layout_mutation() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(!app.state.workbench.full_screen_presentation);
+        assert_eq!(app.state.ui.take_full_screen_request(), None);
+
+        Command::ToggleFullScreen.execute(&mut app);
+
+        assert!(app.state.dialogs.view_operation.open);
+        assert_eq!(
+            app.state.dialogs.view_operation.operation,
+            crate::common::app::ViewOperation::FullScreen
+        );
+        assert!(app.state.dialogs.application_modal_open());
+        assert!(!app.state.workbench.full_screen_presentation);
+        assert_eq!(app.state.ui.take_full_screen_request(), None);
+    }
+
+    #[test]
+    fn reset_active_view_command_captures_the_exact_workspace_for_review() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Results);
+
+        Command::ResetActiveView.execute(&mut app);
+
+        assert!(app.state.dialogs.view_operation.open);
+        assert_eq!(
+            app.state.dialogs.view_operation.operation,
+            crate::common::app::ViewOperation::ResetActiveView
+        );
+        assert_eq!(
+            app.state.dialogs.view_operation.workspace,
+            Workspace::Results
+        );
+        assert!(app.state.dialogs.application_modal_open());
     }
 
     #[test]

@@ -11,6 +11,14 @@ impl<'a> NetlistGenerator<'a> {
         self.lines
             .push(format!("* Components: {}", self.schematic.components.len()));
         self.lines.push(format!("* Nets: {}", self.nets.len()));
+        if self.hierarchy_path == "/top"
+            && let Some(hierarchy) = self.hierarchy
+        {
+            let globals = hierarchy.global_net_names();
+            if !globals.is_empty() {
+                self.lines.push(format!(".GLOBAL {}", globals.join(" ")));
+            }
+        }
         self.lines.push(String::new());
     }
 

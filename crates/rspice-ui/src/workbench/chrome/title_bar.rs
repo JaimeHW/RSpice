@@ -49,6 +49,22 @@ const DESIGN_EDIT_COMMANDS: [Command; 4] = [
     Command::ArraySelection,
     Command::ReplaceInstance,
 ];
+const DESIGN_MANAGEMENT_COMMANDS: [Command; 7] = [
+    Command::CreateHierarchy,
+    Command::DesignManagement,
+    Command::SelectionBulkEdit,
+    Command::ConnectivityManager,
+    Command::ConfigurationSets,
+    Command::ReviewComments,
+    Command::RevisionHistory,
+];
+const WINDOW_LAYOUT_COMMANDS: [Command; 5] = [
+    Command::ToggleNavigator,
+    Command::ToggleInspector,
+    Command::ToggleConsole,
+    Command::ToggleResultsSplit,
+    Command::ToggleFocusMode,
+];
 const BRAND_WORDMARK_WIDTH: f32 = 88.0;
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -1032,6 +1048,28 @@ fn command_item_as(
     label: &str,
     shortcut_override: Option<&str>,
 ) {
+    command_item_as_impl(ui, app, command, label, shortcut_override, None);
+}
+
+fn scoped_palette_item(ui: &mut Ui, app: &mut RSpiceApp, label: &str, scope: &'static str) {
+    command_item_as_impl(
+        ui,
+        app,
+        Command::CommandPalette,
+        label,
+        Some("Ctrl+K"),
+        Some(scope),
+    );
+}
+
+fn command_item_as_impl(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    command: Command,
+    label: &str,
+    shortcut_override: Option<&str>,
+    palette_scope: Option<&'static str>,
+) {
     let availability = command.availability(app);
     if availability == CommandAvailability::Hidden {
         return;
@@ -1139,7 +1177,11 @@ fn command_item_as(
         CommandAvailability::Available | CommandAvailability::Hidden => response,
     };
     if response.clicked() {
-        command.execute(app);
+        if let Some(scope) = palette_scope {
+            app.state.dialogs.command_palette.open_in_scope(scope);
+        } else {
+            command.execute(app);
+        }
         ui.close();
     }
 }
@@ -1167,13 +1209,15 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::NewProject => WorkbenchIcon::File,
         Command::NewCell => WorkbenchIcon::Add,
         Command::OpenProject | Command::OpenDocument => WorkbenchIcon::Folder,
+        Command::OpenNetlist => WorkbenchIcon::Netlist,
         Command::RecentProjects => WorkbenchIcon::History,
         Command::Save | Command::SaveAs | Command::SaveAll | Command::ModelSaveRevision => {
             WorkbenchIcon::Save
         }
-        Command::RevertActiveDocument | Command::ResetActiveView | Command::ResetLayout => {
-            WorkbenchIcon::Refresh
-        }
+        Command::RevertActiveDocument
+        | Command::ResetActiveView
+        | Command::ResetLayout
+        | Command::WorkspaceLayouts => WorkbenchIcon::Refresh,
         Command::ImportNetlist
         | Command::ImportVerilogA
         | Command::ExportSchematicSvg
@@ -1195,9 +1239,11 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
         Command::CycleGrid => WorkbenchIcon::Grid,
+        Command::VisibilityOptions => WorkbenchIcon::Layers,
         Command::ToggleNavigator => WorkbenchIcon::Navigator,
         Command::ToggleInspector => WorkbenchIcon::Inspector,
         Command::ToggleConsole => WorkbenchIcon::Console,
+        Command::ToggleResultsSplit => WorkbenchIcon::Compare,
         Command::ToggleFocusMode | Command::ToggleFullScreen => WorkbenchIcon::Focus,
         Command::PlaceInstance => WorkbenchIcon::Component,
         Command::Place(_) => WorkbenchIcon::Add,
@@ -1214,8 +1260,12 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ArraySelection => WorkbenchIcon::Grid,
         Command::ReplaceInstance => WorkbenchIcon::Refresh,
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
+        Command::ConnectivityManager => WorkbenchIcon::Bus,
+        Command::SelectionBulkEdit => WorkbenchIcon::Sliders,
+        Command::ReviewComments => WorkbenchIcon::Info,
+        Command::RevisionHistory => WorkbenchIcon::History,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
-        Command::DescendHierarchy => WorkbenchIcon::Folder,
+        Command::DescendHierarchy | Command::DescendHierarchyDirect => WorkbenchIcon::Folder,
         Command::RunSimulation | Command::ModelRunQualificationTests => WorkbenchIcon::Run,
         Command::StopSimulation => WorkbenchIcon::Stop,
         Command::PreflightChecks
@@ -1225,6 +1275,11 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::CompileVerilogA => WorkbenchIcon::Code,
         Command::AccountOrganization | Command::License => WorkbenchIcon::User,
         Command::KeyboardShortcuts => WorkbenchIcon::Search,
+        Command::HelpCenter => WorkbenchIcon::Info,
+        Command::ReleaseNotes => WorkbenchIcon::History,
+        Command::MigrationGuide => WorkbenchIcon::Compare,
+        Command::SystemDiagnostics | Command::SupportBundle => WorkbenchIcon::Terminal,
+        Command::LegalPrivacy => WorkbenchIcon::Check,
         Command::InteroperabilityMatrix | Command::ModelCompareRelease => WorkbenchIcon::Compare,
         Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
         Command::VisualizationStudio => WorkbenchIcon::Results,
@@ -1234,6 +1289,16 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::VisualizationDocumentProperties => WorkbenchIcon::Settings,
         Command::ExportVisualizationDocument => WorkbenchIcon::Export,
         Command::FeatureAvailability | Command::About => WorkbenchIcon::Info,
+        Command::PreviousDocument | Command::PreviousWorkspace => WorkbenchIcon::ArrowLeft,
+        Command::NextDocument | Command::NextWorkspace => WorkbenchIcon::ArrowRight,
+        Command::CloseOtherDocuments | Command::CloseAllDocuments => WorkbenchIcon::File,
+        Command::NewApplicationWindow => WorkbenchIcon::Add,
+        Command::DetachDocument => WorkbenchIcon::File,
+        Command::MoveDocumentToWindow => WorkbenchIcon::ArrowRight,
+        Command::ReattachDocument => WorkbenchIcon::ArrowLeft,
+        Command::ConsolidateWindows => WorkbenchIcon::Grid,
+        Command::MonitorRecovery => WorkbenchIcon::Refresh,
+        Command::WindowManager => WorkbenchIcon::Folder,
         Command::Exit => WorkbenchIcon::Stop,
         Command::CloseActiveDocument => WorkbenchIcon::File,
         Command::CloseProject => WorkbenchIcon::Folder,
@@ -1268,9 +1333,11 @@ fn shortcut_for_occurrence(
 fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::ProjectLauncher);
     menu_separator(ui);
-    command_item(ui, app, Command::NewProject);
     command_item(ui, app, Command::OpenProject);
+    command_item(ui, app, Command::OpenNetlist);
+    command_item(ui, app, Command::NewProject);
     command_item(ui, app, Command::RecentProjects);
+    menu_separator(ui);
     command_item(ui, app, Command::NewCell);
     command_item(ui, app, Command::OpenDocument);
     menu_separator(ui);
@@ -1353,12 +1420,13 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ] {
         command_item(ui, app, command);
     }
+    command_item(ui, app, Command::VisibilityOptions);
     menu_separator(ui);
     command_item_as(
         ui,
         app,
         Command::ToggleFullScreen,
-        if app.state.workbench.full_screen {
+        if app.state.workbench.full_screen_presentation {
             "Exit full screen"
         } else {
             "Enter full screen"
@@ -1367,9 +1435,7 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     command_item(ui, app, Command::ResetActiveView);
     menu_separator(ui);
-    command_item(ui, app, Command::ToggleNavigator);
-    command_item(ui, app, Command::ToggleInspector);
-    command_item(ui, app, Command::ToggleConsole);
+    command_item(ui, app, Command::EngineeringTableView);
 }
 
 fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1391,10 +1457,20 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         command_item(ui, app, command);
     }
     menu_separator(ui);
-    command_item(ui, app, Command::CreateHierarchy);
-    command_item(ui, app, Command::DesignManagement);
-    command_item(ui, app, Command::ConfigurationSets);
+    for command in DESIGN_MANAGEMENT_COMMANDS {
+        command_item(ui, app, command);
+    }
+    menu_separator(ui);
+    command_item_as(
+        ui,
+        app,
+        Command::SpecialistToolBrowser,
+        "Specialist workspaces\u{2026}",
+        None,
+    );
     command_item(ui, app, Command::CheckAndSave);
+    menu_separator(ui);
+    scoped_palette_item(ui, app, "Browse all design commands\u{2026}", "Design");
 }
 
 fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1565,33 +1641,58 @@ fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
         "Automation workspace",
         Some(""),
     );
+    command_item_as(
+        ui,
+        app,
+        Command::SpecialistToolBrowser,
+        "Specialist workspaces\u{2026}",
+        Some(""),
+    );
     menu_separator(ui);
-    command_item(ui, app, Command::ResetLayout);
+    command_item(ui, app, Command::WorkspaceLayouts);
+    command_item(ui, app, Command::WindowManager);
+    command_item_as(ui, app, Command::JobsManager, "Jobs & targets", Some(""));
     command_item(ui, app, Command::ToggleFocusMode);
     command_item(ui, app, Command::ToggleConsole);
     menu_separator(ui);
-    command_item(ui, app, Command::KeyboardShortcuts);
-    command_item(ui, app, Command::FeatureAvailability);
+    command_item(ui, app, Command::HelpCenter);
 }
 
 fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::ToggleNavigator);
-    command_item(ui, app, Command::ToggleInspector);
-    command_item(ui, app, Command::ToggleConsole);
-    command_item(ui, app, Command::ToggleFocusMode);
+    for command in WINDOW_LAYOUT_COMMANDS {
+        command_item(ui, app, command);
+    }
+    menu_separator(ui);
+    command_item(ui, app, Command::NewApplicationWindow);
+    command_item(ui, app, Command::DetachDocument);
+    command_item(ui, app, Command::MoveDocumentToWindow);
+    command_item(ui, app, Command::ReattachDocument);
+    command_item(ui, app, Command::ConsolidateWindows);
+    command_item(ui, app, Command::MonitorRecovery);
+    menu_separator(ui);
+    command_item(ui, app, Command::PreviousDocument);
+    command_item(ui, app, Command::NextDocument);
+    command_item(ui, app, Command::CloseOtherDocuments);
+    command_item(ui, app, Command::CloseAllDocuments);
+    menu_separator(ui);
+    command_item(ui, app, Command::WorkspaceLayouts);
+    command_item(ui, app, Command::WindowManager);
+    command_item(ui, app, Command::ResetLayout);
     menu_separator(ui);
     command_item(ui, app, Command::PreviousWorkspace);
     command_item(ui, app, Command::NextWorkspace);
-    command_item(ui, app, Command::ResetLayout);
-    command_item(ui, app, Command::ToggleFullScreen);
 }
 
 fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::CommandPalette);
+    command_item(ui, app, Command::HelpCenter);
     command_item(ui, app, Command::KeyboardShortcuts);
     command_item(ui, app, Command::FeatureAvailability);
     command_item(ui, app, Command::InteroperabilityMatrix);
-    command_item(ui, app, Command::License);
+    command_item(ui, app, Command::ReleaseNotes);
+    command_item(ui, app, Command::MigrationGuide);
+    command_item(ui, app, Command::SystemDiagnostics);
+    command_item(ui, app, Command::SupportBundle);
+    command_item(ui, app, Command::LegalPrivacy);
     menu_separator(ui);
     command_item(ui, app, Command::About);
 }
@@ -1614,7 +1715,7 @@ fn paint_title_context(
     } else {
         app.state.workspace.project.display_name().to_owned()
     };
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let clip = bounds.shrink2(egui::vec2(5.0, 0.0));
     let painter = ui.painter().with_clip_rect(clip);
     let text_origin = if left_aligned {
@@ -1808,7 +1909,7 @@ fn search_button(ui: &mut Ui, app: &RSpiceApp, viewport_width: f32, large_target
             egui::Pos2::new(rect.left() + 30.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
+            theme::sans(tokens::FS_1, FontWeight::Regular),
             if response.hovered() || response.has_focus() {
                 t.color.text
             } else {
@@ -1832,7 +1933,7 @@ fn search_button(ui: &mut Ui, app: &RSpiceApp, viewport_width: f32, large_target
             shortcut_rect.center(),
             egui::Align2::CENTER_CENTER,
             &keycap,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
+            theme::mono(tokens::FS_1, FontWeight::Regular),
             t.color.text_faint,
         );
     }
@@ -1850,7 +1951,7 @@ fn search_keycap_width(ui: &Ui, shortcut: &str) -> f32 {
         .painter()
         .layout_no_wrap(
             shortcut.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
+            theme::mono(tokens::FS_1, FontWeight::Regular),
             egui::Color32::WHITE,
         )
         .size()
@@ -2112,6 +2213,44 @@ mod tests {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rendered_overflow_menu_labels() -> Vec<String> {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = title_test_app();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(MENU_OUTER_WIDTH, 720.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ctx, |ui| {
+                        overflow_menu(ui, &mut app, MenuProjection::ThroughModels)
+                    });
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit overflow-menu tree")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| {
+                if node.role() == egui::accesskit::Role::MenuItem {
+                    node.label().map(str::to_owned)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     #[test]
     fn menu_projection_matches_mockup_breakpoints() {
         assert_eq!(MenuProjection::for_width(820.0), MenuProjection::Hidden);
@@ -2206,6 +2345,27 @@ mod tests {
         assert_eq!(search_button_width(1440.0, true), 44.0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn overflow_keeps_mockup_specialist_and_jobs_routes_without_dropping_useful_extras() {
+        let labels = rendered_overflow_menu_labels();
+        for expected in [
+            "Automation workspace",
+            "Specialist workspaces\u{2026}",
+            "Workspace layouts\u{2026}",
+            "Windows, documents and session\u{2026}",
+            "Jobs & targets",
+            "Focus workspace",
+            "Toggle console",
+            "RSpice Help",
+        ] {
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "overflow is missing {expected:?}: {labels:?}"
+            );
+        }
+    }
+
     #[test]
     fn menu_geometry_matches_the_mockup_contract() {
         assert_eq!(MENU_OUTER_WIDTH, 244.0);
@@ -2285,7 +2445,7 @@ mod tests {
                     .painter()
                     .layout_no_wrap(
                         "Ctrl K".to_owned(),
-                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        theme::mono(tokens::FS_1, FontWeight::Regular),
                         egui::Color32::WHITE,
                     )
                     .size()
@@ -2442,12 +2602,26 @@ mod tests {
     }
 
     #[test]
+    fn window_layout_menu_places_split_with_results_before_focus_workspace() {
+        assert_eq!(
+            WINDOW_LAYOUT_COMMANDS,
+            [
+                Command::ToggleNavigator,
+                Command::ToggleInspector,
+                Command::ToggleConsole,
+                Command::ToggleResultsSplit,
+                Command::ToggleFocusMode,
+            ]
+        );
+    }
+
+    #[test]
     fn brand_lockup_does_not_reserve_space_after_the_wordmark() {
         assert_eq!(BRAND_WORDMARK_WIDTH, 88.0);
     }
 
     #[test]
-    fn design_edit_menu_is_exact_move_stretch_array_and_replace_group() {
+    fn design_edit_menu_matches_the_upgraded_authoring_group() {
         assert_eq!(
             DESIGN_EDIT_COMMANDS,
             [
@@ -2460,19 +2634,37 @@ mod tests {
     }
 
     #[test]
-    fn design_placement_menu_routes_place_pin_to_the_schematic_command() {
-        let probe = DESIGN_PLACEMENT_COMMANDS
-            .iter()
-            .position(|command| *command == Command::PlaceProbe)
-            .expect("probe command is present");
-        let pin = DESIGN_PLACEMENT_COMMANDS
-            .iter()
-            .position(|command| *command == Command::PlacePin)
-            .expect("schematic pin command is present");
+    fn design_management_menu_matches_the_upgraded_governed_group() {
+        assert_eq!(
+            DESIGN_MANAGEMENT_COMMANDS,
+            [
+                Command::CreateHierarchy,
+                Command::DesignManagement,
+                Command::SelectionBulkEdit,
+                Command::ConnectivityManager,
+                Command::ConfigurationSets,
+                Command::ReviewComments,
+                Command::RevisionHistory,
+            ]
+        );
+    }
 
-        assert_eq!(pin, probe + 1);
-        assert!(!DESIGN_PLACEMENT_COMMANDS.contains(&Command::SymbolPinTool));
-        assert_eq!(DESIGN_PLACEMENT_COMMANDS[pin].stable_id(), "place-pin");
+    #[test]
+    fn upgraded_design_menu_commands_remain_palette_discoverable() {
+        for command in DESIGN_PLACEMENT_COMMANDS
+            .into_iter()
+            .chain(DESIGN_EDIT_COMMANDS)
+            .chain(DESIGN_MANAGEMENT_COMMANDS)
+        {
+            assert!(command.palette_visible());
+        }
+        for command in [
+            Command::CreateHierarchy,
+            Command::SpecialistToolBrowser,
+            Command::CheckAndSave,
+        ] {
+            assert!(command.palette_visible());
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]

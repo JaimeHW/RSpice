@@ -5,6 +5,7 @@
 //! layout or widget implementations are reused.
 
 use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
+use std::hash::Hash;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::theme::{self, FontWeight};
@@ -18,8 +19,12 @@ pub const ACTIVITY_RAIL_W: f32 = 51.0;
 pub const PHONE_NAV_H: f32 = 54.0;
 pub const TOUCH_TARGET: f32 = 44.0;
 pub const PANEL_HEADER_H: f32 = 39.0;
-pub const PANEL_TABS_H: f32 = 31.0;
-pub const PANEL_SECTION_H: f32 = 29.0;
+/// Desktop panel tabs use the upgraded mockup's compact 25 px track.
+/// Coarse-pointer layouts still raise this to the shared touch target.
+pub const PANEL_TABS_H: f32 = 25.0;
+/// Section heads keep a 24 px single-line rhythm and grow only when the
+/// title/metadata pair genuinely needs a second line.
+pub const PANEL_SECTION_H: f32 = 24.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkbenchIcon {
@@ -66,7 +71,9 @@ pub enum WorkbenchIcon {
     Copy,
     Trash,
     ArrowLeft,
+    ArrowRight,
     ArrowUp,
+    Supply,
     Layers,
     Component,
     Code,
@@ -445,9 +452,18 @@ impl WorkbenchIcon {
                 line(&[(15.0, 5.0), (8.0, 12.0), (15.0, 19.0)]);
                 line(&[(8.0, 12.0), (21.0, 12.0)]);
             }
+            Self::ArrowRight => {
+                line(&[(9.0, 5.0), (16.0, 12.0), (9.0, 19.0)]);
+                line(&[(3.0, 12.0), (16.0, 12.0)]);
+            }
             Self::ArrowUp => {
                 line(&[(5.0, 11.0), (12.0, 4.0), (19.0, 11.0)]);
                 line(&[(12.0, 4.0), (12.0, 20.0)]);
+            }
+            Self::Supply => {
+                line(&[(4.0, 8.0), (20.0, 8.0)]);
+                line(&[(6.5, 12.0), (17.5, 12.0)]);
+                line(&[(9.0, 16.0), (15.0, 16.0)]);
             }
             // Descending into an instance opens the sheet beneath it.
             Self::Layers => {
@@ -621,9 +637,9 @@ pub fn labeled_icon_button_sized(
             },
         );
         let label_font = theme::sans(
-            // `.tool-text-button` inherits the mockup's 13 px body type;
+            // `.tool-text-button` inherits the mockup's 12 px body type;
             // compactness comes from its 29 px box, not smaller copy.
-            tokens::FS_2,
+            tokens::FS_1,
             if selected {
                 FontWeight::SemiBold
             } else {
@@ -654,11 +670,120 @@ pub fn labeled_icon_button_sized(
 }
 
 pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), PANEL_SECTION_H),
-        Sense::hover(),
+    section_header_with_typography(ui, title, meta, tokens::FS_0, 0.0);
+}
+
+/// Schematic-dock section heading from the upgraded design mockup.
+///
+/// This stays separate from [`section_header`] so the schematic's 13 px,
+/// tracked EDA headings do not silently enlarge unrelated workspaces.
+pub fn schematic_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
+    section_header_with_typography(
+        ui,
+        title,
+        meta,
+        tokens::FS_2,
+        SCHEMATIC_SECTION_TITLE_TRACKING,
     );
+}
+
+const SCHEMATIC_SECTION_TITLE_TRACKING: f32 = 0.055 * tokens::FS_2;
+
+fn tracked_galley(
+    ui: &Ui,
+    text: String,
+    font_id: egui::FontId,
+    color: Color32,
+    extra_letter_spacing: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let job = egui::text::LayoutJob::single_section(
+        text,
+        egui::TextFormat {
+            font_id,
+            color,
+            extra_letter_spacing,
+            ..Default::default()
+        },
+    );
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+fn tracked_wrapped_galley(
+    ui: &Ui,
+    text: String,
+    font_id: egui::FontId,
+    color: Color32,
+    extra_letter_spacing: f32,
+    max_width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(
+        text,
+        egui::TextFormat {
+            font_id,
+            color,
+            extra_letter_spacing,
+            ..Default::default()
+        },
+    );
+    job.wrap.max_width = max_width.max(1.0);
+    job.wrap.max_rows = 2;
+    job.wrap.break_anywhere = true;
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+fn section_header_full_text(title: &str, meta: Option<&str>) -> String {
+    meta.map_or_else(|| title.to_owned(), |meta| format!("{title}, {meta}"))
+}
+
+fn section_header_with_typography(
+    ui: &mut Ui,
+    title: &str,
+    meta: Option<&str>,
+    title_size: f32,
+    title_tracking: f32,
+) {
+    let t = Tokens::get(ui.ctx());
+    let title_font = theme::sans(title_size, FontWeight::SemiBold);
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let title = title.to_uppercase();
+    let content_width = (ui.available_width() - 20.0).max(0.0);
+    let title_width = tracked_galley(
+        ui,
+        title.clone(),
+        title_font.clone(),
+        t.color.text_dim,
+        title_tracking,
+    )
+    .size()
+    .x;
+    let meta_width = meta.map_or(0.0, |meta| {
+        ui.painter()
+            .layout_no_wrap(meta.to_owned(), meta_font.clone(), t.color.text_faint)
+            .size()
+            .x
+    });
+    let wraps = section_header_wraps(content_width, title_width, meta_width, meta.is_some());
+    let height = if wraps {
+        PANEL_SECTION_WRAPPED_H
+    } else {
+        PANEL_SECTION_H
+    };
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let accessible_label = section_header_full_text(&title, meta);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            accessible_label.clone(),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(accessible_label.clone());
+        node.set_level(3);
+    });
+    let _ = response.on_hover_text(accessible_label);
     ui.painter().rect_filled(
         rect,
         0.0,
@@ -671,23 +796,63 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     );
     ui.painter()
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
-    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let title = title.to_uppercase();
     let content_left = rect.left() + 10.0;
     let content_right = rect.right() - 10.0;
     let content_width = (content_right - content_left).max(0.0);
-    let title_width = ui
-        .painter()
-        .layout_no_wrap(title.clone(), title_font.clone(), t.color.text_dim)
-        .size()
-        .x;
-    let meta_width = meta.map_or(0.0, |meta| {
-        ui.painter()
-            .layout_no_wrap(meta.to_owned(), meta_font.clone(), t.color.text_faint)
-            .size()
-            .x
-    });
+    if wraps {
+        if meta.is_none() {
+            let title_rect = Rect::from_min_max(
+                Pos2::new(content_left, rect.top()),
+                Pos2::new(content_right, rect.bottom()),
+            );
+            let title_galley = tracked_wrapped_galley(
+                ui,
+                title,
+                title_font,
+                t.color.text_dim,
+                title_tracking,
+                title_rect.width(),
+            );
+            ui.painter().with_clip_rect(title_rect).galley(
+                Pos2::new(
+                    title_rect.left(),
+                    title_rect.center().y - title_galley.size().y * 0.5,
+                ),
+                title_galley,
+                t.color.text_dim,
+            );
+            return;
+        }
+        let title_rect = Rect::from_min_max(
+            Pos2::new(content_left, rect.top()),
+            Pos2::new(content_right, rect.top() + PANEL_SECTION_H),
+        );
+        let title = elide_text(ui, &title, &title_font, title_rect.width());
+        let title_galley = tracked_galley(ui, title, title_font, t.color.text_dim, title_tracking);
+        ui.painter().with_clip_rect(title_rect).galley(
+            Pos2::new(
+                title_rect.left(),
+                title_rect.center().y - title_galley.size().y * 0.5,
+            ),
+            title_galley,
+            t.color.text_dim,
+        );
+        if let Some(meta) = meta {
+            let meta_rect = Rect::from_min_max(
+                Pos2::new(content_left, rect.top() + PANEL_SECTION_H - 1.0),
+                Pos2::new(content_right, rect.bottom()),
+            );
+            let meta = elide_text(ui, meta, &meta_font, meta_rect.width());
+            ui.painter().with_clip_rect(meta_rect).text(
+                meta_rect.right_center(),
+                Align2::RIGHT_CENTER,
+                meta,
+                meta_font,
+                t.color.text_faint,
+            );
+        }
+        return;
+    }
     let (title_region_width, meta_region_width) =
         section_header_column_widths(content_width, title_width, meta_width, meta.is_some());
     let title_right = content_left + title_region_width;
@@ -696,11 +861,13 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
         Pos2::new(title_right.max(content_left), rect.bottom()),
     );
     let title = elide_text(ui, &title, &title_font, title_rect.width());
-    ui.painter().with_clip_rect(title_rect).text(
-        title_rect.left_center(),
-        Align2::LEFT_CENTER,
-        title,
-        title_font,
+    let title_galley = tracked_galley(ui, title, title_font, t.color.text_dim, title_tracking);
+    ui.painter().with_clip_rect(title_rect).galley(
+        Pos2::new(
+            title_rect.left(),
+            title_rect.center().y - title_galley.size().y * 0.5,
+        ),
+        title_galley,
         t.color.text_dim,
     );
     if let Some(meta) = meta {
@@ -720,6 +887,20 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
 }
 
 const SECTION_HEADER_COLUMN_GAP: f32 = 8.0;
+const PANEL_SECTION_WRAPPED_H: f32 = 42.0;
+
+fn section_header_wraps(
+    available_width: f32,
+    desired_title_width: f32,
+    desired_meta_width: f32,
+    has_meta: bool,
+) -> bool {
+    let available_width = available_width.max(0.0);
+    desired_title_width > available_width
+        || (has_meta
+            && desired_title_width + SECTION_HEADER_COLUMN_GAP + desired_meta_width
+                > available_width)
+}
 
 /// Allocate a section header from the measured copy instead of a fixed ratio.
 ///
@@ -754,12 +935,19 @@ fn section_header_column_widths(
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(ui, label, value, t.color.text, None)
+    property_row_with_tone(ui, label, value, t.color.text, None, tokens::FS_0)
+}
+
+/// Read-only schematic property row. The upgraded inspector uses body-sized
+/// mono values while retaining caption-sized labels.
+pub fn schematic_property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    property_row_with_tone(ui, label, value, t.color.text, None, tokens::FS_1)
 }
 
 /// Property row whose value communicates an explicit semantic tone.
 pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
-    property_row_with_tone(ui, label, value, value_tone, None)
+    property_row_with_tone(ui, label, value, value_tone, None, tokens::FS_0)
 }
 
 /// Property row with a font-independent semantic mark before its value.
@@ -770,7 +958,18 @@ pub fn property_row_status(
     value_tone: Color32,
     mark: StatusMark,
 ) -> Response {
-    property_row_with_tone(ui, label, value, value_tone, Some(mark))
+    property_row_with_tone(ui, label, value, value_tone, Some(mark), tokens::FS_0)
+}
+
+/// Status-bearing counterpart to [`schematic_property_row`].
+pub fn schematic_property_row_status(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    value_tone: Color32,
+    mark: StatusMark,
+) -> Response {
+    property_row_with_tone(ui, label, value, value_tone, Some(mark), tokens::FS_1)
 }
 
 /// Horizontal padding inside a property row.
@@ -798,10 +997,20 @@ fn property_row_columns(width: f32) -> (f32, f32, f32) {
 ///
 /// `invalid` outlines the input in the error tone — the typed text has not
 /// been applied to the design.
-pub fn property_row_input(
+pub fn property_row_input(ui: &mut Ui, label: &str, value: &mut String, invalid: bool) -> Response {
+    property_row_input_with_hint(ui, label, value, "", invalid)
+}
+
+/// Editable property row that keeps inherited/default copy inside the input
+/// without making that presentation text part of the authoritative value.
+///
+/// This is important for override fields: focusing an inherited value must
+/// not itself materialize an override, while the first typed character must.
+pub fn property_row_input_with_hint(
     ui: &mut Ui,
     label: &str,
     value: &mut String,
+    hint: &str,
     invalid: bool,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
@@ -821,17 +1030,39 @@ pub fn property_row_input(
         t.color.text_dim,
     );
     let value_rect = Rect::from_min_max(
-        Pos2::new(label_rect.right() + gap, rect.center().y - t.metrics.ctl_h * 0.5),
-        Pos2::new(rect.right() - PROPERTY_ROW_PAD, rect.center().y + t.metrics.ctl_h * 0.5),
+        Pos2::new(
+            label_rect.right() + gap,
+            rect.center().y - t.metrics.ctl_h * 0.5,
+        ),
+        Pos2::new(
+            rect.right() - PROPERTY_ROW_PAD,
+            rect.center().y + t.metrics.ctl_h * 0.5,
+        ),
     );
     let mut edit = egui::TextEdit::singleline(value)
         .font(egui::TextStyle::Monospace)
         .margin(egui::Margin::symmetric(8, 4))
         .desired_width(value_column);
+    if !hint.is_empty() {
+        edit = edit.hint_text(hint);
+    }
     if invalid {
         edit = edit.text_color(t.color.err);
     }
     let response = ui.put(value_rect, edit);
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label);
+        node.set_description(if invalid {
+            "Editable engineering value with a validation error"
+        } else {
+            "Editable engineering value"
+        });
+        if invalid {
+            node.set_invalid(egui::accesskit::Invalid::True);
+        } else {
+            node.clear_invalid();
+        }
+    });
     if invalid {
         ui.painter().rect_stroke(
             value_rect,
@@ -843,18 +1074,215 @@ pub fn property_row_input(
     response
 }
 
+/// Editable property row with one compact trailing action, used by instance
+/// values that can open a non-destructive engineering workflow such as the
+/// parameter-tuning sandbox. The action owns fixed width so focusing or
+/// editing the text field never shifts adjacent rows.
+pub fn property_row_input_action(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    invalid: bool,
+    action_icon: WorkbenchIcon,
+    action_label: &str,
+    action_enabled: bool,
+) -> (Response, Response) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (label_column, gap, value_column) = property_row_columns(width);
+    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let label_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(label_rect).text(
+        Pos2::new(label_rect.left(), label_rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+
+    let action_size = t.metrics.ctl_h;
+    let action_gap = 4.0;
+    let action_rect = Rect::from_min_max(
+        Pos2::new(
+            rect.right() - PROPERTY_ROW_PAD - action_size,
+            rect.center().y - action_size * 0.5,
+        ),
+        Pos2::new(
+            rect.right() - PROPERTY_ROW_PAD,
+            rect.center().y + action_size * 0.5,
+        ),
+    );
+    let value_rect = Rect::from_min_max(
+        Pos2::new(
+            label_rect.right() + gap,
+            rect.center().y - t.metrics.ctl_h * 0.5,
+        ),
+        Pos2::new(
+            action_rect.left() - action_gap,
+            rect.center().y + t.metrics.ctl_h * 0.5,
+        ),
+    );
+    let mut edit = egui::TextEdit::singleline(value)
+        .font(egui::TextStyle::Monospace)
+        .desired_width((value_column - action_size - action_gap).max(1.0))
+        .margin(egui::Margin::symmetric(7, 3));
+    if invalid {
+        edit = edit.text_color(t.color.err);
+    }
+    let edit_response = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(value_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| ui.add(edit),
+        )
+        .inner;
+    ui.ctx().accesskit_node_builder(edit_response.id, |node| {
+        node.set_label(label);
+        node.set_description(if invalid {
+            "Editable engineering value with a validation error"
+        } else {
+            "Editable engineering value"
+        });
+        if invalid {
+            node.set_invalid(egui::accesskit::Invalid::True);
+        } else {
+            node.clear_invalid();
+        }
+    });
+    if invalid {
+        ui.painter().rect_stroke(
+            value_rect,
+            t.radius,
+            Stroke::new(1.0, t.color.err),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    let action_response = ui.interact(
+        action_rect,
+        ui.id().with(("property-row-action", action_label)),
+        if action_enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    action_response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            action_enabled,
+            action_label.to_owned(),
+        )
+    });
+    let action_fill = if action_response.hovered() && action_enabled {
+        t.color.bg_hover
+    } else {
+        t.color.bg_elevated
+    };
+    ui.painter().rect(
+        action_rect,
+        t.radius,
+        action_fill,
+        Stroke::new(1.0, t.color.border),
+        egui::StrokeKind::Inside,
+    );
+    action_icon.paint(
+        ui.painter(),
+        Rect::from_center_size(action_rect.center(), Vec2::splat(15.0)),
+        if action_enabled {
+            t.color.text_dim
+        } else {
+            t.color.text_faint
+        },
+    );
+    theme::paint_focus_ring_outset(ui, &action_response, action_rect);
+    (edit_response, action_response.on_hover_text(action_label))
+}
+
+/// Selectable twin of [`property_row`], with the same fixed label/value
+/// columns as read-only rows and text inputs. `options` carries a durable
+/// value and its presentation label; the returned flag is true only when the
+/// selected value changed.
+pub fn property_row_combo(
+    ui: &mut Ui,
+    label: &str,
+    id_source: impl Hash,
+    selected: &mut String,
+    options: &[(String, String)],
+    enabled: bool,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (label_column, gap, value_column) = property_row_columns(width);
+    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let label_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
+        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(label_rect).text(
+        Pos2::new(label_rect.left(), label_rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let value_rect = Rect::from_min_max(
+        Pos2::new(
+            label_rect.right() + gap,
+            rect.center().y - t.metrics.ctl_h * 0.5,
+        ),
+        Pos2::new(
+            rect.right() - PROPERTY_ROW_PAD,
+            rect.center().y + t.metrics.ctl_h * 0.5,
+        ),
+    );
+    let selected_label = options
+        .iter()
+        .find(|(value, _)| value == selected)
+        .map_or_else(|| selected.clone(), |(_, display)| display.clone());
+    let before = selected.clone();
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(value_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.set_width(value_rect.width());
+            ui.add_enabled_ui(enabled, |ui| {
+                let output = egui::ComboBox::from_id_salt(id_source)
+                    .width(value_column)
+                    .selected_text(selected_label)
+                    .show_ui(ui, |ui| {
+                        for (value, display) in options {
+                            ui.selectable_value(selected, value.clone(), display);
+                        }
+                    });
+                ui.ctx()
+                    .accesskit_node_builder(output.response.id, |node| node.set_label(label));
+            });
+        },
+    );
+    *selected != before
+}
+
 fn property_row_with_tone(
     ui: &mut Ui,
     label: &str,
     value: &str,
     value_tone: Color32,
     mark: Option<StatusMark>,
+    value_size: f32,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let full_label = label;
     let full_value = value;
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::mono(value_size, FontWeight::Regular);
     let width = ui.available_width().max(1.0);
     let (label_column, gap, value_column) = property_row_columns(width);
     let label_galley =
@@ -867,8 +1295,7 @@ fn property_row_with_tone(
         value_tone,
         (value_column - status_prefix).max(1.0),
     );
-    let height =
-        (label_galley.size().y.max(value_galley.size().y) + 12.0).max(PROPERTY_ROW_MIN_H);
+    let height = (label_galley.size().y.max(value_galley.size().y) + 12.0).max(PROPERTY_ROW_MIN_H);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
@@ -1253,19 +1680,98 @@ mod tests {
         assert_eq!(meta, 91.0);
         assert!((title + SECTION_HEADER_COLUMN_GAP + meta - 210.0).abs() <= 0.001);
         assert!(title >= 47.0);
+        assert!(!section_header_wraps(210.0, 47.0, 91.0, true));
     }
 
     #[test]
-    fn overconstrained_section_header_preserves_both_columns() {
+    fn overconstrained_section_header_wraps_instead_of_eliding_both_columns() {
         let (title, meta) = section_header_column_widths(100.0, 80.0, 80.0, true);
         assert!((title - 50.6).abs() <= 0.001);
         assert!((meta - 41.4).abs() <= 0.001);
         assert!((title + SECTION_HEADER_COLUMN_GAP + meta - 100.0).abs() <= 0.001);
+        assert!(section_header_wraps(100.0, 80.0, 80.0, true));
 
         assert_eq!(
             section_header_column_widths(100.0, 180.0, 0.0, false),
             (100.0, 0.0)
         );
+        assert!(section_header_wraps(100.0, 180.0, 0.0, false));
+        assert_eq!(
+            section_header_full_text("LONG ENGINEERING TITLE", Some("complete metadata")),
+            "LONG ENGINEERING TITLE, complete metadata"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn property_controls_and_section_headers_expose_their_full_accessible_names() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut value = "R1".to_owned();
+        let mut tunable_value = "1k".to_owned();
+        let mut selected = "tt".to_owned();
+        let options = vec![
+            ("tt".to_owned(), "Typical".to_owned()),
+            ("ff".to_owned(), "Fast".to_owned()),
+        ];
+
+        let nodes = ctx
+            .run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.set_width(160.0);
+                    section_header(
+                        ui,
+                        "Long engineering section title",
+                        Some("complete metadata"),
+                    );
+                    property_row_input(ui, "Instance", &mut value, false);
+                    property_row_input_action(
+                        ui,
+                        "Value",
+                        &mut tunable_value,
+                        false,
+                        WorkbenchIcon::Sliders,
+                        "Tune value",
+                        true,
+                    );
+                    property_row_combo(
+                        ui,
+                        "Model section",
+                        "accessible-model-section",
+                        &mut selected,
+                        &options,
+                        true,
+                    );
+                });
+            })
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Heading
+                && node.label() == Some("LONG ENGINEERING SECTION TITLE, complete metadata")
+                && node.level() == Some(3)
+        }));
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::TextInput && node.label() == Some("Instance")
+        }));
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::TextInput && node.label() == Some("Value")
+        }));
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Model section"))
+        );
+    }
+
+    #[test]
+    fn schematic_section_heading_uses_the_mockup_tracking() {
+        assert_eq!(tokens::FS_2, 13.0);
+        assert!((SCHEMATIC_SECTION_TITLE_TRACKING - 0.715).abs() <= 0.001);
     }
 
     #[test]

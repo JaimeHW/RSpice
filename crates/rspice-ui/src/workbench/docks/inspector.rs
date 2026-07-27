@@ -3,84 +3,280 @@
 mod design;
 mod symbol;
 
-use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::common::{AppState, RSpiceApp};
 use crate::state::{Component, ComponentType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
+use super::super::commands::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row, property_row_status,
+    schematic_section_header as design_schematic_section_header,
     section_header as design_section_header,
 };
 use super::super::state::{VerificationPage, Workspace};
 
 const INSPECTOR_PROPERTY_LIST_PADDING_TOP: f32 = 7.0;
 const INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM: f32 = 10.0;
+const INSPECTOR_TREE_PADDING_TOP: f32 = 4.0;
+const INSPECTOR_TREE_PADDING_BOTTOM: f32 = 7.0;
 
 fn inspector_section_state_id() -> egui::Id {
     egui::Id::new("workbench.inspector.property-list-open")
 }
 
 fn begin_inspector_sections(ui: &mut Ui) {
-    ui.data_mut(|data| data.insert_temp(inspector_section_state_id(), false));
+    ui.data_mut(|data| data.insert_temp(inspector_section_state_id(), -1.0_f32));
 }
 
 fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    let has_previous = ui.data_mut(|data| {
-        data.get_temp::<bool>(inspector_section_state_id())
-            .unwrap_or(false)
+    let previous_bottom = ui.data_mut(|data| {
+        data.get_temp::<f32>(inspector_section_state_id())
+            .unwrap_or(-1.0)
     });
-    if has_previous {
-        ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM);
+    if previous_bottom >= 0.0 {
+        ui.add_space(previous_bottom);
     }
     design_section_header(ui, title, meta);
     ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_TOP);
-    ui.data_mut(|data| data.insert_temp(inspector_section_state_id(), true));
+    ui.data_mut(|data| {
+        data.insert_temp(
+            inspector_section_state_id(),
+            INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM,
+        )
+    });
+}
+
+fn schematic_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
+    let previous_bottom = ui.data_mut(|data| {
+        data.get_temp::<f32>(inspector_section_state_id())
+            .unwrap_or(-1.0)
+    });
+    if previous_bottom >= 0.0 {
+        ui.add_space(previous_bottom);
+    }
+    design_schematic_section_header(ui, title, meta);
+    ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_TOP);
+    ui.data_mut(|data| {
+        data.insert_temp(
+            inspector_section_state_id(),
+            INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM,
+        )
+    });
+}
+
+/// Schematic section followed by a compact mockup `.tree` rather than a
+/// property list. Keeping this local prevents the tree rhythm from changing
+/// form sections or inspectors in other workspaces.
+fn schematic_tree_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
+    let previous_bottom = ui.data_mut(|data| {
+        data.get_temp::<f32>(inspector_section_state_id())
+            .unwrap_or(-1.0)
+    });
+    if previous_bottom >= 0.0 {
+        ui.add_space(previous_bottom);
+    }
+    design_schematic_section_header(ui, title, meta);
+    ui.add_space(INSPECTOR_TREE_PADDING_TOP);
+    ui.data_mut(|data| {
+        data.insert_temp(inspector_section_state_id(), INSPECTOR_TREE_PADDING_BOTTOM)
+    });
+}
+
+fn schematic_annotation_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
+    let previous_bottom = ui.data_mut(|data| {
+        data.get_temp::<f32>(inspector_section_state_id())
+            .unwrap_or(-1.0)
+    });
+    if previous_bottom >= 0.0 {
+        ui.add_space(previous_bottom);
+    }
+    design_schematic_section_header(ui, title, meta);
+    ui.add_space(8.0);
+    ui.data_mut(|data| data.insert_temp(inspector_section_state_id(), 8.0_f32));
+}
+
+fn schematic_section_header_action(
+    ui: &mut Ui,
+    title: &str,
+    action: &str,
+    enabled: bool,
+) -> Response {
+    let previous_bottom = ui.data_mut(|data| {
+        data.get_temp::<f32>(inspector_section_state_id())
+            .unwrap_or(-1.0)
+    });
+    if previous_bottom >= 0.0 {
+        ui.add_space(previous_bottom);
+    }
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), PANEL_SECTION_H),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        Color32::from_rgba_unmultiplied(
+            t.color.bg_panel_2.r(),
+            t.color.bg_panel_2.g(),
+            t.color.bg_panel_2.b(),
+            204,
+        ),
+    );
+    ui.painter()
+        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
+
+    let title_job = egui::text::LayoutJob::single_section(
+        title.to_uppercase(),
+        egui::TextFormat {
+            font_id: theme::sans(tokens::FS_2, FontWeight::SemiBold),
+            color: t.color.text_dim,
+            extra_letter_spacing: 0.055 * tokens::FS_2,
+            ..Default::default()
+        },
+    );
+    let title_galley = ui.fonts_mut(|fonts| fonts.layout_job(title_job));
+    ui.painter().galley(
+        Pos2::new(
+            rect.left() + 10.0,
+            rect.center().y - title_galley.size().y * 0.5,
+        ),
+        title_galley,
+        t.color.text_dim,
+    );
+
+    let action_galley = ui.painter().layout_no_wrap(
+        action.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        if enabled {
+            t.color.text_dim
+        } else {
+            t.color.text_faint
+        },
+    );
+    let action_rect = Rect::from_min_max(
+        Pos2::new(
+            rect.right() - 10.0 - action_galley.size().x - 10.0,
+            rect.top() + 2.0,
+        ),
+        Pos2::new(rect.right() - 8.0, rect.bottom() - 2.0),
+    );
+    let response = ui.interact(
+        action_rect,
+        ui.id().with(("schematic-section-action", title, action)),
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    if response.hovered() && enabled {
+        ui.painter()
+            .rect_filled(action_rect, t.radius, t.color.bg_hover);
+    }
+    ui.painter().galley(
+        Pos2::new(
+            action_rect.center().x - action_galley.size().x * 0.5,
+            action_rect.center().y - action_galley.size().y * 0.5,
+        ),
+        action_galley,
+        t.color.text_dim,
+    );
+    theme::paint_focus_ring_outset(ui, &response, action_rect);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, action.to_owned())
+    });
+    ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_TOP);
+    ui.data_mut(|data| {
+        data.insert_temp(
+            inspector_section_state_id(),
+            INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM,
+        )
+    });
+    response
 }
 
 fn finish_inspector_sections(ui: &mut Ui) {
-    if ui
-        .data_mut(|data| data.remove_temp::<bool>(inspector_section_state_id()))
-        .unwrap_or(false)
-    {
-        ui.add_space(INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM);
+    let bottom = ui
+        .data_mut(|data| data.remove_temp::<f32>(inspector_section_state_id()))
+        .unwrap_or(-1.0);
+    if bottom >= 0.0 {
+        ui.add_space(bottom);
     }
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app);
+    let scroll_identity = inspector_scroll_identity(app);
     ScrollArea::vertical()
-        .id_salt("workbench.inspector.scroll")
+        // Each inspected object owns its scroll state. Sharing one scroll
+        // offset across a tall component, the sheet, and another component
+        // made the next inspector appear halfway down after selection
+        // changes, which was both jarring and unlike the upgraded mockup.
+        .id_salt(("workbench.inspector.scroll", scroll_identity))
         .auto_shrink([false, false])
         .show(ui, |ui| {
             begin_inspector_sections(ui);
-            match app.state.workbench.workspace {
-                Workspace::Project => project(ui, app),
-                // A symbol cellview is edited against its pin contract, not
-                // against a schematic selection.
-                Workspace::Design
-                    if app.state.workspace.active_view_type()
-                        == crate::state::ViewType::Symbol =>
-                {
-                    symbol::show(ui, app);
+            if split_selected_trace_is_inspected(app) {
+                results(ui, app);
+            } else {
+                match app.state.workbench.workspace {
+                    Workspace::Project => project(ui, app),
+                    // A symbol cellview is edited against its pin contract, not
+                    // against a schematic selection.
+                    Workspace::Design
+                        if app.state.workspace.active_view_type()
+                            == crate::state::ViewType::Symbol =>
+                    {
+                        symbol::show(ui, app);
+                    }
+                    Workspace::Design => design::show(ui, app),
+                    Workspace::Simulate => simulate(ui, app),
+                    Workspace::Results => results(ui, app),
+                    Workspace::Verify => verify(ui, app),
+                    Workspace::Models => models(ui, app),
+                    Workspace::Netlist => netlist(ui, app),
                 }
-                Workspace::Design => design::show(ui, app),
-                Workspace::Simulate => simulate(ui, app),
-                Workspace::Results => results(ui, app),
-                Workspace::Verify => verify(ui, app),
-                Workspace::Models => models(ui, app),
-                Workspace::Netlist => netlist(ui, app),
             }
             finish_inspector_sections(ui);
         });
 }
 
+fn inspector_scroll_identity(app: &RSpiceApp) -> String {
+    let route = app.state.workbench.current_route();
+    if app.state.workbench.workspace != Workspace::Design {
+        return route.to_string();
+    }
+
+    format!(
+        "{}|{}|{:?}",
+        route,
+        app.state.workspace.active_display_path(),
+        app.state.schematic.selection
+    )
+}
+
+fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
+    app.state.workbench.workspace == Workspace::Design
+        && app.state.workbench.results_split_visible(
+            app.state.project_lifecycle.project_open,
+            app.state.simulation.has_retained_result_dataset(),
+        )
+        && app
+            .state
+            .ui
+            .results
+            .valid_selected_trace(&app.state.simulation)
+            .is_some()
+}
+
 fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_HEADER_H),
         egui::Sense::hover(),
     );
@@ -89,21 +285,52 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let title = match app.state.workbench.workspace {
-        Workspace::Verify if app.state.workbench.verification_page == VerificationPage::Yield => {
-            "Yield details"
+    let title = if split_selected_trace_is_inspected(app) {
+        "Result details"
+    } else {
+        match app.state.workbench.workspace {
+            Workspace::Verify
+                if app.state.workbench.verification_page == VerificationPage::Yield =>
+            {
+                "Yield details"
+            }
+            Workspace::Verify => app.state.workbench.verification_page.label(),
+            Workspace::Netlist => "Diagnostics & tuner",
+            _ => app.state.workbench.workspace.inspector_title(),
         }
-        Workspace::Verify => app.state.workbench.verification_page.label(),
-        Workspace::Netlist => "Diagnostics & tuner",
-        _ => app.state.workbench.workspace.inspector_title(),
     };
-    ui.painter().text(
-        egui::pos2(rect.left() + 11.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        title.to_ascii_uppercase(),
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text,
-    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(title);
+        node.set_level(2);
+    });
+    if app.state.workbench.workspace == Workspace::Design {
+        let job = egui::text::LayoutJob::single_section(
+            title.to_ascii_uppercase(),
+            egui::TextFormat {
+                font_id: theme::sans(tokens::FS_2, FontWeight::SemiBold),
+                color: t.color.text,
+                extra_letter_spacing: 0.065 * tokens::FS_2,
+                ..Default::default()
+            },
+        );
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        ui.painter().galley(
+            egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y * 0.5),
+            galley,
+            t.color.text,
+        );
+    } else {
+        ui.painter().text(
+            egui::pos2(rect.left() + 11.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            title.to_ascii_uppercase(),
+            theme::sans(tokens::FS_0, FontWeight::SemiBold),
+            t.color.text,
+        );
+    }
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -214,7 +441,12 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
                     .values()
                     .find(|model| model.name.eq_ignore_ascii_case(candidate))
             }) {
-                return catalog_model_evidence(library, model);
+                let mut evidence = catalog_model_evidence(library, model);
+                evidence.section = binding
+                    .model_section
+                    .clone()
+                    .unwrap_or_else(|| "default".to_owned());
+                return evidence;
             }
         }
 
@@ -226,7 +458,10 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
                     .clone()
                     .unwrap_or_else(|| binding.cell.clone()),
                 source: path.display().to_string(),
-                section: "Not declared".to_owned(),
+                section: binding
+                    .model_section
+                    .clone()
+                    .unwrap_or_else(|| "default".to_owned()),
                 tone: ModelEvidenceTone::Warn,
             };
         }
@@ -249,7 +484,10 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
                 .clone()
                 .unwrap_or_else(|| binding.cell.clone()),
             source: format!("{}/{}/{}", binding.library, binding.cell, binding.view),
-            section: "Not applicable".to_owned(),
+            section: binding
+                .model_section
+                .clone()
+                .unwrap_or_else(|| "default".to_owned()),
             tone: if project_view_exists {
                 ModelEvidenceTone::Info
             } else {
@@ -544,6 +782,12 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {
+    let selected_trace = app
+        .state
+        .ui
+        .results
+        .valid_selected_trace(&app.state.simulation)
+        .cloned();
     section_header(ui, "Dataset provenance", None);
     let Some(run_index) = app.state.simulation.active_run_idx else {
         property_row(ui, "Selection", "No active dataset");
@@ -601,8 +845,91 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Source identity", "Legacy result · unavailable");
         }
     }
+    if let Some(selected) = selected_trace {
+        section_header(ui, "Selected trace", None);
+        property_row(ui, "Name", &selected.source_name);
+        property_row(ui, "Analysis", &(selected.analysis_index + 1).to_string());
+        property_row(ui, "Dataset", &selected.dataset_id.to_string());
+        if is_schematic_cross_probe_candidate(&selected.source_name) {
+            let signal = selected.source_name;
+            let unavailable = schematic_cross_probe_unavailability(&app.state, &signal);
+            let mut response =
+                ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
+            if let Some(reason) = unavailable {
+                response = response.on_hover_text(reason);
+            }
+            if response.clicked() {
+                match cross_probe_trace_to_design(app, &signal) {
+                    Ok(net) => {
+                        app.state.ui.toasts.success(
+                            ui.ctx(),
+                            "Schematic net located",
+                            format!("{signal} cross-probed to {net}."),
+                        );
+                        app.state
+                            .push_user_message(crate::common::ConsoleMessage::info(format!(
+                                "Selected conductor {net} from {signal}."
+                            )));
+                    }
+                    Err(message) => {
+                        app.state.ui.toasts.warn_with_title(
+                            ui.ctx(),
+                            "Cannot cross-probe",
+                            message.clone(),
+                        );
+                        app.state
+                            .push_user_message(crate::common::ConsoleMessage::warning(message));
+                    }
+                }
+            }
+        }
+    }
     ui.add_space(8.0);
     crate::workbench::result_document::right_panel(ui, &mut app.state);
+}
+
+fn is_schematic_cross_probe_candidate(signal: &str) -> bool {
+    (signal.starts_with("V(") || signal.starts_with("I(")) && signal.ends_with(')')
+}
+
+fn schematic_cross_probe_unavailability(state: &AppState, signal: &str) -> Option<String> {
+    let Some(net) = crate::schematic::view::wrapped_signal_name(signal, 'V') else {
+        return Some(format!(
+            "{signal} is a device current or derived quantity; no single schematic net carries it."
+        ));
+    };
+    if !state.simulation.cross_probe.is_current_for(
+        &state.workspace.active_view,
+        state.schematic.topology_version(),
+    ) {
+        return Some(
+            "The schematic changed since this result was produced; run again to cross-probe it."
+                .to_owned(),
+        );
+    }
+    if !state
+        .simulation
+        .cross_probe
+        .net_to_points
+        .iter()
+        .any(|(name, points)| name.eq_ignore_ascii_case(net) && !points.is_empty())
+    {
+        return Some(format!("The open sheet has no conductor named {net}."));
+    }
+    None
+}
+
+/// Resolve against the current schematic map before navigation. A stale or
+/// derived signal therefore leaves the engineer in Results with an exact
+/// explanation. On success, the Design surface opens; a remembered split
+/// remains active and projects Design + the same canonical Results document.
+fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<String, String> {
+    let net = crate::schematic::view::select_signal_conductor(&mut app.state, signal)
+        .map_err(|error| error.message(signal))?;
+    if app.state.workbench.workspace != Workspace::Design {
+        Command::OpenWorkspace(Workspace::Design).execute(app);
+    }
+    Ok(net)
 }
 
 fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1535,10 +1862,152 @@ fn diagnostic_severity_name(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn inspector_header_exposes_its_workspace_heading() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Design);
+
+        let nodes = ctx
+            .run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.set_width(312.0);
+                    header(ui, &mut app);
+                });
+            })
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Heading
+                && node.label() == Some("Inspector")
+                && node.level() == Some(2)
+        }));
+    }
+
+    fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        app.state.workbench.split_with_results = split;
+        app.state.workbench.activate(Workspace::Results);
+        app.state.simulation.start_run().add_analysis(
+            crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::Transient,
+                "retained TRAN",
+            )
+            .with_waveforms(vec![crate::state::WaveformData::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                "#ffbd2e",
+            )]),
+        );
+        let dataset_id = app
+            .state
+            .simulation
+            .active_run()
+            .expect("retained run")
+            .dataset_id
+            .clone();
+        app.state.ui.results.selected_trace =
+            Some(crate::workbench::result_document::SelectedResultTrace {
+                dataset_id,
+                analysis_index: 0,
+                waveform_index: 0,
+                source_name: "V(out)".to_owned(),
+            });
+        let a = crate::state::Point::new(0, 0);
+        let b = crate::state::Point::new(40, 0);
+        app.state
+            .schematic
+            .wires
+            .push(crate::state::Wire::new(91, vec![a, b]));
+        app.state.simulation.cross_probe.update(
+            app.state.workspace.active_view.clone(),
+            std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
+            std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
+            std::collections::HashMap::new(),
+            app.state.schematic.topology_version(),
+        );
+        app
+    }
+
     #[test]
     fn inspector_property_lists_keep_mockup_vertical_padding() {
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_TOP, 7.0);
         assert_eq!(INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM, 10.0);
+    }
+
+    #[test]
+    fn schematic_subjects_do_not_share_inspector_scroll_state() {
+        let mut app = RSpiceApp::test_instance();
+        let sheet = inspector_scroll_identity(&app);
+        let component_id = app
+            .state
+            .schematic
+            .add_component(ComponentType::Resistor, crate::state::Point::new(10, 10));
+        app.state
+            .schematic
+            .selection
+            .select_only_component(component_id);
+        let component = inspector_scroll_identity(&app);
+
+        assert_ne!(sheet, component);
+        app.state.schematic.selection.clear();
+        assert_eq!(sheet, inspector_scroll_identity(&app));
+    }
+
+    #[test]
+    fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
+        let mut app = result_app_with_current_out_map(false);
+
+        assert_eq!(
+            cross_probe_trace_to_design(&mut app, "V(out)"),
+            Ok("OUT".to_owned())
+        );
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Design);
+        assert!(!app.state.workbench.split_with_results);
+        assert!(app.state.schematic.selection.wires.contains(&91));
+        assert!(app.state.schematic.net_highlight.is_wire_highlighted(91));
+    }
+
+    #[test]
+    fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
+        let mut app = result_app_with_current_out_map(true);
+
+        assert_eq!(
+            cross_probe_trace_to_design(&mut app, "V(out)"),
+            Ok("OUT".to_owned())
+        );
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Design);
+        assert!(app.state.workbench.results_split_visible(
+            app.state.project_lifecycle.project_open,
+            app.state.simulation.has_retained_result_dataset(),
+        ));
+    }
+
+    #[test]
+    fn stale_cross_probe_map_fails_without_leaving_results() {
+        let mut app = result_app_with_current_out_map(true);
+        app.state.schematic.add_wire(vec![
+            crate::state::Point::new(80, 0),
+            crate::state::Point::new(120, 0),
+        ]);
+
+        let error = cross_probe_trace_to_design(&mut app, "V(out)")
+            .expect_err("topology mismatch must fail closed");
+
+        assert!(error.contains("changed since this result"));
+        assert_eq!(app.state.workbench.workspace, Workspace::Results);
+        assert!(app.state.schematic.selection.wires.is_empty());
     }
 
     #[test]
@@ -1693,6 +2162,38 @@ mod tests {
         assert_eq!(evidence.model, "vendor_npn");
         assert!(evidence.status.contains("source pinned"));
         assert!(evidence.source.contains("vendor.lib"));
+    }
+
+    #[test]
+    fn bound_model_evidence_uses_the_instance_model_and_section_overrides() {
+        let mut state = AppState::default();
+        let mut library = crate::state::model_library::ModelLibrary::new("vendor_analog");
+        library.add_model(crate::state::model_library::DeviceModel::new(
+            "OPA189_A",
+            crate::state::model_library::ModelType::Other,
+        ));
+        library.add_model(crate::state::model_library::DeviceModel::new(
+            "OPA189_B",
+            crate::state::model_library::ModelType::Other,
+        ));
+        state.model_library_manager.add_library(library);
+
+        let mut binding =
+            crate::state::LibraryCellInstance::new("vendor_analog", "OPA189", "spice");
+        binding.module_name = Some("OPA189_B".to_owned());
+        binding.model_section = Some("high_accuracy".to_owned());
+        let component = Component::new(
+            9,
+            ComponentType::CellInstance,
+            crate::state::Point::origin(),
+        )
+        .with_library_cell(binding)
+        .with_name_value("XU1", "OPA189");
+
+        let evidence = component_model_evidence(&state, &component);
+
+        assert_eq!(evidence.model, "OPA189_B");
+        assert_eq!(evidence.section, "high_accuracy");
     }
 
     #[test]

@@ -315,6 +315,10 @@ pub struct ResultsState {
     pub cursor_tool: CursorTool,
     /// The marker tool.
     pub marker_tool: MarkerTool,
+    /// Exact retained waveform selected from a trace chip. This is only an
+    /// identity into the canonical result dataset; it never copies samples or
+    /// creates a second result owner.
+    pub(crate) selected_trace: Option<SelectedResultTrace>,
     /// User-placed markers across every waveform strip.
     pub markers: Vec<ResultMarker>,
     /// Id allocator for `markers`. Monotonic within a session so a marker
@@ -393,6 +397,19 @@ pub struct ResultsState {
     pub table_status: Option<String>,
 }
 
+/// Stable-enough session identity for a selected retained waveform.
+///
+/// The dataset id prevents a run switch from silently relabelling the
+/// selection, while the indices make lookup constant-time. The source name is
+/// retained as an additional fail-closed check against stale/reordered data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelectedResultTrace {
+    pub dataset_id: DatasetId,
+    pub analysis_index: usize,
+    pub waveform_index: usize,
+    pub source_name: String,
+}
+
 /// One user expression trace on a waves strip.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExprTrace {
@@ -432,6 +449,25 @@ pub struct ExprSeries {
 }
 
 impl ResultsState {
+    /// Return the selection only while it resolves to the exact active
+    /// retained dataset and source waveform that created it.
+    pub(crate) fn valid_selected_trace<'a>(
+        &'a self,
+        simulation: &crate::state::SimulationState,
+    ) -> Option<&'a SelectedResultTrace> {
+        let selected = self.selected_trace.as_ref()?;
+        let run = simulation.active_run()?;
+        if run.dataset_id != selected.dataset_id {
+            return None;
+        }
+        let waveform = run
+            .analyses
+            .get(selected.analysis_index)?
+            .waveforms
+            .get(selected.waveform_index)?;
+        (waveform.name == selected.source_name).then_some(selected)
+    }
+
     /// Clear cursors (Esc, Clear action).
     pub fn clear_cursors(&mut self) {
         self.cursors.clear();
@@ -586,11 +622,9 @@ impl ResultsState {
 
     /// Whether any pane of one plot is zoomed away from the automatic view.
     pub fn strip_is_zoomed(&self, viewer: ResultViewer, index: usize) -> bool {
-        self.views
-            .iter()
-            .any(|((key_viewer, key_index, _), view)| {
-                (*key_viewer, *key_index) == (viewer, index) && view.is_zoomed()
-            })
+        self.views.iter().any(|((key_viewer, key_index, _), view)| {
+            (*key_viewer, *key_index) == (viewer, index) && view.is_zoomed()
+        })
     }
 }
 
@@ -978,6 +1012,23 @@ pub fn well_hint(ui: &mut Ui, text: &str) {
 
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    show_with_chrome(ui, app, ResultChrome::Full);
+}
+
+/// Render the compact upgraded-mockup projection used beside another
+/// engineering document. This is the same canonical retained result state,
+/// not a second result document.
+pub fn show_compact_split(ui: &mut Ui, app: &mut RSpiceApp) {
+    show_with_chrome(ui, app, ResultChrome::CompactSplit);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResultChrome {
+    Full,
+    CompactSplit,
+}
+
+fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     crate::ui::plot::set_interaction_mode(ui.ctx(), crate::ui::plot::InteractionMode::All);
     app.state.ui.results.set_sample_selection(None);
     prepare_viewer_state(app);
@@ -987,7 +1038,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .analysis_plan
         .as_ref()
         .map(|plan| (plan.id(), plan.revision()));
-    show_docbar(ui, &mut app.state);
+    match chrome {
+        ResultChrome::Full => show_docbar(ui, &mut app.state),
+        ResultChrome::CompactSplit => show_compact_docbar(ui, &mut app.state),
+    }
     let plan_after_docbar = app
         .state
         .sim_setup
@@ -1001,12 +1055,15 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // The stage bottom holds at most one thin, single-purpose readout strip.
     // It is content-fit, so a stage with nothing to read out gives the whole
     // area back to the document.
-    let strip_height = readout_strip_height(&app.state);
+    let strip_height = match chrome {
+        ResultChrome::Full => readout_strip_height(&app.state),
+        ResultChrome::CompactSplit => 0.0,
+    };
     let available = ui.available_rect_before_wrap();
     let well_height = (available.height() - strip_height).max(0.0);
     ui.allocate_ui(egui::vec2(available.width(), well_height), |ui| {
         ui.set_min_height(well_height);
-        show_viewer_well(ui, app);
+        show_viewer_well(ui, app, chrome);
     });
     if strip_height > 0.0 {
         waves::readout_strip(ui, &mut app.state, strip_height);
@@ -1047,7 +1104,7 @@ pub(crate) fn show_embedded_with_sample_selection(
 ) {
     app.state.ui.results.set_sample_selection(selection);
     prepare_viewer_state(app);
-    show_viewer_well(ui, app);
+    show_viewer_well(ui, app, ResultChrome::Full);
 }
 
 fn prepare_viewer_state(app: &mut RSpiceApp) {
@@ -1056,6 +1113,7 @@ fn prepare_viewer_state(app: &mut RSpiceApp) {
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.clear_cursors();
+        results.selected_trace = None;
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
         results.rf_pin.clear();
@@ -1066,7 +1124,7 @@ fn prepare_viewer_state(app: &mut RSpiceApp) {
     reconcile_active_viewer(&mut app.state);
 }
 
-fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
+fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     let t = Tokens::get(ui.ctx());
     // The document well backdrop; viewers paint on top. The rect doubles
     // as the crop window for viewer PNG export.
@@ -1091,7 +1149,10 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let viewer = app.state.ui.results.viewer;
     match viewer {
-        ResultViewer::Waves => waves::show(ui, &mut app.state),
+        ResultViewer::Waves => match chrome {
+            ResultChrome::Full => waves::show(ui, &mut app.state),
+            ResultChrome::CompactSplit => waves::show_compact(ui, &mut app.state),
+        },
         ResultViewer::Bode => bode::show(ui, &mut app.state),
         ResultViewer::Fft => {
             if ensure_derived(ui, app, ActiveViewer::Fft) {
@@ -1114,6 +1175,25 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp) {
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
     }
+}
+
+/// Split projection of the mockup's viewer-tab row. Run binding, output
+/// controls, result-document creation and properties remain owned by the full
+/// Results workspace; every compatible existing viewer stays reachable here.
+fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
+    let height = result_docbar_height(ui.available_width());
+    docbar_at_height(ui, height, |ui| {
+        let tabs = egui::ScrollArea::horizontal()
+            .id_salt("rspice.results.split.viewer-tabs")
+            .auto_shrink([false, true])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| ui.horizontal(|ui| viewer_tabs(ui, state)));
+        ui.ctx()
+            .accesskit_node_builder(tabs.inner.response.id, |node| {
+                node.set_role(egui::accesskit::Role::TabList);
+                node.set_label("Compatible result viewers");
+            });
+    });
 }
 
 fn show_docbar(ui: &mut Ui, state: &mut AppState) {
@@ -1936,6 +2016,44 @@ mod availability_tests {
         state.simulation.runs = vec![run];
         assert!(state.simulation.select_run(0));
         state
+    }
+
+    #[test]
+    fn selected_trace_identity_fails_closed_after_active_dataset_changes() {
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+            ]);
+        let mut state = state_with_analysis(analysis.clone());
+        let dataset_id = state
+            .simulation
+            .active_run()
+            .expect("active retained run")
+            .dataset_id
+            .clone();
+        state.ui.results.selected_trace = Some(SelectedResultTrace {
+            dataset_id,
+            analysis_index: 0,
+            waveform_index: 0,
+            source_name: "V(out)".to_owned(),
+        });
+        assert!(
+            state
+                .ui
+                .results
+                .valid_selected_trace(&state.simulation)
+                .is_some()
+        );
+
+        state.simulation.start_run().add_analysis(analysis);
+
+        assert!(
+            state
+                .ui
+                .results
+                .valid_selected_trace(&state.simulation)
+                .is_none()
+        );
     }
 
     #[test]

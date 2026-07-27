@@ -11,7 +11,7 @@ use crate::state::{BusTap, Junction, SchematicState, Selection, Wire};
 
 use super::{SchematicSymbolContext, SelectionWindow};
 
-pub(super) fn object_is_on_active_sheet(state: &AppState, object_id: u64) -> bool {
+pub(crate) fn object_is_on_active_sheet(state: &AppState, object_id: u64) -> bool {
     let key = state.workspace.active_schematic_reference().key();
     let Some(catalog) = state.workspace.design_management.sheet_catalog(&key) else {
         return true;
@@ -58,7 +58,7 @@ pub(super) fn selection_on_active_sheet(state: &AppState) -> Selection {
     selection_filtered_to_active_sheet(state, &state.schematic.selection)
 }
 
-pub(super) fn selection_filtered_to_active_sheet(
+pub(crate) fn selection_filtered_to_active_sheet(
     state: &AppState,
     source: &Selection,
 ) -> Selection {
@@ -129,46 +129,56 @@ pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
     state.schematic.selection = selection;
 }
 
+#[cfg(test)]
 pub(crate) fn select_all_on_active_sheet(state: &mut AppState) {
+    let filter = state.ui.schematic_selection_filter;
     let mut selection = Selection::default();
-    for object in &state.schematic.components {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_component(object.id);
+    if filter.instances {
+        for object in &state.schematic.components {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_component(object.id);
+            }
         }
     }
-    for object in &state.schematic.wires {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_wire(object.id);
+    if filter.wires {
+        for object in &state.schematic.wires {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_wire(object.id);
+            }
+        }
+        for object in &state.schematic.junctions {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_junction(object.pos);
+            }
+        }
+        for object in &state.schematic.buses {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_bus(object.id);
+            }
+        }
+        for object in &state.schematic.bus_taps {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_bus_tap(object.id);
+            }
         }
     }
-    for object in &state.schematic.junctions {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_junction(object.pos);
+    if filter.labels {
+        for object in &state.schematic.net_labels {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_net_label(object.id);
+            }
         }
     }
-    for object in &state.schematic.buses {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_bus(object.id);
+    if filter.annotations {
+        for object in &state.schematic.design_notes {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_design_note(object.id);
+            }
         }
-    }
-    for object in &state.schematic.bus_taps {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_bus_tap(object.id);
-        }
-    }
-    for object in &state.schematic.net_labels {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_net_label(object.id);
-        }
-    }
-    for object in &state.schematic.design_notes {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_design_note(object.id);
-        }
-    }
-    for object in &state.schematic.documentation_shapes {
-        if object_is_on_active_sheet(state, object.id) {
-            selection.select_documentation_shape(object.id);
+        for object in &state.schematic.documentation_shapes {
+            if object_is_on_active_sheet(state, object.id) {
+                selection.select_documentation_shape(object.id);
+            }
         }
     }
     state.schematic.selection = selection;
@@ -190,6 +200,10 @@ pub(super) fn select_in_rect_on_active_sheet(
     };
     symbol_context.select_in_rect(&mut state.schematic, window, add_to_selection);
     retain_selection_on_active_sheet(state);
+    state
+        .ui
+        .schematic_selection_filter
+        .retain_matching(&mut state.schematic.selection);
     state
         .schematic
         .selection
@@ -389,6 +403,11 @@ pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
             .documentation_shapes
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
+        || state
+            .schematic
+            .probes
+            .iter()
+            .any(|object| object_is_on_active_sheet(state, object.id))
 }
 
 #[cfg(test)]
@@ -427,9 +446,11 @@ mod tests {
                 Some(first),
             )
             .expect("second sheet");
-        catalog
-            .assign_objects(catalog.revision(), second, hidden_ids.iter().copied())
-            .expect("hidden assignments");
+        if !hidden_ids.is_empty() {
+            catalog
+                .assign_objects(catalog.revision(), second, hidden_ids.iter().copied())
+                .expect("hidden assignments");
+        }
         catalog.set_active(first).expect("active sheet");
         state
     }
@@ -468,6 +489,20 @@ mod tests {
         select_all_on_active_sheet(&mut state);
         assert!(state.schematic.selection.has_component(10));
         assert!(!state.schematic.selection.has_component(20));
+    }
+
+    #[test]
+    fn select_all_honors_the_persisted_schematic_selection_filter() {
+        let mut state = two_sheet_state(&[10, 11], &[]);
+        state.schematic.components =
+            vec![Component::new(10, ComponentType::Resistor, Point::origin())];
+        state.schematic.wires = vec![Wire::segment(11, Point::origin(), Point::new(20, 0))];
+        state.ui.schematic_selection_filter.instances = false;
+
+        select_all_on_active_sheet(&mut state);
+
+        assert!(!state.schematic.selection.has_component(10));
+        assert!(state.schematic.selection.has_wire(11));
     }
 
     #[test]

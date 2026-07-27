@@ -38,6 +38,7 @@ use super::component::Component;
 use super::design_note::DesignNote;
 use super::documentation_shape::DocumentationShape;
 use super::net_label::{Junction, NetLabel};
+use super::probe::SchematicProbe;
 use super::wire::{Wire, WireConnection};
 
 // =============================================================================
@@ -58,6 +59,10 @@ pub const MAX_UNDO_STEPS: usize = 100;
 /// View state (zoom, pan, selection) is intentionally excluded.
 #[derive(Debug, Clone)]
 pub struct SchematicSnapshot {
+    /// Project-portable editor and connectivity semantics.
+    pub document_policy: super::document_policy::SchematicDocumentPolicy,
+    /// Canvas spacing derived from the document grid pitch.
+    pub grid_size: i32,
     /// All placed components
     pub components: Vec<Component>,
     /// All wires
@@ -74,6 +79,8 @@ pub struct SchematicSnapshot {
     pub design_notes: Vec<DesignNote>,
     /// Durable non-electrical documentation geometry.
     pub documentation_shapes: Vec<DocumentationShape>,
+    /// Durable schematic probe flags and their exact output bindings.
+    pub probes: Vec<SchematicProbe>,
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
 }
@@ -82,6 +89,8 @@ impl SchematicSnapshot {
     /// Create a snapshot from the current schematic state
     pub fn capture(state: &super::state::SchematicState) -> Self {
         Self {
+            document_policy: state.document_policy,
+            grid_size: state.grid_size,
             components: state.components.clone(),
             wires: state.wires.clone(),
             buses: state.buses.clone(),
@@ -90,6 +99,7 @@ impl SchematicSnapshot {
             net_labels: state.net_labels.clone(),
             design_notes: state.design_notes.clone(),
             documentation_shapes: state.documentation_shapes.clone(),
+            probes: state.probes.clone(),
             connections: state.connections.clone(),
         }
     }
@@ -98,13 +108,17 @@ impl SchematicSnapshot {
     ///
     /// Restores undoable fields without touching view state.
     pub fn apply(&self, state: &mut super::state::SchematicState) {
-        let electrical_changed = self.components != state.components
+        let electrical_changed = self.document_policy != state.document_policy
+            || self.grid_size != state.grid_size
+            || self.components != state.components
             || self.wires != state.wires
             || self.buses != state.buses
             || self.bus_taps != state.bus_taps
             || self.junctions != state.junctions
             || self.net_labels != state.net_labels
             || self.connections != state.connections;
+        state.document_policy = self.document_policy;
+        state.grid_size = self.grid_size;
         state.components = self.components.clone();
         state.wires = self.wires.clone();
         state.buses = self.buses.clone();
@@ -113,6 +127,7 @@ impl SchematicSnapshot {
         state.net_labels = self.net_labels.clone();
         state.design_notes = self.design_notes.clone();
         state.documentation_shapes = self.documentation_shapes.clone();
+        state.probes = self.probes.clone();
         state.connections = self.connections.clone();
 
         if electrical_changed {
@@ -130,7 +145,9 @@ impl SchematicSnapshot {
     ///
     /// Used to prevent creating undo entries when nothing changed.
     pub fn is_equal(&self, other: &Self) -> bool {
-        self.components == other.components
+        self.document_policy == other.document_policy
+            && self.grid_size == other.grid_size
+            && self.components == other.components
             && self.wires == other.wires
             && self.buses == other.buses
             && self.bus_taps == other.bus_taps
@@ -138,6 +155,7 @@ impl SchematicSnapshot {
             && self.net_labels == other.net_labels
             && self.design_notes == other.design_notes
             && self.documentation_shapes == other.documentation_shapes
+            && self.probes == other.probes
             && self.connections == other.connections
     }
 
@@ -146,7 +164,9 @@ impl SchematicSnapshot {
     /// every preview frame, so an allocation-free comparison is essential for
     /// large schematics.
     pub fn is_equal_state(&self, state: &super::state::SchematicState) -> bool {
-        self.components == state.components
+        self.document_policy == state.document_policy
+            && self.grid_size == state.grid_size
+            && self.components == state.components
             && self.wires == state.wires
             && self.buses == state.buses
             && self.bus_taps == state.bus_taps
@@ -154,6 +174,7 @@ impl SchematicSnapshot {
             && self.net_labels == state.net_labels
             && self.design_notes == state.design_notes
             && self.documentation_shapes == state.documentation_shapes
+            && self.probes == state.probes
             && self.connections == state.connections
     }
 }
@@ -186,6 +207,11 @@ struct PendingOperation {
     before_snapshot: SchematicSnapshot,
     /// Description of the operation
     description: String,
+    /// Balanced nested transaction scopes inside the owning operation.
+    ///
+    /// Nested helpers are common in editor code. They must extend the outer
+    /// atomic operation instead of overwriting its before-snapshot.
+    nesting_depth: usize,
 }
 
 // =============================================================================
@@ -257,22 +283,24 @@ impl UndoHistory {
     /// * `before_snapshot` - Current state snapshot
     /// * `description` - Human-readable description of the upcoming operation
     ///
-    /// # Panics
-    /// Panics if called while another operation is pending (missing end_operation)
     pub fn begin_operation(
         &mut self,
         before_snapshot: SchematicSnapshot,
         description: impl Into<String>,
     ) {
-        if self.pending.is_some() {
-            // In a production tool, we'd log a warning and auto-commit
-            // For now, just overwrite (the previous op probably did nothing)
-            log::warn!("begin_operation called while another operation pending - auto-committing");
+        if let Some(pending) = self.pending.as_mut() {
+            pending.nesting_depth = pending.nesting_depth.saturating_add(1);
+            log::debug!(
+                "nested undo operation joined outer transaction {:?}",
+                pending.description
+            );
+            return;
         }
 
         self.pending = Some(PendingOperation {
             before_snapshot,
             description: description.into(),
+            nesting_depth: 0,
         });
     }
 
@@ -287,6 +315,13 @@ impl UndoHistory {
     /// # Returns
     /// `true` if an undo entry was created (state changed), `false` otherwise
     pub fn end_operation(&mut self, after_snapshot: SchematicSnapshot) -> bool {
+        if let Some(pending) = self.pending.as_mut()
+            && pending.nesting_depth > 0
+        {
+            pending.nesting_depth -= 1;
+            return false;
+        }
+
         let pending = match self.pending.take() {
             Some(p) => p,
             None => {
@@ -433,6 +468,8 @@ mod tests {
     /// Snapshot containing `n` distinct resistors (and nothing else).
     fn snapshot_with(n: usize) -> SchematicSnapshot {
         SchematicSnapshot {
+            document_policy: super::super::document_policy::SchematicDocumentPolicy::default(),
+            grid_size: 10,
             components: (0..n)
                 .map(|i| Component::new(i as u64, ComponentType::Resistor, Point::new(i as i32, 0)))
                 .collect(),
@@ -443,6 +480,7 @@ mod tests {
             net_labels: Vec::new(),
             design_notes: Vec::new(),
             documentation_shapes: Vec::new(),
+            probes: Vec::new(),
             connections: Vec::new(),
         }
     }
@@ -571,22 +609,23 @@ mod tests {
     }
 
     #[test]
-    fn double_begin_replaces_pending_snapshot() {
-        // Current behavior: a second begin_operation overwrites the pending
-        // transaction (with a logged warning). The committed entry uses the
-        // second "before" snapshot and only one entry is created.
+    fn nested_begin_joins_the_outer_atomic_transaction() {
+        // A helper can open an undo scope inside an already-atomic caller.
+        // The inner end only closes its nesting level; the outer end commits
+        // one entry from the original before snapshot.
         let mut history = UndoHistory::default();
         history.initialize();
 
         history.begin_operation(snapshot_with(0), "First");
         history.begin_operation(snapshot_with(1), "Second");
+        assert!(!history.end_operation(snapshot_with(2)));
         let created = history.end_operation(snapshot_with(2));
 
         assert!(created);
         assert_eq!(history.undo_count(), 1);
-        assert_eq!(history.undo_description(), Some("Second"));
+        assert_eq!(history.undo_description(), Some("First"));
         let (restored, _) = history.undo(snapshot_with(2)).unwrap();
-        assert!(restored.is_equal(&snapshot_with(1)));
+        assert!(restored.is_equal(&snapshot_with(0)));
     }
 
     #[test]
@@ -721,6 +760,35 @@ mod tests {
     }
 
     #[test]
+    fn project_portable_grid_policy_participates_in_undo_and_redo() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+        let original_policy = state.document_policy;
+        let original_grid_size = state.grid_size;
+
+        assert!(state.with_undo("change schematic grid pitch", |schematic| {
+            schematic.document_policy.grid_pitch =
+                super::super::document_policy::SchematicGridPitch::Metric;
+            schematic.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
+        }));
+        assert_ne!(state.document_policy, original_policy);
+        assert_ne!(state.grid_size, original_grid_size);
+
+        assert!(state.undo());
+        assert_eq!(state.document_policy, original_policy);
+        assert_eq!(state.grid_size, original_grid_size);
+        assert!(state.redo());
+        assert_eq!(
+            state.document_policy.grid_pitch,
+            super::super::document_policy::SchematicGridPitch::Metric
+        );
+        assert_eq!(
+            state.grid_size,
+            super::super::document_policy::SchematicGridPitch::Metric.canvas_grid_size()
+        );
+    }
+
+    #[test]
     fn with_undo_is_skipped_on_read_only_state() {
         let mut state = SchematicState::default();
         state.init_undo_history();
@@ -777,6 +845,25 @@ mod tests {
 
         assert!(state.undo_history.is_initialized());
         assert_eq!(state.undo_history.undo_count(), 1);
+    }
+
+    #[test]
+    fn nested_helpers_extend_one_outer_atomic_undo_transaction() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+
+        state.begin_operation("outer edit");
+        state.add_component(ComponentType::Resistor, Point::new(0, 0));
+        assert!(!state.with_undo("nested helper", |schematic| {
+            schematic.add_component(ComponentType::Capacitor, Point::new(20, 0));
+        }));
+        assert!(state.has_pending_operation());
+        assert!(state.end_operation());
+
+        assert_eq!(state.undo_history.undo_count(), 1);
+        assert_eq!(state.undo_description(), Some("outer edit"));
+        assert!(state.undo());
+        assert!(state.components.is_empty());
     }
 
     #[test]

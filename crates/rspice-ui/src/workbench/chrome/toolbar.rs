@@ -5,7 +5,7 @@ use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, TopBottomPanel, Vec2};
 
 use crate::common::RSpiceApp;
-use crate::state::{Tool, ViewType};
+use crate::state::{SchematicGridPitch, Tool, ViewType, WireRoutingMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
@@ -17,20 +17,24 @@ use super::super::session::SymbolTool;
 use super::super::state::{Drawer, Workspace};
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
-const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon); 5] = [
-    (Command::SelectTool, WorkbenchIcon::Select),
-    (Command::PlaceWire, WorkbenchIcon::Wire),
-    (Command::PlaceBus, WorkbenchIcon::Bus),
-    (Command::PlaceLabel, WorkbenchIcon::Label),
-    (Command::PlaceProbe, WorkbenchIcon::Probe),
+const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 5] = [
+    (Command::SelectTool, WorkbenchIcon::Select, "Select (Esc)"),
+    (Command::PlaceWire, WorkbenchIcon::Wire, "Draw wire"),
+    (Command::PlaceBus, WorkbenchIcon::Bus, "Draw bus"),
+    (Command::PlaceLabel, WorkbenchIcon::Label, "Net label"),
+    (Command::PlaceProbe, WorkbenchIcon::Probe, "Probe signal"),
 ];
 
 /// Authoring tools of the symbol document, in the order the editor's
 /// keyboard shortcuts declare them. A symbol cellview is a design document,
 /// so its tools live in the shared workspace toolbar rather than in a bar
 /// of the editor's own.
-const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 7] = [
-    (Command::SelectTool, WorkbenchIcon::Select, SymbolTool::Select),
+const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 8] = [
+    (
+        Command::SelectTool,
+        WorkbenchIcon::Select,
+        SymbolTool::Select,
+    ),
     (
         Command::SymbolPinTool,
         WorkbenchIcon::Probe,
@@ -39,7 +43,12 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 7] 
     (
         Command::SymbolPolylineTool,
         WorkbenchIcon::Wire,
-        SymbolTool::Polyline,
+        SymbolTool::Line,
+    ),
+    (
+        Command::SymbolRectangleTool,
+        WorkbenchIcon::Grid,
+        SymbolTool::Rectangle,
     ),
     (
         Command::SymbolCircleTool,
@@ -52,11 +61,15 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 7] 
         SymbolTool::Arc,
     ),
     (
-        Command::SymbolArrowTool,
-        WorkbenchIcon::ArrowLeft,
-        SymbolTool::Arrow,
+        Command::SymbolPolygonTool,
+        WorkbenchIcon::Layers,
+        SymbolTool::Polygon,
     ),
-    (Command::SymbolDotTool, WorkbenchIcon::Label, SymbolTool::Dot),
+    (
+        Command::SymbolTextTool,
+        WorkbenchIcon::Label,
+        SymbolTool::Text,
+    ),
 ];
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -322,15 +335,18 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         == super::super::SurfaceId::VisualizationStudio
     {
         visualization_tools(ui, app, layout);
+        workspace_focus_tool(ui, app, layout);
         return;
     }
     if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::ReportAuthoring
     {
         report_authoring_tools(ui, app, layout);
+        workspace_focus_tool(ui, app, layout);
         return;
     }
     if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::ModelEditor {
         model_editor_tools(ui, app, layout);
+        workspace_focus_tool(ui, app, layout);
         return;
     }
     match workspace {
@@ -345,6 +361,26 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Workspace::Models => models_tools(ui, app, layout),
         Workspace::Netlist => netlist_tools(ui, app, layout),
     }
+    workspace_focus_tool(ui, app, layout);
+}
+
+/// The upgraded shell keeps focus mode at the end of every project toolbar,
+/// independent of the active workspace's domain tools.
+fn workspace_focus_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    context_separator(ui, layout);
+    toolbar_icon_command_selected_as(
+        ui,
+        app,
+        Command::ToggleFocusMode,
+        WorkbenchIcon::Focus,
+        app.state.workbench.focus_mode,
+        if app.state.workbench.focus_mode {
+            "Restore workspace layout"
+        } else {
+            "Focus workspace"
+        },
+        layout,
+    );
 }
 
 fn no_project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -378,8 +414,7 @@ fn project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 }
 
 fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let grid = app.state.ui.grid != crate::workbench::GridStyle::Off;
-    for (command, icon) in DESIGN_DIRECT_TOOLBAR_COMMANDS {
+    for (command, icon, label) in DESIGN_DIRECT_TOOLBAR_COMMANDS {
         let selected = match command {
             Command::SelectTool => app.state.schematic.tool == Tool::Select,
             Command::PlaceWire => app.state.schematic.tool == Tool::Wire,
@@ -388,7 +423,7 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             Command::PlaceProbe => app.state.schematic.tool == Tool::Probe,
             _ => false,
         };
-        toolbar_icon_command_selected(ui, app, command, icon, selected, layout);
+        toolbar_icon_command_selected_as(ui, app, command, icon, selected, label, layout);
     }
     context_separator(ui, layout);
     toolbar_icon_command(
@@ -405,7 +440,15 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Mirror,
         layout,
     );
-    toolbar_icon_command(ui, app, Command::Duplicate, WorkbenchIcon::Copy, layout);
+    toolbar_icon_command_selected_as(
+        ui,
+        app,
+        Command::Duplicate,
+        WorkbenchIcon::Copy,
+        false,
+        "Duplicate and place",
+        layout,
+    );
     toolbar_icon_command(ui, app, Command::Delete, WorkbenchIcon::Trash, layout);
     context_separator(ui, layout);
     toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
@@ -414,29 +457,32 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_icon_command(
         ui,
         app,
-        Command::DescendHierarchy,
+        Command::DescendHierarchyDirect,
         WorkbenchIcon::Layers,
         layout,
     );
-    toolbar_icon_command(
+    toolbar_icon_command_selected_as(
         ui,
         app,
         Command::AscendHierarchy,
         WorkbenchIcon::ArrowUp,
+        false,
+        "Ascend to parent sheet · double-click the sheet background also ascends",
         layout,
     );
     context_separator(ui, layout);
     toolbar_icon_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
     toolbar_icon_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
-    toolbar_icon_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
-    toolbar_icon_command_selected(
+    toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::CycleGrid,
-        WorkbenchIcon::Grid,
-        grid,
+        Command::ZoomFit,
+        WorkbenchIcon::ZoomFit,
+        false,
+        "Zoom to fit",
         layout,
     );
+    design_grid_and_snap_menu(ui, app, layout);
     toolbar_text_command(
         ui,
         app,
@@ -445,6 +491,146 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         "Run schematic checks",
         layout,
     );
+}
+
+fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    if !take_projected_tool_slot(ui, layout) {
+        return;
+    }
+    let grid_visible = app.state.ui.grid != crate::workbench::GridStyle::Off;
+    let height = layout.toolbar_control_height;
+    let response = ui.add(egui::Button::selectable(grid_visible, "").min_size(Vec2::splat(height)));
+    if response.clicked() {
+        Command::CycleGrid.execute(app);
+    }
+    response.context_menu(|ui| design_grid_and_snap_configuration(ui, app));
+    let grid_visible = app.state.ui.grid != crate::workbench::GridStyle::Off;
+    let t = Tokens::get(ui.ctx());
+    WorkbenchIcon::Grid.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0)),
+        if grid_visible {
+            t.color.accent
+        } else {
+            t.color.text_dim
+        },
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Grid and snap");
+        node.set_description(
+            "Activate to toggle canvas grid and snapping together. Open the context menu to configure display style, snap targets, spacing, and wire routing.",
+        );
+    });
+    response.on_hover_text(
+        "Toggle grid and snap \u{00b7} right-click to configure display, targets, spacing, and routing",
+    );
+}
+
+fn design_grid_and_snap_configuration(ui: &mut egui::Ui, app: &mut RSpiceApp) {
+    ui.set_min_width(236.0);
+    toolbar_popover_heading(ui, "GRID DISPLAY");
+    for style in crate::workbench::GridStyle::ALL {
+        if toolbar_popover_option(ui, app.state.ui.grid == style, style.label()).clicked() {
+            app.state.ui.set_grid_style(style);
+        }
+    }
+
+    ui.separator();
+    toolbar_popover_heading(ui, "SNAP SPACING");
+    let current_pitch = app.state.schematic.document_policy.grid_pitch;
+    let read_only = app.state.schematic.read_only;
+    for (pitch, label) in [
+        (SchematicGridPitch::Mil50, "50 mil"),
+        (SchematicGridPitch::Mil25, "25 mil"),
+        (SchematicGridPitch::Metric, "Metric"),
+    ] {
+        let response = ui.add_enabled(
+            !read_only,
+            egui::Button::selectable(current_pitch == pitch, label)
+                .min_size(Vec2::new(ui.available_width(), 27.0)),
+        );
+        if response.clicked() && current_pitch != pitch {
+            let changed = app
+                .state
+                .schematic
+                .with_undo("change schematic grid pitch", |doc| {
+                    doc.document_policy.grid_pitch = pitch;
+                    doc.grid_size = pitch.canvas_grid_size();
+                    doc.is_dirty = true;
+                    doc.bump_topology_version();
+                });
+            if changed {
+                app.state.sync_active_schematic_to_workspace();
+            }
+        }
+    }
+    if read_only {
+        ui.weak("Snap spacing is locked for this read-only view.");
+    }
+
+    ui.separator();
+    toolbar_popover_heading(ui, "SNAP TARGETS");
+    let snap = &mut app.state.schematic.snap_engine;
+    ui.checkbox(&mut snap.enabled, "Enable snapping");
+    ui.add_enabled_ui(snap.enabled, |ui| {
+        ui.checkbox(&mut snap.snap_to_terminals, "Terminals");
+        ui.checkbox(&mut snap.snap_to_wire_endpoints, "Wire endpoints");
+        ui.checkbox(&mut snap.snap_to_wire_segments, "Wire segments");
+        ui.checkbox(&mut snap.snap_to_junctions, "Junctions");
+        ui.checkbox(&mut snap.snap_to_grid, "Grid intersections");
+    });
+    app.state.ui.schematic_snap = snap.clone();
+
+    ui.separator();
+    toolbar_popover_heading(ui, "WIRE ROUTING");
+    let current = app.state.schematic.wire_drawing.routing_mode;
+    for (mode, label, selected) in [
+        (
+            WireRoutingMode::HorizontalFirst,
+            "Orthogonal",
+            current.is_orthogonal(),
+        ),
+        (
+            WireRoutingMode::FortyFiveDegree,
+            "45\u{00b0}",
+            current == WireRoutingMode::FortyFiveDegree,
+        ),
+        (
+            WireRoutingMode::Diagonal,
+            "Free",
+            current == WireRoutingMode::Diagonal,
+        ),
+    ] {
+        if toolbar_popover_option(ui, selected, label).clicked() {
+            app.state.schematic.wire_drawing.set_routing_mode(mode);
+            app.state.schematic.bus_drawing.routing_mode = mode;
+            app.state.ui.schematic_routing_mode = mode;
+            app.state.ui.schematic_visibility.wire_routing = match mode {
+                WireRoutingMode::HorizontalFirst | WireRoutingMode::VerticalFirst => {
+                    crate::workbench::SchematicWireRoutingStyle::Orthogonal
+                }
+                WireRoutingMode::FortyFiveDegree => {
+                    crate::workbench::SchematicWireRoutingStyle::FortyFiveDegree
+                }
+                WireRoutingMode::Diagonal => crate::workbench::SchematicWireRoutingStyle::FreeAngle,
+            };
+        }
+    }
+}
+
+fn toolbar_popover_heading(ui: &mut egui::Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(label)
+            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.text_faint),
+    );
+}
+
+fn toolbar_popover_option(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
+    ui.add(
+        egui::Button::selectable(selected, label).min_size(Vec2::new(ui.available_width(), 27.0)),
+    )
 }
 
 /// Toolbar of an open symbol cellview.
@@ -457,20 +643,92 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         toolbar_icon_command_selected(ui, app, command, icon, active == tool, layout);
     }
     context_separator(ui, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::SymbolRotatePin,
+        WorkbenchIcon::Rotate,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::SymbolMirrorPin,
+        WorkbenchIcon::Mirror,
+        layout,
+    );
+    context_separator(ui, layout);
     toolbar_icon_command(ui, app, Command::Undo, WorkbenchIcon::Undo, layout);
     toolbar_icon_command(ui, app, Command::Redo, WorkbenchIcon::Redo, layout);
     context_separator(ui, layout);
     toolbar_icon_command(ui, app, Command::ZoomOut, WorkbenchIcon::ZoomOut, layout);
     toolbar_icon_command(ui, app, Command::ZoomIn, WorkbenchIcon::ZoomIn, layout);
     toolbar_icon_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
+    symbol_toggle(
+        ui,
+        &mut app.state.ui.symbol.show_grid,
+        WorkbenchIcon::Grid,
+        "Show grid",
+        layout,
+    );
+    symbol_toggle(
+        ui,
+        &mut app.state.ui.symbol.snap_to_grid,
+        WorkbenchIcon::Check,
+        "Snap to grid",
+        layout,
+    );
+    symbol_grid_spacing(ui, app, layout);
+    context_separator(ui, layout);
+    symbol_toggle(
+        ui,
+        &mut app.state.ui.symbol.preview_as_placed,
+        WorkbenchIcon::Focus,
+        "Preview as placed on a sheet",
+        layout,
+    );
     toolbar_text_command(
         ui,
         app,
-        Command::RunChecks,
-        WorkbenchIcon::Check,
-        "Run pin checks",
+        Command::SymbolSave,
+        WorkbenchIcon::Save,
+        "Save symbol",
         layout,
     );
+}
+
+fn symbol_toggle(
+    ui: &mut egui::Ui,
+    value: &mut bool,
+    icon: WorkbenchIcon,
+    label: &'static str,
+    layout: LayoutSpec,
+) {
+    if !take_projected_tool_slot(ui, layout) {
+        return;
+    }
+    let response = icon_button(ui, icon, label, *value, toolbar_icon_button_size(layout));
+    if response.clicked() {
+        *value = !*value;
+    }
+}
+
+fn symbol_grid_spacing(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    if !take_projected_tool_slot(ui, layout) {
+        return;
+    }
+    egui::ComboBox::from_id_salt("symbol-editor.grid-spacing")
+        .selected_text(app.state.ui.symbol.grid_spacing.label())
+        .width(72.0)
+        .show_ui(ui, |ui| {
+            for spacing in crate::workbench::SymbolGridSpacing::ALL {
+                ui.selectable_value(
+                    &mut app.state.ui.symbol.grid_spacing,
+                    spacing,
+                    spacing.label(),
+                );
+            }
+        });
 }
 
 fn simulation_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -731,7 +989,33 @@ fn toolbar_icon_command_selected(
         app,
         command,
         layout,
-        ToolbarCommandPresentation::Icon { icon, selected },
+        ToolbarCommandPresentation::Icon {
+            icon,
+            selected,
+            label: None,
+        },
+    );
+}
+
+fn toolbar_icon_command_selected_as(
+    ui: &mut egui::Ui,
+    app: &mut RSpiceApp,
+    command: Command,
+    icon: WorkbenchIcon,
+    selected: bool,
+    label: &'static str,
+    layout: LayoutSpec,
+) {
+    toolbar_command(
+        ui,
+        app,
+        command,
+        layout,
+        ToolbarCommandPresentation::Icon {
+            icon,
+            selected,
+            label: Some(label),
+        },
     );
 }
 
@@ -760,6 +1044,7 @@ enum ToolbarCommandPresentation {
     Icon {
         icon: WorkbenchIcon,
         selected: bool,
+        label: Option<&'static str>,
     },
     Text {
         icon: WorkbenchIcon,
@@ -783,7 +1068,11 @@ fn toolbar_command(
     }
     let spec = command.spec();
     let (icon, base_label, show_label, selected) = match presentation {
-        ToolbarCommandPresentation::Icon { icon, selected } => (icon, spec.label, false, selected),
+        ToolbarCommandPresentation::Icon {
+            icon,
+            selected,
+            label,
+        } => (icon, label.unwrap_or(spec.label), false, selected),
         ToolbarCommandPresentation::Text { icon, label } => {
             (icon, label, layout.toolbar_labels, false)
         }
@@ -878,7 +1167,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         .painter()
         .layout_no_wrap(
             label.clone(),
-            theme::sans(tokens::FS_2, FontWeight::SemiBold),
+            theme::sans(tokens::FS_1, FontWeight::SemiBold),
             t.color.text,
         )
         .size()
@@ -976,8 +1265,8 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 egui::Pos2::new(rect.left() + 30.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 &label,
-                // The mockup run control inherits the 13 px application body type.
-                theme::sans(tokens::FS_2, FontWeight::SemiBold),
+                // The mockup run control inherits the 12 px application body type.
+                theme::sans(tokens::FS_1, FontWeight::SemiBold),
                 ink,
             );
             theme::paint_focus_ring_outset(ui, &response, rect);
@@ -1438,7 +1727,7 @@ mod tests {
     #[test]
     fn desktop_design_toolbar_matches_the_mockup_and_omits_bus_tap() {
         assert_eq!(
-            DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(command, _)| command),
+            DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(command, _, _)| command),
             [
                 Command::SelectTool,
                 Command::PlaceWire,
@@ -1450,7 +1739,21 @@ mod tests {
         assert!(
             !DESIGN_DIRECT_TOOLBAR_COMMANDS
                 .iter()
-                .any(|(command, _)| *command == Command::PlaceBusTap)
+                .any(|(command, _, _)| *command == Command::PlaceBusTap)
+        );
+    }
+
+    #[test]
+    fn schematic_tooltips_use_the_upgraded_mockup_copy() {
+        assert_eq!(
+            DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(_, _, label)| label),
+            [
+                "Select (Esc)",
+                "Draw wire",
+                "Draw bus",
+                "Net label",
+                "Probe signal",
+            ]
         );
     }
 

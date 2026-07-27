@@ -13,6 +13,10 @@ pub(super) struct NetInfo {
     pub(super) is_ground: bool,
     pub(super) connected_components: Vec<String>,
     pub(super) output_drivers: HashSet<String>,
+    pub(super) voltage_source_drivers: HashSet<String>,
+    pub(super) declared_output_drivers: HashSet<String>,
+    pub(super) wire_ids: HashSet<u64>,
+    pub(super) electrical_anchor_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -50,6 +54,10 @@ pub(super) struct NetAccumulator {
     pub(super) has_current_source: bool,
     pub(super) connected_components: HashSet<String>,
     pub(super) output_drivers: HashSet<String>,
+    pub(super) voltage_source_drivers: HashSet<String>,
+    pub(super) declared_output_drivers: HashSet<String>,
+    pub(super) wire_ids: HashSet<u64>,
+    pub(super) electrical_anchor_count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -143,61 +151,61 @@ pub(super) fn segment_intersection_point(
 ) -> Option<PointKey> {
     let (a0, a1) = a;
     let (b0, b1) = b;
-    let a_vertical = a0.x == a1.x;
-    let b_vertical = b0.x == b1.x;
+    let r = (
+        i128::from(a1.x) - i128::from(a0.x),
+        i128::from(a1.y) - i128::from(a0.y),
+    );
+    let s = (
+        i128::from(b1.x) - i128::from(b0.x),
+        i128::from(b1.y) - i128::from(b0.y),
+    );
+    let q_minus_p = (
+        i128::from(b0.x) - i128::from(a0.x),
+        i128::from(b0.y) - i128::from(a0.y),
+    );
+    let cross = |left: (i128, i128), right: (i128, i128)| left.0 * right.1 - left.1 * right.0;
+    let denominator = cross(r, s);
 
-    match (a_vertical, b_vertical) {
-        (true, false) => {
-            let y = b0.y;
-            let x = a0.x;
-            let point = PointKey { x, y };
-            (point_on_segment(point, a0, a1) && point_on_segment(point, b0, b1)).then_some(point)
+    if denominator == 0 {
+        if cross(q_minus_p, r) != 0 {
+            return None;
         }
-        (false, true) => {
-            let y = a0.y;
-            let x = b0.x;
-            let point = PointKey { x, y };
-            (point_on_segment(point, a0, a1) && point_on_segment(point, b0, b1)).then_some(point)
-        }
-        (true, true) => {
-            if a0.x != b0.x {
-                return None;
-            }
-            let a_min_y = a0.y.min(a1.y);
-            let a_max_y = a0.y.max(a1.y);
-            let b_min_y = b0.y.min(b1.y);
-            let b_max_y = b0.y.max(b1.y);
-            let overlap_start = a_min_y.max(b_min_y);
-            let overlap_end = a_max_y.min(b_max_y);
-            if overlap_start <= overlap_end {
-                Some(PointKey {
-                    x: a0.x,
-                    y: overlap_start,
-                })
-            } else {
-                None
-            }
-        }
-        (false, false) => {
-            if a0.y != b0.y {
-                return None;
-            }
-            let a_min_x = a0.x.min(a1.x);
-            let a_max_x = a0.x.max(a1.x);
-            let b_min_x = b0.x.min(b1.x);
-            let b_max_x = b0.x.max(b1.x);
-            let overlap_start = a_min_x.max(b_min_x);
-            let overlap_end = a_max_x.min(b_max_x);
-            if overlap_start <= overlap_end {
-                Some(PointKey {
-                    x: overlap_start,
-                    y: a0.y,
-                })
-            } else {
-                None
-            }
-        }
+        // Collinear overlap: return the first shared authored endpoint in a
+        // deterministic order. The caller only needs one point to union the
+        // two complete segments.
+        let mut shared = [a0, a1, b0, b1]
+            .into_iter()
+            .filter(|point| point_on_segment(*point, a0, a1) && point_on_segment(*point, b0, b1))
+            .collect::<Vec<_>>();
+        shared.sort_unstable_by_key(|point| (point.x, point.y));
+        return shared.into_iter().next();
     }
+
+    let t_numerator = cross(q_minus_p, s);
+    let u_numerator = cross(q_minus_p, r);
+    let within_segment = |numerator: i128| {
+        if denominator > 0 {
+            (0..=denominator).contains(&numerator)
+        } else {
+            (denominator..=0).contains(&numerator)
+        }
+    };
+    if !within_segment(t_numerator) || !within_segment(u_numerator) {
+        return None;
+    }
+
+    // Schematic connectivity lives on the integer design lattice. A visual
+    // crossing between lattice points cannot host a terminal or persisted
+    // junction, so it is deliberately not promoted to an electrical point.
+    let x_numerator = i128::from(a0.x) * denominator + r.0 * t_numerator;
+    let y_numerator = i128::from(a0.y) * denominator + r.1 * t_numerator;
+    if x_numerator % denominator != 0 || y_numerator % denominator != 0 {
+        return None;
+    }
+    Some(PointKey {
+        x: i64::try_from(x_numerator / denominator).ok()?,
+        y: i64::try_from(y_numerator / denominator).ok()?,
+    })
 }
 
 pub(super) fn merge_net_accumulator(
@@ -231,6 +239,16 @@ pub(super) fn merge_net_accumulator(
         }
     }
     entry.output_drivers.extend(acc.output_drivers);
+    entry
+        .voltage_source_drivers
+        .extend(acc.voltage_source_drivers);
+    entry
+        .declared_output_drivers
+        .extend(acc.declared_output_drivers);
+    entry.wire_ids.extend(acc.wire_ids);
+    entry.electrical_anchor_count = entry
+        .electrical_anchor_count
+        .saturating_add(acc.electrical_anchor_count);
 }
 
 pub(super) fn canonical_net_name(
@@ -296,5 +314,44 @@ mod tests {
         let origin = PointKey::from_f64(0.0, 0.0);
 
         assert!(point_on_segment(origin, start, end));
+    }
+
+    #[test]
+    fn segment_intersection_is_exact_for_any_angle_lattice_geometry() {
+        let point = |x, y| PointKey { x, y };
+
+        assert_eq!(
+            segment_intersection_point((point(0, 0), point(40, 40)), (point(0, 40), point(40, 0)),),
+            Some(point(20, 20))
+        );
+        assert_eq!(
+            segment_intersection_point(
+                (point(0, 0), point(30, 20)),
+                (point(15, 10), point(15, 40)),
+            ),
+            Some(point(15, 10)),
+            "endpoint-to-diagonal attachment is retained"
+        );
+        assert_eq!(
+            segment_intersection_point((point(0, 0), point(3, 2)), (point(0, 2), point(3, 0)),),
+            None,
+            "a crossing between lattice points cannot be an authored node"
+        );
+    }
+
+    #[test]
+    fn collinear_any_angle_overlap_returns_a_deterministic_shared_point() {
+        let point = |x, y| PointKey { x, y };
+        assert_eq!(
+            segment_intersection_point(
+                (point(0, 0), point(40, 40)),
+                (point(20, 20), point(60, 60)),
+            ),
+            Some(point(20, 20))
+        );
+        assert_eq!(
+            segment_intersection_point((point(0, 0), point(40, 40)), (point(0, 20), point(40, 60)),),
+            None
+        );
     }
 }

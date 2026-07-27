@@ -12,6 +12,81 @@ use std::path::PathBuf;
 // Component
 // =============================================================================
 
+/// Per-instance label visibility override used by reviewed bulk edits.
+///
+/// `Inherit` delegates to the device-local canvas annotation policy. Explicit
+/// values are durable schematic presentation data and therefore participate
+/// in schematic undo/redo and project serialization.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComponentDisplayMode {
+    #[default]
+    Inherit,
+    NameAndValue,
+    NameOnly,
+    ValueOnly,
+    Hidden,
+}
+
+impl ComponentDisplayMode {
+    pub const ALL_EXPLICIT: [Self; 4] = [
+        Self::NameAndValue,
+        Self::NameOnly,
+        Self::ValueOnly,
+        Self::Hidden,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Inherit => "inherit",
+            Self::NameAndValue => "name and value",
+            Self::NameOnly => "name only",
+            Self::ValueOnly => "value only",
+            Self::Hidden => "hidden",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        let normalized = value.trim().to_ascii_lowercase().replace(['_', '-'], " ");
+        match normalized.as_str() {
+            "inherit" | "inherited" => Some(Self::Inherit),
+            "name and value" | "both" | "full" => Some(Self::NameAndValue),
+            "name only" | "name" => Some(Self::NameOnly),
+            "value only" | "value" => Some(Self::ValueOnly),
+            "hidden" | "hide" | "none" => Some(Self::Hidden),
+            _ => None,
+        }
+    }
+
+    pub const fn show_name(
+        self,
+        inherited: crate::workbench::SchematicParameterLabelVisibility,
+    ) -> bool {
+        match self {
+            Self::Inherit => matches!(
+                inherited,
+                crate::workbench::SchematicParameterLabelVisibility::NamesAndValues
+            ),
+            Self::NameAndValue | Self::NameOnly => true,
+            Self::ValueOnly | Self::Hidden => false,
+        }
+    }
+
+    pub const fn show_value(
+        self,
+        inherited: crate::workbench::SchematicParameterLabelVisibility,
+    ) -> bool {
+        match self {
+            Self::Inherit => !matches!(
+                inherited,
+                crate::workbench::SchematicParameterLabelVisibility::Hidden
+            ),
+            Self::NameAndValue | Self::ValueOnly => true,
+            Self::NameOnly | Self::Hidden => false,
+        }
+    }
+}
+
 /// Library/cell/view binding for a generic hierarchical instance.
 ///
 /// This mirrors commercial LCV instance binding where a placed instance points
@@ -216,6 +291,10 @@ pub struct Component {
     #[serde(default)]
     pub value_label_pos: LabelPosition,
 
+    /// Durable per-instance label visibility override.
+    #[serde(default)]
+    pub display_mode: ComponentDisplayMode,
+
     /// Horizontal mirror (flip left/right)
     ///
     /// When true, the component is mirrored horizontally (about Y-axis).
@@ -258,6 +337,7 @@ impl Component {
             symbol_variant: None,
             name_label_pos: LabelPosition::Auto,
             value_label_pos: LabelPosition::Auto,
+            display_mode: ComponentDisplayMode::Inherit,
             mirror_h: false,
             mirror_v: false,
             library_cell: None,
@@ -624,6 +704,31 @@ impl Component {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn component_display_mode_parses_mockup_values_and_inherits_canvas_policy() {
+        assert_eq!(
+            ComponentDisplayMode::parse("name-and-value"),
+            Some(ComponentDisplayMode::NameAndValue)
+        );
+        assert_eq!(
+            ComponentDisplayMode::parse("value only"),
+            Some(ComponentDisplayMode::ValueOnly)
+        );
+        assert!(ComponentDisplayMode::parse("sometimes").is_none());
+        assert!(
+            !ComponentDisplayMode::Inherit
+                .show_name(crate::workbench::SchematicParameterLabelVisibility::ValuesOnly)
+        );
+        assert!(
+            ComponentDisplayMode::Inherit
+                .show_value(crate::workbench::SchematicParameterLabelVisibility::ValuesOnly)
+        );
+        assert!(
+            !ComponentDisplayMode::Hidden
+                .show_value(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+        );
+    }
     use crate::state::{
         Cell, ComponentType, Library, LibraryManager, PortDirection, PortSpec, SchematicState,
         SymbolDocument, SymbolPin, SymbolResolver, View, ViewType,

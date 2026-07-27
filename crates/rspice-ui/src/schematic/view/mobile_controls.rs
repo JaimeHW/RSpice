@@ -377,6 +377,8 @@ mod tests {
 
         assert!(!app.state.schematic.needs_fit);
         execute_action(&mut app, MobileCanvasAction::Command(Command::ZoomFit));
+        assert_eq!(app.state.schematic.zoom, 1.0);
+        assert_eq!(app.state.schematic.pan, (0.0, 0.0));
         assert!(app.state.schematic.needs_fit);
 
         execute_action(&mut app, MobileCanvasAction::TouchEditGuide);

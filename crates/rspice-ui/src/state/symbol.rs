@@ -9,10 +9,35 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Point, PortDirection, PortSpec, View};
+use super::{Point, PortDirection, PortSpec, SymbolElectricalType, SymbolPinSide, View};
 
 /// Metadata key used by `View::metadata` for the symbol document JSON.
 pub const SYMBOL_DOCUMENT_METADATA_KEY: &str = "rspice.symbol.document.v1";
+/// Metadata key for symbol-editor-only text, attributes and revision history.
+///
+/// These records are kept beside the geometric document so older renderers
+/// can continue to consume `rspice.symbol.document.v1` without silently
+/// discarding the richer authoring contract.
+pub const SYMBOL_EDITOR_METADATA_KEY: &str = "rspice.symbol.editor.v1";
+pub const SYMBOL_EDITOR_METADATA_SCHEMA_VERSION: u16 = 1;
+
+/// Resource and geometry limits for authored symbol metadata.
+///
+/// Symbol documents are embedded in project metadata and may originate from
+/// imported libraries. These limits are deliberately generous for practical
+/// symbols while keeping parsing, tessellation, and bounds calculations
+/// deterministic for malformed or hostile input.
+pub const MAX_SYMBOL_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_SYMBOL_PINS: usize = 16_384;
+pub const MAX_SYMBOL_SHAPES: usize = 100_000;
+pub const MAX_SYMBOL_POINTS: usize = 1_000_000;
+pub const MAX_SYMBOL_PIN_NAME_BYTES: usize = 1_024;
+pub const MAX_SYMBOL_COORDINATE_ABS: i32 = 1_000_000_000;
+pub const MAX_SYMBOL_RADIUS: i32 = 1_000_000_000;
+pub const MAX_SYMBOL_TEXT_OBJECTS: usize = 16_384;
+pub const MAX_SYMBOL_TEXT_BYTES: usize = 16 * 1024;
+pub const MAX_SYMBOL_REVISION_NOTE_BYTES: usize = 4 * 1024;
+pub const MAX_SYMBOL_REVISION_RECORDS: usize = 4_096;
 
 /// Terminal-grid spacing in schematic coordinate units.
 ///
@@ -21,10 +46,22 @@ pub const SYMBOL_DOCUMENT_METADATA_KEY: &str = "rspice.symbol.document.v1";
 pub const SYMBOL_TERMINAL_GRID: i32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SymbolPin {
     pub name: String,
     pub direction: PortDirection,
     pub position: Option<Point>,
+    /// Rich electrical semantics retained by model-bound symbols.
+    ///
+    /// Legacy documents omit this field and derive it from `direction`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electrical_type: Option<SymbolElectricalType>,
+    /// Authored body side. Legacy documents infer it from terminal geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<SymbolPinSide>,
+    /// Distance along the authored body side in symbol coordinates.
+    #[serde(default)]
+    pub offset: i32,
 }
 
 impl SymbolPin {
@@ -33,7 +70,60 @@ impl SymbolPin {
             name: name.into(),
             direction,
             position,
+            electrical_type: Some(default_electrical_type(direction)),
+            side: Some(default_pin_side(direction, position)),
+            offset: pin_offset(default_pin_side(direction, position), position),
         }
+    }
+
+    pub fn with_contract(
+        mut self,
+        electrical_type: SymbolElectricalType,
+        side: SymbolPinSide,
+        offset: i32,
+    ) -> Self {
+        self.electrical_type = Some(electrical_type);
+        self.side = Some(side);
+        self.offset = offset;
+        self
+    }
+
+    pub fn electrical_type(&self) -> SymbolElectricalType {
+        self.electrical_type
+            .unwrap_or_else(|| default_electrical_type(self.direction))
+    }
+
+    pub fn side(&self) -> SymbolPinSide {
+        self.side
+            .unwrap_or_else(|| default_pin_side(self.direction, self.position))
+    }
+
+    pub fn offset(&self) -> i32 {
+        if self.side.is_some() {
+            self.offset
+        } else {
+            pin_offset(self.side(), self.position)
+        }
+    }
+
+    pub fn set_electrical_contract(
+        &mut self,
+        electrical_type: SymbolElectricalType,
+        direction: PortDirection,
+    ) {
+        self.electrical_type = Some(electrical_type);
+        self.direction = direction;
+    }
+
+    pub fn set_side_and_offset(
+        &mut self,
+        side: SymbolPinSide,
+        offset: i32,
+        body_bounds: (Point, Point),
+    ) {
+        self.side = Some(side);
+        self.offset = offset;
+        self.position = Some(pin_position_for_geometry(side, offset, body_bounds));
     }
 
     pub fn terminal_on_grid(&self) -> bool {
@@ -41,6 +131,423 @@ impl SymbolPin {
             point.x % SYMBOL_TERMINAL_GRID == 0 && point.y % SYMBOL_TERMINAL_GRID == 0
         })
     }
+}
+
+fn default_electrical_type(direction: PortDirection) -> SymbolElectricalType {
+    match direction {
+        PortDirection::Supply => SymbolElectricalType::Power,
+        PortDirection::In | PortDirection::Out | PortDirection::InOut => {
+            SymbolElectricalType::Analog
+        }
+    }
+}
+
+fn default_pin_side(direction: PortDirection, position: Option<Point>) -> SymbolPinSide {
+    if let Some(position) = position {
+        if position.x.abs() >= position.y.abs() {
+            if position.x < 0 {
+                return SymbolPinSide::Left;
+            }
+            return SymbolPinSide::Right;
+        }
+        if position.y < 0 {
+            return SymbolPinSide::Top;
+        }
+        return SymbolPinSide::Bottom;
+    }
+    match direction {
+        PortDirection::In => SymbolPinSide::Left,
+        PortDirection::Out | PortDirection::InOut => SymbolPinSide::Right,
+        PortDirection::Supply => SymbolPinSide::Top,
+    }
+}
+
+fn pin_offset(side: SymbolPinSide, position: Option<Point>) -> i32 {
+    let Some(position) = position else {
+        return 0;
+    };
+    match side {
+        SymbolPinSide::Left | SymbolPinSide::Right => position.y,
+        SymbolPinSide::Top | SymbolPinSide::Bottom => position.x,
+    }
+}
+
+fn pin_position_for_geometry(
+    side: SymbolPinSide,
+    offset: i32,
+    (min, max): (Point, Point),
+) -> Point {
+    let stub = SYMBOL_TERMINAL_GRID * 2;
+    match side {
+        SymbolPinSide::Left => Point::new(min.x.saturating_sub(stub), offset),
+        SymbolPinSide::Right => Point::new(max.x.saturating_add(stub), offset),
+        SymbolPinSide::Top => Point::new(offset, min.y.saturating_sub(stub)),
+        SymbolPinSide::Bottom => Point::new(offset, max.y.saturating_add(stub)),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolPinElectricalKind {
+    AnalogInput,
+    AnalogOutput,
+    AnalogBidirectional,
+    Power,
+    Ground,
+    DigitalInput,
+    DigitalOutput,
+}
+
+impl SymbolPinElectricalKind {
+    pub const ALL: [Self; 7] = [
+        Self::AnalogInput,
+        Self::AnalogOutput,
+        Self::AnalogBidirectional,
+        Self::Power,
+        Self::Ground,
+        Self::DigitalInput,
+        Self::DigitalOutput,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AnalogInput => "analog input",
+            Self::AnalogOutput => "analog output",
+            Self::AnalogBidirectional => "analog bidirectional",
+            Self::Power => "power",
+            Self::Ground => "ground",
+            Self::DigitalInput => "digital input",
+            Self::DigitalOutput => "digital output",
+        }
+    }
+
+    pub const fn contract(self) -> (SymbolElectricalType, PortDirection) {
+        match self {
+            Self::AnalogInput => (SymbolElectricalType::Analog, PortDirection::In),
+            Self::AnalogOutput => (SymbolElectricalType::Analog, PortDirection::Out),
+            Self::AnalogBidirectional => (SymbolElectricalType::Analog, PortDirection::InOut),
+            Self::Power => (SymbolElectricalType::Power, PortDirection::Supply),
+            Self::Ground => (SymbolElectricalType::Ground, PortDirection::Supply),
+            Self::DigitalInput => (SymbolElectricalType::Logic, PortDirection::In),
+            Self::DigitalOutput => (SymbolElectricalType::Logic, PortDirection::Out),
+        }
+    }
+
+    pub fn from_pin(pin: &SymbolPin) -> Self {
+        match (pin.electrical_type(), pin.direction) {
+            (SymbolElectricalType::Logic, PortDirection::Out) => Self::DigitalOutput,
+            (SymbolElectricalType::Logic, _) => Self::DigitalInput,
+            (SymbolElectricalType::Power, _) => Self::Power,
+            (SymbolElectricalType::Ground, _) => Self::Ground,
+            (_, PortDirection::In) => Self::AnalogInput,
+            (_, PortDirection::Out) => Self::AnalogOutput,
+            (_, PortDirection::InOut | PortDirection::Supply) => Self::AnalogBidirectional,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolAttributeKind {
+    Reference,
+    Value,
+    Model,
+}
+
+impl SymbolAttributeKind {
+    pub const ALL: [Self; 3] = [Self::Reference, Self::Value, Self::Model];
+
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Reference => "refdes",
+            Self::Value => "value",
+            Self::Model => "model",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolAttribute {
+    pub kind: SymbolAttributeKind,
+    pub default_value: String,
+    pub shown: bool,
+    pub position: Point,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolTextObject {
+    pub id: u64,
+    pub text: String,
+    pub position: Point,
+    pub shown: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SymbolEditorMetadata {
+    pub schema_version: u16,
+    pub attributes: Vec<SymbolAttribute>,
+    pub texts: Vec<SymbolTextObject>,
+    pub next_text_id: u64,
+    pub revision: u64,
+    pub revision_note: String,
+    pub revisions: Vec<SymbolRevisionRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolRevisionRecord {
+    pub revision: u64,
+    pub note: String,
+    pub pin_count: usize,
+    pub shape_count: usize,
+    pub text_count: usize,
+}
+
+impl Default for SymbolEditorMetadata {
+    fn default() -> Self {
+        Self {
+            schema_version: SYMBOL_EDITOR_METADATA_SCHEMA_VERSION,
+            attributes: Vec::new(),
+            texts: Vec::new(),
+            next_text_id: 1,
+            revision: 0,
+            revision_note: String::new(),
+            revisions: Vec::new(),
+        }
+    }
+}
+
+impl SymbolEditorMetadata {
+    pub fn for_document(document: &SymbolDocument) -> Self {
+        Self {
+            attributes: vec![
+                SymbolAttribute {
+                    kind: SymbolAttributeKind::Reference,
+                    default_value: "U?".to_owned(),
+                    shown: true,
+                    position: document.name_anchor,
+                },
+                SymbolAttribute {
+                    kind: SymbolAttributeKind::Value,
+                    default_value: "VALUE".to_owned(),
+                    shown: true,
+                    position: document.value_anchor,
+                },
+                SymbolAttribute {
+                    kind: SymbolAttributeKind::Model,
+                    default_value: String::new(),
+                    shown: false,
+                    position: Point::new(
+                        document.value_anchor.x,
+                        document
+                            .value_anchor
+                            .y
+                            .saturating_add(SYMBOL_TERMINAL_GRID * 2),
+                    ),
+                },
+            ],
+            ..Self::default()
+        }
+    }
+
+    pub fn normalize(&mut self, document: &SymbolDocument) {
+        self.schema_version = SYMBOL_EDITOR_METADATA_SCHEMA_VERSION;
+        for kind in SymbolAttributeKind::ALL {
+            if self
+                .attributes
+                .iter()
+                .all(|attribute| attribute.kind != kind)
+            {
+                let fallback = Self::for_document(document);
+                if let Some(attribute) = fallback
+                    .attributes
+                    .into_iter()
+                    .find(|attribute| attribute.kind == kind)
+                {
+                    self.attributes.push(attribute);
+                }
+            }
+        }
+        self.attributes.sort_by_key(|attribute| attribute.kind);
+        self.attributes.dedup_by_key(|attribute| attribute.kind);
+        let max_id = self.texts.iter().map(|text| text.id).max().unwrap_or(0);
+        self.next_text_id = self.next_text_id.max(max_id.saturating_add(1)).max(1);
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != SYMBOL_EDITOR_METADATA_SCHEMA_VERSION {
+            return Err(format!(
+                "Unsupported symbol editor metadata schema {}",
+                self.schema_version
+            ));
+        }
+        if self.texts.len() > MAX_SYMBOL_TEXT_OBJECTS {
+            return Err(format!(
+                "Invalid symbol editor metadata: {} text objects exceed the limit of {MAX_SYMBOL_TEXT_OBJECTS}",
+                self.texts.len()
+            ));
+        }
+        if self.revision_note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES
+            || self.revision_note.chars().any(char::is_control)
+        {
+            return Err("Invalid symbol revision note".to_owned());
+        }
+        if self.revisions.len() > MAX_SYMBOL_REVISION_RECORDS {
+            return Err(format!(
+                "Invalid symbol editor metadata: {} revision records exceed the limit of {MAX_SYMBOL_REVISION_RECORDS}",
+                self.revisions.len()
+            ));
+        }
+        let mut previous_revision = 0;
+        for record in &self.revisions {
+            validate_symbol_text(&record.note, "revision note")?;
+            if record.note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES {
+                return Err(format!(
+                    "Invalid symbol editor metadata: revision note exceeds the limit of {MAX_SYMBOL_REVISION_NOTE_BYTES} bytes"
+                ));
+            }
+            if record.revision == 0 || record.revision <= previous_revision {
+                return Err(
+                    "Invalid symbol editor metadata: revision history is not strictly ordered"
+                        .to_owned(),
+                );
+            }
+            previous_revision = record.revision;
+        }
+        if previous_revision > self.revision {
+            return Err(
+                "Invalid symbol editor metadata: revision history exceeds the active revision"
+                    .to_owned(),
+            );
+        }
+        let mut kinds = HashSet::new();
+        for attribute in &self.attributes {
+            if !kinds.insert(attribute.kind) {
+                return Err(format!(
+                    "Invalid symbol editor metadata: duplicate '{}' attribute",
+                    attribute.kind.key()
+                ));
+            }
+            validate_symbol_text(&attribute.default_value, "attribute value")?;
+            validate_symbol_point(attribute.position, "attribute position")?;
+        }
+        if kinds.len() != SymbolAttributeKind::ALL.len() {
+            return Err("Invalid symbol editor metadata: the refdes, value and model attributes are required".to_owned());
+        }
+        let mut ids = HashSet::new();
+        for text in &self.texts {
+            if text.id == 0 || !ids.insert(text.id) {
+                return Err(
+                    "Invalid symbol editor metadata: text identities must be unique and nonzero"
+                        .to_owned(),
+                );
+            }
+            validate_symbol_text(&text.text, "symbol text")?;
+            validate_symbol_point(text.position, "symbol text position")?;
+        }
+        Ok(())
+    }
+
+    pub fn load_from_view(view: &View, document: &SymbolDocument) -> Result<Self, String> {
+        let Some(encoded) = view.metadata.get(SYMBOL_EDITOR_METADATA_KEY) else {
+            return Ok(Self::for_document(document));
+        };
+        if encoded.len() > MAX_SYMBOL_DOCUMENT_BYTES {
+            return Err(format!(
+                "Invalid symbol editor metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
+                encoded.len()
+            ));
+        }
+        let mut metadata: Self = serde_json::from_str(encoded)
+            .map_err(|error| format!("Invalid symbol editor metadata: {error}"))?;
+        metadata.normalize(document);
+        metadata.validate()?;
+        Ok(metadata)
+    }
+
+    pub fn encode(&self) -> Result<String, String> {
+        self.validate()?;
+        let encoded = serde_json::to_string(self)
+            .map_err(|error| format!("Could not serialize symbol editor metadata: {error}"))?;
+        if encoded.len() > MAX_SYMBOL_DOCUMENT_BYTES {
+            return Err(format!(
+                "Could not serialize symbol editor metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
+                encoded.len()
+            ));
+        }
+        Ok(encoded)
+    }
+
+    pub fn attribute(&self, kind: SymbolAttributeKind) -> Option<&SymbolAttribute> {
+        self.attributes
+            .iter()
+            .find(|attribute| attribute.kind == kind)
+    }
+
+    pub fn attribute_mut(&mut self, kind: SymbolAttributeKind) -> Option<&mut SymbolAttribute> {
+        self.attributes
+            .iter_mut()
+            .find(|attribute| attribute.kind == kind)
+    }
+
+    pub fn allocate_text(&mut self, text: impl Into<String>, position: Point) -> u64 {
+        let id = self.next_text_id.max(1);
+        self.next_text_id = id.saturating_add(1).max(1);
+        self.texts.push(SymbolTextObject {
+            id,
+            text: text.into(),
+            position,
+            shown: true,
+        });
+        id
+    }
+
+    pub fn publish_revision(
+        &mut self,
+        document: &SymbolDocument,
+        revision_note: &str,
+    ) -> Result<u64, String> {
+        let note = revision_note.trim();
+        if note.is_empty() {
+            return Err("A revision note is required.".to_owned());
+        }
+        if note.len() > MAX_SYMBOL_REVISION_NOTE_BYTES {
+            return Err(format!(
+                "The revision note exceeds the limit of {MAX_SYMBOL_REVISION_NOTE_BYTES} bytes."
+            ));
+        }
+        validate_symbol_text(note, "revision note")?;
+        if self.revisions.len() >= MAX_SYMBOL_REVISION_RECORDS {
+            return Err(format!(
+                "The symbol revision history reached its limit of {MAX_SYMBOL_REVISION_RECORDS} records."
+            ));
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| "The symbol revision counter is exhausted.".to_owned())?;
+        self.revision = revision;
+        self.revision_note = note.to_owned();
+        self.revisions.push(SymbolRevisionRecord {
+            revision,
+            note: note.to_owned(),
+            pin_count: document.pins.len(),
+            shape_count: document.body.len(),
+            text_count: self.texts.len(),
+        });
+        Ok(revision)
+    }
+}
+
+fn validate_symbol_text(value: &str, label: &str) -> Result<(), String> {
+    if value.len() > MAX_SYMBOL_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(format!(
+            "Invalid symbol editor metadata: {label} is invalid or too long"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,12 +586,12 @@ impl SymbolShape {
         self.map_points(|point| Point::new(-point.y, point.x));
         match self {
             SymbolShape::Arc { start_degrees, .. } => {
-                *start_degrees += 90;
+                *start_degrees = (*start_degrees as i64 + 90).rem_euclid(360) as i32;
             }
             SymbolShape::Arrow {
                 rotation_quarters, ..
             } => {
-                *rotation_quarters += 1;
+                *rotation_quarters = (*rotation_quarters as i64 + 1).rem_euclid(4) as i32;
             }
             _ => {}
         }
@@ -98,7 +605,8 @@ impl SymbolShape {
                 sweep_degrees,
                 ..
             } => {
-                *start_degrees = 180 - *start_degrees - *sweep_degrees;
+                *start_degrees = (180_i64 - *start_degrees as i64 - *sweep_degrees as i64)
+                    .rem_euclid(360) as i32;
             }
             SymbolShape::Arrow {
                 rotation_quarters, ..
@@ -117,7 +625,8 @@ impl SymbolShape {
                 sweep_degrees,
                 ..
             } => {
-                *start_degrees = -*start_degrees - *sweep_degrees;
+                *start_degrees =
+                    (-(*start_degrees as i64) - *sweep_degrees as i64).rem_euclid(360) as i32;
             }
             SymbolShape::Arrow {
                 rotation_quarters, ..
@@ -148,12 +657,14 @@ impl SymbolShape {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SymbolLabelAnchors {
     pub name: Point,
     pub value: Point,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SymbolDocument {
     pub pins: Vec<SymbolPin>,
     pub body: Vec<SymbolShape>,
@@ -233,15 +744,147 @@ impl SymbolDocument {
         let Some(raw) = view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) else {
             return Ok(Self::default());
         };
-        serde_json::from_str(raw).map_err(|err| format!("Invalid symbol metadata: {err}"))
+        if raw.len() > MAX_SYMBOL_DOCUMENT_BYTES {
+            return Err(format!(
+                "Invalid symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
+                raw.len()
+            ));
+        }
+        let document: Self =
+            serde_json::from_str(raw).map_err(|err| format!("Invalid symbol metadata: {err}"))?;
+        document.validate()?;
+        Ok(document)
     }
 
     pub fn store_in_view(&self, view: &mut View) -> Result<(), String> {
+        self.validate()?;
         let raw = serde_json::to_string(self)
             .map_err(|err| format!("Could not serialize symbol metadata: {err}"))?;
+        if raw.len() > MAX_SYMBOL_DOCUMENT_BYTES {
+            return Err(format!(
+                "Could not serialize symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
+                raw.len()
+            ));
+        }
         view.metadata
             .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), raw);
         view.modified = true;
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.pins.len() > MAX_SYMBOL_PINS {
+            return Err(format!(
+                "Invalid symbol metadata: {} pins exceed the limit of {MAX_SYMBOL_PINS}",
+                self.pins.len()
+            ));
+        }
+        if self.body.len() > MAX_SYMBOL_SHAPES {
+            return Err(format!(
+                "Invalid symbol metadata: {} shapes exceed the limit of {MAX_SYMBOL_SHAPES}",
+                self.body.len()
+            ));
+        }
+
+        validate_symbol_point(self.origin, "origin")?;
+        validate_symbol_point(self.name_anchor, "name label anchor")?;
+        validate_symbol_point(self.value_anchor, "value label anchor")?;
+
+        let mut pin_names = HashSet::with_capacity(self.pins.len());
+        for (index, pin) in self.pins.iter().enumerate() {
+            let name = pin.name.trim();
+            if name.is_empty() {
+                return Err(format!(
+                    "Invalid symbol metadata: pin {} has an empty name",
+                    index + 1
+                ));
+            }
+            if pin.name.len() > MAX_SYMBOL_PIN_NAME_BYTES {
+                return Err(format!(
+                    "Invalid symbol metadata: pin '{}' has a {}-byte name; the limit is {MAX_SYMBOL_PIN_NAME_BYTES}",
+                    name,
+                    pin.name.len()
+                ));
+            }
+            if name != pin.name {
+                return Err(format!(
+                    "Invalid symbol metadata: pin '{}' contains leading or trailing whitespace",
+                    pin.name
+                ));
+            }
+            if name.chars().any(char::is_control) {
+                return Err(format!(
+                    "Invalid symbol metadata: pin '{name}' contains a control character"
+                ));
+            }
+            if !pin_names.insert(name.to_ascii_lowercase()) {
+                return Err(format!(
+                    "Invalid symbol metadata: duplicate pin name '{name}'"
+                ));
+            }
+            if let Some(position) = pin.position {
+                validate_symbol_point(position, &format!("pin '{name}' terminal"))?;
+            }
+            if pin.offset().unsigned_abs() > MAX_SYMBOL_COORDINATE_ABS as u32 {
+                return Err(format!(
+                    "Invalid symbol metadata: pin '{name}' offset is outside the supported range"
+                ));
+            }
+        }
+
+        let mut total_points = 0_usize;
+        for (index, shape) in self.body.iter().enumerate() {
+            let ordinal = index + 1;
+            match shape {
+                SymbolShape::Polyline { points, .. } => {
+                    if points.len() < 2 {
+                        return Err(format!(
+                            "Invalid symbol metadata: polyline {ordinal} must contain at least two points"
+                        ));
+                    }
+                    total_points = total_points.checked_add(points.len()).ok_or_else(|| {
+                        "Invalid symbol metadata: symbol point count overflowed".to_owned()
+                    })?;
+                    if total_points > MAX_SYMBOL_POINTS {
+                        return Err(format!(
+                            "Invalid symbol metadata: {total_points} polyline points exceed the limit of {MAX_SYMBOL_POINTS}"
+                        ));
+                    }
+                    for (point_index, point) in points.iter().copied().enumerate() {
+                        validate_symbol_point(
+                            point,
+                            &format!("polyline {ordinal} point {}", point_index + 1),
+                        )?;
+                    }
+                }
+                SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+                    validate_symbol_point(*center, &format!("round shape {ordinal} center"))?;
+                    validate_symbol_radius(*center, *radius, ordinal)?;
+                }
+                SymbolShape::Arc {
+                    center,
+                    radius,
+                    start_degrees,
+                    sweep_degrees,
+                } => {
+                    validate_symbol_point(*center, &format!("arc {ordinal} center"))?;
+                    validate_symbol_radius(*center, *radius, ordinal)?;
+                    if !(-360..=360).contains(sweep_degrees) || *sweep_degrees == 0 {
+                        return Err(format!(
+                            "Invalid symbol metadata: arc {ordinal} sweep must be between -360 and 360 degrees and nonzero"
+                        ));
+                    }
+                    if start_degrees.unsigned_abs() > 360_000 {
+                        return Err(format!(
+                            "Invalid symbol metadata: arc {ordinal} start angle is outside the supported range"
+                        ));
+                    }
+                }
+                SymbolShape::Arrow { tip, .. } => {
+                    validate_symbol_point(*tip, &format!("arrow {ordinal} tip"))?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -341,6 +984,105 @@ impl SymbolDocument {
             value: self.value_anchor,
         }
     }
+
+    /// Body-only bounds used for side/offset pin placement.
+    ///
+    /// Pins, attributes and the editing origin are intentionally excluded:
+    /// moving one terminal must never recursively expand the body it is
+    /// anchored to.
+    pub fn body_bounds(&self) -> (Point, Point) {
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for shape in &self.body {
+            match shape {
+                SymbolShape::Polyline { points, .. } => {
+                    for point in points {
+                        xs.push(point.x);
+                        ys.push(point.y);
+                    }
+                }
+                SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+                    xs.extend([
+                        center.x.saturating_sub(*radius),
+                        center.x.saturating_add(*radius),
+                    ]);
+                    ys.extend([
+                        center.y.saturating_sub(*radius),
+                        center.y.saturating_add(*radius),
+                    ]);
+                }
+                SymbolShape::Arc { center, radius, .. } => {
+                    xs.extend([
+                        center.x.saturating_sub(*radius),
+                        center.x.saturating_add(*radius),
+                    ]);
+                    ys.extend([
+                        center.y.saturating_sub(*radius),
+                        center.y.saturating_add(*radius),
+                    ]);
+                }
+                SymbolShape::Arrow { tip, .. } => {
+                    xs.extend([
+                        tip.x.saturating_sub(SYMBOL_TERMINAL_GRID),
+                        tip.x.saturating_add(SYMBOL_TERMINAL_GRID),
+                    ]);
+                    ys.extend([
+                        tip.y.saturating_sub(SYMBOL_TERMINAL_GRID),
+                        tip.y.saturating_add(SYMBOL_TERMINAL_GRID),
+                    ]);
+                }
+            }
+        }
+        if xs.is_empty() {
+            return (
+                Point::new(-SYMBOL_TERMINAL_GRID * 4, -SYMBOL_TERMINAL_GRID * 4),
+                Point::new(SYMBOL_TERMINAL_GRID * 4, SYMBOL_TERMINAL_GRID * 4),
+            );
+        }
+        (
+            Point::new(
+                xs.iter().min().copied().unwrap_or(-40),
+                ys.iter().min().copied().unwrap_or(-40),
+            ),
+            Point::new(
+                xs.iter().max().copied().unwrap_or(40),
+                ys.iter().max().copied().unwrap_or(40),
+            ),
+        )
+    }
+}
+
+fn validate_symbol_point(point: Point, label: &str) -> Result<(), String> {
+    if point.x.unsigned_abs() > MAX_SYMBOL_COORDINATE_ABS as u32
+        || point.y.unsigned_abs() > MAX_SYMBOL_COORDINATE_ABS as u32
+    {
+        return Err(format!(
+            "Invalid symbol metadata: {label} ({}, {}) exceeds the supported coordinate range",
+            point.x, point.y
+        ));
+    }
+    Ok(())
+}
+
+fn validate_symbol_radius(center: Point, radius: i32, ordinal: usize) -> Result<(), String> {
+    if !(1..=MAX_SYMBOL_RADIUS).contains(&radius) {
+        return Err(format!(
+            "Invalid symbol metadata: round shape {ordinal} radius must be between 1 and {MAX_SYMBOL_RADIUS}"
+        ));
+    }
+    let limit = i64::from(MAX_SYMBOL_COORDINATE_ABS);
+    let radius = i64::from(radius);
+    let x = i64::from(center.x);
+    let y = i64::from(center.y);
+    if [x - radius, x + radius, y - radius, y + radius]
+        .into_iter()
+        .any(|coordinate| coordinate.unsigned_abs() > limit as u64)
+    {
+        return Err(format!(
+            "Invalid symbol metadata: round shape {ordinal} bounds exceed the coordinate representation"
+        ));
+    }
+    Ok(())
 }
 
 fn port_name_set(ports: &[PortSpec]) -> HashSet<String> {
@@ -348,4 +1090,181 @@ fn port_name_set(ports: &[PortSpec]) -> HashSet<String> {
         .iter()
         .map(|port| port.name.to_ascii_lowercase())
         .collect()
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use crate::state::ViewType;
+
+    #[test]
+    fn loading_rejects_arc_sweeps_that_would_expand_unbounded_tessellation() {
+        let mut view = View::new("symbol", ViewType::Symbol);
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Arc {
+                center: Point::origin(),
+                radius: 10,
+                start_degrees: 0,
+                sweep_degrees: i32::MAX,
+            }],
+            ..SymbolDocument::default()
+        };
+        view.metadata.insert(
+            SYMBOL_DOCUMENT_METADATA_KEY.to_owned(),
+            serde_json::to_string(&document).expect("test document serializes"),
+        );
+
+        let error = SymbolDocument::load_from_view(&view)
+            .expect_err("an unbounded imported arc sweep must fail closed");
+
+        assert!(error.contains("sweep must be between -360 and 360"));
+    }
+
+    #[test]
+    fn storing_invalid_geometry_is_atomic() {
+        let mut view = View::new("symbol", ViewType::Symbol);
+        view.metadata.insert(
+            SYMBOL_DOCUMENT_METADATA_KEY.to_owned(),
+            "retained".to_owned(),
+        );
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Polyline {
+                points: vec![Point::origin()],
+                closed: false,
+            }],
+            ..SymbolDocument::default()
+        };
+
+        let error = document
+            .store_in_view(&mut view)
+            .expect_err("an incomplete stored polyline must fail validation");
+
+        assert!(error.contains("at least two points"));
+        assert_eq!(
+            view.metadata
+                .get(SYMBOL_DOCUMENT_METADATA_KEY)
+                .map(String::as_str),
+            Some("retained")
+        );
+        assert!(!view.modified);
+    }
+
+    #[test]
+    fn pin_identity_is_unique_case_insensitively() {
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::origin())),
+                SymbolPin::new("out", PortDirection::Out, Some(Point::new(10, 0))),
+            ],
+            ..SymbolDocument::default()
+        };
+
+        let error = document
+            .validate()
+            .expect_err("ambiguous symbol pin identity must be rejected");
+
+        assert!(error.contains("duplicate pin name 'out'"));
+    }
+
+    #[test]
+    fn round_shape_bounds_must_fit_the_coordinate_representation() {
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Circle {
+                center: Point::new(MAX_SYMBOL_COORDINATE_ABS, 0),
+                radius: MAX_SYMBOL_RADIUS,
+            }],
+            ..SymbolDocument::default()
+        };
+
+        let error = document
+            .validate()
+            .expect_err("overflowing round-shape bounds must be rejected");
+
+        assert!(error.contains("bounds exceed the coordinate representation"));
+    }
+
+    #[test]
+    fn repeated_shape_transforms_keep_angles_in_canonical_ranges() {
+        let mut arc = SymbolShape::Arc {
+            center: Point::origin(),
+            radius: 10,
+            start_degrees: 0,
+            sweep_degrees: 180,
+        };
+        let mut arrow = SymbolShape::Arrow {
+            tip: Point::origin(),
+            rotation_quarters: 0,
+        };
+
+        for _ in 0..10_000 {
+            arc.rotate_cw();
+            arrow.rotate_cw();
+        }
+
+        let SymbolShape::Arc { start_degrees, .. } = arc else {
+            unreachable!();
+        };
+        let SymbolShape::Arrow {
+            rotation_quarters, ..
+        } = arrow
+        else {
+            unreachable!();
+        };
+        assert!((0..360).contains(&start_degrees));
+        assert!((0..4).contains(&rotation_quarters));
+    }
+
+    #[test]
+    fn pin_side_and_offset_produce_canonical_terminal_geometry() {
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Polyline {
+                points: vec![
+                    Point::new(-20, -20),
+                    Point::new(20, -20),
+                    Point::new(20, 20),
+                    Point::new(-20, 20),
+                ],
+                closed: true,
+            }],
+            ..SymbolDocument::default()
+        };
+        let mut pin = SymbolPin::new("OUT", PortDirection::Out, None);
+
+        pin.set_side_and_offset(SymbolPinSide::Right, 10, document.body_bounds());
+
+        assert_eq!(pin.side(), SymbolPinSide::Right);
+        assert_eq!(pin.offset(), 10);
+        assert_eq!(pin.position, Some(Point::new(40, 10)));
+        assert!(pin.terminal_on_grid());
+    }
+
+    #[test]
+    fn editor_metadata_round_trips_text_attributes_and_revision_history() {
+        let document = SymbolDocument::default();
+        let mut metadata = SymbolEditorMetadata::for_document(&document);
+        let text_id = metadata.allocate_text("gain stage", Point::new(10, -20));
+        let revision = metadata
+            .publish_revision(&document, "Initial reviewed symbol")
+            .expect("revision publishes");
+        let mut view = View::new("symbol", ViewType::Symbol);
+        view.metadata.insert(
+            SYMBOL_EDITOR_METADATA_KEY.to_owned(),
+            metadata.encode().expect("editor metadata encodes"),
+        );
+
+        let restored =
+            SymbolEditorMetadata::load_from_view(&view, &document).expect("sidecar round trips");
+
+        assert_eq!(revision, 1);
+        assert_eq!(restored.revision, 1);
+        assert_eq!(restored.revisions.len(), 1);
+        assert_eq!(restored.texts[0].id, text_id);
+        assert_eq!(
+            restored
+                .attribute(SymbolAttributeKind::Reference)
+                .expect("reference attribute retained")
+                .default_value,
+            "U?"
+        );
+    }
 }

@@ -34,17 +34,12 @@ pub struct CrossProbeMapping {
     pub source_topology_version: Option<u64>,
 }
 
-/// Does `p` lie on the orthogonal segment `(a, b)` (inclusive)?
+/// Does `p` lie exactly on segment `(a, b)` (inclusive)?
+///
+/// Cross-probing shares the schematic wire primitive's canonical integer
+/// geometry so diagonal and extreme-coordinate conductors resolve exactly.
 fn on_segment(p: Point, a: Point, b: Point) -> bool {
-    if a.y == b.y && p.y == a.y {
-        let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
-        return p.x >= x0 && p.x <= x1;
-    }
-    if a.x == b.x && p.x == a.x {
-        let (y0, y1) = (a.y.min(b.y), a.y.max(b.y));
-        return p.y >= y0 && p.y <= y1;
-    }
-    false
+    crate::state::WireSegment::new(a, b).contains_point(p)
 }
 
 impl CrossProbeMapping {
@@ -161,5 +156,30 @@ mod tests {
         );
         assert!(mapping.net_at_in(&other, 7, point).is_none());
         assert!(mapping.net_at_in(&source, 8, point).is_none());
+    }
+
+    #[test]
+    fn diagonal_segment_interior_resolves_with_canonical_wire_geometry() {
+        let source = crate::state::CellViewRef::new("user", "top", "schematic");
+        let start = Point::new(-30, -20);
+        let end = Point::new(30, 40);
+        let interior = Point::new(0, 10);
+        let mut mapping = CrossProbeMapping::new();
+        mapping.update(
+            source.clone(),
+            HashMap::new(),
+            HashMap::from([("DIAGONAL".to_owned(), vec![start, end])]),
+            HashMap::from([("DIAGONAL".to_owned(), vec![(start, end)])]),
+            11,
+        );
+
+        assert_eq!(
+            mapping.net_at_in(&source, 11, interior).map(String::as_str),
+            Some("DIAGONAL")
+        );
+        assert!(
+            mapping.net_at_in(&source, 11, Point::new(0, 11)).is_none(),
+            "a nearby off-segment point must not alias the diagonal conductor"
+        );
     }
 }

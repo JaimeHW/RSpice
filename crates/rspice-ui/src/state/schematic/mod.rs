@@ -30,6 +30,7 @@ mod net_highlight;
 mod net_label;
 mod point;
 mod port;
+mod probe;
 mod replacement;
 mod rotation;
 mod selection;
@@ -55,16 +56,22 @@ pub use bus::{
 };
 pub use canvas_cache::CanvasCache;
 pub use clipboard::ClipboardData;
-pub use component::{Component, LibraryCellInstance, validate_library_netlist_template};
+pub use component::{
+    Component, ComponentDisplayMode, LibraryCellInstance, validate_library_netlist_template,
+};
 pub use component_type::ComponentType;
 pub use design_note::{
     DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, DesignNotePlacementAuthority,
-    DesignNoteRenderContext, DesignReviewRecord, DesignReviewState, MAX_DESIGN_NOTE_TEXT_LEN,
+    DesignNoteRenderContext, DesignReviewEvidence, DesignReviewMessage, DesignReviewMutation,
+    DesignReviewRecord, DesignReviewState, MAX_DESIGN_NOTE_TEXT_LEN, MAX_DESIGN_REVIEW_EVIDENCE,
+    MAX_DESIGN_REVIEW_EVIDENCE_IDENTITY_LEN, MAX_DESIGN_REVIEW_EVIDENCE_LABEL_LEN,
+    MAX_DESIGN_REVIEW_IDENTITY_LEN, MAX_DESIGN_REVIEW_MESSAGE_LEN, MAX_DESIGN_REVIEW_MESSAGES,
     PendingDesignNotePlacement, RequirementTarget,
 };
 pub use document_policy::{
     NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
-    SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,
+    SchematicGridPitch, SchematicPageOrientation, SchematicPageSize, SelectionCrossingPolicy,
+    WireJunctionPolicy,
 };
 pub(crate) use documentation_shape::clamped_documentation_shape_translation;
 pub use documentation_shape::{
@@ -86,7 +93,7 @@ pub use port::{
     PendingPortPlacement, PortContract, PortDirection, PortDirectionType, PortDiscipline,
     PortPlacementAuthority, PortPlacementError, PortSignalType, PortSpec,
 };
-pub(crate) use replacement::parse_replacement_parameters_strict;
+pub use probe::{MAX_SCHEMATIC_PROBE_REFERENCE_LEN, SchematicProbe};
 pub use replacement::{
     SchematicReplacementAuthority, SchematicReplacementCompatibility, SchematicReplacementError,
     SchematicReplacementImpact, SchematicReplacementMappingStatus, SchematicReplacementParameter,
@@ -96,8 +103,15 @@ pub use replacement::{
     SchematicReplacementTerminalMapping, SchematicReplacementValuePolicy,
     SchematicReplacementWireEdit,
 };
+pub(crate) use replacement::{
+    format_replacement_parameters, parse_replacement_parameters_strict,
+    valid_replacement_parameter_name,
+};
 pub use rotation::Rotation;
-pub use selection::{JunctionSelection, Selection, WireSegmentSelection, WireVertexSelection};
+pub use selection::{
+    JunctionSelection, SchematicSelectionFilter, Selection, WireSegmentSelection,
+    WireVertexSelection,
+};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::{
     MoveSelectionError, MoveSelectionMode, SchematicState, StretchOrthogonalPolicy,
@@ -110,8 +124,8 @@ pub use validated_revision::{
     AdvisoryDisposition, AdvisoryDispositionKind, MAX_ADVISORY_DISPOSITION_REASON_LEN,
     MAX_VALIDATED_REVISION_IDENTITY_LEN, MAX_VALIDATED_REVISION_NOTE_LEN,
     ValidatedRevisionDependency, ValidatedRevisionError, ValidatedRevisionJournal,
-    ValidatedRevisionRequest, ValidatedSchematicRevision, ValidatedSchematicRevisionId,
-    ValidationFindingCounts,
+    ValidatedRevisionObjectDelta, ValidatedRevisionRequest, ValidatedRevisionSemanticDelta,
+    ValidatedSchematicRevision, ValidatedSchematicRevisionId, ValidationFindingCounts,
 };
 pub use wire::{
     // Connection types

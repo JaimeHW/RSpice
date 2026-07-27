@@ -1,11 +1,13 @@
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::common::app::AppState;
-use crate::state::{Bus, BusTap, Component, ComponentType, Point, PortDirection, Wire};
+use crate::state::{
+    Bus, BusTap, Component, ComponentType, Point, PortDirection, SchematicProbe, Wire,
+};
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::SchematicSymbolContext;
-use super::resolved_symbol_render::draw_resolved_symbol;
+use super::resolved_symbol_render::draw_resolved_symbol_with_visibility;
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_cccs_symbol, draw_ccvs_symbol, draw_diode_symbol,
     draw_ground_symbol, draw_inductor_symbol, draw_isource_symbol, draw_nmos_symbol,
@@ -22,6 +24,11 @@ const DEFAULT_BUS_STROKE_WIDTH: f32 = 1.2;
 const SELECTED_BUS_STROKE_WIDTH: f32 = 1.6;
 const DEFAULT_BUS_TAP_STROKE_WIDTH: f32 = 2.0;
 const SELECTED_BUS_TAP_STROKE_WIDTH: f32 = 2.4;
+const PROBE_RADIUS: f32 = 9.0;
+const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
+const PROBE_LABEL_X_OFFSET: i32 = 13;
+const PROBE_LABEL_ASCENT: i32 = 22;
+const PROBE_LABEL_ADVANCE: i32 = 7;
 type PortMarkerSegment = ((f32, f32), (f32, f32));
 
 const _: [(); 1] = [(); (DEFAULT_WIRE_STROKE_WIDTH.to_bits() == 1.1f32.to_bits()) as usize];
@@ -34,15 +41,15 @@ pub(super) fn draw_wire(
     viewport: &Viewport,
     wire: &Wire,
     selected: bool,
-    highlighted: bool, // Net highlighting - orange color for connected net
+    highlight_color: Option<egui::Color32>,
 ) {
     // Wire is a polyline - draw all segments
     // Priority: selected > highlighted > default
     let palette = crate::ui::tokens::active_palette();
     let (color, width) = if selected {
         (palette.accent, SELECTED_WIRE_STROKE_WIDTH) // Accent for selected
-    } else if highlighted {
-        (palette.warn, HIGHLIGHTED_WIRE_STROKE_WIDTH) // Net highlight (cross-probe)
+    } else if let Some(color) = highlight_color {
+        (color, HIGHLIGHTED_WIRE_STROKE_WIDTH)
     } else {
         (palette.wire, DEFAULT_WIRE_STROKE_WIDTH)
     };
@@ -138,6 +145,74 @@ pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap,
             palette.net_label
         },
     );
+}
+
+/// Paint a retained probe flag using the upgraded mockup's circle, crosshair,
+/// and exact source/reference label. The marker scales with the drawing so it
+/// stays anchored to its authored schematic coordinate at every zoom.
+pub(super) fn draw_probe(painter: &Painter, viewport: &Viewport, probe: &SchematicProbe) {
+    let palette = crate::ui::tokens::active_palette();
+    let center = viewport.schematic_to_screen(probe.position);
+    let radius = PROBE_RADIUS * viewport.zoom;
+    let half_span = PROBE_CROSSHAIR_HALF_SPAN * viewport.zoom;
+    painter.circle_filled(center, radius, palette.canvas_bg);
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(2.0 * viewport.zoom, palette.accent),
+    );
+    painter.line_segment(
+        [
+            center - Vec2::new(half_span, 0.0),
+            center + Vec2::new(half_span, 0.0),
+        ],
+        Stroke::new(2.0 * viewport.zoom, palette.accent),
+    );
+    painter.line_segment(
+        [
+            center - Vec2::new(0.0, half_span),
+            center + Vec2::new(0.0, half_span),
+        ],
+        Stroke::new(2.0 * viewport.zoom, palette.accent),
+    );
+    painter.text(
+        center + Vec2::new(13.0, -9.0) * viewport.zoom,
+        egui::Align2::LEFT_BOTTOM,
+        &probe.reference,
+        crate::ui::theme::mono(
+            crate::ui::tokens::FS_0 * viewport.zoom,
+            crate::ui::theme::FontWeight::Medium,
+        ),
+        palette.accent,
+    );
+}
+
+/// Conservative zoom-independent authored bounds for fitting and culling.
+/// The label font scales with the schematic, so its screen-space advance maps
+/// to a stable world-space estimate just like component labels.
+pub(super) fn probe_world_bounds(probe: &SchematicProbe) -> (Point, Point) {
+    let label_characters = i32::try_from(probe.reference.chars().count()).unwrap_or(i32::MAX);
+    let label_width = label_characters.saturating_mul(PROBE_LABEL_ADVANCE);
+    (
+        Point::new(
+            probe
+                .position
+                .x
+                .saturating_sub(PROBE_CROSSHAIR_HALF_SPAN as i32),
+            probe.position.y.saturating_sub(PROBE_LABEL_ASCENT),
+        ),
+        Point::new(
+            probe
+                .position
+                .x
+                .saturating_add(PROBE_LABEL_X_OFFSET)
+                .saturating_add(label_width),
+            probe
+                .position
+                .y
+                .saturating_add(PROBE_CROSSHAIR_HALF_SPAN as i32),
+        ),
+    )
 }
 
 fn offset_polyline(points: &[Pos2], offset: f32) -> Vec<Pos2> {
@@ -241,6 +316,7 @@ pub(super) fn draw_component(
     selected: bool,
     symbol_library: Option<&SymbolLibrary>,
     symbol_context: &SchematicSymbolContext,
+    parameter_labels: crate::workbench::SchematicParameterLabelVisibility,
 ) {
     // Component uses `pos` not `position`, `kind` not `component_type`
     let pos = viewport.schematic_to_screen(component.pos);
@@ -362,7 +438,15 @@ pub(super) fn draw_component(
             }
             ComponentType::CellInstance => {
                 if let Some(symbol) = resolved_cell_symbol {
-                    draw_resolved_symbol(painter, pos, scale, component, symbol, stroke);
+                    draw_resolved_symbol_with_visibility(
+                        painter,
+                        pos,
+                        scale,
+                        component,
+                        symbol,
+                        stroke,
+                        parameter_labels,
+                    );
                 } else {
                     draw_cell_instance_symbol(painter, pos, scale, component, stroke);
                 }
@@ -378,8 +462,10 @@ pub(super) fn draw_component(
     // Smart label placement based on component type, rotation, and dimensions
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
     // terminals and component body, with name/value on opposite sides
-    if resolved_cell_symbol.is_none() {
-        draw_component_labels(painter, pos, scale, component);
+    if resolved_cell_symbol.is_none()
+        && parameter_labels != crate::workbench::SchematicParameterLabelVisibility::Hidden
+    {
+        draw_component_labels(painter, pos, scale, component, parameter_labels);
     }
 }
 
@@ -682,7 +768,13 @@ fn quantize_font_size(size: f32) -> f32 {
     ((size * 4.0).round() * 0.25).max(1.0)
 }
 
-fn draw_component_labels(painter: &Painter, pos: Pos2, scale: f32, component: &Component) {
+fn draw_component_labels(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    component: &Component,
+    visibility: crate::workbench::SchematicParameterLabelVisibility,
+) {
     // Skip labels for Ground (too small, clutters schematic)
     if matches!(component.kind, crate::state::ComponentType::Ground) {
         return;
@@ -704,7 +796,7 @@ fn draw_component_labels(painter: &Painter, pos: Pos2, scale: f32, component: &C
     let palette = crate::ui::tokens::active_palette();
 
     // Draw component name (reference designator)
-    if !component.name.is_empty() {
+    if component.display_mode.show_name(visibility) && !component.name.is_empty() {
         painter.text(
             layout.name_pos,
             layout.name_align,
@@ -716,7 +808,7 @@ fn draw_component_labels(painter: &Painter, pos: Pos2, scale: f32, component: &C
 
     // Draw component value
     let value_text = super::super::source_labels::component_value_label_cached(component);
-    if !value_text.is_empty() {
+    if component.display_mode.show_value(visibility) && !value_text.is_empty() {
         painter.text(
             layout.value_pos,
             layout.value_align,
@@ -804,7 +896,13 @@ mod tests {
         };
         let wire = Wire::segment(1, Point::new(0, 0), Point::new(10, 0));
 
-        draw_wire(&painter, &viewport, &wire, selected, highlighted);
+        draw_wire(
+            &painter,
+            &viewport,
+            &wire,
+            selected,
+            highlighted.then_some(crate::ui::tokens::active_palette().warn),
+        );
 
         let mut widths = Vec::new();
         painter.for_each_shape(|shape| {
@@ -824,6 +922,22 @@ mod tests {
         assert!((wire_stroke_width(false, false, zoom) - 2.2).abs() < f32::EPSILON);
         assert!((wire_stroke_width(true, false, zoom) - 4.0).abs() < f32::EPSILON);
         assert!((wire_stroke_width(false, true, zoom) - 4.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn retained_probe_bounds_include_crosshair_and_reference_label() {
+        let probe =
+            SchematicProbe::new(8, Point::new(100, 50), "V(OUT)", Some("V(OUT)".to_owned()))
+                .unwrap();
+        let (min, max) = probe_world_bounds(&probe);
+
+        assert!(min.x < probe.position.x);
+        assert!(min.y < probe.position.y);
+        assert!(max.y > probe.position.y);
+        assert!(
+            max.x > probe.position.x + PROBE_LABEL_X_OFFSET,
+            "fit and culling bounds must retain the complete reference label"
+        );
     }
 
     #[test]

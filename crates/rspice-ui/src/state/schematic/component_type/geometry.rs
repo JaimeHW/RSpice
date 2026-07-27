@@ -165,9 +165,7 @@ impl ComponentType {
                 ("c-", Point { x: 20, y: 10 }),
             ],
             // (28, 40): vertical two-pin port like a source.
-            ComponentType::RfPort => {
-                &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })]
-            }
+            ComponentType::RfPort => &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })],
             // (40, 40): hw 20, hh/2 10
             ComponentType::Vcvs
             | ComponentType::Vccs

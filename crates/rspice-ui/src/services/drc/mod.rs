@@ -16,7 +16,9 @@ pub use self::extraction::{
     run_drc_check_with_config, run_drc_check_with_hierarchy,
     run_drc_check_with_hierarchy_and_config,
 };
-pub use self::input::{ComponentInfo, JunctionInfo, NetLabelInfo, PinInfo, WireInfo};
+pub use self::input::{
+    ComponentInfo, JunctionInfo, NetLabelInfo, ParameterRangeIssue, PinInfo, WireInfo,
+};
 pub use self::types::{
     DrcLocation, DrcResult, DrcSeverity, DrcSummary, DrcViolation, DrcViolationType,
 };

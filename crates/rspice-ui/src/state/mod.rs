@@ -4,6 +4,7 @@
 //! Core data structures that are shared across multiple modules.
 
 mod configuration_set;
+mod connectivity_contract;
 mod design_management;
 pub mod library_browser;
 mod model_bound_symbol;
@@ -23,6 +24,16 @@ pub use configuration_set::{
     ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog, ConfigurationSetDefinition,
     ConfigurationSetError, ConfigurationSetId, ConfigurationSetLineage, ConfigurationSetOverride,
     UnresolvedBindingPolicy,
+};
+pub use connectivity_contract::{
+    BundleDirection, BundleDiscipline, BundleExpansionPolicy, BundleIndexOrderPolicy,
+    BundleWidthMismatchPolicy, CONNECTIVITY_CONTRACT_SCHEMA_VERSION, ConnectivityAliasGroup,
+    ConnectivityContract, ConnectivityPolicy, DialectAliasCatalog, GlobalAliasComparisonPolicy,
+    GlobalNetPromotionPolicy, LocalGlobalShadowingPolicy, MAX_CONNECTIVITY_ALIAS_GROUPS,
+    MAX_CONNECTIVITY_ALIASES_PER_GROUP, MAX_CONNECTIVITY_NAME_BYTES,
+    MAX_NAMED_BUNDLE_CATALOG_MEMBERS, MAX_NAMED_BUNDLE_MEMBERS, MAX_NAMED_SIGNAL_BUNDLES,
+    MAX_QUALIFIED_NET_BYTES, NamedSignalBundle, NamedSignalBundleMember, QualifiedNetReference,
+    TechnologyGlobalNetCatalog,
 };
 pub use design_management::*;
 pub use library_browser::{
@@ -81,8 +92,11 @@ pub use simulation::{
     ac_bode_summary_for_selection, ac_bode_summary_for_source_instance,
 };
 pub use symbol::{
-    PinFinding, PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_TERMINAL_GRID,
-    SymbolDocument, SymbolLabelAnchors, SymbolPin, SymbolShape,
+    MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFinding,
+    PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY,
+    SYMBOL_EDITOR_METADATA_SCHEMA_VERSION, SYMBOL_TERMINAL_GRID, SymbolAttribute,
+    SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolLabelAnchors, SymbolPin,
+    SymbolPinElectricalKind, SymbolShape, SymbolTextObject,
 };
 pub use symbol_resolver::{
     ResolvedCellSymbol, ResolvedSymbolIssue, ResolvedSymbolIssueKind, ResolvedSymbolPin,

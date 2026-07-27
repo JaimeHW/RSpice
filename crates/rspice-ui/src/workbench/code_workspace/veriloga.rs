@@ -84,22 +84,13 @@ impl SelectedVerilogASource {
 pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
     let (owner, selected_module) = if app.state.workspace.active_view_type() == ViewType::VerilogA {
         let reference = app.state.workspace.active_view.clone();
-        let module = app
-            .state
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .and_then(|view| view.metadata.get("veriloga.module"))
-            .map(|module| module.trim())
-            .filter(|module| !module.is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "{} has no selected Verilog-A module contract.",
-                    reference.display_path()
-                )
-            })?
-            .to_owned();
+        let module = crate::state::workspace::project_veriloga_binding_for_view(
+            &app.state.workspace,
+            &app.state.library_manager,
+            &reference,
+        )?
+        .selected_module()
+        .to_owned();
         (ProjectSourceOwner::cell_view(reference), Some(module))
     } else {
         let selected_module = app

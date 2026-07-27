@@ -3,7 +3,7 @@
 mod design;
 mod symbol;
 
-use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::common::RSpiceApp;
 use crate::state::{CellViewRef, ViewType};
@@ -12,16 +12,19 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::code_workspace::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 
+use super::super::commands::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
 };
-use super::super::commands::Command;
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 const SIGNAL_ROW_HEIGHT: f32 = 30.0;
 const TOUCH_TARGET_HEIGHT: f32 = 44.0;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
+const SCHEMATIC_NAV_ROW_HEIGHT: f32 = 24.0;
+const SCHEMATIC_NAV_LABEL_SIZE: f32 = tokens::FS_1;
+const SCHEMATIC_NAV_META_SIZE: f32 = 10.0;
 // Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
 // run-set values remain visually contained beside the analysis-stack divider.
 const NAV_PROPERTY_PADDING_X: f32 = 10.0;
@@ -181,7 +184,7 @@ fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_HEADER_H),
         egui::Sense::hover(),
     );
@@ -199,13 +202,38 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         Workspace::Models => "Library browser",
         Workspace::Netlist => "Netlist outline",
     };
-    ui.painter().text(
-        egui::pos2(rect.left() + 11.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        title.to_ascii_uppercase(),
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text,
-    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(title);
+        node.set_level(2);
+    });
+    if app.state.workbench.workspace == Workspace::Design {
+        let job = egui::text::LayoutJob::single_section(
+            title.to_ascii_uppercase(),
+            egui::TextFormat {
+                font_id: theme::sans(tokens::FS_2, FontWeight::SemiBold),
+                color: t.color.text,
+                extra_letter_spacing: 0.065 * tokens::FS_2,
+                ..Default::default()
+            },
+        );
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        ui.painter().galley(
+            egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y * 0.5),
+            galley,
+            t.color.text,
+        );
+    } else {
+        ui.painter().text(
+            egui::pos2(rect.left() + 11.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            title.to_ascii_uppercase(),
+            theme::sans(tokens::FS_0, FontWeight::SemiBold),
+            t.color.text,
+        );
+    }
 }
 
 fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) {
@@ -245,7 +273,7 @@ pub(super) fn panel_search(
             egui::TextEdit::singleline(query)
                 .id_salt(id)
                 .hint_text(placeholder)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                 .margin(egui::Margin {
                     left: 29,
                     right: 8,
@@ -253,6 +281,10 @@ pub(super) fn panel_search(
                     bottom: 5,
                 }),
         );
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label(placeholder);
+            node.set_description("Filter the current navigator contents");
+        });
         WorkbenchIcon::Search.paint(
             ui.painter(),
             egui::Rect::from_center_size(
@@ -2224,7 +2256,17 @@ pub(super) fn nav_row(
     selected: bool,
     meta: Option<&str>,
 ) -> bool {
-    nav_row_indented(ui, icon, label, selected, meta, 0)
+    nav_row_response(ui, icon, label, selected, meta).clicked()
+}
+
+pub(super) fn nav_row_response(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+) -> Response {
+    nav_row_indented_response(ui, icon, label, selected, meta, 0)
 }
 
 pub(super) fn nav_row_indented(
@@ -2235,18 +2277,74 @@ pub(super) fn nav_row_indented(
     meta: Option<&str>,
     level: usize,
 ) -> bool {
-    nav_row_indented_styled(ui, icon, label, selected, meta, level, false)
+    nav_row_indented_response(ui, icon, label, selected, meta, level).clicked()
 }
 
-pub(super) fn nav_row_indented_mono(
+pub(super) fn nav_row_indented_response(
     ui: &mut Ui,
     icon: WorkbenchIcon,
     label: &str,
     selected: bool,
     meta: Option<&str>,
     level: usize,
-) -> bool {
-    nav_row_indented_styled(ui, icon, label, selected, meta, level, true)
+) -> Response {
+    nav_row_indented_styled(ui, icon, label, selected, meta, level, false)
+}
+
+pub(super) fn schematic_nav_row_indented_response(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+    mono: bool,
+    expanded: bool,
+    child_guide: bool,
+) -> Response {
+    nav_row_indented_styled_with_metrics(
+        ui,
+        icon,
+        label,
+        selected,
+        meta,
+        level,
+        mono,
+        SCHEMATIC_NAV_ROW_HEIGHT,
+        SCHEMATIC_NAV_LABEL_SIZE,
+        SCHEMATIC_NAV_META_SIZE,
+        expanded,
+        child_guide,
+        egui::Sense::click(),
+    )
+}
+
+pub(super) fn schematic_nav_row_indented_drag_response(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+    mono: bool,
+    expanded: bool,
+    child_guide: bool,
+) -> Response {
+    nav_row_indented_styled_with_metrics(
+        ui,
+        icon,
+        label,
+        selected,
+        meta,
+        level,
+        mono,
+        SCHEMATIC_NAV_ROW_HEIGHT,
+        SCHEMATIC_NAV_LABEL_SIZE,
+        SCHEMATIC_NAV_META_SIZE,
+        expanded,
+        child_guide,
+        egui::Sense::click_and_drag(),
+    )
 }
 
 fn nav_row_indented_styled(
@@ -2257,13 +2355,43 @@ fn nav_row_indented_styled(
     meta: Option<&str>,
     level: usize,
     mono: bool,
-) -> bool {
+) -> Response {
     let t = Tokens::get(ui.ctx());
-    let height = t.metrics.row_h;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
+    nav_row_indented_styled_with_metrics(
+        ui,
+        icon,
+        label,
+        selected,
+        meta,
+        level,
+        mono,
+        t.metrics.row_h,
+        tokens::FS_0,
+        tokens::FS_0,
+        false,
+        false,
         egui::Sense::click(),
-    );
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn nav_row_indented_styled_with_metrics(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+    mono: bool,
+    height: f32,
+    label_size: f32,
+    meta_size: f32,
+    expanded: bool,
+    child_guide: bool,
+    sense: egui::Sense,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -2293,11 +2421,46 @@ fn nav_row_indented_styled(
             t.color.accent,
         );
     }
-    let indent = 14.0 * level as f32;
+    let schematic_metrics = (height - SCHEMATIC_NAV_ROW_HEIGHT).abs() <= f32::EPSILON
+        && (label_size - SCHEMATIC_NAV_LABEL_SIZE).abs() <= f32::EPSILON;
+    let child_offset = if child_guide { 19.0 } else { 0.0 };
+    if child_guide {
+        ui.painter().vline(
+            rect.left() + 19.0,
+            rect.y_range(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
+    // `.nav-children` owns its 19 px hierarchy offset; its rows reset their
+    // own padding to the root-row contract instead of accumulating levels.
+    let indent = if child_guide {
+        0.0
+    } else {
+        14.0 * level as f32
+    };
+    if expanded {
+        WorkbenchIcon::ChevronDown.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(
+                    rect.left()
+                        + child_offset
+                        + if schematic_metrics { 14.0 } else { 12.0 }
+                        + indent,
+                    rect.center().y,
+                ),
+                egui::vec2(9.0, 9.0),
+            ),
+            t.color.text_faint,
+        );
+    }
     icon.paint(
         ui.painter(),
         egui::Rect::from_center_size(
-            egui::pos2(rect.left() + 31.0 + indent, rect.center().y),
+            egui::pos2(
+                rect.left() + child_offset + if schematic_metrics { 33.5 } else { 31.0 } + indent,
+                rect.center().y,
+            ),
             egui::vec2(15.0, 15.0),
         ),
         if selected {
@@ -2310,13 +2473,14 @@ fn nav_row_indented_styled(
         ui.painter()
             .layout_no_wrap(
                 meta.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
+                theme::mono(meta_size, FontWeight::Regular),
                 t.color.text_faint,
             )
             .size()
             .x
     });
-    let label_left = rect.left() + 45.0 + indent;
+    let label_left =
+        rect.left() + child_offset + if schematic_metrics { 47.0 } else { 45.0 } + indent;
     let label_right = if meta.is_some() {
         rect.right() - 14.0 - meta_width
     } else {
@@ -2332,9 +2496,9 @@ fn nav_row_indented_styled(
             egui::Align2::LEFT_CENTER,
             label,
             if mono {
-                theme::mono(tokens::FS_0, FontWeight::Regular)
+                theme::mono(label_size, FontWeight::Regular)
             } else {
-                theme::sans(tokens::FS_0, FontWeight::Regular)
+                theme::sans(label_size, FontWeight::Regular)
             },
             if selected {
                 t.color.text
@@ -2347,12 +2511,12 @@ fn nav_row_indented_styled(
             egui::pos2(rect.right() - 8.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             meta,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
+            theme::mono(meta_size, FontWeight::Regular),
             t.color.text_faint,
         );
     }
     theme::paint_focus_ring(ui, &response, rect);
-    response.clicked()
+    response
 }
 
 fn muted(ui: &mut Ui, text: &str) {
@@ -2396,8 +2560,9 @@ mod tests {
         NETLIST_OUTLINE_ICON_GAP, NETLIST_OUTLINE_PADDING_X, NETLIST_OUTLINE_ROW_HEIGHT,
         NETLIST_OUTLINE_TOUCH_ROW_HEIGHT, NetlistNavigatorProjection, NetlistNavigatorRowKind,
         PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT, active_mc_sample_trail,
-        flow_row_geometry, panel_search_field_width, responsive_result_control_height,
-        verification_coverage, verification_flow_label, verification_navigator_requires_scroll,
+        flow_row_geometry, header, panel_search, panel_search_field_width,
+        responsive_result_control_height, verification_coverage, verification_flow_label,
+        verification_navigator_requires_scroll,
     };
     use crate::common::RSpiceApp;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -2405,7 +2570,7 @@ mod tests {
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
     };
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
-    use crate::workbench::state::VerificationPage;
+    use crate::workbench::state::{VerificationPage, Workspace};
 
     fn result(trail: Vec<bool>) -> YieldResult {
         let pass_count = trail.iter().filter(|passes| **passes).count();
@@ -2428,6 +2593,47 @@ mod tests {
         assert_eq!(NAV_PROPERTY_PADDING_X, 10.0);
         assert_eq!(EMPTY_HINT_PADDING_X, 12);
         assert_eq!(EMPTY_HINT_PADDING_Y, 20);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn navigator_heading_and_search_expose_explicit_accesskit_names() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Design);
+        let mut query = String::new();
+        let mut focus_pending = false;
+
+        let nodes = ctx
+            .run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    header(ui, &mut app);
+                    panel_search(
+                        ui,
+                        &mut query,
+                        "navigator-accessibility-test",
+                        "Find instance, net or port",
+                        &mut focus_pending,
+                    );
+                });
+            })
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Heading
+                && node.label() == Some("Design navigator")
+                && node.level() == Some(2)
+        }));
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::TextInput
+                && node.label() == Some("Find instance, net or port")
+        }));
     }
 
     #[test]
@@ -2660,5 +2866,12 @@ mod tests {
             responsive_result_control_height(SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT),
             TOUCH_TARGET_HEIGHT
         );
+    }
+
+    #[test]
+    fn schematic_navigator_uses_the_upgraded_compact_tree_metrics() {
+        assert_eq!(super::SCHEMATIC_NAV_ROW_HEIGHT, 24.0);
+        assert_eq!(super::SCHEMATIC_NAV_LABEL_SIZE, 12.0);
+        assert_eq!(super::SCHEMATIC_NAV_META_SIZE, 10.0);
     }
 }

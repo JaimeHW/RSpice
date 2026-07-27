@@ -147,6 +147,15 @@ impl SurfaceNavigation {
         self.current
     }
 
+    /// Project a route while another native viewport is rendered.
+    ///
+    /// This is deliberately free of history, recent-task, and browser effects:
+    /// immediate viewports share one `RSpiceApp`, and switching the render
+    /// projection must not masquerade as user navigation.
+    pub(crate) fn project_transient(&mut self, route: SurfaceRoute) {
+        self.current = route;
+    }
+
     #[must_use]
     pub fn back_entries(&self) -> &[SurfaceRoute] {
         &self.back

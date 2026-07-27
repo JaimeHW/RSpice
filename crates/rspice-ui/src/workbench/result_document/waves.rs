@@ -34,7 +34,7 @@ use crate::workbench::{
 use super::strip::{LegendChip, StripHeader};
 use super::{
     DerivedSeries, ExprEditor, ExprSeries, ExprTrace, MarkerKind, ResultMarker, ResultsState,
-    WaveformSeriesResult, waveform_color, well_hint,
+    SelectedResultTrace, WaveformSeriesResult, waveform_color, well_hint,
 };
 
 /// How a trace's Y values are interpreted.
@@ -1232,6 +1232,17 @@ const fn display_decimation(policy: LargeDatasetDisplay) -> DisplayDecimation {
 
 /// Render the strip stack.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    show_with_pane_chrome(ui, state, true);
+}
+
+/// Render the same retained waveform strips inside the compact split-results
+/// pane. Trace selection and swatch visibility remain fully interactive, while
+/// the pane-only maximize/close/fit and expression controls are omitted.
+pub fn show_compact(ui: &mut Ui, state: &mut AppState) {
+    show_with_pane_chrome(ui, state, false);
+}
+
+fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     let t = Tokens::get(ui.ctx());
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
@@ -1285,6 +1296,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut toggle_expr: Option<(usize, usize)> = None;
     let mut remove_expr: Option<(usize, usize)> = None;
     let mut open_editor: Option<usize> = None;
+    let mut select_trace: Option<SelectedResultTrace> = None;
+    let active_dataset_id = state
+        .simulation
+        .active_run()
+        .map(|run| run.dataset_id.clone());
 
     let avail = ui.available_rect_before_wrap();
     let n = visible.len();
@@ -1354,14 +1370,51 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             .ui
                             .results
                             .strip_is_zoomed(super::ResultViewer::Waves, model.analysis_index);
+                        let selected_legend = state
+                            .ui
+                            .results
+                            .valid_selected_trace(&state.simulation)
+                            .and_then(|selected| {
+                                (selected.analysis_index == model.analysis_index).then(|| {
+                                    model.traces.iter().take(model.signal_trace_count).position(
+                                        |trace| {
+                                            trace.waveform_index == selected.waveform_index
+                                                && trace.source_waveform_name
+                                                    == selected.source_name
+                                        },
+                                    )
+                                })
+                            })
+                            .flatten();
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
                             .maximized(maximized)
-                            .closable(!maximized && n > 1)
+                            .closable(pane_chrome && !maximized && n > 1)
                             .zoomed(zoomed)
-                            .expr_action(true)
+                            .expr_action(pane_chrome)
                             .removable_from(model.signal_trace_count)
+                            .selected_legend(selected_legend)
+                            .pane_actions(pane_chrome)
                             .show(ui);
                         if let Some(chip_index) = header.legend_clicked {
+                            if chip_index < model.signal_trace_count {
+                                if let (Some(trace), Some(dataset_id)) =
+                                    (model.traces.get(chip_index), active_dataset_id.clone())
+                                {
+                                    select_trace = Some(SelectedResultTrace {
+                                        dataset_id,
+                                        analysis_index: model.analysis_index,
+                                        waveform_index: trace.waveform_index,
+                                        source_name: trace.source_waveform_name.clone(),
+                                    });
+                                }
+                            } else {
+                                toggle_expr = Some((
+                                    model.analysis_index,
+                                    chip_index - model.signal_trace_count,
+                                ));
+                            }
+                        }
+                        if let Some(chip_index) = header.legend_visibility_clicked {
                             if chip_index < model.signal_trace_count {
                                 if let Some(trace) = model.traces.get(chip_index) {
                                     if let Some(key) = trace.family_visibility_key {
@@ -1419,6 +1472,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
     if let Some(key) = toggle_family_trace {
         state.ui.results.toggle_family_trace_visibility(key);
+    }
+    if let Some(selected) = select_trace {
+        state.ui.results.selected_trace = Some(selected);
     }
     let results = &mut state.ui.results;
     if let Some(idx) = toggle_maximize {
@@ -2172,8 +2228,7 @@ fn show_strip_plot(
         if ordinal > 0 {
             let (seam, _) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-            ui.painter()
-                .rect_filled(seam, 0.0, t.color.canvas_grid);
+            ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
         }
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), pane_height),
@@ -2359,9 +2414,9 @@ fn show_unit_pane(
         }
         // A marker belongs to the pane that owns its trace's unit; the
         // other panes are a different scale and would misplace it.
-        let anchored = pane_traces.iter().find(|(_, trace)| {
-            !trace.overlay && anchor_key(model, trace) == marker.anchor
-        });
+        let anchored = pane_traces
+            .iter()
+            .find(|(_, trace)| !trace.overlay && anchor_key(model, trace) == marker.anchor);
         let Some((index, trace)) = anchored else {
             continue;
         };
@@ -3620,21 +3675,9 @@ mod tests {
     fn fitting_a_strip_fits_every_pane_of_it() {
         let mut state = AppState::default();
         let viewer = super::super::ResultViewer::Waves;
-        state
-            .ui
-            .results
-            .plot_view_pane_mut(viewer, 0, 0)
-            .y = Some((0.0, 1.0));
-        state
-            .ui
-            .results
-            .plot_view_pane_mut(viewer, 0, 1)
-            .y = Some((0.0, 2.0));
-        state
-            .ui
-            .results
-            .plot_view_pane_mut(viewer, 1, 0)
-            .y = Some((0.0, 3.0));
+        state.ui.results.plot_view_pane_mut(viewer, 0, 0).y = Some((0.0, 1.0));
+        state.ui.results.plot_view_pane_mut(viewer, 0, 1).y = Some((0.0, 2.0));
+        state.ui.results.plot_view_pane_mut(viewer, 1, 0).y = Some((0.0, 3.0));
         assert!(state.ui.results.strip_is_zoomed(viewer, 0));
 
         state.ui.results.reset_plot_view(viewer, 0);

@@ -371,10 +371,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 2);
                 let (explicit_model, _) = Self::extract_model_override(component);
                 let model = self.get_memristor_model(component, explicit_model.as_deref());
-                Some(format!(
-                    "YMEMRISTOR {} {} {}",
-                    instance_name, nodes, model
-                ))
+                Some(format!("YMEMRISTOR {} {} {}", instance_name, nodes, model))
             }
 
             // RF port: P name n+ n- PORT=k Z0=r [DC v] [AC mag]. With no

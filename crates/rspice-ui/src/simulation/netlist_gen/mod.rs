@@ -299,6 +299,9 @@ pub struct NetTerminal {
 pub struct DesignNet {
     /// SPICE name ("0", a label/port name, or autonamed `netN`).
     pub name: String,
+    /// `true` when the name comes from an authored label, interface port, or
+    /// ground symbol rather than the netlister's isolated-node fallback.
+    pub authored_name: bool,
     /// Electrical class of the conductor.
     pub class: NetClass,
     /// Component terminals on this net, in document order.
@@ -392,6 +395,7 @@ fn collect_design_nets(
         .iter()
         .map(|net| {
             let name = net.spice_name();
+            let authored_name = net.label.is_some();
             let port = ports.get(&name.to_ascii_lowercase()).copied();
             let class = if ground_net == Some(net.id) || name == "0" {
                 NetClass::Ground
@@ -403,6 +407,7 @@ fn collect_design_nets(
                 NetClass::Signal
             };
             DesignNet {
+                authored_name,
                 class,
                 port,
                 terminals: terminals.remove(&net.id).unwrap_or_default(),
@@ -418,11 +423,16 @@ fn collect_design_nets(
             .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
     };
     nets.sort_by(|a, b| {
-        (!a.is_port(), autonamed(&a.name), a.name.to_ascii_lowercase()).cmp(&(
-            !b.is_port(),
-            autonamed(&b.name),
-            b.name.to_ascii_lowercase(),
-        ))
+        (
+            !a.is_port(),
+            autonamed(&a.name),
+            a.name.to_ascii_lowercase(),
+        )
+            .cmp(&(
+                !b.is_port(),
+                autonamed(&b.name),
+                b.name.to_ascii_lowercase(),
+            ))
     });
     nets
 }
@@ -774,10 +784,12 @@ fn chrono_lite_timestamp() -> String {
 mod tests {
     use super::*;
     use crate::state::{
-        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, CellViewRef, DesignNote,
-        DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Library,
-        LibraryCellInstance, LibraryManager, NetLabel, PortDirection, PortSpec, SymbolDocument,
-        SymbolPin, View, ViewType,
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, CellViewRef,
+        ConnectivityAliasGroup, ConnectivityContract, ConnectivityPolicy, DesignNote,
+        DesignNoteKind, DialectAliasCatalog, DocumentationShape, DocumentationShapeGeometry,
+        GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy, Library, LibraryCellInstance,
+        LibraryManager, NetLabel, PortDirection, PortSpec, SymbolDocument, SymbolPin,
+        TechnologyGlobalNetCatalog, View, ViewType,
     };
     use std::collections::HashMap;
 
@@ -936,6 +948,70 @@ mod tests {
                 .any(|l| { l.starts_with('R') && l.split_whitespace().any(|tok| tok == "out") }),
             "instance lines should reference the labeled node:\n{}",
             result.netlist
+        );
+    }
+
+    #[test]
+    fn any_angle_segment_interior_attachments_share_the_generated_net() {
+        let mut state = SchematicState::default();
+        state
+            .wires
+            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 40)));
+        state
+            .wires
+            .push(Wire::segment(2, Point::new(20, 20), Point::new(20, 60)));
+        state
+            .net_labels
+            .push(NetLabel::new(3, Point::new(30, 30), "diag"));
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+        let diagonal = generator
+            .net_at(Point::new(0, 0))
+            .expect("diagonal endpoint has a net")
+            .id;
+        assert_eq!(
+            generator.net_at(Point::new(20, 60)).map(|net| net.id),
+            Some(diagonal),
+            "a wire endpoint on a diagonal interior is an electrical T attachment"
+        );
+        assert_eq!(
+            generator.net_at(Point::new(30, 30)).map(|net| net.id),
+            Some(diagonal),
+            "a label on a diagonal interior names that net"
+        );
+        assert_eq!(
+            generator.net_at(Point::new(30, 30)).unwrap().spice_name(),
+            "diag"
+        );
+    }
+
+    #[test]
+    fn diagonal_crossings_require_an_explicit_junction() {
+        let crossing = Point::new(20, 20);
+        let mut state = SchematicState::default();
+        state
+            .wires
+            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 40)));
+        state
+            .wires
+            .push(Wire::segment(2, Point::new(0, 40), Point::new(40, 0)));
+
+        let mut disconnected = NetlistGenerator::new(&state);
+        disconnected.generate();
+        assert_ne!(
+            disconnected.net_at(Point::new(0, 0)).map(|net| net.id),
+            disconnected.net_at(Point::new(0, 40)).map(|net| net.id),
+            "an unmarked interior crossing is not a connection"
+        );
+
+        state.add_junction(crossing);
+        let mut connected = NetlistGenerator::new(&state);
+        connected.generate();
+        assert_eq!(
+            connected.net_at(Point::new(0, 0)).map(|net| net.id),
+            connected.net_at(Point::new(0, 40)).map(|net| net.id),
+            "an explicit junction connects both diagonal segments"
         );
     }
 
@@ -1381,7 +1457,9 @@ mod tests {
             Component::new(1, ComponentType::Diode, Point::origin()).with_name_value("D1", "BAV99"),
         ]);
         assert!(
-            netlist.lines().any(|l| l.starts_with("D1 ") && l.ends_with(" BAV99")),
+            netlist
+                .lines()
+                .any(|l| l.starts_with("D1 ") && l.ends_with(" BAV99")),
             "{netlist}"
         );
         assert!(!netlist.contains(".MODEL"), "{netlist}");
@@ -1427,8 +1505,8 @@ mod tests {
     #[test]
     fn vdmos_emits_instance_and_model_card() {
         let netlist = netlist_for(vec![
-        Component::new(1, ComponentType::NVdmos, Point::origin()).with_name_value("M1", ""),
-        Component::new(2, ComponentType::PVdmos, Point::new(200, 0)).with_name_value("M2", ""),
+            Component::new(1, ComponentType::NVdmos, Point::origin()).with_name_value("M1", ""),
+            Component::new(2, ComponentType::PVdmos, Point::new(200, 0)).with_name_value("M2", ""),
         ]);
         assert!(
             netlist
@@ -1436,8 +1514,14 @@ mod tests {
                 .any(|l| l.starts_with("M1 ") && l.ends_with(" nvdmos_M1")),
             "{netlist}"
         );
-        assert!(netlist.contains(".MODEL nvdmos_M1 NVDMOS (VTO=3"), "{netlist}");
-        assert!(netlist.contains(".MODEL pvdmos_M2 PVDMOS (VTO=-3"), "{netlist}");
+        assert!(
+            netlist.contains(".MODEL nvdmos_M1 NVDMOS (VTO=3"),
+            "{netlist}"
+        );
+        assert!(
+            netlist.contains(".MODEL pvdmos_M2 PVDMOS (VTO=-3"),
+            "{netlist}"
+        );
     }
 
     /// H/F elements reference a controlling V source by name; the schematic's
@@ -1788,5 +1872,91 @@ mod tests {
             "expected a floating-label warning; got {:?}",
             generator.warnings()
         );
+    }
+
+    #[test]
+    fn technology_global_catalog_changes_the_executable_node_authority() {
+        let libraries = LibraryManager::new();
+        let mut schematic = SchematicState::default();
+        schematic
+            .wires
+            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
+        schematic
+            .net_labels
+            .push(NetLabel::new(2, Point::new(0, 0), "VCC"));
+        let mut buffers = HashMap::new();
+        buffers.insert("user/top/schematic".to_owned(), schematic.clone());
+        let contract = ConnectivityContract {
+            policy: ConnectivityPolicy {
+                global_promotion: GlobalNetPromotionPolicy::TechnologyDefinedOnly,
+                ..ConnectivityPolicy::default()
+            },
+            technology_global_nets: Some(TechnologyGlobalNetCatalog {
+                authority: "demo-pdk@1.0".to_owned(),
+                nets: vec![ConnectivityAliasGroup {
+                    canonical_name: "VDD".to_owned(),
+                    aliases: vec!["VCC".to_owned()],
+                }],
+            }),
+            ..ConnectivityContract::default()
+        };
+        contract.validate().unwrap();
+        let hierarchy =
+            HierarchySource::from_workspace_with_connectivity(&libraries, &buffers, &contract);
+
+        let result = generate_netlist_hierarchical(&schematic, &[], &hierarchy);
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.netlist.contains(".GLOBAL VDD"), "{}", result.netlist);
+        assert!(result.nets.contains_key("VDD"), "{:?}", result.nets);
+        assert!(!result.nets.contains_key("VCC"), "{:?}", result.nets);
+    }
+
+    #[test]
+    fn dialect_alias_catalog_merges_explicit_global_declarations() {
+        let libraries = LibraryManager::new();
+        let mut schematic = SchematicState::default();
+        schematic
+            .wires
+            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
+        schematic
+            .wires
+            .push(Wire::segment(2, Point::new(0, 40), Point::new(40, 40)));
+        schematic
+            .net_labels
+            .push(NetLabel::new(3, Point::new(0, 0), "VCC!"));
+        schematic
+            .net_labels
+            .push(NetLabel::new(4, Point::new(0, 40), "VDD!"));
+        let mut buffers = HashMap::new();
+        buffers.insert("user/top/schematic".to_owned(), schematic.clone());
+        let contract = ConnectivityContract {
+            policy: ConnectivityPolicy {
+                alias_comparison: GlobalAliasComparisonPolicy::DialectCompatibility,
+                ..ConnectivityPolicy::default()
+            },
+            dialect_aliases: Some(DialectAliasCatalog {
+                authority: "commercial-spice-2026".to_owned(),
+                groups: vec![ConnectivityAliasGroup {
+                    canonical_name: "VDD".to_owned(),
+                    aliases: vec!["VCC".to_owned()],
+                }],
+            }),
+            ..ConnectivityContract::default()
+        };
+        contract.validate().unwrap();
+        let hierarchy =
+            HierarchySource::from_workspace_with_connectivity(&libraries, &buffers, &contract);
+
+        let result = generate_netlist_hierarchical(&schematic, &[], &hierarchy);
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(
+            result.netlist.contains(".GLOBAL VDD!"),
+            "{}",
+            result.netlist
+        );
+        assert_eq!(result.nets.len(), 1, "{:?}", result.nets);
+        assert!(result.nets.contains_key("VDD!"), "{:?}", result.nets);
     }
 }

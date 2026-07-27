@@ -11,6 +11,8 @@ pub(crate) enum BrowserTextImportKind {
     Project,
     Schematic,
     ShortcutProfile,
+    #[cfg_attr(test, allow(dead_code))]
+    EngineeringTableView,
     SymbolDefinition,
     VerilogA,
 }
@@ -23,6 +25,7 @@ impl BrowserTextImportKind {
             Self::Project => "project",
             Self::Schematic => "schematic",
             Self::ShortcutProfile => "shortcut profile",
+            Self::EngineeringTableView => "engineering table view",
             Self::SymbolDefinition => "symbol definition",
             Self::VerilogA => "Verilog-A source",
         }
@@ -34,6 +37,7 @@ impl BrowserTextImportKind {
             Self::ShortcutProfile => {
                 crate::common::shortcut_profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
             }
+            Self::EngineeringTableView => 512 * 1024,
             Self::SymbolDefinition => crate::common::app::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
             Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
                 crate::io::project_io::MAX_PROJECT_FILE_BYTES

@@ -14,6 +14,12 @@ use super::{
 };
 
 const NAVIGATION_SCHEMA_VERSION: u8 = 1;
+/// Device-local shell geometry schema.
+///
+/// Version 1 adopts the redesigned workbench's responsive dock proportions.
+/// Older sessions may contain explicit widths captured from the retired shell;
+/// those values must not distort the redesigned schematic workspace forever.
+const LAYOUT_SCHEMA_VERSION: u8 = 1;
 
 /// The seven canonical workspaces from the product contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -436,6 +442,7 @@ pub enum Drawer {
 pub enum ConsolePage {
     #[default]
     Console,
+    Interactive,
     Problems,
     Measurements,
     TaskLog,
@@ -598,16 +605,18 @@ impl LocalSafeModeState {
 }
 
 impl ConsolePage {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Console,
         Self::Problems,
         Self::Measurements,
         Self::TaskLog,
+        Self::Interactive,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Console => "Console",
+            Self::Interactive => "Interactive",
             Self::Problems => "Problems",
             Self::Measurements => "Measurements",
             Self::TaskLog => "Task log",
@@ -758,11 +767,37 @@ pub struct TuningVariableDraft {
     pub baseline_expression: String,
     pub candidate_expression: String,
     pub validation_error: Option<String>,
+    /// A proposed variable does not exist in the authoritative plan yet.
+    /// Its candidate expression is still initialized from the selected
+    /// instance literal, so this bit participates in dirty detection.
+    pub proposed: bool,
 }
 
 impl TuningVariableDraft {
     pub fn is_dirty(&self) -> bool {
-        self.candidate_expression.trim() != self.baseline_expression.trim()
+        self.proposed || self.candidate_expression.trim() != self.baseline_expression.trim()
+    }
+}
+
+/// Runtime-only bridge between a selected schematic instance and the tuning
+/// sandbox.  The proposed variable and binding are deliberately kept outside
+/// both authoritative stores until the review dialog commits them together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TuningInstanceBindingDraft {
+    pub component_id: u64,
+    pub component_name: String,
+    pub source_view: crate::state::CellViewRef,
+    pub source_topology_version: u64,
+    pub source_value: String,
+    pub binding_expression: String,
+    pub variable: crate::state::DesignVariable,
+    pub creates_variable: bool,
+}
+
+impl TuningInstanceBindingDraft {
+    #[must_use]
+    pub fn requires_schematic_edit(&self) -> bool {
+        self.source_value.trim() != self.binding_expression
     }
 }
 
@@ -794,6 +829,15 @@ pub struct VerificationSessionState {
     pub tuning_plan_revision: Option<crate::product::ObjectRevision>,
     #[serde(skip)]
     pub tuning_variables: Vec<TuningVariableDraft>,
+    /// Optional instance Value-row proposal that opened this sandbox.
+    #[serde(skip)]
+    pub tuning_instance_binding: Option<TuningInstanceBindingDraft>,
+    /// Selected variable card and one-shot editor focus request. Both are
+    /// transient presentation state and never confer commit authority.
+    #[serde(skip)]
+    pub tuning_selected_variable: Option<crate::product::DesignVariableId>,
+    #[serde(skip)]
+    pub tuning_focus_variable: Option<crate::product::DesignVariableId>,
     /// Immutable retained run selected when the sandbox was opened. This is
     /// presentation state only; the run and dataset remain owned by
     /// `SimulationState` and are never copied into the tuner.
@@ -824,6 +868,9 @@ impl Default for VerificationSessionState {
             tuning_plan_id: None,
             tuning_plan_revision: None,
             tuning_variables: Vec::new(),
+            tuning_instance_binding: None,
+            tuning_selected_variable: None,
+            tuning_focus_variable: None,
             tuning_baseline_run: None,
             tuning_review_open: false,
             action_receipt: default_verification_action_receipt(),
@@ -1432,6 +1479,9 @@ pub enum InlineEditField {
     Instance,
     /// The instance value.
     Value,
+    /// The complete free-form instance-parameter override string used by
+    /// component families that do not publish a typed parameter contract.
+    Parameters,
     /// One `key=value` instance parameter.
     Parameter(String),
 }
@@ -1526,12 +1576,22 @@ impl InlineEdit {
 pub struct WorkbenchState {
     #[serde(default)]
     pub workspace: Workspace,
+    /// Device-local application-window presentations and their exclusive
+    /// document ownership. Engineering documents remain owned by their
+    /// project stores; this registry only controls where each is presented.
+    #[serde(default)]
+    pub window_session: super::window_session::WindowSessionRegistry,
     #[serde(default)]
     pub engineering_profile: EngineeringProfile,
     /// Version marker used to distinguish sessions that predate canonical
     /// routes from sessions whose current route is intentionally Design.
     #[serde(default)]
     navigation_schema_version: u8,
+    /// Version marker for persisted device-local dock geometry. This is kept
+    /// independent from navigation because a visual-shell migration must not
+    /// rewrite the user's current route or engineering state.
+    #[serde(default)]
+    layout_schema_version: u8,
     /// Canonical current route plus bounded back/forward/recent task history.
     #[serde(default)]
     navigation: SurfaceNavigation,
@@ -1549,11 +1609,33 @@ pub struct WorkbenchState {
     pub console_maximized: bool,
     #[serde(default)]
     pub focus_mode: bool,
+    /// Device-local presentation toggle for the mockup's equal schematic /
+    /// result stage. The immutable datasets and result-document state remain
+    /// owned by `SimulationState` and `UiSessionState::results`; this flag
+    /// only controls whether that existing document is projected beside an
+    /// eligible primary workspace.
+    #[serde(default)]
+    pub split_with_results: bool,
+    /// Session-only guard for a hierarchy view intentionally opened as a
+    /// read-only reference. The underlying library and schematic document
+    /// remain unchanged, so reopening the view normally restores editability.
+    #[serde(skip)]
+    pub hierarchy_reference_read_only: bool,
     /// Current viewport full-screen intent. Runtime-owned because the host
     /// window, browser, or mobile shell decides whether the request can be
     /// honored and must never restore a stale platform window state.
     #[serde(skip)]
     pub full_screen: bool,
+    /// RSpice-owned presentation state. Unlike `full_screen`, this also
+    /// covers the mockup's "Active canvas only" scope and remains true while
+    /// application chrome is intentionally suppressed.
+    #[serde(skip)]
+    pub full_screen_presentation: bool,
+    /// Whether the current full-screen transaction temporarily suppresses
+    /// the Navigator and Inspector. Their durable visibility flags are never
+    /// rewritten, so exiting restores the exact prior dock composition.
+    #[serde(skip)]
+    pub full_screen_hide_context_panels: bool,
     /// Capability-derived touch composition. Once a native touch event is
     /// observed it remains enabled for this process; browsers also refresh it
     /// from the exact `(pointer: coarse)` media query every frame.
@@ -1753,8 +1835,10 @@ impl Default for WorkbenchState {
     fn default() -> Self {
         Self {
             workspace: Workspace::Design,
+            window_session: super::window_session::WindowSessionRegistry::default(),
             engineering_profile: EngineeringProfile::AnalogIc,
             navigation_schema_version: NAVIGATION_SCHEMA_VERSION,
+            layout_schema_version: LAYOUT_SCHEMA_VERSION,
             navigation: SurfaceNavigation::default(),
             route_diagnostic: None,
             navigator_visible: true,
@@ -1762,7 +1846,11 @@ impl Default for WorkbenchState {
             console_visible: false,
             console_maximized: false,
             focus_mode: false,
+            split_with_results: false,
+            hierarchy_reference_read_only: false,
             full_screen: false,
+            full_screen_presentation: false,
+            full_screen_hide_context_panels: false,
             coarse_pointer: false,
             project_launcher_open: false,
             project_launcher_query: String::new(),
@@ -1930,6 +2018,19 @@ impl WorkbenchState {
     /// persisted workspace; current sessions treat the canonical route as the
     /// source of truth and keep the workspace only as a render projection.
     pub fn reconcile_restored_navigation(&mut self) {
+        if self.layout_schema_version != LAYOUT_SCHEMA_VERSION {
+            self.navigator_width = default_navigator_width();
+            self.navigator_width_custom = false;
+            self.inspector_width = default_inspector_width();
+            self.inspector_width_custom = false;
+            for layout in self.workspace_layouts.values_mut() {
+                layout.navigator_width = default_navigator_width();
+                layout.navigator_width_custom = false;
+                layout.inspector_width = default_inspector_width();
+                layout.inspector_width_custom = false;
+            }
+            self.layout_schema_version = LAYOUT_SCHEMA_VERSION;
+        }
         if !self.verification_page.is_operational() {
             self.route_diagnostic = Some(format!(
                 "The restored {} verification page was not opened because its executable evidence pipeline is unavailable.",
@@ -2091,6 +2192,42 @@ impl WorkbenchState {
     #[must_use]
     pub const fn current_route(&self) -> SurfaceRoute {
         self.navigation.current()
+    }
+
+    pub(crate) fn project_application_window(
+        &mut self,
+        workspace: Workspace,
+        route: SurfaceRoute,
+        layout: WorkspaceLayoutState,
+    ) {
+        self.workspace = workspace;
+        self.navigation.project_transient(route);
+        self.apply_workspace_layout(layout);
+    }
+
+    /// Whether the foreground route is one of the three authoring/setup
+    /// stages that the upgraded mockup permits beside a retained result
+    /// document. Checking both route and workspace fails closed while a
+    /// manager or specialist surface temporarily retains an owner workspace.
+    #[must_use]
+    pub fn supports_results_split(&self) -> bool {
+        matches!(
+            (self.workspace, self.current_route().surface_id()),
+            (Workspace::Design, SurfaceId::Design)
+                | (Workspace::Netlist, SurfaceId::Netlist)
+                | (Workspace::Simulate, SurfaceId::Simulate)
+        )
+    }
+
+    /// Effective split-stage visibility. A remembered presentation choice
+    /// never creates a blank or misleading secondary pane after the project
+    /// or its retained evidence goes away.
+    #[must_use]
+    pub fn results_split_visible(&self, project_open: bool, has_retained_result: bool) -> bool {
+        self.split_with_results
+            && project_open
+            && has_retained_result
+            && self.supports_results_split()
     }
 
     /// Immediate in-application return destination, if one exists. The
@@ -2323,7 +2460,7 @@ impl WorkbenchState {
         self.apply_workspace_layout(layout);
     }
 
-    fn current_workspace_layout(&self) -> WorkspaceLayoutState {
+    pub(crate) fn current_workspace_layout(&self) -> WorkspaceLayoutState {
         WorkspaceLayoutState {
             navigator_visible: self.navigator_visible,
             inspector_visible: self.inspector_visible,
@@ -2342,7 +2479,7 @@ impl WorkbenchState {
         self.workspace_layouts.insert(workspace, layout);
     }
 
-    fn apply_workspace_layout(&mut self, layout: WorkspaceLayoutState) {
+    pub(crate) fn apply_workspace_layout(&mut self, layout: WorkspaceLayoutState) {
         self.navigator_visible = layout.navigator_visible;
         self.inspector_visible = layout.inspector_visible;
         self.console_visible = layout.console_visible;
@@ -2724,6 +2861,43 @@ mod tests {
     }
 
     #[test]
+    fn results_split_is_limited_to_the_three_mockup_primary_stages() {
+        let mut state = WorkbenchState {
+            split_with_results: true,
+            ..WorkbenchState::default()
+        };
+
+        for workspace in [Workspace::Design, Workspace::Netlist, Workspace::Simulate] {
+            state.activate(workspace);
+            assert!(state.supports_results_split(), "{workspace:?}");
+            assert!(state.results_split_visible(true, true), "{workspace:?}");
+        }
+
+        for workspace in [
+            Workspace::Project,
+            Workspace::Results,
+            Workspace::Verify,
+            Workspace::Models,
+        ] {
+            state.activate(workspace);
+            assert!(!state.supports_results_split(), "{workspace:?}");
+            assert!(!state.results_split_visible(true, true), "{workspace:?}");
+        }
+    }
+
+    #[test]
+    fn remembered_split_never_projects_without_project_and_retained_evidence() {
+        let state = WorkbenchState {
+            split_with_results: true,
+            ..WorkbenchState::default()
+        };
+
+        assert!(!state.results_split_visible(false, true));
+        assert!(!state.results_split_visible(true, false));
+        assert!(state.results_split_visible(true, true));
+    }
+
+    #[test]
     fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
         let mut state = WorkbenchState::default();
         state
@@ -2835,6 +3009,42 @@ mod tests {
                 SurfaceId::Results
             )))
         );
+    }
+
+    #[test]
+    fn legacy_shell_geometry_migrates_to_redesigned_responsive_docks() {
+        let mut state = WorkbenchState::default();
+        state.layout_schema_version = 0;
+        state.navigator_width = 232.0;
+        state.navigator_width_custom = true;
+        state.inspector_width = 440.0;
+        state.inspector_width_custom = true;
+        state.workspace_layouts.insert(
+            Workspace::Design,
+            WorkspaceLayoutState {
+                navigator_width: 232.0,
+                navigator_width_custom: true,
+                inspector_width: 440.0,
+                inspector_width_custom: true,
+                ..WorkspaceLayoutState::default()
+            },
+        );
+
+        state.reconcile_restored_navigation();
+
+        assert_eq!(state.layout_schema_version, LAYOUT_SCHEMA_VERSION);
+        assert_eq!(state.navigator_width, default_navigator_width());
+        assert!(!state.navigator_width_custom);
+        assert_eq!(state.inspector_width, default_inspector_width());
+        assert!(!state.inspector_width_custom);
+        let design = state
+            .workspace_layouts
+            .get(&Workspace::Design)
+            .expect("design workspace layout remains present");
+        assert_eq!(design.navigator_width, default_navigator_width());
+        assert!(!design.navigator_width_custom);
+        assert_eq!(design.inspector_width, default_inspector_width());
+        assert!(!design.inspector_width_custom);
     }
 
     #[test]
@@ -3278,5 +3488,20 @@ mod tests {
                 .inspector_width,
             332.0
         );
+    }
+
+    #[test]
+    fn console_pages_include_the_mockup_interactive_surface() {
+        assert_eq!(
+            ConsolePage::ALL,
+            [
+                ConsolePage::Console,
+                ConsolePage::Problems,
+                ConsolePage::Measurements,
+                ConsolePage::TaskLog,
+                ConsolePage::Interactive,
+            ]
+        );
+        assert_eq!(ConsolePage::Interactive.label(), "Interactive");
     }
 }

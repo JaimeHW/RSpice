@@ -3,10 +3,12 @@ use egui::{Painter, Rect, Response, Stroke, Vec2};
 use crate::common::app::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
-    ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, Tool, geometry_from_points,
+    ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool,
+    geometry_from_points,
 };
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
+use super::SchematicShelfDragPayload;
 use super::SchematicSymbolContext;
 use super::array_interaction::array_placement;
 use super::bus_interaction::resolve_bus_tap_candidate_on_active_sheet;
@@ -62,7 +64,7 @@ pub(super) fn draw_interaction_previews(
     draw_wire_preview(painter, response, state, viewport, symbol_context);
     draw_bus_tap_preview(painter, response, state, viewport);
     draw_junction_preview(painter, response, state, viewport);
-    draw_net_label_preview(painter, response, state, viewport);
+    draw_net_label_preview(painter, response, state, viewport, symbol_context);
     draw_design_note_preview(painter, response, state, viewport);
     draw_documentation_shape_preview(painter, response, state, viewport);
     draw_component_preview(
@@ -117,7 +119,7 @@ fn draw_move_selection_preview(
                 .find(|wire| wire.id == candidate_wire.id)
                 != Some(*candidate_wire)
         }) {
-            draw_wire(painter, viewport, wire, true, false);
+            draw_wire(painter, viewport, wire, true, None);
         }
         for bus in candidate.buses.iter().filter(|candidate_bus| {
             state
@@ -154,6 +156,7 @@ fn draw_move_selection_preview(
                 true,
                 symbol_library,
                 symbol_context,
+                state.ui.schematic_visibility.parameter_labels,
             );
         }
         for junction in candidate.junctions.iter().filter(|candidate_junction| {
@@ -260,7 +263,7 @@ fn draw_stretch_selection_preview(
             .find(|wire| wire.id == candidate_wire.id)
             != Some(*candidate_wire)
     }) {
-        draw_wire(painter, viewport, wire, true, false);
+        draw_wire(painter, viewport, wire, true, None);
     }
     for bus in candidate.buses.iter().filter(|candidate_bus| {
         state
@@ -393,7 +396,7 @@ fn draw_array_selection_preview(
     };
 
     for wire in preview.wires() {
-        draw_wire(painter, viewport, wire, true, false);
+        draw_wire(painter, viewport, wire, true, None);
     }
     for bus in preview.buses() {
         draw_bus(painter, viewport, bus, true);
@@ -409,6 +412,7 @@ fn draw_array_selection_preview(
             true,
             symbol_library,
             symbol_context,
+            state.ui.schematic_visibility.parameter_labels,
         );
     }
     for junction in preview.junctions() {
@@ -576,6 +580,7 @@ fn draw_net_label_preview(
     response: &Response,
     state: &AppState,
     viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
 ) {
     if state.schematic.read_only || state.schematic.tool != Tool::Label {
         return;
@@ -583,12 +588,15 @@ fn draw_net_label_preview(
     let Some(hover) = response.hover_pos() else {
         return;
     };
-    let position = screen_to_grid(viewport, state.schematic.grid_size, hover);
-    let name = format!("net{}", state.schematic.net_labels.len() + 1);
+    let position = wire_preview_snap_position(
+        state,
+        symbol_context,
+        screen_to_wire_grid(viewport, state.schematic.grid_size, hover),
+    );
     draw_net_label(
         painter,
         viewport,
-        &NetLabel::new(0, position, name),
+        &NetLabel::new(0, position, "click to name"),
         false,
         false,
         true,
@@ -794,6 +802,7 @@ fn pending_library_cell_preview<'a>(
     let symbol = symbol_context.pending_library_symbol()?;
     let component = Component::new(0, ComponentType::CellInstance, grid_pos)
         .with_rotation(state.schematic.preview_rotation)
+        .with_mirror_h(state.schematic.preview_mirror_h)
         .with_library_cell(binding);
     Some((component, symbol))
 }
@@ -813,6 +822,7 @@ fn draw_component_preview(
     let preview_tool = state.schematic.tool;
     let preview_rotation_degrees = state.schematic.preview_rotation.degrees();
     let preview_rotation_index = rotation_to_index(state.schematic.preview_rotation);
+    let preview_mirror_h = state.schematic.preview_mirror_h;
 
     if let Tool::Place(component_type) = preview_tool
         && let Some(hover_pos) = response.hover_pos()
@@ -855,7 +865,7 @@ fn draw_component_preview(
                 preview_pos,
                 viewport.zoom,
                 preview_rotation_index,
-                (false, false),
+                (preview_mirror_h, false),
                 direction,
                 preview_stroke,
             );
@@ -872,7 +882,7 @@ fn draw_component_preview(
                     preview_pos,
                     viewport.zoom,
                     adjusted_rotation,
-                    false,
+                    preview_mirror_h,
                     false,
                     preview_stroke,
                 );
@@ -894,6 +904,84 @@ fn draw_component_preview(
                 preview_stroke,
             );
         }
+    }
+}
+
+/// Paint the ephemeral component-shelf payload at its snapped drop point.
+///
+/// The payload never enters application state before release, so an aborted or
+/// invalid drag cannot leak an armed tool or pending library-cell binding.
+pub(super) fn draw_shelf_drag_preview(
+    painter: &Painter,
+    state: &AppState,
+    viewport: &Viewport,
+    payload: &SchematicShelfDragPayload,
+    pointer_pos: egui::Pos2,
+    symbol_library: Option<&SymbolLibrary>,
+) {
+    if !component_preview_enabled(state.schematic.read_only) {
+        return;
+    }
+    let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pointer_pos);
+    let preview_pos = viewport.schematic_to_screen(grid_pos);
+    let rotation = state.schematic.preview_rotation;
+    let rotation_degrees = rotation.degrees();
+    let rotation_index = rotation_to_index(rotation);
+    let mirror_h = state.schematic.preview_mirror_h;
+    let preview_stroke = Stroke::new(
+        viewport.zoom,
+        crate::ui::tokens::active_palette()
+            .accent
+            .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
+    );
+
+    if let Some(binding) = payload.binding() {
+        let resolver =
+            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+        if let Some(symbol) = resolver.resolve_binding(binding) {
+            let component = Component::new(0, ComponentType::CellInstance, grid_pos)
+                .with_rotation(rotation)
+                .with_mirror_h(mirror_h)
+                .with_library_cell(binding.clone());
+            draw_resolved_symbol(
+                painter,
+                preview_pos,
+                viewport.zoom,
+                &component,
+                &symbol,
+                preview_stroke,
+            );
+            return;
+        }
+    }
+
+    let component_type = payload.component_type();
+    let svg_rendered = symbol_library.is_some_and(|library| {
+        library
+            .get_with_rotation_variant(component_type, rotation_degrees, None)
+            .is_some_and(|(symbol, adjusted_rotation)| {
+                draw_symbol(
+                    painter,
+                    symbol,
+                    preview_pos,
+                    viewport.zoom,
+                    adjusted_rotation,
+                    mirror_h,
+                    false,
+                    preview_stroke,
+                );
+                true
+            })
+    });
+    if !svg_rendered {
+        draw_procedural_component_preview(
+            painter,
+            component_type,
+            preview_pos,
+            viewport.zoom,
+            rotation_index,
+            preview_stroke,
+        );
     }
 }
 
@@ -1032,6 +1120,7 @@ mod tests {
         }]);
         state.schematic.pending_library_cell = Some(binding);
         state.schematic.preview_rotation = crate::state::Rotation::R90;
+        state.schematic.preview_mirror_h = true;
         let context = SchematicSymbolContext::from_state(&state);
 
         let (component, symbol) =
@@ -1041,6 +1130,7 @@ mod tests {
         assert_eq!(component.kind, ComponentType::CellInstance);
         assert_eq!(component.pos, Point::new(100, 50));
         assert_eq!(component.rotation, crate::state::Rotation::R90);
+        assert!(component.mirror_h);
         assert_eq!(
             component
                 .library_cell

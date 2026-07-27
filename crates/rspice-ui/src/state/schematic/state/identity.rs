@@ -32,6 +32,7 @@ impl SchematicState {
             || self.bus_taps.iter().any(|item| item.id == id)
             || self.design_notes.iter().any(|item| item.id == id)
             || self.documentation_shapes.iter().any(|item| item.id == id)
+            || self.probes.iter().any(|item| item.id == id)
     }
 
     /// Get the current topology version
@@ -89,6 +90,7 @@ impl SchematicState {
             .map(|shape| shape.id)
             .max()
             .unwrap_or(0);
+        let max_probe_id = self.probes.iter().map(|probe| probe.id).max().unwrap_or(0);
         let max_id = max_component_id
             .max(max_wire_id)
             .max(max_junction_id)
@@ -96,7 +98,8 @@ impl SchematicState {
             .max(max_bus_id)
             .max(max_bus_tap_id)
             .max(max_design_note_id)
-            .max(max_documentation_shape_id);
+            .max(max_documentation_shape_id)
+            .max(max_probe_id);
         self.next_id = max_id.checked_add(1).unwrap_or(1);
 
         // Repair duplicate component IDs left behind by earlier counter
@@ -269,6 +272,15 @@ impl SchematicState {
                 self.documentation_shapes[index].id = replacement;
             }
         }
+        for index in 0..self.probes.len() {
+            let id = self.probes[index].id;
+            if !occupied_ids.insert(id) {
+                let replacement = self.next_id();
+                occupied_ids.insert(replacement);
+                self.probes[index].id = replacement;
+            }
+        }
+        self.probes.retain(|probe| probe.validate().is_ok());
 
         // Rebuild component counters from existing component names
         self.component_counters.clear();
@@ -602,11 +614,13 @@ mod tests {
         object.remove("bus_taps");
         object.remove("net_labels");
         object.remove("design_notes");
+        object.remove("probes");
         let migrated: SchematicState = serde_json::from_value(value).unwrap();
         assert!(migrated.buses.is_empty());
         assert!(migrated.bus_taps.is_empty());
         assert!(migrated.net_labels.is_empty());
         assert!(migrated.design_notes.is_empty());
+        assert!(migrated.probes.is_empty());
     }
 
     #[test]

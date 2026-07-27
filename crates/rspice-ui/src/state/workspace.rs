@@ -394,6 +394,7 @@ pub struct ConfigurationExecutionProjection {
     root: CellViewRef,
     schematic_buffers: HashMap<String, SchematicState>,
     plan: Option<ConfigurationExecutionPlan>,
+    connectivity: crate::state::ConnectivityContract,
 }
 
 impl ConfigurationExecutionProjection {
@@ -414,6 +415,10 @@ impl ConfigurationExecutionProjection {
 
     pub const fn plan(&self) -> Option<&ConfigurationExecutionPlan> {
         self.plan.as_ref()
+    }
+
+    pub const fn connectivity(&self) -> &crate::state::ConnectivityContract {
+        &self.connectivity
     }
 }
 
@@ -1906,7 +1911,7 @@ fn parse_calculator_expression(expression: &str) -> Result<(), String> {
         .map_err(|error| format!("expression is invalid: {error}"))
 }
 
-fn validate_raw_probe(expression: &str) -> Result<(), String> {
+pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {
     let open = expression
         .find('(')
         .ok_or_else(|| "raw output must use V(node), V(node+, node-), or I(source)".to_owned())?;
@@ -2020,6 +2025,8 @@ pub enum SimulationConfigurationError {
     InvalidConfigurationSetCatalog { message: String },
     #[error("project design-management catalog is invalid: {message}")]
     InvalidDesignManagementCatalog { message: String },
+    #[error("project connectivity contract is invalid: {message}")]
+    InvalidConnectivityContract { message: String },
     #[error("project-owned netlist document is invalid: {message}")]
     InvalidNetlistDocumentProjection { message: String },
     #[error("project-owned Code source registry is invalid: {message}")]
@@ -2407,6 +2414,10 @@ pub struct ProjectWorkspace {
     /// configuration set describes how that identity is executed.
     #[serde(default)]
     pub design_management: crate::state::DesignManagementCatalog,
+    /// Project-owned bundle mapping and global-net policy. Older projects
+    /// migrate to strict fail-closed defaults instead of inheriting UI state.
+    #[serde(default)]
+    pub connectivity: crate::state::ConnectivityContract,
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
     pub hierarchy_stack: Vec<CellViewRef>,
@@ -2441,6 +2452,11 @@ pub struct ProjectWorkspace {
     /// embedded in `hardcopy_setups` for reproducible publication.
     #[serde(default)]
     pub project_print_mappings: crate::workbench::PrintMappingPresetCatalog,
+    /// Project-owned named engineering-table views. Working and personal
+    /// views are device preferences; only explicitly project-scoped views
+    /// participate in project revisioning and collaboration.
+    #[serde(default)]
+    pub engineering_table_views: crate::workbench::EngineeringTableViewStore,
     /// Ordered, exact source aggregates used by all-sheets/all-panes and
     /// named print-set publication. Every member pins its document revision
     /// and content digest; stale members fail closed when resolved.
@@ -2517,6 +2533,7 @@ impl Default for ProjectWorkspace {
             project: ProjectDescriptor::default(),
             configuration_sets: crate::state::ConfigurationSetCatalog::default(),
             design_management: crate::state::DesignManagementCatalog::default(),
+            connectivity: crate::state::ConnectivityContract::default(),
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],
@@ -2530,6 +2547,7 @@ impl Default for ProjectWorkspace {
             project_print_mappings: crate::workbench::PrintMappingPresetCatalog::new(
                 crate::workbench::PrintMappingCatalogOwner::Project,
             ),
+            engineering_table_views: crate::workbench::EngineeringTableViewStore::default(),
             hardcopy_source_sets: Vec::new(),
             report_documents: Vec::new(),
             netlist_source: None,
@@ -2576,6 +2594,42 @@ fn validate_hardcopy_source_set_catalog(
     Ok(())
 }
 
+fn validate_connectivity_contract_references(
+    workspace: &ProjectWorkspace,
+) -> Result<(), SimulationConfigurationError> {
+    let mut nets_by_view = HashMap::<&str, HashSet<String>>::new();
+    for (view_key, schematic) in &workspace.schematic_buffers {
+        nets_by_view.insert(
+            view_key.as_str(),
+            crate::simulation::netlist_gen::design_nets(schematic)
+                .into_iter()
+                .map(|net| net.name)
+                .collect(),
+        );
+    }
+    for (bundle_index, bundle) in workspace.connectivity.named_bundles.iter().enumerate() {
+        for (member_index, member) in bundle.members.iter().enumerate() {
+            let Some(nets) = nets_by_view.get(member.target.view_key.as_str()) else {
+                return Err(SimulationConfigurationError::InvalidConnectivityContract {
+                    message: format!(
+                        "named_bundles[{bundle_index}].members[{member_index}] references missing schematic view '{}'",
+                        member.target.view_key
+                    ),
+                });
+            };
+            if !nets.contains(&member.target.net_name) {
+                return Err(SimulationConfigurationError::InvalidConnectivityContract {
+                    message: format!(
+                        "named_bundles[{bundle_index}].members[{member_index}] references missing exact net '{}::{}'",
+                        member.target.view_key, member.target.net_name
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 impl ProjectWorkspace {
     /// Validate the persisted simulation configuration without requiring any
     /// runtime editor state. Cross-document targets are validated by project
@@ -2591,6 +2645,10 @@ impl ProjectWorkspace {
                 message: error.to_string(),
             }
         })?;
+        self.connectivity.validate().map_err(|message| {
+            SimulationConfigurationError::InvalidConnectivityContract { message }
+        })?;
+        validate_connectivity_contract_references(self)?;
         self.plot_export_presets
             .validate_ownership_scope(
                 crate::results::plot_export_preset::PlotExportPresetScope::Project,
@@ -4309,7 +4367,7 @@ fn materialize_authoritative_source_binding(
     Ok(materialized)
 }
 
-fn project_veriloga_binding_for_view(
+pub(crate) fn project_veriloga_binding_for_view(
     workspace: &ProjectWorkspace,
     libraries: &LibraryManager,
     reference: &CellViewRef,
@@ -4884,6 +4942,7 @@ impl ProjectWorkspace {
                     .iter()
                     .map(|object| object.id),
             )
+            .chain(schematic.probes.iter().map(|object| object.id))
             .collect::<Vec<_>>();
 
         let mut candidate = self.design_management.clone();
@@ -5200,6 +5259,7 @@ impl ProjectWorkspace {
             root,
             schematic_buffers,
             plan,
+            connectivity: self.connectivity.clone(),
         };
         if projection.root_schematic().is_none() {
             return Err(ConfigurationExecutionPlanError::MissingRoot(

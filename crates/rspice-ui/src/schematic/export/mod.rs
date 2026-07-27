@@ -428,16 +428,25 @@ fn write_component(
 
     if !resolved_cell_instance {
         // Component label
-        writeln!(
-            svg,
-            "<text class=\"text\" x=\"{}\" y=\"{}\">{}</text>",
-            cx,
-            cy - 25.0,
-            escape_xml(&component.name)
-        )
-        .unwrap();
+        if component
+            .display_mode
+            .show_name(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+        {
+            writeln!(
+                svg,
+                "<text class=\"text\" x=\"{}\" y=\"{}\">{}</text>",
+                cx,
+                cy - 25.0,
+                escape_xml(&component.name)
+            )
+            .unwrap();
+        }
 
-        if !component.value.is_empty() {
+        if component
+            .display_mode
+            .show_value(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+            && !component.value.is_empty()
+        {
             writeln!(
                 svg,
                 "<text class=\"text\" x=\"{}\" y=\"{}\">{}</text>",

@@ -852,8 +852,6 @@ mod tests {
             Command::SymbolPolylineTool,
             Command::SymbolCircleTool,
             Command::SymbolArcTool,
-            Command::SymbolArrowTool,
-            Command::SymbolDotTool,
             Command::ZoomFit,
             Command::Cancel,
         ] {

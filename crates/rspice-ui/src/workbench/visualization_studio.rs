@@ -606,6 +606,25 @@ impl Default for VisualizationStudioState {
     }
 }
 
+impl VisualizationStudioState {
+    /// Restore only transient viewer navigation and filtering.
+    ///
+    /// Pane composition, annotations, measurements, report policies, and
+    /// comparison receipts are durable visualization-document content and
+    /// deliberately survive View > Reset active view.
+    pub(crate) fn reset_transient_view(&mut self) {
+        self.tool = ViewerTool::Select;
+        self.zoom = default_zoom();
+        self.viewer_query.clear();
+        self.family_query.clear();
+        self.dock = None;
+        self.linked_x_ranges.clear();
+        self.linked_cursor_positions.clear();
+        self.pane_x_ranges.clear();
+        self.pane_cursor_positions.clear();
+    }
+}
+
 const fn default_zoom() -> f32 {
     1.0
 }
@@ -916,6 +935,10 @@ pub(crate) fn open_cursor_manager(app: &mut RSpiceApp) {
 
 pub(crate) fn open_document_properties(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::DocumentProperties);
+}
+
+pub(crate) fn open_measurement_editor(app: &mut RSpiceApp) {
+    open_dock(app, VisualizationDock::Measurement);
 }
 
 pub(crate) fn export_document(app: &mut RSpiceApp) {

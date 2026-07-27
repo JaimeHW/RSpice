@@ -157,8 +157,11 @@ pub struct LegendChip<'a> {
 /// What strip-header interactions happened this frame.
 #[derive(Default)]
 pub struct StripHeaderResponse {
-    /// Index of the legend chip that was clicked.
+    /// Index of the legend chip whose body was clicked for selection.
     pub legend_clicked: Option<usize>,
+    /// Index of the legend chip whose color swatch was clicked to toggle
+    /// visibility without changing trace selection.
+    pub legend_visibility_clicked: Option<usize>,
     /// Index of the legend chip whose "Remove" context action was chosen.
     pub legend_removed: Option<usize>,
     /// The maximize/restore action was clicked.
@@ -181,6 +184,8 @@ pub struct StripHeader<'a> {
     zoomed: bool,
     expr_action: bool,
     removable_from: usize,
+    selected_legend: Option<usize>,
+    pane_actions: bool,
 }
 
 impl<'a> StripHeader<'a> {
@@ -195,6 +200,8 @@ impl<'a> StripHeader<'a> {
             zoomed: false,
             expr_action: false,
             removable_from: usize::MAX,
+            selected_legend: None,
+            pane_actions: true,
         }
     }
 
@@ -229,6 +236,20 @@ impl<'a> StripHeader<'a> {
         self
     }
 
+    /// Mark the exact trace chip selected by the result document.
+    pub fn selected_legend(mut self, index: Option<usize>) -> Self {
+        self.selected_legend = index;
+        self
+    }
+
+    /// Show or hide the trailing pane controls. Compact split-results panes
+    /// keep the selectable/toggleable legend but omit maximize, close and
+    /// fit actions exactly like the upgraded workbench contract.
+    pub fn pane_actions(mut self, visible: bool) -> Self {
+        self.pane_actions = visible;
+        self
+    }
+
     /// Render the header across the available width.
     pub fn show(self, ui: &mut Ui) -> StripHeaderResponse {
         let t = Tokens::get(ui.ctx());
@@ -249,19 +270,26 @@ impl<'a> StripHeader<'a> {
         );
 
         let inner = rect.shrink2(vec2(HEADER_PADDING_X, 0.0));
-        let fit_chip_width = if self.zoomed {
+        let fit_chip_width = if self.pane_actions && self.zoomed {
             action_chip_width(ui, "FIT")
         } else {
             0.0
         };
-        let actions_width =
+        let actions_width = if self.pane_actions {
             trailing_actions_width(HEADER_ICON_SIDE, self.closable, self.zoomed, fit_chip_width)
-                .min(inner.width());
+                .min(inner.width())
+        } else {
+            0.0
+        };
         let actions_rect = Rect::from_min_max(
             egui::pos2(inner.right() - actions_width, inner.top()),
             inner.right_bottom(),
         );
-        let content_right = (actions_rect.left() - HEADER_ACTION_GAP).max(inner.left());
+        let content_right = if self.pane_actions {
+            (actions_rect.left() - HEADER_ACTION_GAP).max(inner.left())
+        } else {
+            inner.right()
+        };
         let content_rect =
             Rect::from_min_max(inner.left_top(), egui::pos2(content_right, inner.bottom()));
 
@@ -330,6 +358,7 @@ impl<'a> StripHeader<'a> {
         // Chips own exactly the remaining clipped width; drag/wheel scrolling
         // keeps every trace reachable without crossing into the action rect.
         let removable_from = self.removable_from;
+        let selected_legend = self.selected_legend;
         let legend = self.legend;
         let expr_action = self.expr_action;
         let legend_rect = span_rect(layout.legend);
@@ -348,9 +377,13 @@ impl<'a> StripHeader<'a> {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     for (index, chip) in legend.iter().enumerate() {
-                        let response = legend_chip(ui, chip);
-                        if response.clicked() {
+                        let (response, visibility) =
+                            legend_chip(ui, chip, selected_legend == Some(index));
+                        if response.clicked() && !visibility.clicked() {
                             out.legend_clicked = Some(index);
+                        }
+                        if visibility.clicked() {
+                            out.legend_visibility_clicked = Some(index);
                         }
                         if index >= removable_from {
                             response.context_menu(|ui| {
@@ -376,50 +409,52 @@ impl<'a> StripHeader<'a> {
                 });
             });
 
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(actions_rect)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-            |ui| {
-                ui.set_clip_rect(actions_rect);
-                ui.spacing_mut().item_spacing.x = HEADER_ACTION_ITEM_GAP;
-                if self.closable
-                    && IconButton::new(Icon::Close)
+        if self.pane_actions {
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(actions_rect)
+                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                |ui| {
+                    ui.set_clip_rect(actions_rect);
+                    ui.spacing_mut().item_spacing.x = HEADER_ACTION_ITEM_GAP;
+                    if self.closable
+                        && IconButton::new(Icon::Close)
+                            .side(HEADER_ICON_SIDE)
+                            .tooltip("Close strip")
+                            .show(ui)
+                            .clicked()
+                    {
+                        out.close_clicked = true;
+                    }
+                    let tip = if self.maximized {
+                        "Restore strips"
+                    } else {
+                        "Maximize strip"
+                    };
+                    if IconButton::new(Icon::ZoomFit)
                         .side(HEADER_ICON_SIDE)
-                        .tooltip("Close strip")
+                        .on(self.maximized)
+                        .tooltip(tip)
                         .show(ui)
                         .clicked()
-                {
-                    out.close_clicked = true;
-                }
-                let tip = if self.maximized {
-                    "Restore strips"
-                } else {
-                    "Maximize strip"
-                };
-                if IconButton::new(Icon::ZoomFit)
-                    .side(HEADER_ICON_SIDE)
-                    .on(self.maximized)
-                    .tooltip(tip)
-                    .show(ui)
-                    .clicked()
-                {
-                    out.maximize_clicked = true;
-                }
-                if self.zoomed {
-                    ui.add_space(4.0);
-                    if action_chip(
-                        ui,
-                        "FIT",
-                        "Restore automatic view (double-click the plot does the same)",
-                    )
-                    .clicked()
                     {
-                        out.fit_clicked = true;
+                        out.maximize_clicked = true;
                     }
-                }
-            },
-        );
+                    if self.zoomed {
+                        ui.add_space(4.0);
+                        if action_chip(
+                            ui,
+                            "FIT",
+                            "Restore automatic view (double-click the plot does the same)",
+                        )
+                        .clicked()
+                        {
+                            out.fit_clicked = true;
+                        }
+                    }
+                },
+            );
+        }
 
         out
     }
@@ -504,7 +539,11 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
 }
 
 /// A legend chip: 14×3 color swatch + mono name; dimmed when off.
-fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
+fn legend_chip(
+    ui: &mut Ui,
+    chip: &LegendChip<'_>,
+    selected: bool,
+) -> (egui::Response, egui::Response) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -515,28 +554,53 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
             c.text_dim,
         )
     });
-    let (rect, response) = ui.allocate_exact_size(
+    let (rect, allocation) = ui.allocate_exact_size(
         vec2(6.0 + 14.0 + 5.0 + galley.size().x + 6.0, 20.0),
+        Sense::hover(),
+    );
+    let selection_rect = Rect::from_min_max(
+        egui::pos2(rect.left() + 24.0, rect.top()),
+        rect.right_bottom(),
+    );
+    let response = ui.interact(
+        selection_rect,
+        allocation.id.with("selection"),
         Sense::click(),
     );
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::SelectableLabel,
             ui.is_enabled(),
+            selected,
+            format!("{} trace selection", chip.name),
+        )
+    });
+    let swatch = Rect::from_min_size(
+        egui::pos2(rect.left() + 6.0, rect.center().y - 7.0),
+        vec2(14.0, 14.0),
+    );
+    let visibility = ui.interact(swatch, response.id.with("visibility"), Sense::click());
+    visibility.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::Button,
+            ui.is_enabled(),
             chip.on,
-            format!("{} trace visibility", chip.name),
+            format!("Toggle {} visibility", chip.name),
         )
     });
     if !ui.is_rect_visible(rect) {
-        return response;
+        return (response, visibility);
     }
 
-    let hover =
-        ui.ctx()
-            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
+    let hovered = response.hovered() || visibility.hovered() || allocation.hovered();
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id, hovered, ui.style().animation_time);
     let opacity = if chip.on { 1.0 } else { 0.38 };
     let painter = ui.painter();
-    if hover > 0.0 {
+    if selected {
+        painter.rect_filled(rect, t.radius, c.accent_dim);
+    } else if hover > 0.0 {
         painter.rect_filled(
             rect,
             t.radius,
@@ -545,10 +609,7 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
     }
     let swatch_color = if chip.on { chip.color } else { c.text_faint };
     painter.rect_filled(
-        Rect::from_min_size(
-            egui::pos2(rect.left() + 6.0, rect.center().y - 1.5),
-            vec2(14.0, 3.0),
-        ),
+        Rect::from_center_size(swatch.center(), vec2(14.0, 3.0)),
         1.0,
         swatch_color.gamma_multiply(opacity),
     );
@@ -563,7 +624,12 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
 
     theme::paint_focus_ring(ui, &response, rect);
 
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    (
+        response.on_hover_cursor(egui::CursorIcon::PointingHand),
+        visibility
+            .on_hover_text(if chip.on { "Hide trace" } else { "Show trace" })
+            .on_hover_cursor(egui::CursorIcon::PointingHand),
+    )
 }
 
 #[cfg(test)]

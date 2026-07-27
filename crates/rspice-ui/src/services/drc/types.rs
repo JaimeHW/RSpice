@@ -67,7 +67,7 @@ pub enum DrcViolationType {
     //-------------------------------------------------------------------------
     // Electrical Issues
     //-------------------------------------------------------------------------
-    /// Multiple voltage sources on same net
+    /// Multiple hierarchy-declared output pins on the same net.
     ShortedOutputs,
     /// Missing ground/reference node
     MissingGround,
@@ -157,7 +157,7 @@ impl DrcViolationType {
             Self::DanglingBusTap => "Bus tap does not terminate on the required target",
             Self::MixedBusTap => "Bus tap mixes scalar and vector connectivity",
             Self::DuplicateBusMemberDriver => "Typed bus member has multiple output drivers",
-            Self::ShortedOutputs => "Multiple voltage sources connected to same net",
+            Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::MissingGround => "Circuit has no ground reference (node 0)",
             Self::ShortCircuit => "Direct short circuit detected",
             Self::SourceToSource => "Voltage source outputs directly connected",
@@ -177,7 +177,7 @@ impl DrcViolationType {
     pub fn suggested_fix(&self) -> &'static str {
         match self {
             Self::FloatingNode => "Connect the node to another component or remove it",
-            Self::UnconnectedPin => "Connect a wire to this pin or mark as intentionally NC",
+            Self::UnconnectedPin => "Connect this pin or verify that it is intentionally open",
             Self::OrphanNetLabel => "Connect wires to both ends of the net or remove the label",
             Self::DanglingWire => "Complete the wire connection or delete the segment",
             Self::MalformedBus => "Repair or redraw the invalid bus geometry and declaration",
@@ -186,7 +186,7 @@ impl DrcViolationType {
             Self::DanglingBusTap => "Connect the tap to the required scalar wire or typed bus",
             Self::MixedBusTap => "Separate scalar wires from vector bus connectivity",
             Self::DuplicateBusMemberDriver => "Leave only one output driver on this bus member",
-            Self::ShortedOutputs => "Connect only one voltage source per net",
+            Self::ShortedOutputs => "Leave only one declared output driver on the net",
             Self::MissingGround => "Add a ground symbol (GND) to the circuit",
             Self::ShortCircuit => "Remove the short or check intended connectivity",
             Self::SourceToSource => "Add a resistor between voltage sources",

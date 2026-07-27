@@ -189,20 +189,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let table_w = INDEX_W + X_W + columns.len() as f32 * VALUE_W;
     let viewport_width = ui.available_width().max(1.0);
-    let cell = |ui: &Ui, rect: egui::Rect, text: &str, color: egui::Color32, align: egui::Align2| {
-        let inset = rect.shrink2(egui::vec2(CELL_INSET * 0.5, 0.0));
-        let pos = match align {
-            egui::Align2::RIGHT_CENTER => egui::pos2(inset.right(), inset.center().y),
-            _ => egui::pos2(inset.left(), inset.center().y),
+    let cell =
+        |ui: &Ui, rect: egui::Rect, text: &str, color: egui::Color32, align: egui::Align2| {
+            let inset = rect.shrink2(egui::vec2(CELL_INSET * 0.5, 0.0));
+            let pos = match align {
+                egui::Align2::RIGHT_CENTER => egui::pos2(inset.right(), inset.center().y),
+                _ => egui::pos2(inset.left(), inset.center().y),
+            };
+            ui.painter().with_clip_rect(inset).text(
+                pos,
+                align,
+                text,
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                color,
+            );
         };
-        ui.painter().with_clip_rect(inset).text(
-            pos,
-            align,
-            text,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            color,
-        );
-    };
     let column_rect = |row: egui::Rect, index: usize| {
         let left = row.left() + INDEX_W + X_W + index as f32 * VALUE_W;
         egui::Rect::from_min_max(
@@ -391,11 +392,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
                 };
                 let on = effective.contains(&index);
                 if ui.selectable_label(on, name).clicked() {
-                    state
-                        .ui
-                        .results
-                        .table
-                        .toggle_column(index, &automatic);
+                    state.ui.results.table.toggle_column(index, &automatic);
                 }
             }
             if effective.len() >= TABLE_MAX_COLUMNS {

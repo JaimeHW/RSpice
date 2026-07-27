@@ -2617,7 +2617,10 @@ impl ModelLibraryManager {
                 Some(ModelLevel::Vdmos)
             }
             t if t.starts_with("VBIC") => Some(ModelLevel::Vbic),
-            t if t.starts_with("MEXTRAM") || t.starts_with("BJT505") || t.starts_with("BJTD505") => {
+            t if t.starts_with("MEXTRAM")
+                || t.starts_with("BJT505")
+                || t.starts_with("BJTD505") =>
+            {
                 Some(ModelLevel::Mextram)
             }
             t if t.starts_with("HICUM") => Some(ModelLevel::Hicum),

@@ -97,6 +97,10 @@ impl SchematicState {
 
     /// Start drawing a wire at position
     pub fn start_wire(&mut self, pos: Point) {
+        if self.read_only {
+            return;
+        }
+
         log::info!("[Wire] start_wire at {:?}", pos);
         self.wire_drawing.clear();
         self.wire_drawing.points.push(pos);
@@ -117,7 +121,7 @@ impl SchematicState {
 
     /// Add a point to the current wire using orthogonal routing
     pub fn extend_wire(&mut self, pos: Point) {
-        if !self.wire_drawing.active {
+        if self.read_only || !self.wire_drawing.active {
             return;
         }
 
@@ -185,39 +189,47 @@ impl SchematicState {
             return None;
         }
 
-        self.wire_drawing.active = false;
-        self.wire_drawing.preview_pos = None;
-
         let points = std::mem::take(&mut self.wire_drawing.points);
+        self.wire_drawing.clear();
+
+        if self.read_only {
+            return None;
+        }
+
         let simplified = Self::simplify_wire_path(points);
 
         if simplified.len() < 2 {
             return None;
         }
 
-        // Split the path into individual 2-point wire segments
         let mut last_wire_id = None;
-        let mut endpoints_to_check = Vec::new();
+        self.with_undo("draw wire", |schematic| {
+            // Split the path into individual 2-point wire segments. The
+            // complete route and every topology repair it causes are one
+            // atomic user operation.
+            let mut endpoints_to_check = Vec::new();
 
-        for i in 0..simplified.len() - 1 {
-            let segment = vec![simplified[i], simplified[i + 1]];
-            endpoints_to_check.push(simplified[i]);
-            if i == simplified.len() - 2 {
-                endpoints_to_check.push(simplified[i + 1]);
+            for i in 0..simplified.len() - 1 {
+                let segment = vec![simplified[i], simplified[i + 1]];
+                endpoints_to_check.push(simplified[i]);
+                if i == simplified.len() - 2 {
+                    endpoints_to_check.push(simplified[i + 1]);
+                }
+                if let Some(wire_id) = schematic.add_wire(segment) {
+                    last_wire_id = Some(wire_id);
+                }
             }
-            if let Some(wire_id) = self.add_wire(segment) {
-                last_wire_id = Some(wire_id);
+
+            // Professional EDA behavior: split existing wires at T-junction
+            // points. Keeping this inside the route transaction guarantees
+            // that one Undo restores both the route and the prior topology.
+            for point in endpoints_to_check {
+                schematic.split_wires_at_t_junction(point);
             }
-        }
 
-        // Professional EDA behavior: split existing wires at T-junction points
-        // This ensures all wires at a junction share a common endpoint vertex
-        for pt in &endpoints_to_check {
-            self.split_wires_at_t_junction(*pt);
-        }
-
-        // Add junction markers where 3+ wire endpoints meet
-        self.update_wire_junctions();
+            // Add junction markers where 3+ wire endpoints meet.
+            schematic.update_wire_junctions();
+        });
 
         last_wire_id
     }
@@ -252,5 +264,82 @@ impl SchematicState {
     /// Cancel wire drawing
     pub fn cancel_wire(&mut self) {
         self.wire_drawing.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completed_interactive_route_is_one_undo_unit() {
+        let mut schematic = SchematicState::default();
+        let retained_wire = schematic
+            .add_wire(vec![Point::new(-20, -20), Point::new(-10, -20)])
+            .expect("baseline wire");
+        schematic.reset_undo_history();
+        schematic.is_dirty = false;
+
+        schematic.start_wire(Point::new(0, 0));
+        schematic.extend_wire(Point::new(20, 0));
+        schematic.extend_wire(Point::new(20, 20));
+
+        assert!(!schematic.has_pending_operation());
+        assert!(schematic.finish_wire().is_some());
+        assert_eq!(schematic.undo_history.undo_count(), 1);
+        assert_eq!(schematic.undo_description(), Some("draw wire"));
+        assert_eq!(schematic.wires.len(), 3);
+        assert!(!schematic.wire_drawing.active);
+        assert!(schematic.is_dirty);
+
+        assert!(schematic.undo());
+        assert_eq!(schematic.wires.len(), 1);
+        assert_eq!(schematic.wires[0].id, retained_wire);
+        assert!(!schematic.can_undo());
+        assert!(schematic.can_redo());
+
+        assert!(schematic.redo());
+        assert_eq!(schematic.wires.len(), 3);
+        assert_eq!(schematic.undo_history.undo_count(), 1);
+    }
+
+    #[test]
+    fn cancelled_and_non_committing_routes_do_not_create_history() {
+        let mut schematic = SchematicState::default();
+        schematic.init_undo_history();
+        schematic.is_dirty = true;
+
+        schematic.start_wire(Point::new(0, 0));
+        schematic.extend_wire(Point::new(10, 0));
+        schematic.cancel_wire();
+
+        assert!(!schematic.wire_drawing.active);
+        assert!(!schematic.has_pending_operation());
+        assert!(!schematic.can_undo());
+        assert!(schematic.is_dirty);
+        assert!(schematic.wires.is_empty());
+
+        schematic.start_wire(Point::new(5, 5));
+        assert_eq!(schematic.finish_wire(), None);
+        assert!(!schematic.has_pending_operation());
+        assert!(!schematic.can_undo());
+        assert!(schematic.is_dirty);
+        assert!(schematic.wires.is_empty());
+    }
+
+    #[test]
+    fn read_only_wire_gestures_cannot_start_or_commit() {
+        let mut schematic = SchematicState::default();
+        schematic.init_undo_history();
+        schematic.read_only = true;
+
+        schematic.start_wire(Point::new(0, 0));
+        schematic.extend_wire(Point::new(10, 0));
+
+        assert!(!schematic.wire_drawing.active);
+        assert_eq!(schematic.finish_wire(), None);
+        assert!(!schematic.can_undo());
+        assert!(schematic.wires.is_empty());
+        assert!(!schematic.is_dirty);
     }
 }

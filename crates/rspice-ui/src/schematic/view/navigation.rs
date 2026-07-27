@@ -2,6 +2,27 @@ use egui::{Pos2, Rect, Response, Ui, Vec2};
 
 use crate::common::app::AppState;
 
+const SCHEMATIC_ZOOM_MIN: f64 = 0.25;
+const SCHEMATIC_ZOOM_MAX: f64 = 8.0;
+
+pub(super) fn primary_pan_modifier_down(ui: &Ui) -> bool {
+    ui.input(|input| input.modifiers.alt || input.key_down(egui::Key::Space))
+}
+
+pub(super) fn primary_pan_gesture_active(ui: &Ui, response: &Response) -> bool {
+    let (alt, space, primary_down) = ui.input(|input| {
+        (
+            input.modifiers.alt,
+            input.key_down(egui::Key::Space),
+            input.pointer.primary_down(),
+        )
+    });
+    let primary_owned = (response.is_pointer_button_down_on() && primary_down)
+        || response.dragged_by(egui::PointerButton::Primary);
+    (alt && primary_owned)
+        || (space && (primary_owned || response.clicked_by(egui::PointerButton::Primary)))
+}
+
 pub(super) fn handle_viewport_navigation(
     ui: &Ui,
     response: &Response,
@@ -11,16 +32,14 @@ pub(super) fn handle_viewport_navigation(
     // Middle-button pan follows the raw pointer delta from the very first
     // event: egui's click-vs-drag threshold would swallow the first few
     // pixels as a dead zone, and the canvas has no competing middle-click
-    // action. Shift+primary keeps the threshold so clicks stay clicks.
+    // action. Space+primary and Alt+primary are the mockup's modeless pan
+    // escape hatches while an authoring tool remains armed.
     let middle_pan = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.middle_down());
-    let shift_pan =
-        response.dragged_by(egui::PointerButton::Primary) && ui.input(|i| i.modifiers.shift);
-    if middle_pan || shift_pan {
-        let delta = if middle_pan {
-            ui.input(|i| i.pointer.delta())
-        } else {
-            response.drag_delta()
-        };
+    let modified_primary_pan = response.is_pointer_button_down_on()
+        && ui.input(|input| input.pointer.primary_down())
+        && primary_pan_modifier_down(ui);
+    if middle_pan || modified_primary_pan {
+        let delta = ui.input(|i| i.pointer.delta());
         apply_pan_delta(&mut state.schematic.pan, delta);
     }
 
@@ -42,11 +61,16 @@ pub(super) fn handle_viewport_navigation(
 
     // Cursor-centered zoom, matching professional CAD tools.
     if response.hovered() {
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll != 0.0
+        let (scroll, shift) = ui.input(|i| (i.smooth_scroll_delta, i.modifiers.shift));
+        if shift {
+            let horizontal = if scroll.y != 0.0 { scroll.y } else { scroll.x };
+            if horizontal != 0.0 {
+                apply_horizontal_scroll_pan(&mut state.schematic.pan, horizontal);
+            }
+        } else if scroll.y != 0.0
             && let Some(cursor_pos) = response.hover_pos()
         {
-            let zoom_factor = if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 };
+            let zoom_factor = if scroll.y > 0.0 { 1.1 } else { 1.0 / 1.1 };
             apply_zoom_about(
                 &mut state.schematic.zoom,
                 &mut state.schematic.pan,
@@ -56,6 +80,10 @@ pub(super) fn handle_viewport_navigation(
             );
         }
     }
+}
+
+fn apply_horizontal_scroll_pan(pan: &mut (f64, f64), delta: f32) {
+    pan.0 += f64::from(delta);
 }
 
 fn apply_pan_delta(pan: &mut (f64, f64), delta: Vec2) {
@@ -75,7 +103,7 @@ fn apply_zoom_about(
     }
 
     let old_zoom = *zoom;
-    let new_zoom = (old_zoom * zoom_factor).clamp(0.1, 10.0);
+    let new_zoom = (old_zoom * zoom_factor).clamp(SCHEMATIC_ZOOM_MIN, SCHEMATIC_ZOOM_MAX);
 
     let focus_schematic_x = (focus_pos.x as f64 - available.min.x as f64 - pan.0) / old_zoom;
     let focus_schematic_y = (focus_pos.y as f64 - available.min.y as f64 - pan.1) / old_zoom;
@@ -118,5 +146,26 @@ mod tests {
         assert_eq!(zoom, 3.0);
         assert!((before.0 - after.0).abs() < 1e-12);
         assert!((before.1 - after.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn shifted_wheel_changes_horizontal_pan_only() {
+        let mut pan = (4.0, -8.0);
+        apply_horizontal_scroll_pan(&mut pan, 12.5);
+        assert_eq!(pan, (16.5, -8.0));
+    }
+
+    #[test]
+    fn schematic_zoom_uses_the_mockup_twenty_five_to_eight_hundred_percent_contract() {
+        let available = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0));
+        let focus = available.center();
+        let mut pan = (0.0, 0.0);
+        let mut zoom = 1.0;
+
+        apply_zoom_about(&mut zoom, &mut pan, available, focus, 100.0);
+        assert_eq!(zoom, SCHEMATIC_ZOOM_MAX);
+
+        apply_zoom_about(&mut zoom, &mut pan, available, focus, 0.001);
+        assert_eq!(zoom, SCHEMATIC_ZOOM_MIN);
     }
 }

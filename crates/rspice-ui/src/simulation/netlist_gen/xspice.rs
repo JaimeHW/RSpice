@@ -215,7 +215,10 @@ impl<'a> NetlistGenerator<'a> {
                 .join(" ");
             self.models.insert(
                 model_name.clone(),
-                format!(".MODEL {} {} ({})", model_name, spec.model_type, card_params),
+                format!(
+                    ".MODEL {} {} ({})",
+                    model_name, spec.model_type, card_params
+                ),
             );
         }
 

@@ -191,27 +191,6 @@ impl ValidatedRevisionSnapshot {
             .map_err(|error| ValidatedRevisionError::Serialization(error.to_string()))?;
         Ok(digest(&bytes))
     }
-
-    fn apply(&self, state: &mut SchematicState) {
-        let policy_changed = state.document_policy != self.document_policy;
-        SchematicSnapshot {
-            components: self.components.clone(),
-            wires: self.wires.clone(),
-            buses: self.buses.clone(),
-            bus_taps: self.bus_taps.clone(),
-            junctions: self.junctions.clone(),
-            net_labels: self.net_labels.clone(),
-            design_notes: self.design_notes.clone(),
-            documentation_shapes: self.documentation_shapes.clone(),
-            connections: self.connections.clone(),
-        }
-        .apply(state);
-        state.grid_size = self.grid_size;
-        state.document_policy = self.document_policy;
-        if policy_changed {
-            state.bump_topology_version();
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -234,6 +213,60 @@ pub struct ValidatedSchematicRevision {
     dependencies: Vec<ValidatedRevisionDependency>,
     advisory_dispositions: Vec<AdvisoryDisposition>,
     snapshot: ValidatedRevisionSnapshot,
+}
+
+/// Bounded semantic change counts between two validated schematic revisions.
+///
+/// Stable object identities distinguish additions/removals from edits. The
+/// comparison deliberately reports schematic-owned domains only; it never
+/// implies that project plans, models, requirements, or result manifests are
+/// part of a schematic snapshot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ValidatedRevisionObjectDelta {
+    pub added: usize,
+    pub removed: usize,
+    pub modified: usize,
+}
+
+impl ValidatedRevisionObjectDelta {
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.added == 0 && self.removed == 0 && self.modified == 0
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ValidatedRevisionSemanticDelta {
+    pub components: ValidatedRevisionObjectDelta,
+    pub wires: ValidatedRevisionObjectDelta,
+    pub buses: ValidatedRevisionObjectDelta,
+    pub bus_taps: ValidatedRevisionObjectDelta,
+    pub junctions: ValidatedRevisionObjectDelta,
+    pub net_labels: ValidatedRevisionObjectDelta,
+    pub design_notes: ValidatedRevisionObjectDelta,
+    pub documentation_shapes: ValidatedRevisionObjectDelta,
+    pub connections_added: usize,
+    pub connections_removed: usize,
+    pub grid_changed: bool,
+    pub document_policy_changed: bool,
+}
+
+impl ValidatedRevisionSemanticDelta {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.components.is_empty()
+            && self.wires.is_empty()
+            && self.buses.is_empty()
+            && self.bus_taps.is_empty()
+            && self.junctions.is_empty()
+            && self.net_labels.is_empty()
+            && self.design_notes.is_empty()
+            && self.documentation_shapes.is_empty()
+            && self.connections_added == 0
+            && self.connections_removed == 0
+            && !self.grid_changed
+            && !self.document_policy_changed
+    }
 }
 
 impl ValidatedSchematicRevision {
@@ -265,6 +298,66 @@ impl ValidatedSchematicRevision {
     #[must_use]
     pub const fn finding_counts(&self) -> ValidationFindingCounts {
         self.finding_counts
+    }
+
+    #[must_use]
+    pub fn author(&self) -> &str {
+        &self.author
+    }
+
+    #[must_use]
+    pub fn view_identity(&self) -> &str {
+        &self.view_identity
+    }
+
+    #[must_use]
+    pub const fn project_revision(&self) -> u64 {
+        self.project_revision
+    }
+
+    #[must_use]
+    pub const fn created_unix_ms(&self) -> u64 {
+        self.created_unix_ms
+    }
+
+    #[must_use]
+    pub const fn dependency_count(&self) -> usize {
+        self.dependencies.len()
+    }
+
+    #[must_use]
+    pub const fn is_accepted_baseline(&self) -> bool {
+        matches!(self.kind, ValidatedRevisionKind::AcceptedBaseline)
+    }
+
+    /// Compare exact retained schematic semantics without exposing or
+    /// duplicating the immutable snapshots owned by the journal.
+    #[must_use]
+    pub fn semantic_delta_to(&self, newer: &Self) -> ValidatedRevisionSemanticDelta {
+        let older = &self.snapshot;
+        let newer = &newer.snapshot;
+        let (connections_added, connections_removed) =
+            unordered_delta(&older.connections, &newer.connections);
+        ValidatedRevisionSemanticDelta {
+            components: identity_delta(&older.components, &newer.components, |value| value.id),
+            wires: identity_delta(&older.wires, &newer.wires, |value| value.id),
+            buses: identity_delta(&older.buses, &newer.buses, |value| value.id),
+            bus_taps: identity_delta(&older.bus_taps, &newer.bus_taps, |value| value.id),
+            junctions: identity_delta(&older.junctions, &newer.junctions, |value| value.id),
+            net_labels: identity_delta(&older.net_labels, &newer.net_labels, |value| value.id),
+            design_notes: identity_delta(&older.design_notes, &newer.design_notes, |value| {
+                value.id
+            }),
+            documentation_shapes: identity_delta(
+                &older.documentation_shapes,
+                &newer.documentation_shapes,
+                |value| value.id,
+            ),
+            connections_added,
+            connections_removed,
+            grid_changed: older.grid_size != newer.grid_size,
+            document_policy_changed: older.document_policy != newer.document_policy,
+        }
     }
 
     fn computed_revision_digest(&self) -> Result<ContentDigest, ValidatedRevisionError> {
@@ -527,6 +620,9 @@ impl SchematicState {
         &mut self,
         id: ValidatedSchematicRevisionId,
     ) -> Result<(), ValidatedRevisionError> {
+        if self.read_only {
+            return Err(ValidatedRevisionError::ReadOnly);
+        }
         self.validated_revisions.validate()?;
         let snapshot = self
             .validated_revisions
@@ -535,8 +631,35 @@ impl SchematicState {
             .find(|record| record.id == id)
             .map(|record| record.snapshot.clone())
             .ok_or(ValidatedRevisionError::RevisionNotFound)?;
-        snapshot.apply(self);
-        Ok(())
+        let target = SchematicSnapshot {
+            document_policy: snapshot.document_policy,
+            grid_size: snapshot.grid_size,
+            components: snapshot.components,
+            wires: snapshot.wires,
+            buses: snapshot.buses,
+            bus_taps: snapshot.bus_taps,
+            junctions: snapshot.junctions,
+            net_labels: snapshot.net_labels,
+            design_notes: snapshot.design_notes,
+            documentation_shapes: snapshot.documentation_shapes,
+            // Probe flags are simulation-output requests rather than
+            // validated electrical topology. A design revision restore must
+            // therefore preserve the live output markers instead of silently
+            // deleting them.
+            probes: self.probes.clone(),
+            connections: snapshot.connections,
+        };
+        if target.is_equal_state(self) {
+            return Err(ValidatedRevisionError::AlreadyCurrent);
+        }
+        let changed = self.with_undo("restore validated schematic revision", move |state| {
+            target.apply(state);
+        });
+        if changed {
+            Ok(())
+        } else {
+            Err(ValidatedRevisionError::AlreadyCurrent)
+        }
     }
 }
 
@@ -584,10 +707,47 @@ pub enum ValidatedRevisionError {
     RevisionDigestMismatch,
     #[error("validated revision was not found")]
     RevisionNotFound,
+    #[error("the schematic is read-only")]
+    ReadOnly,
+    #[error("the selected validated revision already matches the active schematic")]
+    AlreadyCurrent,
     #[error("only the exact unpublished tail revision may be removed")]
     NotUnpublishedTail,
     #[error("validated revision serialization failed: {0}")]
     Serialization(String),
+}
+
+fn identity_delta<T, F>(older: &[T], newer: &[T], identity: F) -> ValidatedRevisionObjectDelta
+where
+    T: PartialEq,
+    F: Fn(&T) -> u64,
+{
+    let mut delta = ValidatedRevisionObjectDelta::default();
+    for old in older {
+        match newer.iter().find(|new| identity(new) == identity(old)) {
+            None => delta.removed += 1,
+            Some(new) if new != old => delta.modified += 1,
+            Some(_) => {}
+        }
+    }
+    for new in newer {
+        if !older.iter().any(|old| identity(old) == identity(new)) {
+            delta.added += 1;
+        }
+    }
+    delta
+}
+
+fn unordered_delta<T: PartialEq>(older: &[T], newer: &[T]) -> (usize, usize) {
+    let added = newer
+        .iter()
+        .filter(|candidate| !older.contains(candidate))
+        .count();
+    let removed = older
+        .iter()
+        .filter(|candidate| !newer.contains(candidate))
+        .count();
+    (added, removed)
 }
 
 fn validate_project_id(project_id: &str) -> Result<(), ValidatedRevisionError> {
@@ -727,6 +887,61 @@ mod tests {
             NetNamingPolicy::SpiceCompatibleRelaxed
         );
         assert_eq!(state.grid_size, 4);
+    }
+
+    #[test]
+    fn restore_fails_closed_for_read_only_and_already_current_documents() {
+        let project_id = Uuid::new_v4();
+        let mut state = SchematicState::default();
+        state.add_component(ComponentType::Resistor, Point::new(10, 10));
+        let saved = state
+            .append_validated_revision(request(&state, project_id))
+            .expect("validated revision");
+        assert_eq!(
+            state.restore_validated_revision(saved),
+            Err(ValidatedRevisionError::AlreadyCurrent)
+        );
+
+        state.components[0].value = "3k".to_owned();
+        let changed = state.components.clone();
+        state.read_only = true;
+        assert_eq!(
+            state.restore_validated_revision(saved),
+            Err(ValidatedRevisionError::ReadOnly)
+        );
+        assert_eq!(state.components, changed);
+    }
+
+    #[test]
+    fn semantic_delta_reports_stable_object_changes() {
+        let project_id = Uuid::new_v4();
+        let mut state = SchematicState::default();
+        state.add_component(ComponentType::Resistor, Point::new(10, 10));
+        let first = state
+            .append_validated_revision(request(&state, project_id))
+            .expect("first revision");
+        state.components[0].value = "2k".to_owned();
+        state.add_component(ComponentType::Capacitor, Point::new(20, 10));
+        state.grid_size = 8;
+        let second = state
+            .append_validated_revision(request(&state, project_id))
+            .expect("second revision");
+        let first = state
+            .validated_revisions
+            .records()
+            .iter()
+            .find(|record| record.id() == first)
+            .unwrap();
+        let second = state
+            .validated_revisions
+            .records()
+            .iter()
+            .find(|record| record.id() == second)
+            .unwrap();
+        let delta = first.semantic_delta_to(second);
+        assert_eq!(delta.components.added, 1);
+        assert_eq!(delta.components.modified, 1);
+        assert!(delta.grid_changed);
     }
 
     #[test]

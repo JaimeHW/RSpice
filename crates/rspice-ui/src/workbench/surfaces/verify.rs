@@ -5343,6 +5343,57 @@ mod tests {
         id
     }
 
+    fn stage_literal_tuning_binding(
+        app: &mut RSpiceApp,
+        component_id: u64,
+        variable_name: &str,
+    ) -> crate::product::DesignVariableId {
+        sync_tuning_session(app);
+        let component = app
+            .state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == component_id)
+            .cloned()
+            .expect("component exists");
+        let source_view = app.state.workspace.active_schematic_reference();
+        let typed_expression = format!("{} ohm", component.value.trim());
+        let variable = crate::state::DesignVariable::new(
+            variable_name,
+            &typed_expression,
+            crate::state::DesignVariableQuantity::Resistance,
+            crate::state::DesignVariableScope::Project,
+            format!("Value of {}", component.name),
+            None,
+            crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+        )
+        .expect("test literal is a valid resistance");
+        let variable_id = variable.id;
+        app.state.workbench.verification.tuning_variables.push(
+            crate::workbench::state::TuningVariableDraft {
+                variable_id,
+                baseline_expression: typed_expression.clone(),
+                candidate_expression: typed_expression,
+                validation_error: None,
+                proposed: true,
+            },
+        );
+        app.state.workbench.verification.tuning_instance_binding =
+            Some(crate::workbench::state::TuningInstanceBindingDraft {
+                component_id,
+                component_name: component.name,
+                source_view,
+                source_topology_version: app.state.schematic.topology_version(),
+                source_value: component.value,
+                binding_expression: format!("{{{variable_name}}}"),
+                variable,
+                creates_variable: true,
+            });
+        variable_id
+    }
+
     fn retain_preflight_report(app: &mut RSpiceApp) {
         let (plan_id, plan_revision) = app
             .state
@@ -5430,10 +5481,7 @@ mod tests {
     fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
         let mut app = RSpiceApp::test_instance();
         app.state.workspace.project_sources = Default::default();
-        app.state.schematic.add_component(
-            crate::state::ComponentType::Resistor,
-            crate::state::Point::new(0, 0),
-        );
+        crate::common::examples::load_example("Voltage Divider", &mut app.state.schematic);
         let variable_id = add_tuning_variable(&mut app);
         let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
         let source_plan_revision = app
@@ -5463,6 +5511,186 @@ mod tests {
         assert_eq!(variable.revision, ObjectRevision::INITIAL.next().unwrap());
         assert!(app.state.simulation.trigger_simulation);
         assert!(!tuning_is_dirty(&app));
+    }
+
+    #[test]
+    fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
+        let mut app = RSpiceApp::test_instance();
+        let component_id = app.state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::origin(),
+        );
+        app.state.schematic.components[0].value = "10k".to_owned();
+        let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+        let workspace_before = serde_json::to_vec(&app.state.workspace).unwrap();
+        let value_before = app.state.schematic.components[0].value.clone();
+        stage_literal_tuning_binding(&mut app, component_id, "R1_VALUE");
+
+        assert!(tuning_is_dirty(&app));
+        revert_tuning_session(&mut app);
+
+        assert!(!tuning_is_dirty(&app));
+        assert!(
+            app.state
+                .workbench
+                .verification
+                .tuning_instance_binding
+                .is_none()
+        );
+        assert!(
+            app.state
+                .workbench
+                .verification
+                .tuning_variables
+                .iter()
+                .all(|draft| !draft.proposed)
+        );
+        assert_eq!(app.state.schematic.components[0].value, value_before);
+        assert_eq!(
+            serde_json::to_vec(&app.state.workspace).unwrap(),
+            workspace_before
+        );
+        assert!(
+            app.state
+                .workspace
+                .active_plan_data(plan_id)
+                .unwrap()
+                .design_variables
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workspace.project_sources = Default::default();
+        crate::common::examples::load_example("Voltage Divider", &mut app.state.schematic);
+        let component_id = app
+            .state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.kind == crate::state::ComponentType::Resistor)
+            .map(|component| component.id)
+            .expect("voltage divider resistor");
+        let component_index = app
+            .state
+            .schematic
+            .components
+            .iter()
+            .position(|component| component.id == component_id)
+            .unwrap();
+        app.state.schematic.components[component_index].name = "RLOAD".to_owned();
+        app.state.schematic.components[component_index].value = "10k".to_owned();
+        app.state.schematic.bump_topology_version();
+        let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+        let source_plan_revision = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .revision();
+        let variable_id = stage_literal_tuning_binding(&mut app, component_id, "RLOAD_VALUE");
+
+        tuning::commit_tuning_and_run(&mut app)
+            .expect("the exact prepared candidate commits and dispatches");
+
+        let variable = app
+            .state
+            .workspace
+            .active_plan_data(plan_id)
+            .unwrap()
+            .design_variables
+            .iter()
+            .find(|variable| variable.id == variable_id)
+            .expect("proposed variable became authoritative");
+        assert_eq!(variable.name, "RLOAD_VALUE");
+        assert_eq!(variable.expression, "10k ohm");
+        assert_eq!(
+            app.state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.id == component_id)
+                .unwrap()
+                .value,
+            "{RLOAD_VALUE}"
+        );
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .unwrap()
+                .revision(),
+            source_plan_revision.next().unwrap()
+        );
+        assert!(app.state.schematic.can_undo());
+        assert_eq!(
+            app.state.schematic.undo_description(),
+            Some("bind RLOAD to RLOAD_VALUE")
+        );
+        assert!(app.state.simulation.trigger_simulation);
+        assert!(
+            app.state
+                .workbench
+                .verification
+                .tuning_instance_binding
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
+        let mut app = RSpiceApp::test_instance();
+        let component_id = app.state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::origin(),
+        );
+        app.state.schematic.components[0].name = "RFAIL".to_owned();
+        app.state.schematic.components[0].value = "10k".to_owned();
+        let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+        let source_plan_revision = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .revision();
+        let source_topology = app.state.schematic.topology_version();
+        let source_can_undo = app.state.schematic.can_undo();
+        let workspace_before = serde_json::to_vec(&app.state.workspace).unwrap();
+        retain_preflight_report(&mut app);
+        stage_literal_tuning_binding(&mut app, component_id, "RFAIL_VALUE");
+
+        let error = tuning::commit_tuning_and_run(&mut app)
+            .expect_err("missing ground and open pins fail exact run preparation");
+
+        assert!(error.contains("exact run preparation failed"), "{error}");
+        assert_eq!(
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .unwrap()
+                .revision(),
+            source_plan_revision
+        );
+        assert_eq!(app.state.schematic.topology_version(), source_topology);
+        assert_eq!(app.state.schematic.components[0].value, "10k");
+        assert_eq!(app.state.schematic.can_undo(), source_can_undo);
+        assert_eq!(
+            serde_json::to_vec(&app.state.workspace).unwrap(),
+            workspace_before
+        );
+        assert!(
+            app.state
+                .workspace
+                .active_plan_data(plan_id)
+                .unwrap()
+                .design_variables
+                .is_empty()
+        );
+        assert!(app.state.workbench.preflight.open);
+        assert!(tuning_is_dirty(&app));
+        assert!(!app.state.simulation.trigger_simulation);
     }
 
     #[test]

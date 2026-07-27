@@ -1,15 +1,21 @@
 //! Hierarchical design document surface.
 
-use egui::{Align2, Context, Id, Order, Rect, Stroke, Ui};
+use egui::{Align2, Context, Id, Order, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::common::{AppState, RSpiceApp};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::commands::Command;
+use crate::workbench::state::Workspace;
 
 use super::super::design_system::{WorkbenchIcon, empty_state};
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    if is_netlist_first_without_schematic(&app.state) {
+        netlist_first_empty_state(ui, app);
+        return;
+    }
     if app.state.active_view_read_only() {
         read_only_banner(ui, app);
     }
@@ -39,16 +45,208 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+fn is_netlist_first_without_schematic(state: &AppState) -> bool {
+    let imported_deck_owns_the_project = state
+        .workspace
+        .netlist_document
+        .as_ref()
+        .is_some_and(|document| document.provenance().imported().is_some());
+    if !imported_deck_owns_the_project || schematic_has_authored_content(&state.schematic) {
+        return false;
+    }
+
+    // ProjectWorkspace keeps one bootstrap buffer so all legacy editor and
+    // save invariants remain valid. An imported source project is still
+    // netlist-first while that sole buffer is pristine. Creating any
+    // schematic cell materializes a second buffer (or authored content) and
+    // therefore promotes the Design surface without discarding the source
+    // deck.
+    state.workspace.schematic_buffers.len() <= 1
+        && state
+            .workspace
+            .schematic_buffers
+            .values()
+            .all(|schematic| !schematic_has_authored_content(schematic))
+}
+
+fn schematic_has_authored_content(schematic: &crate::state::SchematicState) -> bool {
+    !schematic.components.is_empty()
+        || !schematic.wires.is_empty()
+        || !schematic.buses.is_empty()
+        || !schematic.bus_taps.is_empty()
+        || !schematic.design_notes.is_empty()
+        || !schematic.documentation_shapes.is_empty()
+        || !schematic.probes.is_empty()
+        || !schematic.net_labels.is_empty()
+        || !schematic.junctions.is_empty()
+        || !schematic.connections.is_empty()
+        || !schematic.validated_revisions.is_empty()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NetlistFirstAction {
+    OpenNetlistWorkspace,
+    CreateSchematic,
+}
+
+fn execute_netlist_first_action(app: &mut RSpiceApp, action: NetlistFirstAction) {
+    match action {
+        NetlistFirstAction::OpenNetlistWorkspace => {
+            Command::OpenWorkspace(Workspace::Netlist).execute(app);
+        }
+        NetlistFirstAction::CreateSchematic => Command::NewCell.execute(app),
+    }
+}
+
+fn netlist_first_empty_state(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let available_width = ui.available_width().max(1.0);
+    let project_name = app.state.workspace.project.name().to_owned();
+
+    let (header_rect, _) =
+        ui.allocate_exact_size(Vec2::new(available_width, 118.0), Sense::hover());
+    ui.painter().rect_filled(header_rect, 0.0, t.color.bg_app);
+    ui.painter().line_segment(
+        [header_rect.left_bottom(), header_rect.right_bottom()],
+        Stroke::new(1.0, t.color.border),
+    );
+    let header_content = Rect::from_min_max(
+        header_rect.min + egui::vec2(30.0, 25.0),
+        egui::pos2(
+            (header_rect.left() + 750.0).min(header_rect.right() - 30.0),
+            header_rect.bottom() - 18.0,
+        ),
+    );
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(header_content)
+            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+        |ui| {
+            ui.spacing_mut().item_spacing.y = 3.0;
+            ui.label(
+                egui::RichText::new("NETLIST-FIRST PROJECT \u{00b7} NO SCHEMATIC")
+                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                    .color(t.color.text_dim),
+            );
+            ui.label(
+                egui::RichText::new(project_name)
+                    .font(theme::sans(tokens::FS_4, FontWeight::SemiBold))
+                    .color(t.color.text),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "This project is driven by its SPICE deck. The Netlist workspace owns editing; simulation, probing, and results work exactly as in schematic projects. Create a schematic to promote this into a schematic-driven design.",
+                )
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .color(t.color.text_dim),
+            );
+        },
+    );
+
+    let columns = if available_width <= 460.0 {
+        1
+    } else if available_width <= 760.0 {
+        2
+    } else {
+        4
+    };
+    let rows = 2_usize.div_ceil(columns);
+    let row_height = 72.0 * rows as f32;
+    let (actions_rect, _) =
+        ui.allocate_exact_size(Vec2::new(available_width, row_height), Sense::hover());
+    ui.painter()
+        .rect_filled(actions_rect, 0.0, t.color.bg_inset);
+    ui.painter().line_segment(
+        [actions_rect.left_bottom(), actions_rect.right_bottom()],
+        Stroke::new(1.0, t.color.border),
+    );
+
+    let column_width = actions_rect.width() / columns as f32;
+    let actions = [
+        (
+            NetlistFirstAction::OpenNetlistWorkspace,
+            WorkbenchIcon::Code,
+            "Open netlist workspace",
+            "Deck source \u{00b7} outline \u{00b7} diagnostics \u{00b7} overlay",
+            true,
+        ),
+        (
+            NetlistFirstAction::CreateSchematic,
+            WorkbenchIcon::Design,
+            "Create schematic\u{2026}",
+            "Promote to a schematic-driven project",
+            false,
+        ),
+    ];
+    let mut invoked = None;
+    for (index, (action, icon, title, detail, primary)) in actions.into_iter().enumerate() {
+        let row = index / columns;
+        let column = index % columns;
+        let rect = Rect::from_min_size(
+            actions_rect.min + egui::vec2(column as f32 * column_width, row as f32 * 72.0),
+            Vec2::new(column_width, 72.0),
+        );
+        let response = ui.interact(
+            rect,
+            ui.id().with(("netlist-first-action", index)),
+            Sense::click(),
+        );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        }
+        ui.painter().line_segment(
+            [rect.right_top(), rect.right_bottom()],
+            Stroke::new(1.0, t.color.border),
+        );
+        if primary {
+            ui.painter().line_segment(
+                [
+                    egui::pos2(rect.left(), rect.bottom() - 1.0),
+                    egui::pos2(rect.right(), rect.bottom() - 1.0),
+                ],
+                Stroke::new(2.0, t.color.accent),
+            );
+        }
+        icon.paint(
+            ui.painter(),
+            Rect::from_min_size(rect.min + egui::vec2(15.0, 21.0), Vec2::splat(30.0)),
+            if primary {
+                t.color.accent
+            } else {
+                t.color.text_dim
+            },
+        );
+        ui.painter().text(
+            rect.min + egui::vec2(53.0, 17.0),
+            Align2::LEFT_TOP,
+            title,
+            theme::sans(tokens::FS_2, FontWeight::SemiBold),
+            t.color.text,
+        );
+        ui.painter().text(
+            rect.min + egui::vec2(53.0, 39.0),
+            Align2::LEFT_TOP,
+            detail,
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+        theme::paint_focus_ring_outset(ui, &response, rect);
+        if response.clicked() {
+            invoked = Some(action);
+        }
+    }
+
+    if let Some(action) = invoked {
+        execute_netlist_first_action(app, action);
+    }
+}
+
+const CANVAS_BREADCRUMB_FONT_SIZE: f32 = tokens::FS_1;
+
 fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
     let t = Tokens::get(ctx);
-    let root_library = app.state.workspace.hierarchy_stack.first().map_or(
-        app.state.workspace.active_view.library.as_str(),
-        |reference| reference.library.as_str(),
-    );
-    let mut segments = Vec::with_capacity(app.state.workspace.hierarchy_stack.len() + 2);
-    segments.push(root_library.to_owned());
-    segments.extend(app.state.workspace.occurrence_labels());
-    segments.push(app.state.workspace.active_view.view.clone());
+    let segments = hierarchy_breadcrumb_segments(&app.state);
     let mut text = egui::text::LayoutJob::default();
     for (index, segment) in segments.iter().enumerate() {
         if index > 0 {
@@ -56,7 +254,7 @@ fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
                 " / ",
                 0.0,
                 egui::TextFormat {
-                    font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
+                    font_id: theme::sans(CANVAS_BREADCRUMB_FONT_SIZE, FontWeight::Regular),
                     color: t.color.text_faint,
                     ..Default::default()
                 },
@@ -68,7 +266,7 @@ fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
             0.0,
             egui::TextFormat {
                 font_id: theme::sans(
-                    tokens::FS_0,
+                    CANVAS_BREADCRUMB_FONT_SIZE,
                     if is_view {
                         FontWeight::Regular
                     } else {
@@ -108,6 +306,56 @@ fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
         });
 }
 
+fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<String> {
+    use crate::workbench::SchematicHierarchyVisibility;
+
+    let active = &state.workspace.active_view;
+    let visibility = if matches!(
+        state.workspace.active_view_type(),
+        ViewType::Schematic | ViewType::Testbench
+    ) {
+        state.ui.schematic_visibility.hierarchy
+    } else {
+        SchematicHierarchyVisibility::FullVisibleHierarchy
+    };
+    match visibility {
+        SchematicHierarchyVisibility::ActiveOnly => {
+            vec![active.cell.clone(), active.view.clone()]
+        }
+        SchematicHierarchyVisibility::ActiveAndParent => {
+            let mut segments = state
+                .workspace
+                .hierarchy_stack
+                .iter()
+                .rev()
+                .take(2)
+                .map(|reference| reference.cell.clone())
+                .collect::<Vec<_>>();
+            segments.reverse();
+            if segments.last() != Some(&active.cell) {
+                segments.push(active.cell.clone());
+            }
+            segments.push(active.view.clone());
+            segments
+        }
+        SchematicHierarchyVisibility::FullVisibleHierarchy => {
+            let root_library = state
+                .workspace
+                .hierarchy_stack
+                .first()
+                .map_or(active.library.as_str(), |reference| {
+                    reference.library.as_str()
+                });
+            let mut segments =
+                Vec::with_capacity(state.workspace.hierarchy_stack.len().saturating_add(2));
+            segments.push(root_library.to_owned());
+            segments.extend(state.workspace.occurrence_labels());
+            segments.push(active.view.clone());
+            segments
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CheckNoteTone {
     Ok,
@@ -115,11 +363,17 @@ enum CheckNoteTone {
     Error,
 }
 
+const CANVAS_CHECK_NOTE_MIN_WIDTH: f32 = 620.0;
+
+fn canvas_check_note_visible(viewport_width: f32) -> bool {
+    viewport_width > CANVAS_CHECK_NOTE_MIN_WIDTH
+}
+
 fn canvas_check_note(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
-    // The canonical compact portrait composition intentionally suppresses the
-    // wide engineering-status note; phone landscape (844 px in the reference)
-    // and larger canvases retain it.
-    if ctx.content_rect().width() <= 820.0 {
+    // The upgraded mockup keeps the current/stale engineering status visible
+    // on tablets and phone landscape, suppressing it only in the narrow
+    // portrait composition where it would collide with the breadcrumb.
+    if !canvas_check_note_visible(ctx.content_rect().width()) {
         return;
     }
     let (message, tone) = check_note_content(&app.state);
@@ -217,8 +471,8 @@ fn check_note_content(state: &AppState) -> (String, CheckNoteTone) {
 /// would otherwise leave an all-clear note over a schematic that carries no
 /// operating point at all.
 fn historical_annotation_run(state: &AppState) -> Option<u64> {
-    if state.schematic.document_policy.operating_point_annotations
-        == crate::state::OperatingPointAnnotationPolicy::Hidden
+    if state.ui.schematic_visibility.annotations
+        == crate::workbench::SchematicAnnotationVisibility::Hidden
     {
         return None;
     }
@@ -252,6 +506,19 @@ mod tests {
     }
 
     #[test]
+    fn canvas_check_note_matches_the_upgraded_mockup_breakpoint() {
+        assert_eq!(CANVAS_CHECK_NOTE_MIN_WIDTH, 620.0);
+        assert!(!canvas_check_note_visible(619.0));
+        assert!(!canvas_check_note_visible(620.0));
+        assert!(canvas_check_note_visible(620.01));
+    }
+
+    #[test]
+    fn canvas_breadcrumb_uses_the_mockup_body_type_size() {
+        assert_eq!(CANVAS_BREADCRUMB_FONT_SIZE, 12.0);
+    }
+
+    #[test]
     fn a_solved_run_that_no_longer_annotates_the_drawing_is_never_an_all_clear() {
         let mut state = AppState::default();
         state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
@@ -273,6 +540,63 @@ mod tests {
         assert_eq!(tone, CheckNoteTone::Warning);
         assert!(message.contains("Run 41"), "message was {message}");
         assert!(message.contains("historical"), "message was {message}");
+    }
+
+    #[test]
+    fn hierarchy_visibility_changes_only_the_canvas_context_breadcrumb() {
+        let mut state = AppState::default();
+        state.workspace.hierarchy_stack = vec![
+            crate::state::CellViewRef::new("work", "top", "schematic"),
+            crate::state::CellViewRef::new("work", "amp", "schematic"),
+            crate::state::CellViewRef::new("work", "bias", "schematic"),
+        ];
+        state.workspace.active_view = crate::state::CellViewRef::new("work", "bias", "schematic");
+
+        state.ui.schematic_visibility.hierarchy =
+            crate::workbench::SchematicHierarchyVisibility::ActiveOnly;
+        assert_eq!(
+            hierarchy_breadcrumb_segments(&state),
+            vec!["bias".to_owned(), "schematic".to_owned()]
+        );
+
+        state.ui.schematic_visibility.hierarchy =
+            crate::workbench::SchematicHierarchyVisibility::ActiveAndParent;
+        assert_eq!(
+            hierarchy_breadcrumb_segments(&state),
+            vec!["amp".to_owned(), "bias".to_owned(), "schematic".to_owned()]
+        );
+    }
+
+    #[test]
+    fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(crate::common::netlist_workflow::apply_imported_netlist(
+            &mut app.state,
+            "V1 out 0 1\n.op\n.end\n".to_owned(),
+            None,
+            "front_end.sp",
+        ));
+
+        assert!(is_netlist_first_without_schematic(&app.state));
+
+        app.state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(0, 0),
+        );
+        assert!(!is_netlist_first_without_schematic(&app.state));
+    }
+
+    #[test]
+    fn netlist_first_empty_state_actions_use_the_canonical_commands() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+
+        execute_netlist_first_action(&mut app, NetlistFirstAction::OpenNetlistWorkspace);
+        assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+
+        execute_netlist_first_action(&mut app, NetlistFirstAction::CreateSchematic);
+        assert!(app.state.dialogs.new_cell_dialog);
+        assert!(app.state.dialogs.new_cell_create_schematic);
     }
 }
 

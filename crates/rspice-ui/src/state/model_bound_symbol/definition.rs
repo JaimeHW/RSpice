@@ -645,25 +645,31 @@ fn symbol_document_for(definition: &ModelBoundSymbolDefinition) -> SymbolDocumen
     if let Some(imported) = &definition.imported_graphic
         && !imported.pin_anchors.is_empty()
     {
-        let pins = if definition.pins.is_empty() {
-            imported
-                .pin_anchors
-                .iter()
-                .map(|anchor| {
-                    SymbolPin::new(&anchor.name, PortDirection::InOut, Some(anchor.position))
-                })
-                .collect()
-        } else {
-            let mut ordered = definition.pins.iter().collect::<Vec<_>>();
-            ordered.sort_by_key(|pin| pin.order);
-            ordered
-                .into_iter()
-                .zip(&imported.pin_anchors)
-                .map(|(pin, anchor)| {
-                    SymbolPin::new(&pin.name, pin.direction, Some(anchor.position))
-                })
-                .collect()
-        };
+        let pins =
+            if definition.pins.is_empty() {
+                imported
+                    .pin_anchors
+                    .iter()
+                    .map(|anchor| {
+                        SymbolPin::new(&anchor.name, PortDirection::InOut, Some(anchor.position))
+                    })
+                    .collect()
+            } else {
+                let mut ordered = definition.pins.iter().collect::<Vec<_>>();
+                ordered.sort_by_key(|pin| pin.order);
+                ordered
+                    .into_iter()
+                    .zip(&imported.pin_anchors)
+                    .map(|(pin, anchor)| {
+                        let offset = match pin.side {
+                            SymbolPinSide::Left | SymbolPinSide::Right => anchor.position.y,
+                            SymbolPinSide::Top | SymbolPinSide::Bottom => anchor.position.x,
+                        };
+                        SymbolPin::new(&pin.name, pin.direction, Some(anchor.position))
+                            .with_contract(pin.electrical_type, pin.side, offset)
+                    })
+                    .collect()
+            };
         return SymbolDocument {
             pins,
             body,
@@ -692,7 +698,11 @@ fn symbol_document_for(definition: &ModelBoundSymbolDefinition) -> SymbolDocumen
                 SymbolPinSide::Top => Point::new(centered, -half_height - 20),
                 SymbolPinSide::Bottom => Point::new(centered, half_height + 20),
             };
-            SymbolPin::new(&pin.name, pin.direction, Some(position))
+            SymbolPin::new(&pin.name, pin.direction, Some(position)).with_contract(
+                pin.electrical_type,
+                pin.side,
+                centered,
+            )
         })
         .collect();
     SymbolDocument {

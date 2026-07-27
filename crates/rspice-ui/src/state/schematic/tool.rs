@@ -34,7 +34,7 @@ pub enum Tool {
 
     /// Draw wires
     ///
-    /// Click to start/extend wire, right-click or Escape to finish.
+    /// Click to start/extend wire, then double-click or press Enter to finish.
     Wire,
 
     /// Draw a multi-conductor bus polyline.

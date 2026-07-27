@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::ui::Theme;
 use crate::ui::widgets::Toasts;
 
-/// Canvas grid rendering style. The toolbar grid button and the View
-/// menu cycle Dots → Lines → Off.
+/// Canvas grid rendering style selected from the richer toolbar popover.
+/// The `G` / View command is a master on/off action for grid and snapping;
+/// it does not replace these independent display choices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum GridStyle {
     /// One dot per snap point (default).
@@ -22,16 +23,261 @@ pub enum GridStyle {
     Off,
 }
 
+/// Object family searched by the schematic bulk-edit workflow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SelectionBulkObjectKind {
+    #[default]
+    InstancesAndParameters,
+    NetsAndLabels,
+    PortsAndPins,
+    GraphicsAndNotes,
+}
+
+impl SelectionBulkObjectKind {
+    pub const ALL: [Self; 4] = [
+        Self::InstancesAndParameters,
+        Self::NetsAndLabels,
+        Self::PortsAndPins,
+        Self::GraphicsAndNotes,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::InstancesAndParameters => "Instances + parameters",
+            Self::NetsAndLabels => "Nets and labels",
+            Self::PortsAndPins => "Ports and pins",
+            Self::GraphicsAndNotes => "Graphics and notes",
+        }
+    }
+}
+
+/// Project extent inspected by the schematic bulk-edit workflow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SelectionBulkHierarchyScope {
+    #[default]
+    ActiveHierarchyPath,
+    CurrentSheet,
+    CompleteProject,
+}
+
+impl SelectionBulkHierarchyScope {
+    pub const ALL: [Self; 3] = [
+        Self::ActiveHierarchyPath,
+        Self::CurrentSheet,
+        Self::CompleteProject,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ActiveHierarchyPath => "Active hierarchy path",
+            Self::CurrentSheet => "Current sheet",
+            Self::CompleteProject => "Complete project",
+        }
+    }
+}
+
+/// Device-local, reusable query used by the mockup-owned bulk editor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SelectionBulkFilter {
+    pub query: String,
+    pub object_kind: SelectionBulkObjectKind,
+    pub hierarchy_scope: SelectionBulkHierarchyScope,
+    pub model_cell: String,
+    pub current_property: String,
+}
+
+impl Default for SelectionBulkFilter {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            object_kind: SelectionBulkObjectKind::InstancesAndParameters,
+            hierarchy_scope: SelectionBulkHierarchyScope::ActiveHierarchyPath,
+            model_cell: String::new(),
+            current_property: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedSelectionBulkFilter {
+    pub name: String,
+    pub filter: SelectionBulkFilter,
+}
+
+/// Persisted active query and named filters. This is user/session state, never
+/// project-owned design data.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SelectionBulkFilterSession {
+    pub active: SelectionBulkFilter,
+    saved: Vec<SavedSelectionBulkFilter>,
+}
+
+impl SelectionBulkFilterSession {
+    const MAX_SAVED_FILTERS: usize = 32;
+    const MAX_FILTER_NAME_BYTES: usize = 96;
+
+    pub fn saved(&self) -> &[SavedSelectionBulkFilter] {
+        &self.saved
+    }
+
+    pub fn save_active(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A saved filter name is required.".to_owned());
+        }
+        if name.len() > Self::MAX_FILTER_NAME_BYTES || name.chars().any(char::is_control) {
+            return Err("The saved filter name is invalid or too long.".to_owned());
+        }
+        if let Some(existing) = self
+            .saved
+            .iter_mut()
+            .find(|entry| entry.name.eq_ignore_ascii_case(name))
+        {
+            existing.name = name.to_owned();
+            existing.filter = self.active.clone();
+            return Ok(());
+        }
+        if self.saved.len() >= Self::MAX_SAVED_FILTERS {
+            return Err(format!(
+                "At most {} selection filters may be saved.",
+                Self::MAX_SAVED_FILTERS
+            ));
+        }
+        self.saved.push(SavedSelectionBulkFilter {
+            name: name.to_owned(),
+            filter: self.active.clone(),
+        });
+        self.saved
+            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        Ok(())
+    }
+
+    pub fn load(&mut self, name: &str) -> bool {
+        let Some(filter) = self
+            .saved
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case(name))
+            .map(|entry| entry.filter.clone())
+        else {
+            return false;
+        };
+        self.active = filter;
+        true
+    }
+
+    pub fn remove(&mut self, name: &str) -> bool {
+        let before = self.saved.len();
+        self.saved
+            .retain(|entry| !entry.name.eq_ignore_ascii_case(name));
+        self.saved.len() != before
+    }
+}
+
+/// Device-local hierarchy context shown around the active schematic.
+///
+/// This is presentation state only. It never changes the cell/view binding
+/// or serializes into project-owned design data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicHierarchyVisibility {
+    #[default]
+    ActiveAndParent,
+    ActiveOnly,
+    FullVisibleHierarchy,
+}
+
+/// Mutually exclusive canvas annotation layer selected by the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicAnnotationVisibility {
+    #[default]
+    OperatingPoint,
+    ViolationsOnly,
+    Hidden,
+}
+
+/// Quantities rendered from the explicitly selected retained result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicBackAnnotationContent {
+    #[default]
+    NetVoltagesAndDeviceCurrents,
+    VoltagesOnly,
+    VoltagesCurrentsAndPower,
+}
+
+/// Instance parameter-label detail rendered on the canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicParameterLabelVisibility {
+    #[default]
+    ValuesOnly,
+    NamesAndValues,
+    Hidden,
+}
+
+/// Interactive wire and bus routing policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicWireRoutingStyle {
+    #[default]
+    Orthogonal,
+    FortyFiveDegree,
+    FreeAngle,
+}
+
+/// Temporary net-highlighting presentation policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicNetHighlighting {
+    #[default]
+    SelectedAcrossHierarchy,
+    NetClassColors,
+    Off,
+}
+
+/// Governed design-review records rendered on the canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchematicReviewMarkerVisibility {
+    #[default]
+    OpenAndAssigned,
+    All,
+    Hidden,
+}
+
+/// Complete device-local schematic display policy.
+///
+/// Keeping all seven mockup controls in one value gives Apply/Cancel true
+/// transactional semantics and prevents partial frame-by-frame publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SchematicVisibilityPolicy {
+    pub hierarchy: SchematicHierarchyVisibility,
+    pub annotations: SchematicAnnotationVisibility,
+    pub back_annotation: SchematicBackAnnotationContent,
+    pub parameter_labels: SchematicParameterLabelVisibility,
+    pub wire_routing: SchematicWireRoutingStyle,
+    pub net_highlighting: SchematicNetHighlighting,
+    pub review_markers: SchematicReviewMarkerVisibility,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SymbolTool {
     #[default]
     Select,
     PlacePin,
-    Polyline,
+    Line,
+    Rectangle,
     Circle,
     Arc,
-    Arrow,
-    Dot,
+    Polygon,
+    Text,
 }
 
 impl SymbolTool {
@@ -39,11 +285,43 @@ impl SymbolTool {
         match self {
             SymbolTool::Select => "Select",
             SymbolTool::PlacePin => "Place pin",
-            SymbolTool::Polyline => "Polyline",
+            SymbolTool::Line => "Line",
+            SymbolTool::Rectangle => "Rectangle",
             SymbolTool::Circle => "Circle",
             SymbolTool::Arc => "Arc",
-            SymbolTool::Arrow => "Arrow",
-            SymbolTool::Dot => "Dot",
+            SymbolTool::Polygon => "Polygon",
+            SymbolTool::Text => "Text",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SymbolGridSpacing {
+    Ten,
+    Five,
+    #[default]
+    TwoPointFive,
+}
+
+impl SymbolGridSpacing {
+    pub const ALL: [Self; 3] = [Self::Ten, Self::Five, Self::TwoPointFive];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ten => "grid 10",
+            Self::Five => "grid 5",
+            Self::TwoPointFive => "grid 2.5",
+        }
+    }
+
+    /// The persistent symbol model uses integer quarter-grid coordinates.
+    /// The fine 2.5 display grid therefore maps to one two-unit/two-and-a-half
+    /// authored pitch with deterministic nearest-integer placement.
+    pub const fn model_step(self) -> f32 {
+        match self {
+            Self::Ten => 10.0,
+            Self::Five => 5.0,
+            Self::TwoPointFive => 2.5,
         }
     }
 }
@@ -52,6 +330,8 @@ impl SymbolTool {
 pub struct SymbolSelection {
     pub pins: std::collections::BTreeSet<String>,
     pub shapes: std::collections::BTreeSet<usize>,
+    pub attributes: std::collections::BTreeSet<crate::state::SymbolAttributeKind>,
+    pub texts: std::collections::BTreeSet<u64>,
 }
 
 impl SymbolSelection {
@@ -59,6 +339,8 @@ impl SymbolSelection {
         Self {
             pins: document.pins.iter().map(|pin| pin.name.clone()).collect(),
             shapes: (0..document.body.len()).collect(),
+            attributes: crate::state::SymbolAttributeKind::ALL.into_iter().collect(),
+            texts: std::collections::BTreeSet::new(),
         }
     }
 
@@ -87,13 +369,20 @@ impl SymbolSelection {
                 bounds_intersect(min, max, shape_min, shape_max).then_some(index)
             })
             .collect();
-        Self { pins, shapes }
+        Self {
+            pins,
+            shapes,
+            attributes: std::collections::BTreeSet::new(),
+            texts: std::collections::BTreeSet::new(),
+        }
     }
 
     pub fn single_pin(name: impl Into<String>) -> Self {
         Self {
             pins: [name.into()].into_iter().collect(),
             shapes: std::collections::BTreeSet::new(),
+            attributes: std::collections::BTreeSet::new(),
+            texts: std::collections::BTreeSet::new(),
         }
     }
 
@@ -101,11 +390,30 @@ impl SymbolSelection {
         Self {
             pins: std::collections::BTreeSet::new(),
             shapes: [index].into_iter().collect(),
+            attributes: std::collections::BTreeSet::new(),
+            texts: std::collections::BTreeSet::new(),
+        }
+    }
+
+    pub fn single_attribute(kind: crate::state::SymbolAttributeKind) -> Self {
+        Self {
+            attributes: [kind].into_iter().collect(),
+            ..Self::default()
+        }
+    }
+
+    pub fn single_text(id: u64) -> Self {
+        Self {
+            texts: [id].into_iter().collect(),
+            ..Self::default()
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pins.is_empty() && self.shapes.is_empty()
+        self.pins.is_empty()
+            && self.shapes.is_empty()
+            && self.attributes.is_empty()
+            && self.texts.is_empty()
     }
 }
 
@@ -113,11 +421,12 @@ impl SymbolSelection {
 pub struct SymbolClipboard {
     pub pins: Vec<crate::state::SymbolPin>,
     pub shapes: Vec<crate::state::SymbolShape>,
+    pub texts: Vec<crate::state::SymbolTextObject>,
 }
 
 impl SymbolClipboard {
     pub fn is_empty(&self) -> bool {
-        self.pins.is_empty() && self.shapes.is_empty()
+        self.pins.is_empty() && self.shapes.is_empty() && self.texts.is_empty()
     }
 
     pub fn bounds(&self) -> Option<(crate::state::Point, crate::state::Point)> {
@@ -134,6 +443,10 @@ impl SymbolClipboard {
             xs.extend([min.x, max.x]);
             ys.extend([min.y, max.y]);
         }
+        for text in &self.texts {
+            xs.push(text.position.x);
+            ys.push(text.position.y);
+        }
         Some((
             crate::state::Point::new(xs.iter().min().copied()?, ys.iter().min().copied()?),
             crate::state::Point::new(xs.iter().max().copied()?, ys.iter().max().copied()?),
@@ -145,6 +458,7 @@ impl SymbolClipboard {
 pub struct SymbolDocumentSnapshot {
     pub document: crate::state::SymbolDocument,
     pub symbol_document_metadata: Option<String>,
+    pub symbol_editor_metadata: Option<String>,
     pub generated_metadata: Option<String>,
     pub ports_metadata: Option<String>,
 }
@@ -154,6 +468,7 @@ impl SymbolDocumentSnapshot {
         Self {
             document: document.clone(),
             symbol_document_metadata: None,
+            symbol_editor_metadata: None,
             generated_metadata: None,
             ports_metadata: None,
         }
@@ -166,6 +481,8 @@ pub struct SymbolUiState {
     pub selection: SymbolSelection,
     pub selected_pin: Option<String>,
     pub selected_shape: Option<usize>,
+    pub selected_attribute: Option<crate::state::SymbolAttributeKind>,
+    pub selected_text: Option<u64>,
     pub dragging_pin: Option<String>,
     pub dragging_shape: Option<(usize, crate::state::Point)>,
     pub dragging_label: Option<String>,
@@ -182,6 +499,13 @@ pub struct SymbolUiState {
     pub needs_fit: bool,
     pub pending_polyline: Vec<crate::state::Point>,
     pub shape_start: Option<crate::state::Point>,
+    pub show_grid: bool,
+    pub snap_to_grid: bool,
+    pub grid_spacing: SymbolGridSpacing,
+    pub preview_as_placed: bool,
+    pub save_dialog_open: bool,
+    pub save_revision_note: String,
+    pub save_error: Option<String>,
     pub clipboard: SymbolClipboard,
     pub undo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
     pub redo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
@@ -194,6 +518,8 @@ impl Default for SymbolUiState {
             selection: SymbolSelection::default(),
             selected_pin: None,
             selected_shape: None,
+            selected_attribute: None,
+            selected_text: None,
             dragging_pin: None,
             dragging_shape: None,
             dragging_label: None,
@@ -207,6 +533,13 @@ impl Default for SymbolUiState {
             needs_fit: true,
             pending_polyline: Vec::new(),
             shape_start: None,
+            show_grid: true,
+            snap_to_grid: true,
+            grid_spacing: SymbolGridSpacing::TwoPointFive,
+            preview_as_placed: false,
+            save_dialog_open: false,
+            save_revision_note: String::new(),
+            save_error: None,
             clipboard: SymbolClipboard::default(),
             undo_stacks: std::collections::HashMap::new(),
             redo_stacks: std::collections::HashMap::new(),
@@ -219,11 +552,15 @@ impl SymbolUiState {
         self.selection = SymbolSelection::default();
         self.selected_pin = None;
         self.selected_shape = None;
+        self.selected_attribute = None;
+        self.selected_text = None;
     }
 
     pub fn set_selection(&mut self, selection: SymbolSelection) {
         self.selected_pin = selection.pins.iter().next().cloned();
         self.selected_shape = selection.shapes.iter().next().copied();
+        self.selected_attribute = selection.attributes.iter().next().copied();
+        self.selected_text = selection.texts.iter().next().copied();
         self.selection = selection;
     }
 
@@ -233,6 +570,14 @@ impl SymbolUiState {
 
     pub fn select_shape(&mut self, index: usize) {
         self.set_selection(SymbolSelection::single_shape(index));
+    }
+
+    pub fn select_attribute(&mut self, kind: crate::state::SymbolAttributeKind) {
+        self.set_selection(SymbolSelection::single_attribute(kind));
+    }
+
+    pub fn select_text(&mut self, id: u64) {
+        self.set_selection(SymbolSelection::single_text(id));
     }
 
     pub fn effective_selection(&self) -> SymbolSelection {
@@ -245,6 +590,12 @@ impl SymbolUiState {
         }
         if let Some(shape) = self.selected_shape {
             selection.shapes.insert(shape);
+        }
+        if let Some(attribute) = self.selected_attribute {
+            selection.attributes.insert(attribute);
+        }
+        if let Some(text) = self.selected_text {
+            selection.texts.insert(text);
         }
         selection
     }
@@ -352,17 +703,8 @@ fn bounds_intersect(
 }
 
 impl GridStyle {
-    /// All styles in cycle order.
+    /// All styles in toolbar presentation order.
     pub const ALL: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
-
-    /// The next style in the Dots → Lines → Off cycle.
-    pub fn cycled(self) -> Self {
-        match self {
-            GridStyle::Dots => GridStyle::Lines,
-            GridStyle::Lines => GridStyle::Off,
-            GridStyle::Off => GridStyle::Dots,
-        }
-    }
 
     /// Menu / preferences label.
     pub fn label(self) -> &'static str {
@@ -388,6 +730,26 @@ pub struct InspectorEdit {
     pub component_id: u64,
     /// Design state captured when the first keystroke landed.
     pub before: crate::state::SchematicSnapshot,
+}
+
+/// Transient, device-local recovery point for a governed Select All command.
+///
+/// It is intentionally excluded from [`UiSessionStateSer`]: selection is
+/// runtime editor state, not project data or a durable user preference.
+#[derive(Debug, Clone)]
+pub(crate) struct SchematicSelectionRecovery {
+    pub(crate) active_key: String,
+    pub(crate) selections: std::collections::HashMap<String, crate::state::Selection>,
+}
+
+/// Transient, device-local recovery point for a visibility-policy change.
+#[derive(Debug, Clone)]
+pub(crate) struct SchematicVisibilityRecovery {
+    pub(crate) view_path: String,
+    pub(crate) policy: SchematicVisibilityPolicy,
+    pub(crate) routing_mode: crate::state::WireRoutingMode,
+    pub(crate) net_highlight: crate::state::NetHighlightState,
+    pub(crate) selection: crate::state::Selection,
 }
 
 /// Persistent and per-frame state shared by workbench document engines.
@@ -421,6 +783,39 @@ pub struct UiSessionState {
     pub results_seen_version: u64,
     /// Canvas grid style (dots / lines / off).
     pub grid: GridStyle,
+    /// Exact non-Off display style restored by the `G` master toggle.
+    /// Keeping this separate prevents a temporary grid/snap disable from
+    /// discarding the user's richer toolbar choice.
+    pub grid_restore_style: GridStyle,
+    /// Schematic editor selection classes. This is restored with the UI
+    /// session but never written into project-owned schematic data.
+    pub schematic_selection_filter: crate::state::SchematicSelectionFilter,
+    /// Active and named filters for exact schematic bulk-edit queries.
+    pub schematic_bulk_edit_filters: SelectionBulkFilterSession,
+    /// Device-local schematic display policy. Presentation choices are
+    /// restored with the session and are never written to project data.
+    pub schematic_visibility: SchematicVisibilityPolicy,
+    /// Exact runtime snap-target configuration used by the Grid & snap
+    /// popover. The document grid pitch remains project-owned.
+    pub schematic_snap: crate::state::SnapEngine,
+    /// Exact runtime conductor routing mode. This retains the horizontal- or
+    /// vertical-first orthogonal preference that the display policy's
+    /// user-facing three-way style intentionally abstracts.
+    pub schematic_routing_mode: crate::state::WireRoutingMode,
+    /// Last governed Select All selection snapshot, including visible
+    /// edit-in-place hierarchy buffers.
+    pub(crate) schematic_selection_recovery: Option<SchematicSelectionRecovery>,
+    /// Last visibility-policy presentation snapshot for the active view.
+    pub(crate) schematic_visibility_recovery: Option<SchematicVisibilityRecovery>,
+    /// Device-local edge-triggered schematic selection synchronization.
+    /// This is deliberately excluded from `UiSessionStateSer`: source-map
+    /// and retained-result highlights are presentation state, not project
+    /// data or a durable preference value.
+    pub(crate) schematic_cross_probe: super::cross_probe::SchematicCrossProbeRuntime,
+    /// Device-local working and named engineering-table views. Project-owned
+    /// named views live in `ProjectWorkspace`; this store is the personal
+    /// preference authority restored on desktop, web, and tablet hosts.
+    pub engineering_table_views: super::engineering_table::EngineeringTableViewStore,
     /// One-shot request to export the visible waveforms as CSV (needs the
     /// app's IO backend, so it is handled at the workbench boundary).
     pub export_csv_requested: bool,
@@ -465,6 +860,35 @@ impl UiSessionState {
         self.number_locale = locale;
     }
 
+    pub(crate) fn set_grid_style(&mut self, style: GridStyle) {
+        if style.visible() {
+            self.grid_restore_style = style;
+        }
+        self.grid = style;
+    }
+
+    /// Toggle grid presentation while retaining the exact non-Off style.
+    /// Returns the new master state so callers can apply it to snapping.
+    pub(crate) fn toggle_grid_visibility(&mut self) -> bool {
+        let enabled = !self.grid.visible();
+        if enabled {
+            let restore = if self.grid_restore_style.visible() {
+                self.grid_restore_style
+            } else {
+                GridStyle::Dots
+            };
+            self.grid = restore;
+        } else {
+            self.grid_restore_style = if self.grid.visible() {
+                self.grid
+            } else {
+                GridStyle::Dots
+            };
+            self.grid = GridStyle::Off;
+        }
+        enabled
+    }
+
     pub(crate) fn request_full_screen(&mut self, enabled: bool) {
         self.full_screen_request = Some(enabled);
     }
@@ -486,6 +910,20 @@ pub struct UiSessionStateSer {
     show_grid: bool,
     #[serde(default)]
     grid_style: Option<GridStyle>,
+    #[serde(default)]
+    grid_restore_style: Option<GridStyle>,
+    #[serde(default)]
+    schematic_selection_filter: crate::state::SchematicSelectionFilter,
+    #[serde(default)]
+    schematic_bulk_edit_filters: SelectionBulkFilterSession,
+    #[serde(default)]
+    schematic_visibility: SchematicVisibilityPolicy,
+    #[serde(default)]
+    schematic_snap: crate::state::SnapEngine,
+    #[serde(default)]
+    schematic_routing_mode: Option<crate::state::WireRoutingMode>,
+    #[serde(default)]
+    engineering_table_views: super::engineering_table::EngineeringTableViewStore,
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
     #[serde(default)]
@@ -525,6 +963,19 @@ impl From<&UiSessionState> for UiSessionStateSer {
             theme: session.theme,
             show_grid: session.grid.visible(),
             grid_style: Some(session.grid),
+            grid_restore_style: Some(if session.grid_restore_style.visible() {
+                session.grid_restore_style
+            } else if session.grid.visible() {
+                session.grid
+            } else {
+                GridStyle::Dots
+            }),
+            schematic_selection_filter: session.schematic_selection_filter,
+            schematic_bulk_edit_filters: session.schematic_bulk_edit_filters.clone(),
+            schematic_visibility: session.schematic_visibility,
+            schematic_snap: session.schematic_snap.clone(),
+            schematic_routing_mode: Some(session.schematic_routing_mode),
+            engineering_table_views: session.engineering_table_views.clone(),
             autosave_minutes: normalize_autosave_minutes(session.autosave_minutes),
             preferences: session.preferences.clone(),
             browser_spoken_feedback: session.browser_spoken_feedback,
@@ -540,11 +991,37 @@ impl From<UiSessionStateSer> for UiSessionState {
         } else {
             GridStyle::Off
         });
+        let grid_restore_style = ser
+            .grid_restore_style
+            .filter(|style| style.visible())
+            .unwrap_or(if grid.visible() {
+                grid
+            } else {
+                GridStyle::Dots
+            });
         let mut preferences = ser.preferences;
         preferences.normalize();
+        let schematic_routing_mode =
+            ser.schematic_routing_mode
+                .unwrap_or(match ser.schematic_visibility.wire_routing {
+                    SchematicWireRoutingStyle::Orthogonal => {
+                        crate::state::WireRoutingMode::HorizontalFirst
+                    }
+                    SchematicWireRoutingStyle::FortyFiveDegree => {
+                        crate::state::WireRoutingMode::FortyFiveDegree
+                    }
+                    SchematicWireRoutingStyle::FreeAngle => crate::state::WireRoutingMode::Diagonal,
+                });
         let mut session = Self {
             theme: ser.theme,
             grid,
+            grid_restore_style,
+            schematic_selection_filter: ser.schematic_selection_filter,
+            schematic_bulk_edit_filters: ser.schematic_bulk_edit_filters,
+            schematic_visibility: ser.schematic_visibility,
+            schematic_snap: ser.schematic_snap,
+            schematic_routing_mode,
+            engineering_table_views: ser.engineering_table_views,
             autosave_minutes: normalize_autosave_minutes(ser.autosave_minutes),
             preferences,
             browser_spoken_feedback: ser.browser_spoken_feedback,
@@ -588,6 +1065,205 @@ mod symbol_selection_tests {
         let point = rotate_point_cw_about(Point::new(20, 10), origin);
 
         assert_eq!(point, Point::new(10, 20));
+    }
+
+    #[test]
+    fn schematic_selection_filter_round_trips_with_the_ui_session() {
+        let mut session = UiSessionState::new();
+        session.schematic_selection_filter.instances = false;
+        session.schematic_selection_filter.annotations = false;
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let wire: UiSessionStateSer =
+            serde_json::from_value(serialized).expect("deserialize session");
+        let restored = UiSessionState::from(wire);
+
+        assert_eq!(
+            restored.schematic_selection_filter,
+            session.schematic_selection_filter
+        );
+    }
+
+    #[test]
+    fn legacy_ui_session_defaults_to_all_selection_classes() {
+        let wire: UiSessionStateSer =
+            serde_json::from_value(serde_json::json!({})).expect("legacy session without a filter");
+        let restored = UiSessionState::from(wire);
+
+        assert!(restored.schematic_selection_filter.all_enabled());
+    }
+
+    #[test]
+    fn schematic_bulk_edit_filters_round_trip_with_the_ui_session() {
+        let mut session = UiSessionState::new();
+        session.schematic_bulk_edit_filters.active = SelectionBulkFilter {
+            query: "OPA*".to_owned(),
+            object_kind: SelectionBulkObjectKind::InstancesAndParameters,
+            hierarchy_scope: SelectionBulkHierarchyScope::CompleteProject,
+            model_cell: "OPA189*".to_owned(),
+            current_property: "section=tt".to_owned(),
+        };
+        session
+            .schematic_bulk_edit_filters
+            .save_active("TT amplifiers")
+            .expect("save filter");
+
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serialized).expect("deserialize session"),
+        );
+
+        assert_eq!(
+            restored.schematic_bulk_edit_filters,
+            session.schematic_bulk_edit_filters
+        );
+    }
+
+    #[test]
+    fn personal_engineering_table_views_round_trip_with_the_ui_session() {
+        let mut session = UiSessionState::new();
+        let dataset = crate::workbench::engineering_table::EngineeringDataset::active_schematic(
+            &Default::default(),
+        );
+        let view = crate::workbench::engineering_table::EngineeringTableView::for_dataset(&dataset);
+        session
+            .engineering_table_views
+            .save(
+                "My device view",
+                crate::workbench::engineering_table::EngineeringViewScope::Personal,
+                view,
+                true,
+                &dataset,
+            )
+            .expect("valid personal view");
+
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serialized).expect("deserialize session"),
+        );
+
+        assert_eq!(
+            restored.engineering_table_views,
+            session.engineering_table_views
+        );
+    }
+
+    #[test]
+    fn named_bulk_filters_update_load_and_delete_case_insensitively() {
+        let mut filters = SelectionBulkFilterSession::default();
+        filters.active.query = "R*".to_owned();
+        filters.save_active("Passives").expect("save");
+        filters.active.query = "C*".to_owned();
+        filters.save_active("passives").expect("replace");
+        assert_eq!(filters.saved().len(), 1);
+        assert!(filters.load("PASSIVES"));
+        assert_eq!(filters.active.query, "C*");
+        assert!(filters.remove("pAsSiVeS"));
+        assert!(filters.saved().is_empty());
+    }
+
+    #[test]
+    fn legacy_ui_session_defaults_bulk_edit_filters_without_project_mutation() {
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serde_json::json!({}))
+                .expect("legacy session without bulk filters"),
+        );
+        assert_eq!(
+            restored.schematic_bulk_edit_filters,
+            SelectionBulkFilterSession::default()
+        );
+    }
+
+    #[test]
+    fn schematic_visibility_policy_round_trips_with_the_ui_session() {
+        let mut session = UiSessionState::new();
+        session.schematic_visibility = SchematicVisibilityPolicy {
+            hierarchy: SchematicHierarchyVisibility::ActiveOnly,
+            annotations: SchematicAnnotationVisibility::ViolationsOnly,
+            back_annotation: SchematicBackAnnotationContent::VoltagesCurrentsAndPower,
+            parameter_labels: SchematicParameterLabelVisibility::Hidden,
+            wire_routing: SchematicWireRoutingStyle::FortyFiveDegree,
+            net_highlighting: SchematicNetHighlighting::Off,
+            review_markers: SchematicReviewMarkerVisibility::All,
+        };
+
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serialized).expect("deserialize session"),
+        );
+
+        assert_eq!(restored.schematic_visibility, session.schematic_visibility);
+    }
+
+    #[test]
+    fn grid_master_toggle_restores_and_round_trips_the_exact_display_style() {
+        let mut session = UiSessionState::new();
+        session.set_grid_style(GridStyle::Lines);
+        assert!(!session.toggle_grid_visibility());
+        assert_eq!(session.grid, GridStyle::Off);
+        assert_eq!(session.grid_restore_style, GridStyle::Lines);
+
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let mut restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serialized).expect("deserialize session"),
+        );
+
+        assert_eq!(restored.grid, GridStyle::Off);
+        assert_eq!(restored.grid_restore_style, GridStyle::Lines);
+        assert!(restored.toggle_grid_visibility());
+        assert_eq!(restored.grid, GridStyle::Lines);
+    }
+
+    #[test]
+    fn legacy_ui_session_uses_safe_visibility_defaults() {
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serde_json::json!({}))
+                .expect("legacy session without visibility policy"),
+        );
+
+        assert_eq!(
+            restored.schematic_visibility,
+            SchematicVisibilityPolicy::default()
+        );
+    }
+
+    #[test]
+    fn schematic_snap_and_exact_routing_round_trip_with_the_ui_session() {
+        let mut session = UiSessionState::new();
+        session.schematic_snap.enabled = false;
+        session.schematic_snap.snap_to_wire_segments = false;
+        session.schematic_snap.snap_radius = 7;
+        session.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
+
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serialized).expect("deserialize session"),
+        );
+
+        assert_eq!(restored.schematic_snap, session.schematic_snap);
+        assert_eq!(
+            restored.schematic_routing_mode,
+            crate::state::WireRoutingMode::VerticalFirst
+        );
+    }
+
+    #[test]
+    fn legacy_ui_session_uses_snap_and_routing_defaults() {
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serde_json::json!({}))
+                .expect("legacy session without editor runtime settings"),
+        );
+
+        assert_eq!(restored.schematic_snap, crate::state::SnapEngine::default());
+        assert_eq!(
+            restored.schematic_routing_mode,
+            crate::state::WireRoutingMode::HorizontalFirst
+        );
     }
 }
 

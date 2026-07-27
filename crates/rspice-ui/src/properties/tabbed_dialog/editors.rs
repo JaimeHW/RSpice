@@ -212,7 +212,7 @@ fn render_expression_editor(
 /// evade the property's quantity policy or numeric range. A source that can be
 /// evaluated without parameters is a constant quantity; a source with an
 /// unresolved parameter remains a symbolic SPICE expression.
-pub(super) fn parse_expression_source(
+pub(crate) fn parse_expression_source(
     def: &PropertyDefinition,
     text: &str,
     quantity_policy: QuantityPresentationPolicy,

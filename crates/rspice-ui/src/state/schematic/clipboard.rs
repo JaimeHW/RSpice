@@ -10,6 +10,7 @@ use super::net_label::NetLabel;
 use super::point::Point;
 use super::wire::Wire;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 // =============================================================================
 // ClipboardData
@@ -176,6 +177,51 @@ impl ClipboardData {
         selection
     }
 
+    /// Retain explicit named-net attachments for a duplicated selection.
+    ///
+    /// These labels are typed clipboard objects, not UI annotations. Paste
+    /// remaps their temporary IDs into the destination document namespace and
+    /// translates their anchors with the rest of the duplicated geometry.
+    /// The source selection origin is intentionally preserved so choosing the
+    /// attachment policy cannot move the duplicate.
+    pub(crate) fn preserve_named_net_attachments(
+        &mut self,
+        attachments: impl IntoIterator<Item = (Point, String)>,
+    ) -> usize {
+        let mut occupied = self
+            .net_labels
+            .iter()
+            .map(|label| (label.pos, label.name.clone()))
+            .collect::<HashSet<_>>();
+        let mut occupied_ids = self
+            .net_labels
+            .iter()
+            .map(|label| label.id)
+            .collect::<HashSet<_>>();
+        let mut next_id = self
+            .net_labels
+            .iter()
+            .map(|label| label.id)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1);
+        let before = self.net_labels.len();
+
+        for (pos, name) in attachments {
+            if name.is_empty() || !occupied.insert((pos, name.clone())) {
+                continue;
+            }
+            while occupied_ids.contains(&next_id) {
+                next_id = next_id.wrapping_add(1);
+            }
+            self.net_labels.push(NetLabel::new(next_id, pos, name));
+            occupied_ids.insert(next_id);
+            next_id = next_id.wrapping_add(1);
+        }
+
+        self.net_labels.len().saturating_sub(before)
+    }
+
     /// Calculate the center point of every copied schematic object.
     fn calculate_center(selection: &Self) -> Point {
         let mut cx = 0i64;
@@ -318,5 +364,23 @@ mod tests {
         let clipboard: ClipboardData = serde_json::from_value(value).unwrap();
 
         assert!(clipboard.net_labels.is_empty());
+    }
+
+    #[test]
+    fn named_net_attachments_are_deduplicated_without_changing_origin() {
+        let origin = Point::new(40, 20);
+        let mut clipboard = ClipboardData::from_selection(Vec::new(), Vec::new(), vec![origin]);
+
+        assert_eq!(
+            clipboard.preserve_named_net_attachments([
+                (origin, "sense".to_owned()),
+                (origin, "sense".to_owned()),
+                (Point::new(60, 20), "out".to_owned()),
+            ]),
+            2
+        );
+        assert_eq!(clipboard.origin, origin);
+        assert_eq!(clipboard.net_labels.len(), 2);
+        assert_ne!(clipboard.net_labels[0].id, clipboard.net_labels[1].id);
     }
 }

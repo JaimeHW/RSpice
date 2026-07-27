@@ -5,8 +5,8 @@
 //! `NetlistGenerator`, and runs the engine through the same spec path
 //! the simulate action uses.
 
-use super::spec::run_spec_request;
 use super::SpecExecutionOptions;
+use super::spec::run_spec_request;
 use crate::simulation::engine_bridge::EngineBridge;
 use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::AnalysisSpec;
@@ -89,7 +89,10 @@ fn solve_op(netlist: &str) {
         &ResolvedExecutionDependencies::default(),
         &rspice_core::abort_signal::NoAbort,
     );
-    assert!(result.is_ok(), "OP solve failed: {result:?}\ndeck:\n{netlist}");
+    assert!(
+        result.is_ok(),
+        "OP solve failed: {result:?}\ndeck:\n{netlist}"
+    );
 }
 
 fn solve_tran(netlist: &str, stop_time: f64, step_time: f64) {

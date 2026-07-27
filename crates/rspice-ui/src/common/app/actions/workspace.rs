@@ -1,0 +1,3399 @@
+use crate::common::app::{AppState, ConsoleMessage, RSpiceApp};
+use crate::panels::{LogAnchor, LogSeverity, LogSource};
+use crate::schematic::view::SchematicSymbolContext;
+use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
+use crate::state::{
+    CellViewRef, Component, ComponentType, MAX_SYMBOL_DOCUMENT_BYTES, OpenCellView, PinFindingKind,
+    Point, PortDirection, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY,
+    SchematicState, SymbolDocument, SymbolEditorMetadata, View, ViewType,
+};
+use crate::workbench::SymbolDocumentSnapshot;
+use std::collections::HashMap;
+
+const MAX_FINDING_ROWS: usize = 50;
+
+fn view_type_for_reference(state: &AppState, reference: &CellViewRef) -> ViewType {
+    state
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .map(|view| view.view_type)
+        .unwrap_or(ViewType::Schematic)
+}
+
+fn reference_exists_in(libraries: &crate::state::LibraryManager, reference: &CellViewRef) -> bool {
+    libraries
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .is_some()
+}
+
+fn first_schematic_reference_in(libraries: &crate::state::LibraryManager) -> Option<CellViewRef> {
+    for library in libraries.libraries_sorted() {
+        for cell in library.cells_sorted() {
+            for view in cell.views_sorted() {
+                if is_schematic_like(view.view_type) {
+                    return Some(CellViewRef::new(&library.name, &cell.name, &view.name));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn is_schematic_like(view_type: ViewType) -> bool {
+    matches!(view_type, ViewType::Schematic | ViewType::Testbench)
+}
+
+fn symbol_pin_position_remaps(
+    before: &SymbolDocument,
+    after: &SymbolDocument,
+) -> HashMap<String, (Point, Point)> {
+    let mut remaps = HashMap::new();
+    for before_pin in &before.pins {
+        let Some(old_position) = before_pin.position.map(|position| position - before.origin)
+        else {
+            continue;
+        };
+        let Some(after_pin) = after.pin(&before_pin.name) else {
+            continue;
+        };
+        let Some(new_position) = after_pin.position.map(|position| position - after.origin) else {
+            continue;
+        };
+        if old_position != new_position {
+            remaps.insert(
+                before_pin.name.to_ascii_lowercase(),
+                (old_position, new_position),
+            );
+        }
+    }
+    remaps
+}
+
+fn remap_symbol_instance_wires(
+    schematic: &mut SchematicState,
+    reference: &CellViewRef,
+    pin_remaps: &HashMap<String, (Point, Point)>,
+) -> bool {
+    if pin_remaps.is_empty() {
+        return false;
+    }
+
+    let mut world_remaps = Vec::new();
+    for component in &schematic.components {
+        append_component_symbol_remaps(component, reference, pin_remaps, &mut world_remaps);
+    }
+    if world_remaps.is_empty() {
+        return false;
+    }
+
+    let mut updates: Vec<(usize, usize, Point)> = Vec::new();
+    for (wire_index, wire) in schematic.wires.iter().enumerate() {
+        for (point_index, point) in wire.points.iter().enumerate() {
+            if let Some((_, new_position)) = world_remaps
+                .iter()
+                .find(|(old_position, _)| point == old_position)
+            {
+                updates.push((wire_index, point_index, *new_position));
+            }
+        }
+    }
+    if updates.is_empty() {
+        return false;
+    }
+
+    for (wire_index, point_index, new_position) in updates {
+        if let Some(wire) = schematic.wires.get_mut(wire_index)
+            && point_index < wire.points.len()
+        {
+            wire.points[point_index] = new_position;
+        }
+    }
+    schematic.is_dirty = true;
+    schematic.bump_topology_version();
+    true
+}
+
+fn append_component_symbol_remaps(
+    component: &Component,
+    reference: &CellViewRef,
+    pin_remaps: &HashMap<String, (Point, Point)>,
+    world_remaps: &mut Vec<(Point, Point)>,
+) {
+    let Some(binding) = component.library_cell.as_ref() else {
+        return;
+    };
+    if !binding.library.eq_ignore_ascii_case(&reference.library)
+        || !binding.cell.eq_ignore_ascii_case(&reference.cell)
+    {
+        return;
+    }
+
+    if binding.terminal_order.is_empty() {
+        for &(old_offset, new_offset) in pin_remaps.values() {
+            push_world_pin_remap(component, old_offset, new_offset, world_remaps);
+        }
+        return;
+    }
+
+    for terminal_name in &binding.terminal_order {
+        let Some(&(old_offset, new_offset)) = pin_remaps.get(&terminal_name.to_ascii_lowercase())
+        else {
+            continue;
+        };
+        push_world_pin_remap(component, old_offset, new_offset, world_remaps);
+    }
+}
+
+fn push_world_pin_remap(
+    component: &Component,
+    old_offset: Point,
+    new_offset: Point,
+    world_remaps: &mut Vec<(Point, Point)>,
+) {
+    let old_offset = component.transform_point(old_offset);
+    let new_offset = component.transform_point(new_offset);
+    let old_position = Point::new(
+        component.pos.x.saturating_add(old_offset.x),
+        component.pos.y.saturating_add(old_offset.y),
+    );
+    let new_position = Point::new(
+        component.pos.x.saturating_add(new_offset.x),
+        component.pos.y.saturating_add(new_offset.y),
+    );
+    if old_position != new_position {
+        world_remaps.push((old_position, new_position));
+    }
+}
+
+fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> SchematicState {
+    let mut schematic = state
+        .workspace
+        .schematic_buffers
+        .get(&reference.key())
+        .cloned()
+        .unwrap_or_else(|| state.new_schematic_document());
+    // Workspace buffers round-trip through serde, which skips the runtime
+    // ID counter and name counters: without recalculation a freshly placed
+    // component reuses an existing ID and selection matches both.
+    schematic.recalculate_runtime_state();
+    schematic.snap_engine = state.ui.schematic_snap.clone();
+    schematic.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
+    schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
+    // Views from read-only libraries open for inspection, never for edit —
+    // the docbar banner explains and every edit path checks this flag.
+    schematic.read_only = state.workbench.safe_mode.project_read_only()
+        || state
+            .library_manager
+            .get_library(&reference.library)
+            .is_some_and(|library| library.read_only);
+    schematic
+}
+
+impl AppState {
+    /// Copy the active complete-object selection using the exact rendered
+    /// terminal geometry of authored and generated symbols.
+    ///
+    /// `SchematicState::copy_selection` remains a state-only fallback for
+    /// primitive fixtures. Production UI commands must enter here so a wire
+    /// joining two authored cell pins is captured with the selected
+    /// instances instead of being silently omitted.
+    pub(crate) fn copy_active_schematic_selection(&mut self) -> bool {
+        if self.schematic.selection.is_empty() {
+            return false;
+        }
+        let symbols = SchematicSymbolContext::from_state(self);
+        self.schematic.clipboard =
+            self.schematic
+                .capture_complete_selection_resolved(|component| {
+                    symbols
+                        .named_terminal_points(component)
+                        .into_iter()
+                        .map(|(_, point)| point)
+                        .collect()
+                });
+        true
+    }
+
+    pub(crate) fn rebuild_active_connections_from_symbols(&mut self) {
+        let terminals = {
+            let symbols = SchematicSymbolContext::from_state(self);
+            self.schematic
+                .components
+                .iter()
+                .flat_map(|component| {
+                    symbols
+                        .named_terminal_points(component)
+                        .into_iter()
+                        .map(move |(name, point)| (component.id, name, point))
+                })
+                .collect::<Vec<_>>()
+        };
+        self.schematic
+            .rebuild_connections_from_terminals(&terminals);
+    }
+
+    /// Resolve the user defaults into one explicit, project-portable document
+    /// policy. This is the only constructor production UI paths use for a new
+    /// schematic/testbench document. Existing buffers are never rewritten.
+    pub(crate) fn new_schematic_document(&self) -> SchematicState {
+        use crate::state::{
+            NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy,
+            SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy, WireRoutingMode,
+        };
+        use crate::workbench::ChoicePreference;
+
+        let mut schematic = SchematicState::default();
+        let preferences = &self.ui.preferences;
+        schematic.document_policy.grid_pitch =
+            match preferences.choice(ChoicePreference::SchematicGrid) {
+                0 => SchematicGridPitch::Mil50,
+                1 => SchematicGridPitch::Mil25,
+                2 => SchematicGridPitch::Metric,
+                _ => unreachable!("schematic grid preference is normalized before use"),
+            };
+        schematic.document_policy.wire_junctions =
+            match preferences.choice(ChoicePreference::WireJunctionBehavior) {
+                0 => WireJunctionPolicy::OrthogonalAutomatic,
+                1 => WireJunctionPolicy::OrthogonalManual,
+                2 => WireJunctionPolicy::AnyAngle,
+                _ => unreachable!("wire policy is normalized before use"),
+            };
+        schematic.document_policy.selection_crossing =
+            match preferences.choice(ChoicePreference::SelectionCrossingPolicy) {
+                0 => SelectionCrossingPolicy::Directional,
+                1 => SelectionCrossingPolicy::EnclosedOnly,
+                2 => SelectionCrossingPolicy::Intersecting,
+                _ => unreachable!("selection policy is normalized before use"),
+            };
+        schematic.document_policy.net_naming =
+            match preferences.choice(ChoicePreference::NetNamingPolicy) {
+                0 => NetNamingPolicy::StrictCaseSensitive,
+                1 => NetNamingPolicy::SpiceCompatibleRelaxed,
+                _ => unreachable!("net naming policy is normalized before use"),
+            };
+        schematic.document_policy.property_commit =
+            match preferences.choice(ChoicePreference::PropertyCommitPolicy) {
+                0 => PropertyCommitPolicy::Atomic,
+                1 => PropertyCommitPolicy::ApplyValidFields,
+                _ => unreachable!("property policy is normalized before use"),
+            };
+        schematic.document_policy.operating_point_annotations =
+            match preferences.choice(ChoicePreference::OperatingPointAnnotation) {
+                0 => OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents,
+                1 => OperatingPointAnnotationPolicy::VoltagesOnly,
+                2 => OperatingPointAnnotationPolicy::Hidden,
+                _ => unreachable!("operating-point policy is normalized before use"),
+            };
+
+        schematic.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
+        let routing_mode =
+            if schematic.document_policy.wire_junctions == WireJunctionPolicy::AnyAngle {
+                WireRoutingMode::Diagonal
+            } else {
+                WireRoutingMode::HorizontalFirst
+            };
+        schematic.wire_drawing.set_routing_mode(routing_mode);
+        schematic.bus_drawing.routing_mode = routing_mode;
+        schematic
+    }
+}
+
+fn log_severity_from_drc(severity: DrcSeverity) -> LogSeverity {
+    match severity {
+        DrcSeverity::Critical | DrcSeverity::Error => LogSeverity::Error,
+        DrcSeverity::Warning => LogSeverity::Warning,
+        DrcSeverity::Info => LogSeverity::Info,
+    }
+}
+
+fn symbol_snapshot_from_view(
+    view: &View,
+    fallback: &SymbolDocument,
+    preserve_missing_metadata: bool,
+) -> SymbolDocumentSnapshot {
+    let symbol_document_metadata = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
+        Some(encoded) => Some(encoded.clone()),
+        None if preserve_missing_metadata => None,
+        None => serde_json::to_string(fallback).ok(),
+    };
+    SymbolDocumentSnapshot {
+        document: fallback.clone(),
+        symbol_document_metadata,
+        symbol_editor_metadata: view.metadata.get(SYMBOL_EDITOR_METADATA_KEY).cloned(),
+        generated_metadata: view.metadata.get("generated").cloned(),
+        ports_metadata: view.metadata.get("ports").cloned(),
+    }
+}
+
+fn symbol_metadata_snapshot_from_view(
+    view: &View,
+    fallback: &SymbolDocument,
+) -> SymbolDocumentSnapshot {
+    SymbolDocumentSnapshot {
+        document: fallback.clone(),
+        symbol_document_metadata: view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY).cloned(),
+        symbol_editor_metadata: view.metadata.get(SYMBOL_EDITOR_METADATA_KEY).cloned(),
+        generated_metadata: view.metadata.get("generated").cloned(),
+        ports_metadata: view.metadata.get("ports").cloned(),
+    }
+}
+
+fn restore_symbol_snapshot_in_view(view: &mut View, snapshot: &SymbolDocumentSnapshot) {
+    match &snapshot.symbol_document_metadata {
+        Some(encoded) => {
+            view.metadata
+                .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), encoded.clone());
+        }
+        None => {
+            view.metadata.remove(SYMBOL_DOCUMENT_METADATA_KEY);
+        }
+    }
+    match &snapshot.symbol_editor_metadata {
+        Some(encoded) => {
+            view.metadata
+                .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), encoded.clone());
+        }
+        None => {
+            view.metadata.remove(SYMBOL_EDITOR_METADATA_KEY);
+        }
+    }
+    match &snapshot.generated_metadata {
+        Some(encoded) => {
+            view.metadata
+                .insert("generated".to_owned(), encoded.clone());
+        }
+        None => {
+            view.metadata.remove("generated");
+        }
+    }
+    match &snapshot.ports_metadata {
+        Some(encoded) => {
+            view.metadata.insert("ports".to_owned(), encoded.clone());
+        }
+        None => {
+            view.metadata.remove("ports");
+        }
+    }
+}
+
+impl AppState {
+    pub(crate) fn active_view_read_only(&self) -> bool {
+        self.workbench.hierarchy_reference_read_only
+            || self
+                .library_manager
+                .get_library(&self.workspace.active_view.library)
+                .is_some_and(|library| library.read_only)
+    }
+
+    pub(crate) fn read_only_master_message(&self) -> String {
+        if self.workbench.hierarchy_reference_read_only {
+            return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
+                .to_owned();
+        }
+        let library = &self.workspace.active_view.library;
+        format!("Read-only - '{library}' masters cannot be edited")
+    }
+
+    pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
+        let reference = &self.workspace.active_view;
+        let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
+        if self.workspace.active_view == schematic_ref {
+            return self.schematic.interface_ports();
+        }
+        if let Some(schematic) = self.workspace.schematic_buffers.get(&schematic_ref.key()) {
+            let ports = schematic.interface_ports();
+            if !ports.is_empty() {
+                return ports;
+            }
+        }
+
+        self.library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .and_then(|view| view.metadata.get("ports"))
+            .map(|encoded| parse_encoded_ports(encoded))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
+        let reference = &self.workspace.active_view;
+        let Some(view) = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        let has_document = view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY);
+        let document = SymbolDocument::load_from_view(view)?;
+        if has_document {
+            return Ok(document);
+        }
+        let ports = self.active_symbol_ports();
+        if view.metadata.contains_key("generated") && !ports.is_empty() {
+            return Ok(SymbolDocument::generated_from_ports(&ports));
+        }
+        Ok(document)
+    }
+
+    pub(crate) fn load_active_symbol_editor_metadata(
+        &self,
+        document: &SymbolDocument,
+    ) -> Result<SymbolEditorMetadata, String> {
+        let reference = &self.workspace.active_view;
+        let Some(view) = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        SymbolEditorMetadata::load_from_view(view, document)
+    }
+
+    fn active_symbol_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
+        let reference = &self.workspace.active_view;
+        let current_document = self.load_active_symbol_document().ok();
+        self.library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .map(|view| {
+                let preserve_missing_metadata =
+                    !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
+                        && current_document
+                            .as_ref()
+                            .is_some_and(|document| document == fallback);
+                symbol_snapshot_from_view(view, fallback, preserve_missing_metadata)
+            })
+            .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
+    }
+
+    fn active_symbol_metadata_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
+        let reference = &self.workspace.active_view;
+        self.library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .map(|view| symbol_metadata_snapshot_from_view(view, fallback))
+            .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
+    }
+
+    fn restore_active_symbol_snapshot(
+        &mut self,
+        snapshot: &SymbolDocumentSnapshot,
+    ) -> Result<(), String> {
+        let reference = self.workspace.active_view.clone();
+        if self.active_view_read_only() {
+            return Err(self.read_only_master_message());
+        }
+        let previous_document = self.load_active_symbol_document().ok();
+        let Some(view) = self
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+            .and_then(|cell| cell.get_view_mut(&reference.view))
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        restore_symbol_snapshot_in_view(view, snapshot);
+        if let Some(previous_document) = previous_document {
+            let pin_remaps = symbol_pin_position_remaps(&previous_document, &snapshot.document);
+            for schematic in self.workspace.schematic_buffers.values_mut() {
+                remap_symbol_instance_wires(schematic, &reference, &pin_remaps);
+            }
+        }
+        self.workspace.set_active_dirty(true);
+        Ok(())
+    }
+
+    pub(crate) fn store_active_symbol_document(
+        &mut self,
+        document: &SymbolDocument,
+    ) -> Result<(), String> {
+        let reference = self.workspace.active_view.clone();
+        if self.active_view_read_only() {
+            return Err(self.read_only_master_message());
+        }
+        let previous_document = self.load_active_symbol_document().ok();
+        let Some(view) = self
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+            .and_then(|cell| cell.get_view_mut(&reference.view))
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        document.store_in_view(view)?;
+        view.metadata.remove("generated");
+        view.metadata.remove("ports");
+        if let Some(previous_document) = previous_document {
+            let pin_remaps = symbol_pin_position_remaps(&previous_document, document);
+            for schematic in self.workspace.schematic_buffers.values_mut() {
+                remap_symbol_instance_wires(schematic, &reference, &pin_remaps);
+            }
+        }
+        self.workspace.set_active_dirty(true);
+        Ok(())
+    }
+
+    /// Atomically publish symbol geometry and its authoring-only metadata.
+    pub(crate) fn store_active_symbol_editor_bundle(
+        &mut self,
+        document: &SymbolDocument,
+        metadata: &SymbolEditorMetadata,
+    ) -> Result<(), String> {
+        let reference = self.workspace.active_view.clone();
+        if self.active_view_read_only() {
+            return Err(self.read_only_master_message());
+        }
+        document.validate()?;
+        let encoded_document = serde_json::to_string(document)
+            .map_err(|error| format!("Could not serialize symbol metadata: {error}"))?;
+        if encoded_document.len() > MAX_SYMBOL_DOCUMENT_BYTES {
+            return Err(format!(
+                "Could not serialize symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
+                encoded_document.len()
+            ));
+        }
+        let encoded_editor = metadata.encode()?;
+        let previous_document = self.load_active_symbol_document().ok();
+        let Some(view) = self
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+            .and_then(|cell| cell.get_view_mut(&reference.view))
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        view.metadata
+            .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), encoded_document);
+        view.metadata
+            .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), encoded_editor);
+        view.metadata.remove("generated");
+        view.metadata.remove("ports");
+        view.modified = true;
+        if let Some(previous_document) = previous_document {
+            let pin_remaps = symbol_pin_position_remaps(&previous_document, document);
+            for schematic in self.workspace.schematic_buffers.values_mut() {
+                remap_symbol_instance_wires(schematic, &reference, &pin_remaps);
+            }
+        }
+        self.workspace.set_active_dirty(true);
+        Ok(())
+    }
+
+    pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
+        const MAX_SYMBOL_UNDO: usize = 128;
+        let key = self.workspace.active_key();
+        let snapshot = self.active_symbol_snapshot(before);
+        self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
+    }
+
+    fn record_symbol_metadata_edit(&mut self, before: &SymbolDocument) {
+        const MAX_SYMBOL_UNDO: usize = 128;
+        let key = self.workspace.active_key();
+        let snapshot = self.active_symbol_metadata_snapshot(before);
+        self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
+    }
+
+    fn push_symbol_undo_snapshot(
+        &mut self,
+        key: String,
+        snapshot: SymbolDocumentSnapshot,
+        max_len: usize,
+    ) {
+        let undo_stack = self.ui.symbol.undo_stacks.entry(key.clone()).or_default();
+        undo_stack.push(snapshot);
+        if undo_stack.len() > max_len {
+            undo_stack.remove(0);
+        }
+        self.ui.symbol.redo_stacks.remove(&key);
+    }
+
+    pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
+        self.ui
+            .symbol
+            .undo_stacks
+            .get(&self.workspace.active_key())
+            .is_some_and(|stack| !stack.is_empty())
+    }
+
+    pub(crate) fn can_redo_active_symbol_document(&self) -> bool {
+        self.ui
+            .symbol
+            .redo_stacks
+            .get(&self.workspace.active_key())
+            .is_some_and(|stack| !stack.is_empty())
+    }
+
+    pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
+        if self.active_view_read_only() {
+            return Err(self.read_only_master_message());
+        }
+        let key = self.workspace.active_key();
+        let Some(previous) = self.ui.symbol.undo_stacks.get_mut(&key).and_then(Vec::pop) else {
+            return Ok(false);
+        };
+        let current = self.load_active_symbol_document()?;
+        let current_snapshot = self.active_symbol_metadata_snapshot(&current);
+        self.ui
+            .symbol
+            .redo_stacks
+            .entry(key)
+            .or_default()
+            .push(current_snapshot);
+        self.restore_active_symbol_snapshot(&previous)?;
+        Ok(true)
+    }
+
+    pub(crate) fn redo_active_symbol_document(&mut self) -> Result<bool, String> {
+        if self.active_view_read_only() {
+            return Err(self.read_only_master_message());
+        }
+        let key = self.workspace.active_key();
+        let Some(next) = self.ui.symbol.redo_stacks.get_mut(&key).and_then(Vec::pop) else {
+            return Ok(false);
+        };
+        let current = self.load_active_symbol_document()?;
+        let current_snapshot = self.active_symbol_metadata_snapshot(&current);
+        self.ui
+            .symbol
+            .undo_stacks
+            .entry(key)
+            .or_default()
+            .push(current_snapshot);
+        self.restore_active_symbol_snapshot(&next)?;
+        Ok(true)
+    }
+
+    pub(crate) fn run_active_symbol_pin_checks(&mut self) {
+        let ports = self.active_symbol_ports();
+        let reference = self.workspace.active_view.clone();
+        match self.load_active_symbol_document() {
+            Ok(document) => {
+                let findings = document.pin_findings(&ports);
+                let mut result = DrcResult::new();
+                result.completed = true;
+
+                for (index, finding) in findings.iter().enumerate() {
+                    let violation_type = match finding.kind {
+                        PinFindingKind::UnplacedPin => DrcViolationType::SymbolUnplacedPin,
+                        PinFindingKind::OrphanedPin => DrcViolationType::SymbolOrphanedPin,
+                        PinFindingKind::PinOffGrid => DrcViolationType::SymbolPinOffGrid,
+                    };
+                    let point = document.pin(&finding.pin_name).and_then(|pin| pin.position);
+                    let message = format!("{}: {}", violation_type.description(), finding.pin_name);
+                    result.add_violation(DrcViolation::new(
+                        index + 1,
+                        violation_type,
+                        message,
+                        DrcLocation::SymbolPin {
+                            reference: reference.clone(),
+                            pin_name: finding.pin_name.clone(),
+                            point,
+                        },
+                    ));
+                }
+
+                if findings.is_empty() {
+                    self.dialogs.drc_results = Some(result);
+                    self.dialogs.drc_checked_version = self.schematic.topology_version();
+                    self.dialogs.drc_cycle = None;
+                    self.push_user_message(ConsoleMessage::info("Symbol pins match schematic"));
+                    return;
+                }
+
+                for violation in result.violations().iter().take(MAX_FINDING_ROWS) {
+                    let anchor =
+                        crate::schematic::view::violations::finding_anchor(self, violation);
+                    self.log_buffer.log_anchored(
+                        log_severity_from_drc(violation.severity),
+                        LogSource::Drc,
+                        violation.message.clone(),
+                        None,
+                        anchor,
+                    );
+                }
+                let hidden = result.violations().len().saturating_sub(MAX_FINDING_ROWS);
+                if hidden > 0 {
+                    self.log_buffer.log(
+                        LogSeverity::Info,
+                        LogSource::Drc,
+                        format!("+{hidden} more findings - use the finding navigation commands"),
+                        None,
+                    );
+                }
+                self.push_user_message(ConsoleMessage::error(format!(
+                    "Symbol check found {} issue(s)",
+                    result.total_count()
+                )));
+                self.dialogs.drc_results = Some(result);
+                self.dialogs.drc_checked_version = self.schematic.topology_version();
+                self.dialogs.drc_cycle = None;
+            }
+            Err(error) => self.push_user_message(ConsoleMessage::warning(error)),
+        }
+    }
+
+    pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
+        self.navigate_to_log_anchor(anchor);
+    }
+
+    fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
+        match anchor {
+            LogAnchor::Schematic {
+                x,
+                y,
+                component,
+                wire,
+            } => {
+                self.workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                self.schematic.center_request = Some(Point::new(x, y));
+                self.schematic.net_highlight.clear();
+                self.schematic.selection.clear();
+                if let Some(id) = component {
+                    self.schematic.selection.select_component(id);
+                }
+                if let Some(id) = wire {
+                    self.schematic.selection.select_wire(id);
+                }
+            }
+            LogAnchor::Symbol {
+                reference,
+                pin_name,
+                point,
+            } => {
+                self.open_workspace_view(reference);
+                self.workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                self.ui.symbol.select_pin(pin_name);
+                if let Some(point) = point {
+                    let zoom = self.ui.symbol.zoom.max(1.0);
+                    self.ui.symbol.pan = (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
+                }
+                self.ui.symbol.needs_fit = false;
+            }
+        }
+    }
+
+    pub(crate) fn generate_active_symbol_document(&mut self) -> Result<(), String> {
+        if self.active_view_read_only() {
+            return Err(self.read_only_master_message());
+        }
+        let before = self.load_active_symbol_document()?;
+        let ports = self.active_symbol_ports();
+        let document = SymbolDocument::generated_from_ports(&ports);
+        if document != before {
+            self.record_symbol_metadata_edit(&before);
+        }
+        self.store_active_symbol_document(&document)?;
+        Ok(())
+    }
+
+    /// Migrate persisted sessions away from the legacy seeded "primitives"
+    /// library: any workspace tab or schematic buffer pointing into it is
+    /// moved to the user library (preserving drawn content), then the
+    /// placeholder library is dropped. Without the workspace scrub,
+    /// `ensure_library_model` would faithfully re-create the legacy cell
+    /// the active tab points at on every launch.
+    pub(crate) fn migrate_legacy_primitives(&mut self) {
+        const LEGACY: &str = crate::state::LibraryManager::PRIMITIVES_LIBRARY;
+        let user = crate::state::LibraryManager::USER_LIBRARY;
+        let legacy_prefix = format!("{LEGACY}/");
+
+        // Move schematic buffers (the actual drawn content) to user keys.
+        let legacy_keys: Vec<String> = self
+            .workspace
+            .schematic_buffers
+            .keys()
+            .filter(|key| key.starts_with(&legacy_prefix))
+            .cloned()
+            .collect();
+        for key in legacy_keys {
+            let Some(buffer) = self.workspace.schematic_buffers.remove(&key) else {
+                continue;
+            };
+            let tail = &key[legacy_prefix.len()..];
+            let new_key = format!("{user}/{tail}");
+            self.workspace
+                .schematic_buffers
+                .entry(new_key)
+                .or_insert(buffer);
+
+            // Make the migrated cell/view exist in the user library so the
+            // browser lists it and tabs resolve.
+            if let Some((cell_name, view_name)) = tail.split_once('/')
+                && let Some(library) = self.library_manager.get_library_mut(user)
+            {
+                if library.get_cell(cell_name).is_none() {
+                    library.add_cell(crate::state::Cell::new(cell_name));
+                }
+                if let Some(cell) = library.get_cell_mut(cell_name)
+                    && cell.get_view(view_name).is_none()
+                {
+                    cell.add_view(crate::state::View::new(
+                        view_name,
+                        crate::state::ViewType::Schematic,
+                    ));
+                }
+            }
+        }
+
+        // Repoint tabs, breadcrumbs, and the active view.
+        let remap = |reference: &mut CellViewRef| {
+            if reference.library == LEGACY {
+                reference.library = user.to_string();
+            }
+        };
+        remap(&mut self.workspace.active_view);
+        for open in &mut self.workspace.open_views {
+            remap(&mut open.reference);
+        }
+        for entry in &mut self.workspace.hierarchy_stack {
+            remap(entry);
+        }
+
+        self.library_manager.purge_legacy_primitives();
+    }
+
+    pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
+        if is_schematic_like(self.workspace.active_view_type()) {
+            let active = self.workspace.active_schematic_reference();
+            if let Err(error) = self
+                .workspace
+                .assign_unowned_objects_to_active_sheet(&active, &self.schematic)
+            {
+                self.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                    "Sheet membership could not be updated: {error}"
+                )));
+            }
+            self.workspace.save_active_schematic(&self.schematic);
+            self.sync_generated_symbol_view();
+        }
+    }
+
+    /// Keep the active cell's generated "symbol" view in step with its
+    /// schematic interface — created when ports exist, refreshed when they
+    /// change, removed when the last port goes. A hand-authored symbol
+    /// view (no `generated` marker) is never touched: the user owns it.
+    fn sync_generated_symbol_view(&mut self) {
+        const GENERATED_KEY: &str = "generated";
+        const PORTS_KEY: &str = "ports";
+
+        let reference = self.workspace.active_view.clone();
+        if !reference.view.eq_ignore_ascii_case("schematic") {
+            return;
+        }
+        let mut symbol_error = None;
+        let ports = self.schematic.interface_ports();
+        let Some(cell) = self
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+        else {
+            return;
+        };
+
+        if ports.is_empty() {
+            if cell
+                .get_view("symbol")
+                .is_some_and(|view| view.metadata.contains_key(GENERATED_KEY))
+            {
+                cell.remove_view("symbol");
+            }
+            return;
+        }
+
+        let encoded: String = ports
+            .iter()
+            .map(|port| format!("{}:{}", port.name, port.direction.keyword()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        match cell.get_view_mut("symbol") {
+            Some(view) if view.metadata.contains_key(GENERATED_KEY) => {
+                view.metadata.insert(PORTS_KEY.to_owned(), encoded);
+                if let Err(error) = SymbolDocument::generated_from_ports(&ports).store_in_view(view)
+                {
+                    symbol_error =
+                        Some(format!("Generated symbol could not be refreshed: {error}"));
+                }
+            }
+            Some(_) => {} // hand-authored symbol: leave it alone
+            None => {
+                let mut view = View::new("symbol", ViewType::Symbol);
+                view.metadata
+                    .insert(GENERATED_KEY.to_owned(), "ports".to_owned());
+                view.metadata.insert(PORTS_KEY.to_owned(), encoded);
+                if let Err(error) =
+                    SymbolDocument::generated_from_ports(&ports).store_in_view(&mut view)
+                {
+                    symbol_error = Some(format!("Generated symbol could not be created: {error}"));
+                } else {
+                    cell.add_view(view);
+                }
+            }
+        }
+        if let Some(error) = symbol_error {
+            self.push_user_message(ConsoleMessage::warning(error));
+        }
+    }
+
+    pub(crate) fn restore_active_schematic_from_workspace(&mut self) {
+        self.workspace
+            .ensure_library_model(&mut self.library_manager);
+        let reference = self.workspace.active_view.clone();
+        let schematic_reference = self.workspace.active_schematic_reference();
+        self.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.bump_active_schematic_epoch();
+        // Project persistence stores topology, not the derived rubber-band
+        // connection cache. Rebuild against the same authored/generated
+        // symbol geometry that is rendered and netlisted.
+        self.rebuild_active_connections_from_symbols();
+        self.library_manager
+            .select_view(&reference.library, &reference.cell, &reference.view);
+    }
+
+    pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
+        self.sync_active_schematic_to_workspace();
+        if self.workspace.active_view == reference {
+            self.workbench.hierarchy_reference_read_only = false;
+            return;
+        }
+        self.workbench.hierarchy_reference_read_only = false;
+        self.ui.canvas_hover = None;
+        self.ui.canvas_view_center = None;
+        let view_type = view_type_for_reference(self, &reference);
+        self.workspace.open_as_root(reference.clone(), view_type);
+        self.library_manager
+            .select_view(&reference.library, &reference.cell, &reference.view);
+        let schematic_reference = self.workspace.active_schematic_reference();
+        self.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.bump_active_schematic_epoch();
+        self.push_user_message(ConsoleMessage::info(format!(
+            "Opened {}",
+            reference.display_path()
+        )));
+    }
+
+    /// Descend into a hierarchical instance: open its master and record
+    /// the instance name on the occurrence path. `None` (no instance
+    /// context) labels the level with the cell name.
+    pub(crate) fn descend_into_instance(
+        &mut self,
+        instance: Option<String>,
+        reference: CellViewRef,
+    ) {
+        self.sync_active_schematic_to_workspace();
+        self.workbench.hierarchy_reference_read_only = false;
+        let view_type = view_type_for_reference(self, &reference);
+        match instance {
+            Some(name) => self
+                .workspace
+                .descend_into(name, reference.clone(), view_type),
+            None => self.workspace.enter_hierarchy(reference.clone(), view_type),
+        }
+        self.library_manager
+            .select_view(&reference.library, &reference.cell, &reference.view);
+        let schematic_reference = self.workspace.active_schematic_reference();
+        self.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.bump_active_schematic_epoch();
+        self.push_user_message(ConsoleMessage::info(format!(
+            "Entered {}",
+            reference.display_path()
+        )));
+    }
+
+    /// Copy a whole cell — every view and its drawn content — into a
+    /// writable library under a new name. Returns the number of views
+    /// copied, or the user-facing error.
+    pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
+        self.sync_active_schematic_to_workspace();
+        let active_removed = self.workspace.active_view.library == library
+            && self.workspace.active_view.cell == cell;
+        let project_root_removed = self.workspace.project.root_library == library
+            && self.workspace.project.top_cell == cell;
+        let prefix = format!("{library}/{cell}/");
+        self.workspace
+            .schematic_buffers
+            .retain(|key, _| !key.starts_with(&prefix));
+        self.workspace
+            .open_views
+            .retain(|open| open.reference.library != library || open.reference.cell != cell);
+        let old_hierarchy_len = self.workspace.hierarchy_stack.len();
+        self.workspace
+            .hierarchy_stack
+            .retain(|reference| reference.library != library || reference.cell != cell);
+        let hierarchy_pruned = self.workspace.hierarchy_stack.len() != old_hierarchy_len;
+        if active_removed || self.workspace.hierarchy_stack.is_empty() {
+            self.workspace.hierarchy_instances.clear();
+        } else {
+            self.workspace
+                .hierarchy_instances
+                .truncate(self.workspace.hierarchy_stack.len().saturating_sub(1));
+        }
+        self.restore_valid_workspace_focus_after_prune(
+            active_removed,
+            hierarchy_pruned,
+            project_root_removed,
+            true,
+        );
+    }
+
+    pub(crate) fn prune_workspace_after_view_deleted(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: &str,
+    ) {
+        self.sync_active_schematic_to_workspace();
+        let deleted = CellViewRef::new(library, cell, view);
+        let active_removed = self.workspace.active_view == deleted;
+        let project_root_removed = self.workspace.project.root_library == library
+            && self.workspace.project.top_cell == cell
+            && view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW;
+        self.workspace.schematic_buffers.remove(&deleted.key());
+        self.workspace
+            .open_views
+            .retain(|open| open.reference != deleted);
+        let old_hierarchy_len = self.workspace.hierarchy_stack.len();
+        self.workspace
+            .hierarchy_stack
+            .retain(|reference| reference != &deleted);
+        let hierarchy_pruned = self.workspace.hierarchy_stack.len() != old_hierarchy_len;
+        if active_removed || self.workspace.hierarchy_stack.is_empty() {
+            self.workspace.hierarchy_instances.clear();
+        } else {
+            self.workspace
+                .hierarchy_instances
+                .truncate(self.workspace.hierarchy_stack.len().saturating_sub(1));
+        }
+
+        let preferred = CellViewRef::new(
+            library,
+            cell,
+            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+        );
+        let preferred = reference_exists_in(&self.library_manager, &preferred).then_some(preferred);
+        self.restore_valid_workspace_focus_with_preferred(
+            active_removed,
+            hierarchy_pruned,
+            preferred,
+            project_root_removed,
+            true,
+        );
+    }
+
+    fn restore_valid_workspace_focus_after_prune(
+        &mut self,
+        active_removed: bool,
+        hierarchy_pruned: bool,
+        repoint_project_root: bool,
+        clear_execution_context: bool,
+    ) {
+        self.restore_valid_workspace_focus_with_preferred(
+            active_removed,
+            hierarchy_pruned,
+            None,
+            repoint_project_root,
+            clear_execution_context,
+        );
+    }
+
+    fn restore_valid_workspace_focus_with_preferred(
+        &mut self,
+        active_removed: bool,
+        hierarchy_pruned: bool,
+        preferred: Option<CellViewRef>,
+        repoint_project_root: bool,
+        clear_execution_context: bool,
+    ) {
+        let libraries = &self.library_manager;
+        self.workspace
+            .open_views
+            .retain(|open| reference_exists_in(libraries, &open.reference));
+        self.workspace
+            .hierarchy_stack
+            .retain(|reference| reference_exists_in(libraries, reference));
+
+        let active_valid = !active_removed
+            && reference_exists_in(&self.library_manager, &self.workspace.active_view);
+        let fallback = if active_valid {
+            self.workspace.active_view.clone()
+        } else {
+            preferred
+                .filter(|reference| reference_exists_in(&self.library_manager, reference))
+                .or_else(|| {
+                    self.workspace
+                        .open_views
+                        .iter()
+                        .find(|open| reference_exists_in(&self.library_manager, &open.reference))
+                        .map(|open| open.reference.clone())
+                })
+                .unwrap_or_else(|| self.create_fallback_schematic_cell())
+        };
+        let fallback_type = view_type_for_reference(self, &fallback);
+
+        if !self
+            .workspace
+            .open_views
+            .iter()
+            .any(|open| open.reference == fallback)
+        {
+            self.workspace
+                .open_views
+                .push(OpenCellView::new(fallback.clone(), fallback_type));
+        }
+        if !active_valid {
+            self.workspace.active_view = fallback.clone();
+        }
+        if self.workspace.hierarchy_stack.is_empty()
+            || !self
+                .workspace
+                .hierarchy_stack
+                .iter()
+                .any(|reference| reference == &self.workspace.active_view)
+            || hierarchy_pruned
+        {
+            self.workspace.hierarchy_stack = vec![self.workspace.active_view.clone()];
+            self.workspace.hierarchy_instances.clear();
+        }
+        if is_schematic_like(fallback_type) {
+            self.workspace.ensure_active_buffer();
+        }
+        if repoint_project_root {
+            self.repoint_project_root_to_surviving_schematic(&fallback, fallback_type);
+        }
+        self.restore_active_schematic_from_workspace();
+        if clear_execution_context {
+            self.clear_design_execution_context();
+        }
+    }
+
+    fn repoint_project_root_to_surviving_schematic(
+        &mut self,
+        fallback: &CellViewRef,
+        fallback_type: ViewType,
+    ) {
+        let root = if is_schematic_like(fallback_type)
+            && reference_exists_in(&self.library_manager, fallback)
+        {
+            fallback.clone()
+        } else {
+            self.workspace
+                .open_views
+                .iter()
+                .find(|open| {
+                    is_schematic_like(open.view_type)
+                        && reference_exists_in(&self.library_manager, &open.reference)
+                })
+                .map(|open| open.reference.clone())
+                .or_else(|| first_schematic_reference_in(&self.library_manager))
+                .unwrap_or_else(|| self.create_fallback_schematic_cell())
+        };
+        self.workspace.project.root_library = root.library;
+        self.workspace.project.top_cell = root.cell;
+    }
+
+    fn create_fallback_schematic_cell(&mut self) -> CellViewRef {
+        let library_name = crate::state::workspace::DEFAULT_PROJECT_LIBRARY.to_string();
+        let view_name = crate::state::workspace::DEFAULT_SCHEMATIC_VIEW.to_string();
+        if self.library_manager.get_library(&library_name).is_none() {
+            self.library_manager
+                .add_library(crate::state::Library::new(&library_name));
+        }
+
+        let mut index = 1usize;
+        let cell_name = loop {
+            let candidate = format!("untitled_{index}");
+            let exists = self
+                .library_manager
+                .get_library(&library_name)
+                .and_then(|library| library.get_cell(&candidate))
+                .is_some();
+            if !exists {
+                break candidate;
+            }
+            index += 1;
+        };
+
+        if let Some(library) = self.library_manager.get_library_mut(&library_name) {
+            let mut cell = crate::state::Cell::new(&cell_name);
+            cell.add_view(View::new(&view_name, ViewType::Schematic));
+            library.add_cell(cell);
+        }
+
+        let reference = CellViewRef::new(library_name, cell_name, view_name);
+        self.workspace.project.root_library = reference.library.clone();
+        self.workspace.project.top_cell = reference.cell.clone();
+        self.workspace
+            .schematic_buffers
+            .entry(reference.key())
+            .or_default();
+        reference
+    }
+
+    pub(crate) fn copy_cell(
+        &mut self,
+        src_library: &str,
+        cell: &str,
+        dst_library: &str,
+        new_name: &str,
+    ) -> Result<usize, String> {
+        let source = self
+            .library_manager
+            .get_library(src_library)
+            .ok_or_else(|| format!("Library '{src_library}' not found"))?;
+        let mut copy = source
+            .get_cell(cell)
+            .ok_or_else(|| format!("Cell '{cell}' not found in library '{src_library}'"))?
+            .clone();
+        let destination = self
+            .library_manager
+            .get_library(dst_library)
+            .ok_or_else(|| format!("Library '{dst_library}' not found"))?;
+        if destination.read_only {
+            return Err(format!("Library '{dst_library}' is read-only"));
+        }
+        let requested_identity =
+            crate::state::canonical_cell_view_owner_key(dst_library, new_name, "");
+        if destination.cells.values().any(|candidate| {
+            crate::state::canonical_cell_view_owner_key(dst_library, &candidate.name, "")
+                == requested_identity
+        }) {
+            return Err(format!(
+                "Cell '{new_name}' conflicts with an existing canonical cell identity in library '{dst_library}'"
+            ));
+        }
+
+        self.sync_active_schematic_to_workspace();
+
+        let mut candidate_sources = self.workspace.project_sources.clone();
+        let copied_source_ids = candidate_sources
+            .clone_cell_view_bundles(src_library, cell, dst_library, new_name)
+            .map_err(|error| {
+                format!("Could not copy the cell's project source bundles: {error}")
+            })?;
+        let mut candidate_design_management = self.workspace.design_management.clone();
+        let copied_sheet_catalogs = candidate_design_management
+            .copy_cell_sheet_catalogs(src_library, cell, dst_library, new_name)
+            .map_err(|error| format!("Could not copy the cell's sheet-catalog ownership: {error}"))?
+            .copied_sheet_catalogs;
+        if copied_sheet_catalogs > 0 {
+            self.workspace
+                .project
+                .next_revision()
+                .map_err(|error| format!("Could not advance the project revision: {error}"))?;
+        }
+
+        copy.name = new_name.to_owned();
+        let view_names: Vec<String> = copy.views.keys().cloned().collect();
+        let view_count = view_names.len();
+        self.library_manager
+            .get_library_mut(dst_library)
+            .ok_or_else(|| format!("Library '{dst_library}' disappeared during the copy"))?
+            .add_cell(copy);
+
+        // The drawn content lives in the workspace buffers, keyed
+        // "library/cell/view" — a copy without it would be a lie.
+        for view in view_names {
+            let old_key = CellViewRef::new(src_library, cell, view.as_str()).key();
+            let new_key = CellViewRef::new(dst_library, new_name, view.as_str()).key();
+            if let Some(buffer) = self.workspace.schematic_buffers.get(&old_key).cloned() {
+                self.workspace.schematic_buffers.insert(new_key, buffer);
+            }
+        }
+
+        if !copied_source_ids.is_empty() {
+            self.workspace.project_sources = candidate_sources;
+            self.workspace.project_sources_dirty = true;
+        }
+        if copied_sheet_catalogs > 0 {
+            self.workspace
+                .project
+                .advance_revision()
+                .expect("the project revision was preflighted without intervening mutation");
+            self.workspace.design_management = candidate_design_management;
+            self.workspace.project_metadata_dirty = true;
+            self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+            self.ui.netlist.current_generation_input_digest = None;
+            self.clear_project_design_history();
+        }
+
+        self.library_manager.select_cell(dst_library, new_name);
+        Ok(view_count)
+    }
+
+    /// Rename a cell and remap everything that pointed at it: view buffers,
+    /// open workspace references, and the Library/Cell binding of every
+    /// instance in this project's designs. Returns the number of instance
+    /// bindings remapped, or the user-facing error.
+    pub(crate) fn rename_cell(
+        &mut self,
+        library: &str,
+        cell: &str,
+        new_name: &str,
+    ) -> Result<usize, String> {
+        let lib = self
+            .library_manager
+            .get_library(library)
+            .ok_or_else(|| format!("Library '{library}' not found"))?;
+        if lib.read_only {
+            return Err(format!("Library '{library}' is read-only"));
+        }
+        if lib.get_cell(cell).is_none() {
+            return Err(format!("Cell '{cell}' not found in library '{library}'"));
+        }
+        if cell == new_name {
+            return Err(format!("Cell '{cell}' already has that name"));
+        }
+        let requested_identity = crate::state::canonical_cell_view_owner_key(library, new_name, "");
+        if lib.cells.iter().any(|(candidate_key, candidate)| {
+            candidate_key != cell
+                && crate::state::canonical_cell_view_owner_key(library, &candidate.name, "")
+                    == requested_identity
+        }) {
+            return Err(format!(
+                "Cell '{new_name}' conflicts with an existing canonical cell identity in library '{library}'"
+            ));
+        }
+
+        let mut candidate_sources = self.workspace.project_sources.clone();
+        let renamed_source_ids = candidate_sources
+            .rename_cell_view_bundles(library, cell, new_name)
+            .map_err(|error| {
+                format!("Could not move the cell's project source ownership: {error}")
+            })?;
+        let mut candidate_configurations = self.workspace.configuration_sets.clone();
+        let renamed_configuration_roots = candidate_configurations
+            .rename_cell_roots(library, cell, new_name)
+            .map_err(|error| {
+                format!("Could not move the cell's configuration-set roots: {error}")
+            })?;
+        let mut candidate_design_management = self.workspace.design_management.clone();
+        let design_management_receipt = candidate_design_management
+            .rename_cell_sheet_catalogs(library, cell, new_name)
+            .map_err(|error| {
+                format!("Could not move the cell's Design Management ownership: {error}")
+            })?;
+        let design_management_changed = design_management_receipt.affected_sheet_catalogs > 0
+            || design_management_receipt.remapped_variant_objects > 0
+            || design_management_receipt.remapped_annotation_objects > 0;
+        let design_management_project_revision = design_management_changed
+            .then(|| self.workspace.project.next_revision())
+            .transpose()
+            .map_err(|error| {
+                format!("Could not advance project revision for the cell rename: {error}")
+            })?;
+
+        let library_mut = self
+            .library_manager
+            .get_library_mut(library)
+            .ok_or_else(|| format!("Library '{library}' disappeared during the rename"))?;
+        let mut moved = library_mut
+            .cells
+            .remove(cell)
+            .ok_or_else(|| format!("Cell '{cell}' disappeared during the rename"))?;
+        moved.name = new_name.to_owned();
+        library_mut.cells.insert(new_name.to_owned(), moved);
+
+        // Buffers move with the cell.
+        let old_prefix = format!("{library}/{cell}/");
+        let moved_keys: Vec<String> = self
+            .workspace
+            .schematic_buffers
+            .keys()
+            .filter(|key| key.starts_with(&old_prefix))
+            .cloned()
+            .collect();
+        for key in moved_keys {
+            if let Some(buffer) = self.workspace.schematic_buffers.remove(&key) {
+                let tail = &key[old_prefix.len()..];
+                self.workspace
+                    .schematic_buffers
+                    .insert(format!("{library}/{new_name}/{tail}"), buffer);
+            }
+        }
+
+        // Open references follow.
+        let remap_ref = |reference: &mut CellViewRef| {
+            if reference.library == library && reference.cell == cell {
+                reference.cell = new_name.to_owned();
+            }
+        };
+        remap_ref(&mut self.workspace.active_view);
+        for reference in &mut self.workspace.hierarchy_stack {
+            remap_ref(reference);
+        }
+        for open in &mut self.workspace.open_views {
+            remap_ref(&mut open.reference);
+        }
+
+        // Instance bindings follow — in every buffer and the live sheet.
+        let mut remapped = 0usize;
+        let mut remap_schematic = |schematic: &mut crate::state::SchematicState| {
+            for component in &mut schematic.components {
+                if let Some(binding) = component.library_cell.as_mut()
+                    && binding.library == library
+                    && binding.cell == cell
+                {
+                    binding.cell = new_name.to_owned();
+                    remapped += 1;
+                }
+            }
+        };
+        for buffer in self.workspace.schematic_buffers.values_mut() {
+            remap_schematic(buffer);
+        }
+        remap_schematic(&mut self.schematic);
+
+        if !renamed_source_ids.is_empty() {
+            self.workspace.project_sources = candidate_sources;
+            self.workspace.project_sources_dirty = true;
+            let transient_uses_renamed = self
+                .ui
+                .code_workspace
+                .veriloga
+                .receipt
+                .as_ref()
+                .is_some_and(|receipt| renamed_source_ids.contains(&receipt.token.bundle_id))
+                || self
+                    .ui
+                    .code_workspace
+                    .veriloga
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| renamed_source_ids.contains(&pending.token.bundle_id));
+            if transient_uses_renamed {
+                self.ui.code_workspace.veriloga = Default::default();
+            }
+        }
+        if renamed_configuration_roots > 0 {
+            self.workspace.configuration_sets = candidate_configurations;
+            self.workspace.project_metadata_dirty = true;
+        }
+        if design_management_project_revision.is_some() {
+            self.workspace
+                .project
+                .advance_revision()
+                .expect("the project revision was preflighted without intervening mutation");
+            self.workspace.design_management = candidate_design_management;
+            self.workspace.project_metadata_dirty = true;
+            self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+            self.ui.netlist.current_generation_input_digest = None;
+            self.clear_project_design_history();
+        }
+
+        self.library_manager.select_cell(library, new_name);
+        Ok(remapped)
+    }
+
+    /// Refuse an edit on a read-only view, with the console line that names
+    /// the library. Returns true when the edit must be blocked.
+    pub(crate) fn deny_read_only_edit(&mut self) -> bool {
+        if !self.schematic.read_only && !self.active_view_read_only() {
+            return false;
+        }
+        let message = if self.active_view_read_only() {
+            self.read_only_master_message()
+        } else {
+            "The active schematic is read-only; no design data was changed.".to_owned()
+        };
+        self.push_user_message(ConsoleMessage::warning(message));
+        true
+    }
+
+    /// Ascend one hierarchy level (the U gesture / pathbar action).
+    pub(crate) fn ascend_workspace_level(&mut self) {
+        let len = self.workspace.hierarchy_stack.len();
+        if len >= 2 {
+            self.focus_workspace_breadcrumb(len - 2);
+        }
+    }
+
+    pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
+        self.sync_active_schematic_to_workspace();
+        self.workbench.hierarchy_reference_read_only = false;
+        if let Some(reference) = self.workspace.focus_breadcrumb(index) {
+            self.library_manager
+                .select_view(&reference.library, &reference.cell, &reference.view);
+            self.schematic = schematic_for_workspace(self, &reference);
+            self.bump_active_schematic_epoch();
+        }
+    }
+
+    pub(crate) fn bump_active_schematic_epoch(&mut self) {
+        self.active_schematic_epoch = self.active_schematic_epoch.wrapping_add(1);
+    }
+
+    /// Return the exact schematic master of one hierarchy instance.
+    ///
+    /// A generic `CellInstance` can also bind a SPICE, symbol, or Verilog-A
+    /// view. Those bindings are valid design objects, but they are not
+    /// descendable hierarchy and must not enable the descend command.
+    pub(crate) fn hierarchy_master_for_component(
+        &self,
+        component_id: u64,
+    ) -> Option<(String, CellViewRef)> {
+        let component = self
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == component_id)?;
+        if component.kind != ComponentType::CellInstance {
+            return None;
+        }
+        let binding = component.library_cell.as_ref()?;
+        let reference = CellViewRef::new(
+            binding.library.clone(),
+            binding.cell.clone(),
+            binding.view.clone(),
+        );
+        let view_type = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .map(|view| view.view_type)?;
+        (view_type == ViewType::Schematic).then(|| (component.name.clone(), reference))
+    }
+
+    /// Return the exact project-owned Verilog-A source view bound to one
+    /// schematic instance. Merely spelling a view `veriloga` is insufficient:
+    /// the library view, cell-view-owned source bundle, and selected module
+    /// contract must all resolve before navigation is offered.
+    pub(crate) fn veriloga_source_for_component(&self, component_id: u64) -> Option<CellViewRef> {
+        let component = self
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == component_id)?;
+        if component.kind != ComponentType::CellInstance {
+            return None;
+        }
+        let binding = component.library_cell.as_ref()?;
+        let reference = CellViewRef::new(
+            binding.library.clone(),
+            binding.cell.clone(),
+            binding.view.clone(),
+        );
+        crate::state::workspace::project_veriloga_binding_for_view(
+            &self.workspace,
+            &self.library_manager,
+            &reference,
+        )
+        .ok()?;
+        Some(reference)
+    }
+
+    /// Open the exact Verilog-A source owned by a bound schematic instance.
+    /// Resolution happens before any workspace mutation, so stale or partial
+    /// bindings fail closed and leave the active document untouched.
+    pub(crate) fn open_veriloga_source_for_component(&mut self, component_id: u64) -> bool {
+        let Some(reference) = self.veriloga_source_for_component(component_id) else {
+            return false;
+        };
+        self.open_workspace_view(reference);
+        self.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        self.ui.code_workspace.page = crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+        true
+    }
+
+    pub(crate) fn selected_hierarchy_master(&self) -> Option<(String, CellViewRef)> {
+        self.schematic
+            .selection
+            .single_component()
+            .and_then(|component_id| self.hierarchy_master_for_component(component_id))
+    }
+
+    pub(crate) fn hierarchical_edit_in_place_enabled(&self) -> bool {
+        self.ui
+            .preferences
+            .toggle(crate::workbench::TogglePreference::HierarchicalEditInPlace)
+    }
+
+    pub(crate) fn open_selected_instance_master(&mut self) {
+        let Some((instance_name, reference)) = self.selected_hierarchy_master() else {
+            self.push_user_message(ConsoleMessage::warning(
+                "Select one instance with a resolved schematic master first",
+            ));
+            return;
+        };
+        if self.hierarchical_edit_in_place_enabled() {
+            self.descend_into_instance(Some(instance_name), reference);
+        } else {
+            self.open_workspace_view(reference);
+        }
+    }
+}
+
+impl RSpiceApp {
+    pub(crate) fn restore_workspace_after_project_load(&mut self) {
+        self.state.restore_active_schematic_from_workspace();
+        self.state.clear_transient_specialized_viewer_data();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::app::AppState;
+    use crate::panels::{LogAnchor, LogSource};
+    use crate::services::drc::{DrcLocation, DrcViolationType};
+    use crate::state::{
+        Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
+        PortDirection, PortSpec, ResolvedSymbolSource, Rotation, SYMBOL_DOCUMENT_METADATA_KEY,
+        SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolResolver, View,
+        ViewType, Wire,
+    };
+    use crate::workbench::ChoicePreference;
+    use crate::workbench::state::Workspace;
+
+    #[test]
+    fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() {
+        let mut state = AppState::default();
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::PropertyCommitPolicy, 1)
+            .unwrap();
+        let created = state.new_schematic_document();
+        assert_eq!(
+            created.document_policy.property_commit,
+            crate::state::PropertyCommitPolicy::ApplyValidFields
+        );
+
+        let reference = CellViewRef::new("work", "preserved", "schematic");
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("preserved");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+        let mut existing = SchematicState::default();
+        existing.document_policy.property_commit = crate::state::PropertyCommitPolicy::Atomic;
+        state
+            .workspace
+            .schematic_buffers
+            .insert(reference.key(), existing);
+
+        state.open_workspace_view(reference);
+
+        assert_eq!(
+            state.schematic.document_policy.property_commit,
+            crate::state::PropertyCommitPolicy::Atomic
+        );
+    }
+
+    #[test]
+    fn any_angle_document_policy_applies_to_wire_and_bus_authoring() {
+        let mut state = AppState::default();
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::WireJunctionBehavior, 2)
+            .unwrap();
+
+        let created = state.new_schematic_document();
+
+        assert_eq!(
+            created.wire_drawing.routing_mode,
+            crate::state::WireRoutingMode::Diagonal
+        );
+        assert_eq!(
+            created.bus_drawing.routing_mode,
+            crate::state::WireRoutingMode::Diagonal
+        );
+    }
+
+    fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
+        SymbolDocument {
+            pins: pins
+                .iter()
+                .map(|(name, direction, position)| {
+                    SymbolPin::new(*name, *direction, Some(*position))
+                })
+                .collect(),
+            ..SymbolDocument::default()
+        }
+    }
+
+    fn amp_binding(pins: &[(&str, PortDirection)]) -> LibraryCellInstance {
+        let ports: Vec<PortSpec> = pins
+            .iter()
+            .map(|(name, direction)| PortSpec {
+                name: (*name).to_owned(),
+                direction: *direction,
+            })
+            .collect();
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&ports);
+        binding
+    }
+
+    fn state_with_amp_symbol(document: SymbolDocument) -> AppState {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("initial symbol stores");
+        amp.add_view(symbol_view);
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+        state
+    }
+
+    fn state_with_work_cell(cell_name: &str) -> AppState {
+        let mut state = AppState::default();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new(cell_name);
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+        state.open_workspace_view(CellViewRef::new("work", cell_name, "schematic"));
+        state
+    }
+
+    #[test]
+    fn production_copy_uses_authored_symbol_terminal_geometry() {
+        let mut state = state_with_amp_symbol(symbol_document(&[
+            ("IN", PortDirection::In, Point::new(-50, 0)),
+            ("OUT", PortDirection::Out, Point::new(50, 0)),
+        ]));
+        state.schematic = SchematicState::default();
+        let left =
+            Component::new(1, ComponentType::CellInstance, Point::new(0, 0)).with_library_cell(
+                amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
+            );
+        let right =
+            Component::new(2, ComponentType::CellInstance, Point::new(200, 0)).with_library_cell(
+                amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
+            );
+        state.schematic.components = vec![left, right];
+        state
+            .schematic
+            .wires
+            .push(Wire::segment(3, Point::new(50, 0), Point::new(150, 0)));
+        state.schematic.selection.select_component(1);
+        state.schematic.selection.select_component(2);
+
+        assert!(state.copy_active_schematic_selection());
+        assert_eq!(state.schematic.clipboard.components.len(), 2);
+        assert_eq!(
+            state.schematic.clipboard.wires.len(),
+            1,
+            "the conductor between authored pins must travel with both selected instances"
+        );
+    }
+
+    fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::ProjectSourceId {
+        state
+            .library_manager
+            .get_library_mut("work")
+            .and_then(|library| library.get_cell_mut(cell))
+            .expect("fixture cell")
+            .add_view(View::new("behavior", ViewType::VerilogA));
+        let bundle = crate::state::ProjectSourceBundle::try_new(
+            crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("work", cell, "behavior")),
+            crate::state::ProjectSourceLanguage::VerilogA,
+            "behavior.va",
+            "module behavior(p, n); inout p, n; endmodule",
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .expect("valid source bundle");
+        let id = bundle.id();
+        state
+            .workspace
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("unique source owner");
+        id
+    }
+
+    fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppState {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = pin_name.to_owned();
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+        state
+            .store_active_symbol_document(&SymbolDocument {
+                pins: vec![SymbolPin::new(pin_name, PortDirection::In, position)],
+                ..SymbolDocument::default()
+            })
+            .expect("symbol document stores");
+
+        state
+    }
+
+    fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        for index in 0..count {
+            let port_id = schematic.add_component(ComponentType::Port, Point::new(index as i32, 0));
+            schematic
+                .components
+                .iter_mut()
+                .find(|component| component.id == port_id)
+                .expect("port exists")
+                .value = format!("P{index}");
+        }
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+        state
+            .store_active_symbol_document(&SymbolDocument::default())
+            .expect("symbol document stores");
+        state
+    }
+
+    /// A persisted session whose active tab points into the legacy seeded
+    /// "primitives" library must come back with the drawn content moved to
+    /// the user library and the placeholder library gone — otherwise
+    /// `ensure_library_model` resurrects the placeholder cell every launch.
+    #[test]
+    fn legacy_primitives_content_migrates_to_user_library() {
+        let mut state = AppState::default();
+
+        // Simulate the legacy session: seeded library + an open tab with
+        // a drawn schematic inside it.
+        let mut legacy = Library::new("primitives");
+        let mut cell = Cell::new("ISource AC");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        legacy.add_cell(cell);
+        state.library_manager.add_library(legacy);
+
+        let mut drawn = crate::state::SchematicState::default();
+        drawn.add_component(ComponentType::Njfet, Point::new(0, 0));
+        state
+            .workspace
+            .schematic_buffers
+            .insert("primitives/ISource AC/schematic".to_owned(), drawn);
+        state.workspace.active_view =
+            crate::state::CellViewRef::new("primitives", "ISource AC", "schematic");
+
+        state.migrate_legacy_primitives();
+
+        assert!(
+            state.library_manager.get_library("primitives").is_none(),
+            "legacy library must be gone"
+        );
+        assert_eq!(state.workspace.active_view.library, "user");
+        let migrated = state
+            .workspace
+            .schematic_buffers
+            .get("user/ISource AC/schematic")
+            .expect("buffer migrated to the user library");
+        assert_eq!(migrated.components.len(), 1, "drawn content preserved");
+        assert!(
+            state
+                .library_manager
+                .get_library("user")
+                .and_then(|lib| lib.get_cell("ISource AC"))
+                .is_some(),
+            "migrated cell exists in the user library"
+        );
+    }
+
+    #[test]
+    fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        let mut top = Cell::new("top2");
+        top.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(top);
+        state.library_manager.add_library(library);
+
+        let amp_schematic = CellViewRef::new("work", "amp", "schematic");
+        let amp_symbol = CellViewRef::new("work", "amp", "symbol");
+        let top_schematic = CellViewRef::new("work", "top2", "schematic");
+
+        let mut amp_buffer = SchematicState::default();
+        amp_buffer.add_component(ComponentType::Port, Point::new(0, 0));
+        state
+            .workspace
+            .schematic_buffers
+            .insert(amp_schematic.key(), amp_buffer.clone());
+        state.schematic = amp_buffer;
+        state.workspace.active_view = amp_schematic.clone();
+        state.workspace.open_views = vec![crate::state::OpenCellView::new(
+            amp_schematic.clone(),
+            ViewType::Schematic,
+        )];
+
+        state.open_workspace_view(amp_symbol.clone());
+        assert_eq!(state.workspace.active_view_type(), ViewType::Symbol);
+
+        state.open_workspace_view(top_schematic);
+
+        assert!(
+            !state
+                .workspace
+                .schematic_buffers
+                .contains_key(&amp_symbol.key()),
+            "switching away from symbol must not persist the live schematic under the symbol key"
+        );
+    }
+
+    #[test]
+    fn active_symbol_ports_read_the_paired_schematic_contract() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = "OUT".to_owned();
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        let ports = state.active_symbol_ports();
+
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].name, "OUT");
+    }
+
+    #[test]
+    fn generating_active_symbol_document_writes_symbol_view_metadata() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = "IN".to_owned();
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        state
+            .generate_active_symbol_document()
+            .expect("symbol document generated");
+
+        let view = state
+            .library_manager
+            .get_library("work")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("symbol view exists");
+        let doc = crate::state::SymbolDocument::load_from_view(view)
+            .expect("stored symbol document parses");
+        assert_eq!(
+            doc.pin("IN").expect("IN pin exists").position,
+            Some(Point::new(30, 0))
+        );
+        assert!(
+            !view.metadata.contains_key("generated"),
+            "a stored symbol document is now hand-authored state, not a generated fallback"
+        );
+        assert!(
+            !view.metadata.contains_key("ports"),
+            "stored symbol metadata must not keep stale fallback port text"
+        );
+    }
+
+    #[test]
+    fn generate_symbol_document_is_one_undoable_transaction() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = "IN".to_owned();
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        state
+            .generate_active_symbol_document()
+            .expect("symbol document generated");
+
+        assert!(
+            state.can_undo_active_symbol_document(),
+            "generation should create one undoable editor transaction"
+        );
+        assert!(
+            state
+                .undo_active_symbol_document()
+                .expect("undo generated symbol"),
+            "the generated document should undo in one step"
+        );
+        let undone = state
+            .load_active_symbol_document()
+            .expect("undone symbol document loads");
+        assert!(
+            undone.body.is_empty() && undone.pins.is_empty(),
+            "undo should restore the pre-generation symbol document"
+        );
+        assert!(
+            state
+                .redo_active_symbol_document()
+                .expect("redo generated symbol"),
+            "the generated document should redo in one step"
+        );
+        assert!(
+            !state
+                .load_active_symbol_document()
+                .expect("redone symbol document loads")
+                .body
+                .is_empty(),
+            "redo should restore generated symbol artwork"
+        );
+    }
+
+    #[test]
+    fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = "IN".to_owned();
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        assert!(
+            !state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .and_then(|cell| cell.get_view("symbol"))
+                .expect("symbol view exists")
+                .metadata
+                .contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
+            "fixture starts without authored symbol metadata"
+        );
+
+        state
+            .generate_active_symbol_document()
+            .expect("symbol document generated");
+        assert!(
+            state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .and_then(|cell| cell.get_view("symbol"))
+                .expect("symbol view exists")
+                .metadata
+                .contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
+            "generate writes authored symbol metadata"
+        );
+
+        assert!(
+            state
+                .undo_active_symbol_document()
+                .expect("undo generated symbol"),
+            "undo should apply"
+        );
+
+        let view = state
+            .library_manager
+            .get_library("work")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("symbol view exists");
+        assert!(
+            !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
+            "undo must restore the missing authored metadata state"
+        );
+        let resolver =
+            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+        let resolved = resolver
+            .resolve_reference(&CellViewRef::new("work", "amp", "symbol"))
+            .expect("symbol resolves after undo");
+        assert!(matches!(resolved.source(), ResolvedSymbolSource::Generated));
+    }
+
+    #[test]
+    fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = "IN".to_owned();
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        let before = state
+            .load_active_symbol_document()
+            .expect("pre-edit fallback document loads");
+        assert!(
+            !state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .and_then(|cell| cell.get_view("symbol"))
+                .expect("symbol view exists")
+                .metadata
+                .contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
+        );
+
+        state.record_symbol_edit(&before);
+        state
+            .store_active_symbol_document(&SymbolDocument {
+                body: vec![crate::state::SymbolShape::Dot {
+                    center: Point::origin(),
+                    radius: 3,
+                }],
+                ..before.clone()
+            })
+            .expect("first manual edit stores authored metadata");
+
+        assert!(
+            state
+                .undo_active_symbol_document()
+                .expect("undo first manual edit")
+        );
+        let view = state
+            .library_manager
+            .get_library("work")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("symbol view exists");
+        assert!(
+            !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
+            "undo must restore the missing authored metadata state"
+        );
+        let resolver =
+            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+        let resolved = resolver
+            .resolve_reference(&CellViewRef::new("work", "amp", "symbol"))
+            .expect("symbol resolves after undo");
+        assert!(matches!(resolved.source(), ResolvedSymbolSource::Generated));
+    }
+
+    #[test]
+    fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        SymbolDocument {
+            pins: vec![
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0))),
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(40, 0))),
+            ],
+            ..SymbolDocument::default()
+        }
+        .store_in_view(&mut symbol_view)
+        .expect("initial symbol stores");
+        amp.add_view(symbol_view);
+        library.add_cell(amp);
+        let mut top = Cell::new("top");
+        top.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(top);
+        state.library_manager.add_library(library);
+
+        let ports = vec![
+            PortSpec {
+                name: "IN".to_owned(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "OUT".to_owned(),
+                direction: PortDirection::Out,
+            },
+        ];
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&ports);
+
+        let mut parent = SchematicState::default();
+        parent.components.push(
+            Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+                .with_library_cell(binding),
+        );
+        parent
+            .wires
+            .push(Wire::segment(7, Point::new(60, 50), Point::new(0, 50)));
+        state
+            .workspace
+            .schematic_buffers
+            .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+        state
+            .store_active_symbol_document(&SymbolDocument {
+                pins: vec![
+                    SymbolPin::new("IN", PortDirection::In, Some(Point::new(-20, 10))),
+                    SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(40, 0))),
+                ],
+                ..SymbolDocument::default()
+            })
+            .expect("updated symbol stores");
+
+        let parent = state
+            .workspace
+            .schematic_buffers
+            .get("work/top/schematic")
+            .expect("parent schematic remains open");
+        assert_eq!(parent.wires[0].points[0], Point::new(80, 60));
+        assert_eq!(parent.wires[0].points[1], Point::new(0, 50));
+    }
+
+    #[test]
+    fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
+        let before = SymbolDocument {
+            origin: Point::new(20, 0),
+            pins: vec![SymbolPin::new(
+                "IN",
+                PortDirection::In,
+                Some(Point::new(30, 0)),
+            )],
+            ..SymbolDocument::default()
+        };
+        let mut state = state_with_amp_symbol(before);
+
+        let mut parent = SchematicState::default();
+        parent.components.push(
+            Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+                .with_library_cell(amp_binding(&[("IN", PortDirection::In)])),
+        );
+        parent
+            .wires
+            .push(Wire::segment(7, Point::new(110, 50), Point::new(0, 50)));
+        state
+            .workspace
+            .schematic_buffers
+            .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+
+        state
+            .store_active_symbol_document(&SymbolDocument {
+                origin: Point::origin(),
+                pins: vec![SymbolPin::new(
+                    "IN",
+                    PortDirection::In,
+                    Some(Point::new(30, 0)),
+                )],
+                ..SymbolDocument::default()
+            })
+            .expect("updated symbol stores");
+
+        let parent = state
+            .workspace
+            .schematic_buffers
+            .get("work/top/schematic")
+            .expect("parent schematic remains open");
+        assert_eq!(parent.wires[0].points[0], Point::new(130, 50));
+        assert_eq!(parent.wires[0].points[1], Point::new(0, 50));
+    }
+
+    #[test]
+    fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
+        let mut state = state_with_amp_symbol(symbol_document(&[
+            ("IN", PortDirection::In, Point::new(-30, 10)),
+            ("OUT", PortDirection::Out, Point::new(40, 0)),
+        ]));
+
+        let mut parent = SchematicState::default();
+        parent.components.push(
+            Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+                .with_rotation(Rotation::R90)
+                .with_mirror_h(true)
+                .with_library_cell(amp_binding(&[
+                    ("IN", PortDirection::In),
+                    ("OUT", PortDirection::Out),
+                ])),
+        );
+        parent
+            .wires
+            .push(Wire::segment(8, Point::new(90, 80), Point::new(90, 120)));
+        state
+            .workspace
+            .schematic_buffers
+            .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+
+        state
+            .store_active_symbol_document(&symbol_document(&[
+                ("IN", PortDirection::In, Point::new(-10, -20)),
+                ("OUT", PortDirection::Out, Point::new(40, 0)),
+            ]))
+            .expect("updated symbol stores");
+
+        let parent = state
+            .workspace
+            .schematic_buffers
+            .get("work/top/schematic")
+            .expect("parent schematic remains open");
+        assert_eq!(parent.wires[0].points[0], Point::new(120, 60));
+        assert_eq!(parent.wires[0].points[1], Point::new(90, 120));
+    }
+
+    #[test]
+    fn storing_symbol_document_applies_wire_remaps_once() {
+        let mut state = state_with_amp_symbol(symbol_document(&[
+            ("IN", PortDirection::In, Point::new(0, 0)),
+            ("OUT", PortDirection::Out, Point::new(10, 0)),
+        ]));
+
+        let mut parent = SchematicState::default();
+        parent.components.push(
+            Component::new(1, ComponentType::CellInstance, Point::new(100, 50)).with_library_cell(
+                amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
+            ),
+        );
+        parent
+            .wires
+            .push(Wire::segment(9, Point::new(100, 50), Point::new(100, 0)));
+        state
+            .workspace
+            .schematic_buffers
+            .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+
+        state
+            .store_active_symbol_document(&symbol_document(&[
+                ("IN", PortDirection::In, Point::new(10, 0)),
+                ("OUT", PortDirection::Out, Point::new(20, 0)),
+            ]))
+            .expect("updated symbol stores");
+
+        let parent = state
+            .workspace
+            .schematic_buffers
+            .get("work/top/schematic")
+            .expect("parent schematic remains open");
+        assert_eq!(
+            parent.wires[0].points[0],
+            Point::new(110, 50),
+            "the IN endpoint must stop at IN's new location, not then match OUT's old location"
+        );
+    }
+
+    #[test]
+    fn storing_symbol_document_remaps_all_open_parent_buffers() {
+        let mut state = state_with_amp_symbol(symbol_document(&[
+            ("IN", PortDirection::In, Point::new(-40, 0)),
+            ("OUT", PortDirection::Out, Point::new(40, 0)),
+        ]));
+        let binding = amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]);
+
+        let mut top = SchematicState::default();
+        top.components.push(
+            Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+                .with_library_cell(binding.clone()),
+        );
+        top.components.push(
+            Component::new(2, ComponentType::CellInstance, Point::new(200, 0))
+                .with_library_cell(binding.clone()),
+        );
+        top.wires
+            .push(Wire::segment(10, Point::new(60, 50), Point::new(0, 50)));
+        top.wires
+            .push(Wire::segment(11, Point::new(160, 0), Point::new(160, -50)));
+        state
+            .workspace
+            .schematic_buffers
+            .insert(CellViewRef::new("work", "top", "schematic").key(), top);
+
+        let mut tb = SchematicState::default();
+        tb.components.push(
+            Component::new(3, ComponentType::CellInstance, Point::new(-10, 20))
+                .with_library_cell(binding),
+        );
+        tb.wires
+            .push(Wire::segment(12, Point::new(-50, 20), Point::new(-90, 20)));
+        state
+            .workspace
+            .schematic_buffers
+            .insert(CellViewRef::new("work", "tb", "schematic").key(), tb);
+
+        state
+            .store_active_symbol_document(&symbol_document(&[
+                ("IN", PortDirection::In, Point::new(-20, 10)),
+                ("OUT", PortDirection::Out, Point::new(40, 0)),
+            ]))
+            .expect("updated symbol stores");
+
+        let top = state
+            .workspace
+            .schematic_buffers
+            .get("work/top/schematic")
+            .expect("top schematic remains open");
+        assert_eq!(top.wires[0].points[0], Point::new(80, 60));
+        assert_eq!(top.wires[1].points[0], Point::new(180, 10));
+
+        let tb = state
+            .workspace
+            .schematic_buffers
+            .get("work/tb/schematic")
+            .expect("testbench schematic remains open");
+        assert_eq!(tb.wires[0].points[0], Point::new(-30, 30));
+    }
+
+    #[test]
+    fn symbol_pin_checks_store_structured_drc_results_with_symbol_anchors() {
+        let mut state = state_with_amp_symbol_pin("IN", None);
+
+        state.run_active_symbol_pin_checks();
+
+        let result = state.dialogs.drc_results.as_ref().expect("result stored");
+        assert!(result.violations().iter().any(|violation| {
+            violation.violation_type == DrcViolationType::SymbolUnplacedPin
+                && matches!(
+                    &violation.location,
+                    DrcLocation::SymbolPin { pin_name, .. } if pin_name == "IN"
+                )
+        }));
+        assert!(state.log_buffer.entries().any(|entry| {
+            matches!(
+                &entry.anchor,
+                Some(LogAnchor::Symbol { pin_name, .. }) if pin_name == "IN"
+            )
+        }));
+    }
+
+    #[test]
+    fn symbol_pin_checks_cap_console_rows_and_keep_all_results() {
+        let mut state = state_with_unplaced_amp_symbol_pins(55);
+
+        state.run_active_symbol_pin_checks();
+
+        let result = state.dialogs.drc_results.as_ref().expect("result stored");
+        assert_eq!(result.violations().len(), 55);
+
+        let drc_rows: Vec<_> = state
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.source == LogSource::Drc)
+            .collect();
+        let anchored_symbol_rows = drc_rows
+            .iter()
+            .filter(|entry| matches!(entry.anchor, Some(LogAnchor::Symbol { .. })))
+            .count();
+        assert_eq!(anchored_symbol_rows, 50);
+        assert!(
+            drc_rows
+                .iter()
+                .any(|entry| entry.message.contains("+5 more findings"))
+        );
+    }
+
+    #[test]
+    fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
+        let mut state = state_with_work_cell("amp");
+        let active_key = CellViewRef::new("work", "amp", "schematic").key();
+        state
+            .workspace
+            .schematic_buffers
+            .insert(active_key, SchematicState::default());
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
+
+        let copied = state
+            .copy_cell("work", "amp", "work", "amp_copy")
+            .expect("copy succeeds");
+
+        let copy = state
+            .workspace
+            .schematic_buffers
+            .get("work/amp_copy/schematic")
+            .expect("copy buffer exists");
+        assert_eq!(copied, 1);
+        assert_eq!(copy.components.len(), 1);
+        assert_eq!(copy.components[0].kind, ComponentType::Resistor);
+    }
+
+    #[test]
+    fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
+        let mut state = state_with_work_cell("amp");
+        let original_id = add_cell_veriloga_source(&mut state, "amp");
+        let configuration_id = state
+            .workspace
+            .configuration_sets
+            .create(crate::state::ConfigurationSetDefinition {
+                name: "Release".to_owned(),
+                root: CellViewRef::new("work", "amp", "schematic"),
+                dut_path: "/top".to_owned(),
+                executable_view_policy: vec!["schematic".to_owned()],
+                stop_views: Vec::new(),
+                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                black_box_policy:
+                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                overrides: Vec::new(),
+                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                owner: "Lifecycle test".to_owned(),
+            })
+            .expect("configuration root");
+        let inactive_configuration_id = state
+            .workspace
+            .configuration_sets
+            .clone_configuration(configuration_id, 1, "Characterization")
+            .expect("inactive configuration root");
+
+        state
+            .copy_cell("work", "amp", "work", "amp_copy")
+            .expect("copy succeeds");
+        let copied_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+            "work", "amp_copy", "behavior",
+        ));
+        let copied = state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&copied_owner)
+            .expect("copied source exists");
+        assert_ne!(copied.id(), original_id);
+        assert_eq!(
+            copied.root().content(),
+            state
+                .workspace
+                .project_sources
+                .get_bundle(original_id)
+                .expect("original source")
+                .root()
+                .content()
+        );
+
+        let revision = state
+            .workspace
+            .project_sources
+            .get_bundle(original_id)
+            .expect("original source")
+            .revision();
+        state
+            .rename_cell("work", "amp", "amp_renamed")
+            .expect("rename succeeds");
+        let renamed_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+            "work",
+            "amp_renamed",
+            "behavior",
+        ));
+        let renamed = state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&renamed_owner)
+            .expect("renamed source exists");
+        assert_eq!(renamed.id(), original_id);
+        assert!(renamed.revision() > revision);
+        assert!(
+            state
+                .workspace
+                .project_sources
+                .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+                    CellViewRef::new("work", "amp", "behavior")
+                ))
+                .is_none()
+        );
+        assert!(state.workspace.project_sources_dirty);
+        for id in [configuration_id, inactive_configuration_id] {
+            let configuration = state
+                .workspace
+                .configuration_sets
+                .find(id)
+                .expect("configuration remains");
+            assert_eq!(configuration.root().cell, "amp_renamed");
+            assert_eq!(configuration.revision(), 2);
+        }
+        assert!(state.workspace.project_metadata_dirty);
+    }
+
+    #[test]
+    fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
+        let mut state = state_with_work_cell("\u{c9}tage");
+        let original_id = add_cell_veriloga_source(&mut state, "\u{c9}tage");
+        let persisted_key = CellViewRef::new("work", "\u{c9}tage", "schematic").key();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
+        let before_sources = state.workspace.project_sources.clone();
+
+        let copy_error = state
+            .copy_cell("work", "\u{c9}tage", "work", "\u{e9}TAGE")
+            .expect_err("accented case aliases cannot create a second cell identity");
+        assert!(copy_error.contains("canonical cell identity"));
+        assert_eq!(state.workspace.project_sources, before_sources);
+        assert_eq!(
+            state
+                .workspace
+                .schematic_buffers
+                .get(&persisted_key)
+                .expect("source buffer remains")
+                .components
+                .len(),
+            0,
+            "a rejected copy must not flush or partially copy live document state"
+        );
+        assert_eq!(
+            state
+                .library_manager
+                .get_library("work")
+                .expect("work library")
+                .cell_count(),
+            1
+        );
+
+        state
+            .library_manager
+            .get_library_mut("work")
+            .expect("work library")
+            .add_cell(Cell::new("Cible"));
+        let before_sources = state.workspace.project_sources.clone();
+        let before_revision = state
+            .workspace
+            .project_sources
+            .get_bundle(original_id)
+            .expect("owned source")
+            .revision();
+        let rename_error = state
+            .rename_cell("work", "\u{c9}tage", "cIBLE")
+            .expect_err("rename cannot alias an existing canonical identity");
+        assert!(rename_error.contains("canonical cell identity"));
+        assert_eq!(state.workspace.project_sources, before_sources);
+        assert_eq!(
+            state
+                .workspace
+                .project_sources
+                .get_bundle(original_id)
+                .expect("owned source remains")
+                .revision(),
+            before_revision
+        );
+        let library = state
+            .library_manager
+            .get_library("work")
+            .expect("work library");
+        assert!(library.get_cell("\u{c9}tage").is_some());
+        assert!(library.get_cell("Cible").is_some());
+        assert!(library.get_cell("cIBLE").is_none());
+    }
+
+    #[test]
+    fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
+        let mut state = state_with_amp_symbol_pin("IN", Some(Point::new(-30, 0)));
+        let reference = CellViewRef::new("work", "amp", "symbol");
+
+        state.jump_to_log_anchor(LogAnchor::Symbol {
+            reference: reference.clone(),
+            pin_name: "IN".to_owned(),
+            point: Some(Point::new(-30, 0)),
+        });
+
+        assert_eq!(state.workspace.active_view, reference);
+        assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
+        assert_eq!(state.workbench.workspace, Workspace::Design);
+    }
+
+    #[test]
+    fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
+        let mut state = state_with_amp_symbol_pin("IN", None);
+        state.run_active_symbol_pin_checks();
+        state.ui.symbol.clear_selection();
+
+        crate::schematic::view::violations::cycle_violation(&mut state, 1);
+
+        assert_eq!(
+            state.workspace.active_view,
+            CellViewRef::new("work", "amp", "symbol")
+        );
+        assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
+    }
+
+    #[test]
+    fn symbol_undo_history_is_scoped_to_active_view() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        for cell_name in ["amp_a", "amp_b"] {
+            let mut cell = Cell::new(cell_name);
+            cell.add_view(View::new("schematic", ViewType::Schematic));
+            cell.add_view(View::new("symbol", ViewType::Symbol));
+            library.add_cell(cell);
+        }
+        state.library_manager.add_library(library);
+
+        state.open_workspace_view(CellViewRef::new("work", "amp_a", "symbol"));
+        let before_a = SymbolDocument {
+            name_anchor: Point::new(-10, -10),
+            ..SymbolDocument::default()
+        };
+        let after_a = SymbolDocument {
+            name_anchor: Point::new(-20, -20),
+            ..SymbolDocument::default()
+        };
+        state.record_symbol_edit(&before_a);
+        state
+            .store_active_symbol_document(&after_a)
+            .expect("store amp_a symbol");
+
+        state.open_workspace_view(CellViewRef::new("work", "amp_b", "symbol"));
+        let before_b = SymbolDocument {
+            name_anchor: Point::new(10, 10),
+            ..SymbolDocument::default()
+        };
+        state
+            .store_active_symbol_document(&before_b)
+            .expect("store amp_b symbol");
+
+        assert!(
+            !state
+                .undo_active_symbol_document()
+                .expect("undo amp_b symbol"),
+            "undo from amp_a must not apply to amp_b"
+        );
+        assert_eq!(
+            state
+                .load_active_symbol_document()
+                .expect("amp_b symbol loads")
+                .name_anchor,
+            Point::new(10, 10)
+        );
+
+        state.open_workspace_view(CellViewRef::new("work", "amp_a", "symbol"));
+        assert!(
+            state
+                .undo_active_symbol_document()
+                .expect("undo amp_a symbol"),
+            "amp_a keeps its own undo stack"
+        );
+        assert_eq!(
+            state
+                .load_active_symbol_document()
+                .expect("amp_a symbol loads")
+                .name_anchor,
+            Point::new(-10, -10)
+        );
+    }
+
+    #[test]
+    fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
+        let mut state = AppState::default();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        let document = SymbolDocument::default();
+        let baseline = SymbolEditorMetadata::for_document(&document);
+        state
+            .store_active_symbol_editor_bundle(&document, &baseline)
+            .expect("baseline symbol bundle stores");
+        state.record_symbol_edit(&document);
+        let mut edited = baseline.clone();
+        edited.allocate_text("durable annotation", Point::new(10, 20));
+        state
+            .store_active_symbol_editor_bundle(&document, &edited)
+            .expect("edited symbol bundle stores");
+
+        assert!(
+            state
+                .undo_active_symbol_document()
+                .expect("symbol bundle undo succeeds")
+        );
+        assert!(
+            state
+                .load_active_symbol_editor_metadata(&document)
+                .expect("undone sidecar loads")
+                .texts
+                .is_empty()
+        );
+        assert!(
+            state
+                .redo_active_symbol_document()
+                .expect("symbol bundle redo succeeds")
+        );
+        assert_eq!(
+            state
+                .load_active_symbol_editor_metadata(&document)
+                .expect("redone sidecar loads")
+                .texts
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn symbol_store_refuses_read_only_libraries() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("readonly");
+        library.read_only = true;
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+        state.open_workspace_view(CellViewRef::new("readonly", "amp", "symbol"));
+
+        let error = state
+            .store_active_symbol_document(&SymbolDocument::default())
+            .expect_err("read-only symbol store is rejected");
+
+        assert_eq!(error, "Read-only - 'readonly' masters cannot be edited");
+    }
+
+    #[test]
+    fn read_only_symbol_edit_paths_use_consistent_refusal_text() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("readonly");
+        library.read_only = true;
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+        state.open_workspace_view(CellViewRef::new("readonly", "amp", "symbol"));
+
+        let expected = "Read-only - 'readonly' masters cannot be edited";
+
+        assert_eq!(
+            state
+                .store_active_symbol_document(&SymbolDocument::default())
+                .expect_err("store should be refused"),
+            expected
+        );
+        assert_eq!(
+            state
+                .generate_active_symbol_document()
+                .expect_err("generate should be refused"),
+            expected
+        );
+        assert_eq!(
+            state
+                .undo_active_symbol_document()
+                .expect_err("undo should be refused"),
+            expected
+        );
+        assert_eq!(
+            state
+                .redo_active_symbol_document()
+                .expect_err("redo should be refused"),
+            expected
+        );
+
+        assert!(state.deny_read_only_edit());
+        let warning = state
+            .log_buffer
+            .entries()
+            .last()
+            .expect("read-only warning is logged");
+        assert_eq!(warning.message, expected);
+    }
+
+    #[test]
+    fn opening_symbol_view_loads_the_paired_schematic_context() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut paired = SchematicState::default();
+        let port_id = paired.add_component(ComponentType::Port, Point::new(0, 0));
+        paired
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = "PAIR".to_owned();
+        state
+            .workspace
+            .schematic_buffers
+            .insert(CellViewRef::new("work", "amp", "schematic").key(), paired);
+
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        let ports = state.schematic.interface_ports();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].name, "PAIR");
+    }
+
+    #[test]
+    fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_variants() {
+        let mut state = state_with_work_cell("amp");
+        let main_component = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        let boundary_component = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(40, 0));
+        let moved_component = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(80, 0));
+        let owner = CellViewRef::new("work", "amp", "schematic").key();
+        let main_sheet = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(
+                &owner,
+                "Main",
+                [main_component, boundary_component, moved_component],
+            )
+            .expect("source sheet catalog");
+        let source_catalog = state
+            .workspace
+            .design_management
+            .sheet_catalog_mut(&owner)
+            .expect("source catalog");
+        let auxiliary_sheet = source_catalog
+            .create_sheet(
+                crate::state::SheetDefinition {
+                    name: "Auxiliary".to_owned(),
+                    template: crate::state::SheetTemplate::AnalogSchematic,
+                    port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(main_sheet),
+            )
+            .expect("auxiliary sheet");
+        source_catalog
+            .move_selection(crate::state::MoveSelectionRequest {
+                expected_catalog_revision: source_catalog.revision(),
+                object_ids: vec![moved_component],
+                destination_sheet_id: auxiliary_sheet,
+                boundary_resolution: crate::state::MoveBoundaryResolution::ExplicitPorts {
+                    ports: vec![crate::state::CrossSheetPortDefinition {
+                        net_name: "BIAS".to_owned(),
+                        first: crate::state::CrossSheetPortEndpoint {
+                            sheet_id: main_sheet,
+                            anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: boundary_component,
+                                terminal_name: "BIAS_OUT".to_owned(),
+                            },
+                        },
+                        second: crate::state::CrossSheetPortEndpoint {
+                            sheet_id: auxiliary_sheet,
+                            anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                                component_id: moved_component,
+                                terminal_name: "BIAS_IN".to_owned(),
+                            },
+                        },
+                        direction: crate::state::CrossSheetPortDirection::Output,
+                        signal_type: crate::state::CrossSheetSignalType::Analog,
+                        discipline: crate::state::CrossSheetDiscipline::Electrical,
+                    }],
+                },
+            })
+            .expect("reviewed cross-sheet move");
+        let variant_id = state
+            .workspace
+            .design_management
+            .variants_mut()
+            .create(crate::state::AssemblyVariantDraft {
+                name: "Industrial".to_owned(),
+                parent_id: None,
+                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::from([(
+                    crate::state::SchematicObjectKey::new(&owner, main_component)
+                        .expect("scoped source object"),
+                    crate::state::VariantObjectOverride::DoNotPopulate {
+                        approval_reference: "ECO-42".to_owned(),
+                    },
+                )]),
+            })
+            .expect("source variant");
+
+        let source_sheet_ids = state
+            .workspace
+            .design_management
+            .sheet_catalog(&owner)
+            .expect("source catalog")
+            .sheets()
+            .iter()
+            .map(crate::state::DesignSheet::id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let source_port_ids = state
+            .workspace
+            .design_management
+            .sheet_catalog(&owner)
+            .expect("source catalog")
+            .cross_sheet_ports()
+            .iter()
+            .map(crate::state::CrossSheetPortContract::id)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        state
+            .copy_cell("work", "amp", "work", "amp_copy")
+            .expect("cell copy succeeds");
+
+        let copied_owner = CellViewRef::new("work", "amp_copy", "schematic").key();
+        let copied_catalog = state
+            .workspace
+            .design_management
+            .sheet_catalog(&copied_owner)
+            .expect("copied sheet catalog");
+        let copied_sheet_ids = copied_catalog
+            .sheets()
+            .iter()
+            .map(crate::state::DesignSheet::id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let copied_port_ids = copied_catalog
+            .cross_sheet_ports()
+            .iter()
+            .map(crate::state::CrossSheetPortContract::id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(copied_sheet_ids.len(), source_sheet_ids.len());
+        assert!(copied_sheet_ids.is_disjoint(&source_sheet_ids));
+        assert_eq!(copied_port_ids.len(), source_port_ids.len());
+        assert!(copied_port_ids.is_disjoint(&source_port_ids));
+
+        let resolved = state
+            .workspace
+            .design_management
+            .variants()
+            .resolve(variant_id)
+            .expect("source variant remains resolvable");
+        assert!(
+            resolved
+                .override_for(&owner, main_component)
+                .expect("source key is valid")
+                .is_some()
+        );
+        assert!(
+            resolved
+                .override_for(&copied_owner, main_component)
+                .expect("copied key is valid")
+                .is_none(),
+            "copying a cell must not silently clone project assembly-variant ownership"
+        );
+    }
+
+    #[test]
+    fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership() {
+        let mut state = state_with_work_cell("amp");
+        let object_id = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
+        let old_owner = CellViewRef::new("work", "amp", "schematic").key();
+        let sheet_id = state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&old_owner, "Main", [object_id])
+            .expect("source sheet catalog");
+        let old_object = crate::state::SchematicObjectKey::new(&old_owner, object_id)
+            .expect("source scoped object");
+        let variant_id = state
+            .workspace
+            .design_management
+            .variants_mut()
+            .create(crate::state::AssemblyVariantDraft {
+                name: "Industrial".to_owned(),
+                parent_id: None,
+                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::from([(
+                    old_object.clone(),
+                    crate::state::VariantObjectOverride::DoNotPopulate {
+                        approval_reference: "ECO-17".to_owned(),
+                    },
+                )]),
+            })
+            .expect("source variant");
+        let renumber_request = crate::state::RenumberRequest {
+            scope: crate::state::RenumberScope::WholeProject,
+            order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+            protected_references:
+                crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![crate::state::AnnotationObject {
+                object: old_object.clone(),
+                current_reference: "R9".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: Some(sheet_id),
+                hierarchy_path: "/top".to_owned(),
+                position: crate::state::AnnotationPosition::default(),
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = state
+            .workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&renumber_request)
+            .expect("renumber preview");
+        state
+            .workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &renumber_request)
+            .expect("reviewed annotation");
+
+        state
+            .rename_cell("work", "amp", "amp_rev_b")
+            .expect("cell rename succeeds");
+
+        let new_owner = CellViewRef::new("work", "amp_rev_b", "schematic").key();
+        assert!(
+            state
+                .workspace
+                .design_management
+                .sheet_catalog(&old_owner)
+                .is_none()
+        );
+        assert_eq!(
+            state
+                .workspace
+                .design_management
+                .sheet_catalog(&new_owner)
+                .expect("renamed sheet catalog")
+                .active_sheet_id(),
+            Some(sheet_id),
+            "renaming ownership must preserve stable sheet identity"
+        );
+        let resolved = state
+            .workspace
+            .design_management
+            .variants()
+            .resolve(variant_id)
+            .expect("renamed variant remains resolvable");
+        assert!(
+            resolved
+                .override_for(&old_owner, object_id)
+                .expect("old key is valid")
+                .is_none()
+        );
+        assert!(
+            resolved
+                .override_for(&new_owner, object_id)
+                .expect("new key is valid")
+                .is_some()
+        );
+        assert!(
+            state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&old_owner, object_id)
+                .expect("old annotation lookup")
+                .is_none()
+        );
+        assert!(
+            state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&new_owner, object_id)
+                .expect("renamed annotation lookup")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog() {
+        let mut state = state_with_work_cell("amp");
+        let object_id = state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(20, 20));
+        let old_owner = CellViewRef::new("work", "amp", "schematic").key();
+        let old_object = crate::state::SchematicObjectKey::new(&old_owner, object_id)
+            .expect("source scoped object");
+        let variant_id = state
+            .workspace
+            .design_management
+            .variants_mut()
+            .create(crate::state::AssemblyVariantDraft {
+                name: "Industrial".to_owned(),
+                parent_id: None,
+                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::from([(
+                    old_object.clone(),
+                    crate::state::VariantObjectOverride::DoNotPopulate {
+                        approval_reference: "ECO-18".to_owned(),
+                    },
+                )]),
+            })
+            .expect("source variant");
+        let renumber_request = crate::state::RenumberRequest {
+            scope: crate::state::RenumberScope::WholeProject,
+            order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+            protected_references:
+                crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![crate::state::AnnotationObject {
+                object: old_object,
+                current_reference: "R19".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: None,
+                hierarchy_path: "/top".to_owned(),
+                position: crate::state::AnnotationPosition::default(),
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = state
+            .workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&renumber_request)
+            .expect("renumber preview");
+        state
+            .workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &renumber_request)
+            .expect("reviewed annotation");
+
+        state
+            .rename_cell("work", "amp", "amp_rev_c")
+            .expect("cell rename succeeds");
+
+        let new_owner = CellViewRef::new("work", "amp_rev_c", "schematic").key();
+        let resolved = state
+            .workspace
+            .design_management
+            .variants()
+            .resolve(variant_id)
+            .expect("renamed variant remains resolvable");
+        assert!(
+            resolved
+                .override_for(&old_owner, object_id)
+                .expect("old key is valid")
+                .is_none()
+        );
+        assert!(
+            resolved
+                .override_for(&new_owner, object_id)
+                .expect("new key is valid")
+                .is_some()
+        );
+        assert!(
+            state
+                .workspace
+                .design_management
+                .annotation()
+                .effective_mapping_for(&new_owner, object_id)
+                .expect("renamed annotation lookup")
+                .is_some()
+        );
+    }
+}
+
+fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
+    encoded
+        .split_whitespace()
+        .filter_map(|entry| {
+            let (name, direction) = entry.split_once(':')?;
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some(PortSpec {
+                name: name.to_owned(),
+                direction: PortDirection::parse(direction),
+            })
+        })
+        .collect()
+}

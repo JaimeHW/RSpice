@@ -8,12 +8,14 @@ use std::time::Duration;
 
 pub(crate) mod account_organization;
 pub mod availability;
-pub mod calculator_tool;
 pub mod browser_navigation;
+pub mod calculator_tool;
 pub mod capability_workflow;
 pub mod code_workspace;
 pub mod commands;
+mod cross_probe;
 pub mod design_system;
+pub mod engineering_table;
 mod feature_availability;
 pub mod feature_availability_data;
 pub mod hardcopy;
@@ -27,8 +29,9 @@ pub mod result_document;
 pub mod state;
 pub mod surface_catalog;
 pub mod surface_route;
+pub mod window_session;
 
-mod chrome;
+pub(crate) mod chrome;
 mod docks;
 mod jobs_manager;
 mod layout;
@@ -57,6 +60,13 @@ pub use availability::{
 pub use capability_workflow::{
     CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
 };
+pub(crate) use cross_probe::synchronize_schematic_cross_probe;
+pub use engineering_table::{
+    EngineeringColumnView, EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule,
+    EngineeringTableView, EngineeringTableViewStore, EngineeringViewScope,
+    EngineeringVirtualizationPolicy, FrozenIdentifierPolicy, SavedEngineeringTableView,
+    SortDirection,
+};
 pub use hardcopy_mapping_store::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
     PrintMappingSaveDisposition, PrintMappingSaveReceipt,
@@ -82,11 +92,16 @@ pub use preferences::{
 };
 pub use result_document::{ResultViewer, ResultsState};
 pub use session::{
-    GridStyle, InspectorEdit, SymbolClipboard, SymbolDocumentSnapshot, SymbolSelection, SymbolTool,
-    SymbolUiState, UiSessionState, UiSessionStateSer, mirror_point_h_about, mirror_point_v_about,
-    mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
-    symbol_shape_bounds,
+    GridStyle, InspectorEdit, SavedSelectionBulkFilter, SchematicAnnotationVisibility,
+    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
+    SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
+    SchematicWireRoutingStyle, SelectionBulkFilter, SelectionBulkFilterSession,
+    SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard, SymbolDocumentSnapshot,
+    SymbolGridSpacing, SymbolSelection, SymbolTool, SymbolUiState, UiSessionState,
+    UiSessionStateSer, mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about,
+    mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about, symbol_shape_bounds,
 };
+pub(crate) use session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};
 pub use shortcuts::{
     ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding,
     ProtectedShortcutPolicy, ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
@@ -100,6 +115,10 @@ pub use surface_catalog::{
     SurfaceIdParseError, SurfaceMetadata,
 };
 pub use surface_route::{SurfaceRoute, SurfaceRouteParseError};
+pub use window_session::{
+    ApplicationWindowBounds, ApplicationWindowId, ApplicationWindowState, WindowSessionError,
+    WindowSessionRegistry,
+};
 
 use egui::{CentralPanel, Context, Frame};
 
@@ -108,6 +127,35 @@ use crate::ui::tokens::Tokens;
 
 use layout::LayoutSpec;
 use state::Workspace;
+
+pub(crate) fn enter_full_screen_presentation(
+    app: &mut RSpiceApp,
+    scope: crate::common::app::FullScreenScope,
+    panels: crate::common::app::FullScreenPanels,
+) {
+    let platform_full_screen = scope == crate::common::app::FullScreenScope::ApplicationWindow;
+    app.state.workbench.full_screen_presentation = true;
+    app.state.workbench.full_screen_hide_context_panels =
+        panels == crate::common::app::FullScreenPanels::HideNavigatorAndInspector;
+    app.state.workbench.full_screen = platform_full_screen;
+    if platform_full_screen {
+        app.state.ui.request_full_screen(true);
+    }
+}
+
+pub(crate) fn exit_full_screen_presentation(app: &mut RSpiceApp) {
+    clear_full_screen_presentation(app, true);
+}
+
+fn clear_full_screen_presentation(app: &mut RSpiceApp, request_platform_exit: bool) {
+    let platform_full_screen = app.state.workbench.full_screen;
+    app.state.workbench.full_screen = false;
+    app.state.workbench.full_screen_presentation = false;
+    app.state.workbench.full_screen_hide_context_panels = false;
+    if request_platform_exit && platform_full_screen {
+        app.state.ui.request_full_screen(false);
+    }
+}
 
 /// Render one complete workbench frame.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
@@ -162,6 +210,16 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         layout.inspector_uses_drawer,
         layout.workspaces_uses_drawer,
     );
+    if app.state.workbench.full_screen_presentation
+        && !app.state.application_modal_open()
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        exit_full_screen_presentation(app);
+    }
+    if app.state.workbench.full_screen_presentation {
+        show_full_screen_presentation(ctx, app, layout);
+        return;
+    }
 
     // Global chrome is allocated first. Workbench columns are then allocated
     // before the document strip and console so both rows remain confined to
@@ -233,6 +291,140 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         .toasts
         .show(ctx, layout.title_bar_height, layout.toolbar_height);
     apply_platform_full_screen_request(ctx, app);
+}
+
+fn show_full_screen_presentation(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let hide_context_panels = app.state.workbench.full_screen_hide_context_panels;
+    if !hide_context_panels && layout.show_navigator_dock {
+        docks::show_navigator(ctx, app, layout);
+    }
+    if !hide_context_panels && layout.show_inspector_dock {
+        docks::show_inspector(ctx, app, layout);
+    }
+    docks::show_console(ctx, app, layout);
+
+    let t = Tokens::get(ctx);
+    CentralPanel::default()
+        .frame(Frame::new().fill(t.color.bg_app))
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+            surfaces::show(ui, app);
+        });
+
+    if !hide_context_panels && layout.has_overlay_drawer {
+        docks::show_drawers(ctx, app, layout);
+    }
+
+    let mut exit_requested = false;
+    egui::Area::new(egui::Id::new("rspice-full-screen-exit"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(t.color.bg_panel)
+                .stroke(egui::Stroke::new(1.0, t.color.border_strong))
+                .corner_radius(t.radius)
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(ui, |ui| {
+                    exit_requested = ui.button("Exit full screen  \u{00b7}  F11 / Esc").clicked();
+                });
+        });
+    if exit_requested {
+        exit_full_screen_presentation(app);
+    }
+
+    if std::mem::take(&mut app.state.ui.export_csv_requested) {
+        crate::common::menu_bar::action_export_csv_with_io(
+            &mut app.state,
+            app.export_workflow_io.as_ref(),
+        );
+    }
+    if app.state.workbench.workspace != Workspace::Design {
+        app.state.ui.canvas_hover = None;
+        app.state.ui.canvas_view_center = None;
+    }
+    app.state.ui.toasts.show(ctx, 0.0, 0.0);
+    apply_platform_full_screen_request(ctx, app);
+}
+
+/// Render one secondary native application viewport.
+///
+/// Application-global modal owners, notifications, exports, and toasts remain
+/// in the primary viewport. The window still receives the complete workbench
+/// chrome, dock composition, active document, and workspace surface.
+pub(crate) fn show_secondary(ctx: &Context, app: &mut RSpiceApp) {
+    reconcile_platform_full_screen(app);
+    app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
+    let viewport = ctx.content_rect().size();
+    let context_docks_enabled = app.state.workbench.current_route().surface_id().archetype()
+        != SurfaceArchetype::SpecialistWorkspace;
+    let layout = LayoutSpec::resolve_for_shell(
+        viewport.x,
+        viewport.y,
+        app.state.workbench.coarse_pointer,
+        chrome::document_bar::is_visible(app),
+        app.state.project_lifecycle.project_open,
+        context_docks_enabled,
+        &app.state.workbench,
+    );
+    docks::synchronize_panel_memory(ctx, app, layout);
+    app.state.workbench.reconcile_drawer_mode(
+        layout.navigator_uses_drawer,
+        layout.inspector_uses_drawer,
+        layout.workspaces_uses_drawer,
+    );
+
+    if layout.show_status_bar {
+        chrome::status_bar::show(ctx, app, layout);
+    }
+    if layout.show_phone_navigation {
+        chrome::phone_navigation::show(ctx, app, layout);
+    }
+    chrome::title_bar::show(ctx, app, layout);
+    chrome::toolbar::show(ctx, app, layout);
+    if layout.show_activity_rail {
+        chrome::activity_rail::show(ctx, app);
+    }
+    if layout.show_navigator_dock {
+        docks::show_navigator(ctx, app, layout);
+    }
+    if layout.show_inspector_dock {
+        docks::show_inspector(ctx, app, layout);
+    }
+    chrome::document_bar::show(ctx, app, layout);
+    docks::show_console(ctx, app, layout);
+
+    let t = Tokens::get(ctx);
+    CentralPanel::default()
+        .frame(Frame::new().fill(t.color.bg_app))
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+            surfaces::show(ui, app);
+        });
+    if layout.has_overlay_drawer {
+        docks::show_drawers(ctx, app, layout);
+    }
+    apply_platform_full_screen_request(ctx, app);
+}
+
+/// Truthful browser/backend fallback for a secondary logical window. The host
+/// embeds it in a movable egui window, so nested top-level panels would escape
+/// that frame; render the owned document surface directly instead.
+pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, title: &str) -> bool {
+    let mut reattach = false;
+    ui.horizontal(|ui| {
+        ui.strong(title);
+        ui.label(format!(
+            "{} workspace \u{00b7} embedded single-host fallback",
+            app.state.workbench.workspace.label()
+        ));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            reattach = ui.button("Reattach to main window").clicked();
+        });
+    });
+    ui.separator();
+    surfaces::show(ui, app);
+    reattach
 }
 
 /// Render route-owned overlays after application dialogs so a workflow opened
@@ -352,7 +544,13 @@ fn reconcile_platform_full_screen(app: &mut RSpiceApp) {
     if app.state.ui.full_screen_request.is_none()
         && let Some(document) = web_sys::window().and_then(|window| window.document())
     {
-        app.state.workbench.full_screen = document.fullscreen_element().is_some();
+        let platform_full_screen = document.fullscreen_element().is_some();
+        let platform_exit_ended_presentation =
+            app.state.workbench.full_screen && !platform_full_screen;
+        app.state.workbench.full_screen = platform_full_screen;
+        if platform_exit_ended_presentation {
+            clear_full_screen_presentation(app, false);
+        }
     }
 }
 
@@ -369,19 +567,19 @@ fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
         return;
     };
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        app.state.workbench.full_screen = false;
+        clear_full_screen_presentation(app, false);
         log::error!("Fullscreen request failed: browser document is unavailable");
         return;
     };
 
     if enabled {
         let Some(root) = document.document_element() else {
-            app.state.workbench.full_screen = false;
+            clear_full_screen_presentation(app, false);
             log::error!("Fullscreen request failed: document root is unavailable");
             return;
         };
         if let Err(error) = root.request_fullscreen() {
-            app.state.workbench.full_screen = false;
+            clear_full_screen_presentation(app, false);
             log::warn!("Browser rejected fullscreen request: {error:?}");
         }
     } else {
@@ -408,6 +606,47 @@ mod tests {
         state.toggle_drawer(Drawer::Navigator);
         assert_eq!(state.workspace, Workspace::Design);
         assert_eq!(state.drawer, Some(Drawer::Navigator));
+    }
+
+    #[test]
+    fn active_canvas_full_screen_never_requests_host_window_mutation() {
+        let mut app = RSpiceApp::test_instance();
+        enter_full_screen_presentation(
+            &mut app,
+            crate::common::app::FullScreenScope::ActiveCanvasOnly,
+            crate::common::app::FullScreenPanels::HideNavigatorAndInspector,
+        );
+
+        assert!(app.state.workbench.full_screen_presentation);
+        assert!(app.state.workbench.full_screen_hide_context_panels);
+        assert!(!app.state.workbench.full_screen);
+        assert_eq!(app.state.ui.take_full_screen_request(), None);
+
+        exit_full_screen_presentation(&mut app);
+        assert!(!app.state.workbench.full_screen_presentation);
+        assert!(!app.state.workbench.full_screen_hide_context_panels);
+        assert_eq!(app.state.ui.take_full_screen_request(), None);
+    }
+
+    #[test]
+    fn application_full_screen_has_exactly_one_enter_and_exit_request() {
+        let mut app = RSpiceApp::test_instance();
+        enter_full_screen_presentation(
+            &mut app,
+            crate::common::app::FullScreenScope::ApplicationWindow,
+            crate::common::app::FullScreenPanels::KeepCurrent,
+        );
+
+        assert!(app.state.workbench.full_screen_presentation);
+        assert!(app.state.workbench.full_screen);
+        assert_eq!(app.state.ui.take_full_screen_request(), Some(true));
+        assert_eq!(app.state.ui.take_full_screen_request(), None);
+
+        exit_full_screen_presentation(&mut app);
+        assert!(!app.state.workbench.full_screen_presentation);
+        assert!(!app.state.workbench.full_screen);
+        assert_eq!(app.state.ui.take_full_screen_request(), Some(false));
+        assert_eq!(app.state.ui.take_full_screen_request(), None);
     }
 
     #[test]

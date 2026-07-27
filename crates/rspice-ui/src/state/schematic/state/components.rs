@@ -12,6 +12,7 @@ impl SchematicState {
         let mut component = Component::new(id, kind, pos);
         component.name = name;
         component.rotation = self.preview_rotation;
+        component.mirror_h = self.preview_mirror_h;
 
         // Set default values
         component.value = kind.default_value().to_string();
@@ -58,6 +59,7 @@ impl SchematicState {
         let mut component = Component::new(id, ComponentType::CellInstance, pos);
         component.name = name;
         component.rotation = self.preview_rotation;
+        component.mirror_h = self.preview_mirror_h;
         component.value = library_cell.cell.clone();
         component.library_cell = Some(library_cell);
 

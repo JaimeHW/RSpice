@@ -99,7 +99,8 @@ mod tests {
         assert!(source.contains(&format!(
             "const WORKER_REQUEST_PROTOCOL_VERSION = {WORKER_REQUEST_TRANSPORT_PROTOCOL};"
         )));
-        assert!(source.contains("response.protocolVersion !== WORKER_PROTOCOL_VERSION"));
+        assert!(source.contains("response.protocolVersion !== expectedProtocolVersion"));
+        assert!(source.contains("protocolResponseTransferList(response, WORKER_PROTOCOL_VERSION)"));
         assert!(source.contains("request.protocolVersion !== WORKER_REQUEST_PROTOCOL_VERSION"));
     }
     use crate::simulation::config::{

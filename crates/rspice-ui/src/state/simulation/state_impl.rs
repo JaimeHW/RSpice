@@ -483,6 +483,20 @@ impl SimulationState {
         !self.runs.is_empty()
     }
 
+    /// Whether at least one immutable run has materialized an analysis
+    /// document. A newly allocated or still-empty execution record is not a
+    /// result dataset and must not enable result-only workbench surfaces.
+    pub fn has_retained_result_dataset(&self) -> bool {
+        self.newest_retained_result_run_index().is_some()
+    }
+
+    /// Index of the newest run that owns at least one retained analysis.
+    /// Run history is newest-first, so this is also the exact dataset the
+    /// split-results stage should initially track.
+    pub fn newest_retained_result_run_index(&self) -> Option<usize> {
+        self.runs.iter().position(|run| !run.analyses.is_empty())
+    }
+
     /// Get count of runs in history
     pub fn run_count(&self) -> usize {
         self.runs.len()
@@ -677,6 +691,33 @@ mod tests {
 
         assert_eq!(state.runs.len(), 1);
         assert_eq!(state.active_execution, Some(identity));
+    }
+
+    #[test]
+    fn newest_retained_result_skips_empty_in_progress_run_records() {
+        let mut retained = SimulationRun::new(1);
+        retained.add_analysis(AnalysisResult::new(
+            1,
+            AnalysisType::Transient,
+            "retained TRAN",
+        ));
+        let empty_newer = SimulationRun::new(2);
+        let mut state = SimulationState::default();
+        state.runs = vec![empty_newer, retained];
+
+        assert!(state.has_results(), "run history itself is not empty");
+        assert!(state.has_retained_result_dataset());
+        assert_eq!(state.newest_retained_result_run_index(), Some(1));
+    }
+
+    #[test]
+    fn empty_run_history_does_not_advertise_a_result_dataset() {
+        let mut state = SimulationState::default();
+        state.runs.push(SimulationRun::new(1));
+
+        assert!(state.has_results());
+        assert!(!state.has_retained_result_dataset());
+        assert_eq!(state.newest_retained_result_run_index(), None);
     }
 
     #[test]

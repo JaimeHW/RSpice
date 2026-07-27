@@ -5,7 +5,7 @@ mod drawers;
 mod inspector;
 mod navigator;
 
-use egui::{Context, Frame, Id, SidePanel, TopBottomPanel, containers::PanelState};
+use egui::{Context, Frame, Id, Key, Response, SidePanel, TopBottomPanel, containers::PanelState};
 
 use crate::common::RSpiceApp;
 use crate::ui::tokens::Tokens;
@@ -85,6 +85,86 @@ fn splitter_is_dragged(ctx: &Context, panel_id: &'static str) -> bool {
         .is_some_and(|response| response.dragged())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SplitterKeyboardAction {
+    Decrease,
+    Increase,
+    Reset,
+}
+
+fn splitter_response(ctx: &Context, panel_id: &'static str) -> Option<Response> {
+    ctx.read_response(Id::new(panel_id).with("__resize"))
+}
+
+fn horizontal_splitter_action(
+    ctx: &Context,
+    response: &Response,
+    increase_key: Key,
+    decrease_key: Key,
+) -> Option<SplitterKeyboardAction> {
+    // egui's built-in panel separator deliberately uses `Sense::drag()`,
+    // which is focusable but does not set the response's CLICKED flag. Read
+    // the pointer's double-click cadence directly and scope it to the exact
+    // separator rectangle so the mockup's reset gesture remains available
+    // without replacing egui's mature drag handling.
+    if ctx.input(|input| {
+        input
+            .pointer
+            .interact_pos()
+            .is_some_and(|position| response.rect.contains(position))
+            && input
+                .pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+    }) {
+        return Some(SplitterKeyboardAction::Reset);
+    }
+    if !response.has_focus() {
+        return None;
+    }
+    ctx.input(|input| {
+        if input.key_pressed(Key::Home) {
+            Some(SplitterKeyboardAction::Reset)
+        } else if input.key_pressed(increase_key) {
+            Some(SplitterKeyboardAction::Increase)
+        } else if input.key_pressed(decrease_key) {
+            Some(SplitterKeyboardAction::Decrease)
+        } else {
+            None
+        }
+    })
+}
+
+fn vertical_splitter_action(ctx: &Context, response: &Response) -> Option<SplitterKeyboardAction> {
+    horizontal_splitter_action(ctx, response, Key::ArrowUp, Key::ArrowDown)
+}
+
+fn apply_splitter_step(value: f32, action: SplitterKeyboardAction, step: f32) -> Option<f32> {
+    match action {
+        SplitterKeyboardAction::Decrease => Some(value - step),
+        SplitterKeyboardAction::Increase => Some(value + step),
+        SplitterKeyboardAction::Reset => None,
+    }
+}
+
+fn expose_splitter_accessibility(
+    ctx: &Context,
+    response: &Response,
+    label: &'static str,
+    value: f32,
+    minimum: f32,
+    maximum: f32,
+    step: f32,
+) {
+    ctx.accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Splitter);
+        node.set_label(label);
+        node.set_numeric_value(f64::from(value));
+        node.set_min_numeric_value(f64::from(minimum));
+        node.set_max_numeric_value(f64::from(maximum));
+        node.set_numeric_value_step(f64::from(step));
+    });
+}
+
 pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
     let panel = SidePanel::left(NAVIGATOR_PANEL_ID)
@@ -104,6 +184,33 @@ pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         app.state.workbench.navigator_width = actual.clamp(220.0, 440.0);
         app.state.workbench.navigator_width_custom = true;
     }
+    if layout.navigator_resizable
+        && let Some(response) = splitter_response(ctx, NAVIGATOR_PANEL_ID)
+    {
+        expose_splitter_accessibility(
+            ctx,
+            &response,
+            "Resize workspace navigator",
+            app.state.workbench.navigator_width,
+            220.0,
+            440.0,
+            12.0,
+        );
+        if let Some(action) =
+            horizontal_splitter_action(ctx, &response, Key::ArrowRight, Key::ArrowLeft)
+        {
+            if let Some(width) =
+                apply_splitter_step(app.state.workbench.navigator_width, action, 12.0)
+            {
+                app.state.workbench.navigator_width = width.clamp(220.0, 440.0);
+                app.state.workbench.navigator_width_custom = true;
+            } else {
+                app.state.workbench.navigator_width = 256.0;
+                app.state.workbench.navigator_width_custom = false;
+            }
+            ctx.request_repaint();
+        }
+    }
     ctx.accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Complementary);
         node.set_label("Workspace navigator");
@@ -113,16 +220,53 @@ pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
     let panel = SidePanel::right(INSPECTOR_PANEL_ID)
-        .default_width(layout.inspector_width)
-        .width_range(278.0..=440.0)
-        .resizable(layout.inspector_resizable)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true);
+    let panel = if layout.inspector_resizable {
+        panel
+            .default_width(layout.inspector_width)
+            .width_range(278.0..=440.0)
+            .resizable(true)
+    } else {
+        // Responsive/touch projections own an exact dock width. Letting an
+        // inspector child raise egui's non-resizable default would shift the
+        // canvas and adjacent controls as selection content changes.
+        panel.exact_width(layout.inspector_width).resizable(false)
+    };
     let shown = panel.show(ctx, |ui| inspector::show(ui, app));
     if layout.inspector_resizable && splitter_is_dragged(ctx, INSPECTOR_PANEL_ID) {
         let actual = shown.response.rect.width();
         app.state.workbench.inspector_width = actual.clamp(278.0, 440.0);
         app.state.workbench.inspector_width_custom = true;
+    }
+    if layout.inspector_resizable
+        && let Some(response) = splitter_response(ctx, INSPECTOR_PANEL_ID)
+    {
+        expose_splitter_accessibility(
+            ctx,
+            &response,
+            "Resize inspector",
+            app.state.workbench.inspector_width,
+            278.0,
+            440.0,
+            12.0,
+        );
+        // The inspector is attached to the right edge, so moving its splitter
+        // left increases the panel and moving it right decreases it.
+        if let Some(action) =
+            horizontal_splitter_action(ctx, &response, Key::ArrowLeft, Key::ArrowRight)
+        {
+            if let Some(width) =
+                apply_splitter_step(app.state.workbench.inspector_width, action, 12.0)
+            {
+                app.state.workbench.inspector_width = width.clamp(278.0, 440.0);
+                app.state.workbench.inspector_width_custom = true;
+            } else {
+                app.state.workbench.inspector_width = 312.0;
+                app.state.workbench.inspector_width_custom = false;
+            }
+            ctx.request_repaint();
+        }
     }
     ctx.accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Complementary);
@@ -156,6 +300,28 @@ pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             .height()
             .clamp(layout.console_min_height, layout.console_max_height);
     }
+    if layout.console_resizable
+        && let Some(response) = splitter_response(ctx, CONSOLE_PANEL_ID)
+    {
+        expose_splitter_accessibility(
+            ctx,
+            &response,
+            "Resize console and diagnostics",
+            app.state.workbench.console_height,
+            layout.console_min_height,
+            layout.console_max_height,
+            16.0,
+        );
+        if let Some(action) = vertical_splitter_action(ctx, &response) {
+            app.state.workbench.console_height =
+                apply_splitter_step(app.state.workbench.console_height, action, 16.0)
+                    .unwrap_or(145.0)
+                    .clamp(layout.console_min_height, layout.console_max_height);
+            app.state.workbench.console_maximized = false;
+            app.state.workbench.console_visible = true;
+            ctx.request_repaint();
+        }
+    }
     ctx.accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Region);
         node.set_label("Console and diagnostics");
@@ -168,7 +334,7 @@ pub fn show_drawers(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 #[cfg(test)]
 mod tests {
-    use super::panel_cache_is_stale;
+    use super::{SplitterKeyboardAction, apply_splitter_step, panel_cache_is_stale};
 
     #[test]
     fn responsive_and_reset_layouts_discard_egui_panel_memory() {
@@ -181,5 +347,25 @@ mod tests {
         assert!(!panel_cache_is_stale(Some(340.0), 340.0, true));
         assert!(panel_cache_is_stale(Some(340.0), 312.0, true));
         assert!(panel_cache_is_stale(None, 340.0, true));
+    }
+
+    #[test]
+    fn splitter_keyboard_steps_match_the_mockup_contract() {
+        assert_eq!(
+            apply_splitter_step(256.0, SplitterKeyboardAction::Increase, 12.0),
+            Some(268.0)
+        );
+        assert_eq!(
+            apply_splitter_step(312.0, SplitterKeyboardAction::Decrease, 12.0),
+            Some(300.0)
+        );
+        assert_eq!(
+            apply_splitter_step(145.0, SplitterKeyboardAction::Increase, 16.0),
+            Some(161.0)
+        );
+        assert_eq!(
+            apply_splitter_step(440.0, SplitterKeyboardAction::Reset, 12.0),
+            None
+        );
     }
 }

@@ -174,20 +174,13 @@ pub(super) fn handle_context_menu(
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
-    routing_was_active: bool,
+    _routing_was_active: bool,
     symbol_context: &SchematicSymbolContext,
 ) {
     retain_selection_on_active_sheet(state);
     if show_delete_confirmation(&response.ctx, state, symbol_context) {
         return;
     }
-    if routing_was_active
-        || state.schematic.wire_drawing.active
-        || state.schematic.bus_drawing.active
-    {
-        return;
-    }
-
     let ctx = &response.ctx;
     let popup_id = Popup::default_response_id(response);
     let invocation_id = popup_id.with("invocation");
@@ -497,6 +490,7 @@ fn render_context_contents(
     menu_header(ui, &summary);
 
     let mut rows = Vec::with_capacity(8);
+    let mut keyboard_or_pointer_action = None;
     for entry in CONTEXT_ENTRIES {
         match *entry {
             ContextEntry::Separator => menu_separator(ui),
@@ -512,16 +506,36 @@ fn render_context_contents(
                                 ui.ctx().os(),
                             )
                         });
-                let response = menu_item(ui, command, &shortcut, enabled, reason, row_height);
-                let clicked = enabled && response.clicked();
+                let response = ui
+                    .push_id(("schematic-context-command", command.label), |ui| {
+                        menu_item(ui, command, &shortcut, enabled, reason, row_height)
+                    })
+                    .inner;
+                // Consume a focused Enter/Space before consulting the egui
+                // click synthesis. If `clicked` is checked first, the
+                // short-circuit can execute the command while leaving the
+                // same key event available to the canvas behind the menu.
+                let activated =
+                    enabled && (menu_row_keyboard_activated(ui, &response) || response.clicked());
                 rows.push(ContextRow { response, enabled });
-                if clicked {
-                    execute_context_action(command.action, ui, state, click_pos, symbol_context);
+                if activated && keyboard_or_pointer_action.is_none() {
+                    keyboard_or_pointer_action = Some(command.action);
                 }
             }
         }
     }
     manage_menu_focus(ui, &rows, focus_first);
+    if let Some(action) = keyboard_or_pointer_action {
+        execute_context_action(action, ui, state, click_pos, symbol_context);
+    }
+}
+
+fn menu_row_keyboard_activated(ui: &Ui, response: &Response) -> bool {
+    response.has_focus()
+        && ui.input_mut(|input| {
+            input.consume_key(Modifiers::NONE, Key::Enter)
+                || input.consume_key(Modifiers::NONE, Key::Space)
+        })
 }
 
 fn selection_summary(state: &AppState, target: ContextTarget) -> String {
@@ -996,7 +1010,10 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             writable && deletable_objects_only,
             "Select at least one editable component, wire, bus, tap, junction, net label, or design note",
         ),
-        ContextAction::Probe => (true, ""),
+        ContextAction::Probe => (
+            writable,
+            "The active schematic view is read-only; reopen it in an editable context to place a probe",
+        ),
         ContextAction::OperatingPoint => (
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
@@ -1024,9 +1041,18 @@ fn execute_context_action(
             schematic
                 .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component))
         }),
-        ContextAction::Copy => state.schematic.copy_selection(),
-        ContextAction::Duplicate => duplicate_selection_at(state, click_pos),
-        ContextAction::Delete => request_delete_confirmation(ui.ctx(), state),
+        ContextAction::Copy => {
+            state.copy_active_schematic_selection();
+        }
+        ContextAction::Duplicate => {
+            crate::common::app::open_duplicate_selection_dialog_at(
+                state,
+                click_pos + Point::new(2, 2),
+            );
+        }
+        ContextAction::Delete => {
+            crate::common::app::open_delete_selection_dialog(state);
+        }
         ContextAction::Probe => {
             crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::Probe)
         }
@@ -1035,8 +1061,9 @@ fn execute_context_action(
     ui.close();
 }
 
+#[cfg(test)]
 fn duplicate_selection_at(state: &mut AppState, click_pos: Point) {
-    state.schematic.copy_selection();
+    state.copy_active_schematic_selection();
     if !state.schematic.paste_at(click_pos + Point::new(2, 2)) {
         state.push_user_message(ConsoleMessage::warning(
             "Duplicate could not be completed at the current canvas target".to_owned(),
@@ -1064,6 +1091,7 @@ fn delete_request_id() -> Id {
     Id::new("rspice.schematic.delete-selection-request")
 }
 
+#[cfg(test)]
 fn request_delete_confirmation(ctx: &Context, state: &mut AppState) {
     let mut selection = state.schematic.selection.clone();
     // Keep the reviewed payload to complete objects. Junctions are complete
@@ -1563,6 +1591,21 @@ mod tests {
         }
     }
 
+    fn context_key_input(key: Key) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0))),
+            focused: true,
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn command_catalog_matches_the_mockup_exactly() {
         let labels: Vec<_> = CONTEXT_ENTRIES
@@ -1663,6 +1706,60 @@ mod tests {
     }
 
     #[test]
+    fn focused_keyboard_context_row_activates_with_enter_or_space() {
+        for key in [Key::Enter, Key::Space] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut state = AppState::default();
+            state.schematic.components.clear();
+            state.schematic.components.push(Component::new(
+                7,
+                ComponentType::Resistor,
+                Point::origin(),
+            ));
+            state.schematic.selection.select_only_component(7);
+            state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
+            let symbol_context = SchematicSymbolContext::from_state(&state);
+
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    render_context_contents(
+                        ui,
+                        &mut state,
+                        &symbol_context,
+                        DESKTOP_ROW_HEIGHT,
+                        true,
+                    );
+                });
+            });
+
+            let mut key_still_available = true;
+            let _ = ctx.run(context_key_input(key), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    render_context_contents(
+                        ui,
+                        &mut state,
+                        &symbol_context,
+                        DESKTOP_ROW_HEIGHT,
+                        false,
+                    );
+                    key_still_available =
+                        ctx.input_mut(|input| input.consume_key(Modifiers::NONE, key));
+                });
+            });
+
+            assert!(
+                state.tabbed_property_dialog.open || state.dialogs.object_properties.open,
+                "{key:?} should activate the focused Object properties row"
+            );
+            assert!(
+                !key_still_available,
+                "{key:?} should be owned by the focused context-menu row"
+            );
+        }
+    }
+
+    #[test]
     fn context_shadow_matches_dark_and_light_mockup_tokens() {
         let dark = Tokens::new(
             tokens::Direction::Instrument,
@@ -1713,7 +1810,7 @@ mod tests {
         state.schematic.selection.select_component(999);
         assert!(!action_availability(ContextAction::Copy, &state).0);
         state.schematic.read_only = true;
-        assert!(action_availability(ContextAction::Probe, &state).0);
+        assert!(!action_availability(ContextAction::Probe, &state).0);
 
         let mut junction_state = AppState::default();
         let point = Point::new(4, 4);

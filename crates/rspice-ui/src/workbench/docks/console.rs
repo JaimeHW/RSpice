@@ -1,14 +1,16 @@
 //! Unified console, problems, measurements, and task history.
 
-use egui::{Align, Layout, ScrollArea, Sense, Ui, Vec2};
+use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
 
 use crate::common::RSpiceApp;
 use crate::panels::{ConsoleHistoryItem, LogSeverity};
+use crate::simulation::automation::CommandOutput;
+use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::super::commands::Command;
+use super::super::commands::{Command, CommandAvailability, command_catalog};
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::ConsolePage;
@@ -24,8 +26,10 @@ const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
 const CONSOLE_TIME_WIDTH: f32 = 58.0;
 const CONSOLE_SOURCE_WIDTH: f32 = 62.0;
 const CONSOLE_COLUMN_GAP: f32 = 9.0;
+const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 const EMPTY_HINT_PADDING_X: i8 = 12;
 const EMPTY_HINT_PADDING_Y: i8 = 20;
+const INTERACTIVE_INPUT_GAP: f32 = 6.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     ui.spacing_mut().item_spacing.y = 0.0;
@@ -53,6 +57,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
             ConsolePage::Console => console(ui, app),
+            ConsolePage::Interactive => interactive(ui, app),
             ConsolePage::Problems => problems(ui, app),
             ConsolePage::Measurements => measurements(ui, app),
             ConsolePage::TaskLog => task_log(ui, app),
@@ -139,9 +144,18 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             Command::ToggleConsoleMaximized.execute(app);
                         }
                     }
+                    let page = app.state.workbench.console_page;
                     let clear = console_clear_action(
-                        app.state.workbench.console_page,
-                        Command::ClearConsole.is_enabled(app),
+                        page,
+                        match page {
+                            ConsolePage::Console => !app.state.log_buffer.is_empty(),
+                            ConsolePage::Interactive => {
+                                !app.state.script_console.history.is_empty()
+                            }
+                            ConsolePage::Problems
+                            | ConsolePage::Measurements
+                            | ConsolePage::TaskLog => false,
+                        },
                     );
                     ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
                     let response = ui
@@ -156,7 +170,15 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         })
                         .inner;
                     if response.clicked() {
-                        Command::ClearConsole.execute(app);
+                        match page {
+                            ConsolePage::Console => app.state.clear_primary_log(),
+                            ConsolePage::Interactive => {
+                                app.state.script_console.history.clear();
+                            }
+                            ConsolePage::Problems
+                            | ConsolePage::Measurements
+                            | ConsolePage::TaskLog => {}
+                        }
                     }
                 }
                 if !layout.compact_shell {
@@ -203,14 +225,18 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) 
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
             let count = match page {
+                ConsolePage::Interactive => app.state.script_console.history.len(),
                 ConsolePage::Problems => problems,
+                ConsolePage::Measurements => active_measurement_count(&app.state.simulation),
                 ConsolePage::TaskLog => app.state.simulation.runs.len(),
-                ConsolePage::Console | ConsolePage::Measurements => 0,
+                ConsolePage::Console => 0,
             };
             let count_tone = match page {
                 ConsolePage::Problems => ConsoleCountTone::Warning,
                 ConsolePage::TaskLog => ConsoleCountTone::Success,
-                ConsolePage::Console | ConsolePage::Measurements => ConsoleCountTone::Neutral,
+                ConsolePage::Console | ConsolePage::Interactive | ConsolePage::Measurements => {
+                    ConsoleCountTone::Neutral
+                }
             };
             let response = console_tab(
                 ui,
@@ -281,7 +307,7 @@ fn console_tab(
     height: f32,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let font = theme::sans(CONSOLE_FONT_SIZE, FontWeight::Regular);
     let galley = ui
         .painter()
         .layout_no_wrap(page.label().to_owned(), font, t.color.text_dim);
@@ -347,7 +373,7 @@ fn console_tab(
             badge.center(),
             egui::Align2::CENTER_CENTER,
             digits,
-            theme::mono(tokens::FS_0, FontWeight::Medium),
+            theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
             ink,
         );
     }
@@ -445,7 +471,7 @@ fn console_context(ui: &mut Ui, app: &RSpiceApp) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
                 .color(t.color.text_faint),
         )
         .truncate(),
@@ -460,13 +486,379 @@ fn console(ui: &mut Ui, app: &mut RSpiceApp) {
             for entry in app.state.log_buffer.entries() {
                 log_row(ui, entry);
             }
-            for item in &app.state.script_console.history {
-                automation_row(ui, item);
-            }
-            if app.state.log_buffer.is_empty() && app.state.script_console.history.is_empty() {
-                muted(ui, "Engine and automation messages will appear here.");
+            if app.state.log_buffer.is_empty() {
+                muted(ui, "Engine messages will appear here.");
             }
         });
+}
+
+fn interactive(ui: &mut Ui, app: &mut RSpiceApp) {
+    let mut submit = false;
+    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = INTERACTIVE_INPUT_GAP;
+            let command_ready = !app.state.script_console.input_buffer.trim().is_empty();
+            let run = ui
+                .add_enabled(command_ready, egui::Button::new("Run"))
+                .on_hover_text("Execute command");
+            run.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    "Execute interactive command",
+                )
+            });
+            submit |= run.clicked();
+
+            let input = ui.add_sized(
+                [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
+                egui::TextEdit::singleline(&mut app.state.script_console.input_buffer)
+                    .hint_text("Typed project expression or command…"),
+            );
+            input.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::TextEdit,
+                    ui.is_enabled(),
+                    "Interactive command",
+                )
+            });
+            submit |= input.has_focus()
+                && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        });
+        ui.add_space(INTERACTIVE_INPUT_GAP);
+        ScrollArea::vertical()
+            .id_salt("workbench.interactive.history")
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                if app.state.script_console.history.is_empty() {
+                    muted(
+                        ui,
+                        "Queries: project.runs · plan.analyses.enabled · project.results[\"Run 1\"].measure(\"gain\") · help",
+                    );
+                }
+                for item in &app.state.script_console.history {
+                    automation_row(ui, item);
+                }
+            });
+    });
+    if submit {
+        submit_interactive_command(app);
+    }
+}
+
+fn submit_interactive_command(app: &mut RSpiceApp) -> bool {
+    let command = app.state.script_console.input_buffer.trim().to_owned();
+    if command.is_empty() {
+        return false;
+    }
+    app.state.script_console.input_buffer.clear();
+    let output = execute_interactive_command(&command, app);
+    app.state
+        .script_console
+        .history
+        .push(ConsoleHistoryItem { command, output });
+    true
+}
+
+fn execute_interactive_command(input: &str, app: &mut RSpiceApp) -> CommandOutput {
+    let input = input.trim();
+    if input.eq_ignore_ascii_case("help") {
+        return CommandOutput {
+            success: true,
+            message: "Read project and retained-result state with typed expressions, or dispatch a governed command by stable ID.".to_owned(),
+            data: Some(
+                "Queries: project.runs · project.revision · project.specifications · plan.analyses.enabled · project.results[\"Run 1\"].measure(\"gain\")\nCommands: commands [filter] · command <stable-id>".to_owned(),
+            ),
+        };
+    }
+    if let Some(output) = execute_project_query(input, app) {
+        return output;
+    }
+
+    if let Some(filter) = input
+        .strip_prefix("commands")
+        .filter(|suffix| suffix.is_empty() || suffix.starts_with(char::is_whitespace))
+    {
+        let filter = filter.trim().to_ascii_lowercase();
+        let rows = command_catalog()
+            .filter(|command| {
+                filter.is_empty()
+                    || command.stable_id().to_ascii_lowercase().contains(&filter)
+                    || command.spec().label.to_ascii_lowercase().contains(&filter)
+            })
+            .map(|command| {
+                let availability = match command.availability(app) {
+                    CommandAvailability::Available => "available",
+                    CommandAvailability::Disabled(_) => "disabled",
+                    CommandAvailability::Hidden => "hidden",
+                };
+                format!(
+                    "{} · {} · {availability}",
+                    command.stable_id(),
+                    command.spec().label.trim_end_matches('…')
+                )
+            })
+            .collect::<Vec<_>>();
+        return if rows.is_empty() {
+            CommandOutput {
+                success: false,
+                message: if filter.is_empty() {
+                    "The canonical command catalog is empty.".to_owned()
+                } else {
+                    format!("No command matches `{filter}`.")
+                },
+                data: None,
+            }
+        } else {
+            CommandOutput {
+                success: true,
+                message: format!(
+                    "{} governed command{}",
+                    rows.len(),
+                    if rows.len() == 1 { "" } else { "s" }
+                ),
+                data: Some(rows.join("\n")),
+            }
+        };
+    }
+
+    let Some(stable_id) = input.strip_prefix("command ").map(str::trim) else {
+        return CommandOutput {
+            success: false,
+            message:
+                "Unknown expression. Use `help` for project queries and governed command syntax."
+                    .to_owned(),
+            data: None,
+        };
+    };
+    if stable_id.is_empty() || stable_id.chars().any(char::is_whitespace) {
+        return CommandOutput {
+            success: false,
+            message: "A command invocation requires exactly one canonical stable ID.".to_owned(),
+            data: None,
+        };
+    }
+    let Some(command) = Command::from_stable_id(stable_id) else {
+        return CommandOutput {
+            success: false,
+            message: format!("Unknown command ID `{stable_id}`. Use `commands` to inspect IDs."),
+            data: None,
+        };
+    };
+    if !command.palette_visible() {
+        return CommandOutput {
+            success: false,
+            message: format!("Command `{stable_id}` is private to application chrome."),
+            data: None,
+        };
+    }
+    if let Some(output) = unavailable_command_output(stable_id, command.availability(app)) {
+        return output;
+    }
+    let label = command.spec().label.trim_end_matches('…').to_owned();
+    command.execute(app);
+    CommandOutput {
+        success: true,
+        message: format!("Dispatched `{stable_id}` · {label}"),
+        data: Some(
+            "The governed dispatcher accepted this command. Its owning workflow reports asynchronous completion separately.".to_owned(),
+        ),
+    }
+}
+
+fn execute_project_query(input: &str, app: &RSpiceApp) -> Option<CommandOutput> {
+    match input {
+        "project.revision" => Some(CommandOutput {
+            success: true,
+            message: "Current mutable project revision".to_owned(),
+            data: Some(app.state.workspace.project.revision().get().to_string()),
+        }),
+        "project.runs" | "help(project.runs)" => {
+            let runs = app
+                .state
+                .simulation
+                .runs
+                .iter()
+                .map(|run| {
+                    format!(
+                        "Run {} · {} · {} · {} analyses · {:.3} s",
+                        run.id,
+                        run.label,
+                        run_lifecycle_label(run.lifecycle),
+                        run.analyses.len(),
+                        run.elapsed_time
+                    )
+                })
+                .collect::<Vec<_>>();
+            Some(CommandOutput {
+                success: true,
+                message: format!(
+                    "{} retained immutable run{}",
+                    runs.len(),
+                    if runs.len() == 1 { "" } else { "s" }
+                ),
+                data: Some(if runs.is_empty() {
+                    "No retained runs.".to_owned()
+                } else {
+                    runs.join("\n")
+                }),
+            })
+        }
+        "project.specifications" => {
+            let rows = active_specifications(app)
+                .into_iter()
+                .map(|spec| {
+                    format!(
+                        "{} · {}{}",
+                        spec.measurement,
+                        specification_text(&spec),
+                        if spec.unit.trim().is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", spec.unit.trim())
+                        }
+                    )
+                })
+                .collect::<Vec<_>>();
+            Some(CommandOutput {
+                success: true,
+                message: format!(
+                    "{} active specification{}",
+                    rows.len(),
+                    if rows.len() == 1 { "" } else { "s" }
+                ),
+                data: Some(if rows.is_empty() {
+                    "No active specifications.".to_owned()
+                } else {
+                    rows.join("\n")
+                }),
+            })
+        }
+        "plan.analyses.enabled" => {
+            let Some(plan) = app.state.sim_setup.analysis_plan.as_ref() else {
+                return Some(CommandOutput {
+                    success: false,
+                    message: "The active simulation plan has no stable analysis graph.".to_owned(),
+                    data: None,
+                });
+            };
+            let enabled = plan
+                .instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+                .map(|instance| instance.kind().stable_id())
+                .collect::<Vec<_>>();
+            Some(CommandOutput {
+                success: true,
+                message: format!(
+                    "{} enabled analysis instance{} · plan revision {}",
+                    enabled.len(),
+                    if enabled.len() == 1 { "" } else { "s" },
+                    plan.revision().get()
+                ),
+                data: Some(format!("[{}]", enabled.join(", "))),
+            })
+        }
+        _ => parse_measurement_query(input)
+            .map(|(run_selector, measurement)| measurement_query(app, run_selector, measurement)),
+    }
+}
+
+fn parse_measurement_query(input: &str) -> Option<(&str, &str)> {
+    let rest = input.strip_prefix("project.results[\"")?;
+    let (run, rest) = rest.split_once("\"].measure(\"")?;
+    let measurement = rest.strip_suffix("\")")?;
+    (!run.trim().is_empty() && !measurement.trim().is_empty()).then_some((run, measurement))
+}
+
+fn measurement_query(app: &RSpiceApp, run_selector: &str, measurement: &str) -> CommandOutput {
+    let run_number = run_selector
+        .strip_prefix("Run ")
+        .and_then(|value| value.parse::<u64>().ok());
+    let run = app.state.simulation.runs.iter().find(|run| {
+        run.label.eq_ignore_ascii_case(run_selector)
+            || run_number.is_some_and(|number| run.id == number)
+    });
+    let Some(run) = run else {
+        return CommandOutput {
+            success: false,
+            message: format!("No retained run matches `{run_selector}`."),
+            data: None,
+        };
+    };
+    let matches = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| {
+            analysis
+                .measurements
+                .iter()
+                .filter(|candidate| candidate.name.eq_ignore_ascii_case(measurement))
+                .map(move |candidate| (analysis.label.as_str(), candidate))
+        })
+        .collect::<Vec<_>>();
+    if matches.is_empty() {
+        return CommandOutput {
+            success: false,
+            message: format!("Run {} has no measurement named `{measurement}`.", run.id),
+            data: None,
+        };
+    }
+    let rows = matches
+        .iter()
+        .map(|(analysis, measurement)| {
+            let value = measurement
+                .value
+                .map(format_measure_value)
+                .unwrap_or_else(|| "unavailable".to_owned());
+            format!(
+                "{} · {} · {}",
+                analysis,
+                value,
+                if measurement.passed { "pass" } else { "fail" }
+            )
+        })
+        .collect::<Vec<_>>();
+    CommandOutput {
+        success: matches
+            .iter()
+            .all(|(_, measurement)| measurement.value.is_some()),
+        message: format!(
+            "{} exact f64 result{} from immutable Run {}",
+            rows.len(),
+            if rows.len() == 1 { "" } else { "s" },
+            run.id
+        ),
+        data: Some(rows.join("\n")),
+    }
+}
+
+fn unavailable_command_output(
+    stable_id: &str,
+    availability: CommandAvailability,
+) -> Option<CommandOutput> {
+    match availability {
+        CommandAvailability::Available => None,
+        CommandAvailability::Disabled(reason) => Some(CommandOutput {
+            success: false,
+            message: format!("Command `{stable_id}` is unavailable: {reason}."),
+            data: None,
+        }),
+        CommandAvailability::Hidden => Some(CommandOutput {
+            success: false,
+            message: format!("Command `{stable_id}` is hidden in the current context."),
+            data: None,
+        }),
+    }
+}
+
+fn active_measurement_count(simulation: &SimulationState) -> usize {
+    simulation.active_run().map_or(0, |run| {
+        run.analyses
+            .iter()
+            .map(|analysis| analysis.measurements.len())
+            .sum()
+    })
 }
 
 fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -507,33 +899,79 @@ fn problems(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
+    let specifications = active_specifications(app);
+    let rows = active_measurement_rows(app, &specifications);
+    let run_label = app
+        .state
+        .simulation
+        .active_run()
+        .map(|run| format!("Run {} · immutable dataset", run.id));
+    let mut add_measurement = false;
     ScrollArea::vertical()
         .id_salt("workbench.measurements")
         .show(ui, |ui| {
-            let Some(run_index) = app.state.simulation.active_run_idx else {
-                muted(ui, "Select a result dataset to inspect measurements.");
-                return;
-            };
-            let Some(run) = app.state.simulation.runs.get(run_index) else {
-                muted(ui, "The selected dataset is no longer available.");
-                return;
-            };
-            let mut any = false;
-            for analysis in &run.analyses {
-                if analysis.measurements.is_empty() {
-                    continue;
+            ui.horizontal(|ui| {
+                if let Some(label) = run_label.as_deref() {
+                    ui.label(
+                        egui::RichText::new(label)
+                            .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
+                            .color(Tokens::get(ui.ctx()).color.text_dim),
+                    );
+                } else {
+                    muted(ui, "No retained result selected");
                 }
-                any = true;
-                ui.label(egui::RichText::new(&analysis.label).strong());
-                for measurement in &analysis.measurements {
-                    let row = measurement_presentation(measurement, &analysis.label);
-                    issue_row(ui, row.status, &row.name, &row.detail, row.tone);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    add_measurement = ui
+                        .add_enabled(
+                            app.state.simulation.active_analysis().is_some(),
+                            egui::Button::new("+ Add measurement…"),
+                        )
+                        .on_disabled_hover_text(
+                            "Select a retained result analysis before creating a measurement",
+                        )
+                        .clicked();
+                });
+            });
+            ui.separator();
+            if rows.is_empty() {
+                if app.state.simulation.active_run().is_some() {
+                    muted(ui, "This dataset has no computed measurements.");
+                } else {
+                    muted(
+                        ui,
+                        "Select a retained result dataset to inspect measurements.",
+                    );
                 }
+                return;
             }
-            if !any {
-                muted(ui, "This dataset has no .MEAS results.");
-            }
+            Grid::new("workbench.measurements.table")
+                .num_columns(7)
+                .striped(true)
+                .spacing(Vec2::new(16.0, 4.0))
+                .show(ui, |ui| {
+                    measurement_header(ui, "Measurement");
+                    measurement_header(ui, "Expression");
+                    measurement_header(ui, "Value");
+                    measurement_header(ui, "Spec");
+                    measurement_header(ui, "Margin");
+                    measurement_header(ui, "Worst point");
+                    measurement_header(ui, "Status");
+                    ui.end_row();
+                    for row in &rows {
+                        measurement_cell(ui, &row.name, false);
+                        measurement_cell(ui, &row.expression, true);
+                        measurement_cell(ui, &row.value, true);
+                        measurement_cell(ui, &row.specification, true);
+                        measurement_cell_tone(ui, &row.margin, row.tone);
+                        measurement_cell(ui, &row.worst_point, false);
+                        measurement_cell_tone(ui, row.status, row.tone);
+                        ui.end_row();
+                    }
+                });
         });
+    if add_measurement {
+        super::super::visualization_studio::open_measurement_editor(app);
+    }
 }
 
 fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -541,26 +979,264 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.task_log")
         .show(ui, |ui| {
             if app.state.simulation.runs.is_empty() {
-                muted(ui, "Completed simulation tasks will appear here.");
+                muted(ui, "Queued, active, cancelled, and completed simulation tasks will appear here.");
             }
             for run in &app.state.simulation.runs {
+                let active = app.state.simulation.active_execution
+                    == run.execution_identity()
+                    && !run.lifecycle.is_terminal();
+                let (status, tone) = run_lifecycle_presentation(run.lifecycle);
+                let progress = if active {
+                    format!(
+                        " · {}%",
+                        simulation_progress_percent(app.state.simulation.progress)
+                    )
+                } else {
+                    String::new()
+                };
+                let revision = run.prepared_receipt().map_or_else(
+                    || "revision unavailable".to_owned(),
+                    |receipt| format!("revision {}", receipt.project_revision().get()),
+                );
                 issue_row(
                     ui,
-                    if run.success { "DONE" } else { "FAIL" },
+                    status,
                     &run.label,
                     &format!(
-                        "{} analyses · {:.3} s",
+                        "{} analyses · {:.3} s{progress} · {revision}",
                         run.analyses.len(),
                         run.elapsed_time
                     ),
-                    if run.success {
+                    tone,
+                );
+            }
+            if !app.state.simulation.is_running {
+                issue_row(
+                    ui,
+                    "IDLE",
+                    "queue",
+                    "No queued execution. The next run will snapshot the active plan and project revision.",
+                    SemanticTone::Info,
+                );
+            }
+        });
+}
+
+#[derive(Debug, Clone)]
+struct MeasurementTableRow {
+    name: String,
+    expression: String,
+    value: String,
+    specification: String,
+    margin: String,
+    worst_point: String,
+    status: &'static str,
+    tone: SemanticTone,
+}
+
+fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
+    let active = app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .and_then(|plan| app.state.workspace.active_plan_data(plan.id()))
+        .map(|payload| payload.specs.as_slice())
+        .unwrap_or(app.state.workspace.specs.as_slice());
+    active.to_vec()
+}
+
+fn active_measurement_rows(
+    app: &RSpiceApp,
+    specifications: &[crate::state::SpecEntry],
+) -> Vec<MeasurementTableRow> {
+    let Some(run) = app.state.simulation.active_run() else {
+        return Vec::new();
+    };
+    run.analyses
+        .iter()
+        .flat_map(|analysis| {
+            analysis.measurements.iter().map(move |measurement| {
+                let spec = specifications
+                    .iter()
+                    .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement.name));
+                measurement_table_row(measurement, &analysis.label, spec)
+            })
+        })
+        .collect()
+}
+
+fn measurement_table_row(
+    measurement: &rspice_core::MeasureResult,
+    analysis_label: &str,
+    specification: Option<&crate::state::SpecEntry>,
+) -> MeasurementTableRow {
+    let value = measurement.value;
+    let specification_text = specification.map_or_else(
+        || {
+            measurement.expected.map_or_else(
+                || "—".to_owned(),
+                |expected| {
+                    measurement.tolerance.map_or_else(
+                        || format!("= {}", format_measure_value(expected)),
+                        |tolerance| {
+                            format!(
+                                "{} ± {}",
+                                format_measure_value(expected),
+                                format_measure_value(tolerance)
+                            )
+                        },
+                    )
+                },
+            )
+        },
+        specification_text,
+    );
+    let (status, tone, margin) = if let Some(error) = measurement
+        .error
+        .as_deref()
+        .filter(|error| !error.trim().is_empty())
+    {
+        ("ERROR", SemanticTone::Error, error.to_owned())
+    } else if let Some(specification) = specification {
+        value.map_or(
+            ("NO DATA", SemanticTone::Warning, "—".to_owned()),
+            |value| {
+                let passing = specification.passes(value);
+                let signed_margin = if passing {
+                    let lower = specification.min.map(|minimum| value - minimum);
+                    let upper = specification.max.map(|maximum| maximum - value);
+                    lower
+                        .into_iter()
+                        .chain(upper)
+                        .reduce(f64::min)
+                        .unwrap_or(f64::INFINITY)
+                } else {
+                    -specification.violation(value)
+                };
+                (
+                    if passing { "PASS" } else { "FAIL" },
+                    if passing {
                         SemanticTone::Success
                     } else {
                         SemanticTone::Error
                     },
-                );
-            }
-        });
+                    if signed_margin.is_finite() {
+                        format_signed_measure_value(signed_margin)
+                    } else {
+                        "unbounded".to_owned()
+                    },
+                )
+            },
+        )
+    } else if measurement.expected.is_some() {
+        let margin = measurement
+            .value
+            .zip(measurement.expected)
+            .zip(measurement.tolerance)
+            .map_or_else(
+                || "—".to_owned(),
+                |((value, expected), tolerance)| {
+                    format_signed_measure_value(tolerance - (value - expected).abs())
+                },
+            );
+        (
+            if measurement.passed { "PASS" } else { "FAIL" },
+            if measurement.passed {
+                SemanticTone::Success
+            } else {
+                SemanticTone::Error
+            },
+            margin,
+        )
+    } else {
+        ("NO SPEC", SemanticTone::Info, "—".to_owned())
+    };
+    MeasurementTableRow {
+        name: measurement.name.clone(),
+        expression: "—".to_owned(),
+        value: value
+            .map(format_measure_value)
+            .unwrap_or_else(|| "—".to_owned()),
+        specification: specification_text,
+        margin,
+        worst_point: analysis_label.to_owned(),
+        status,
+        tone,
+    }
+}
+
+fn specification_text(specification: &crate::state::SpecEntry) -> String {
+    match (specification.min, specification.max) {
+        (Some(minimum), Some(maximum)) => format!(
+            "{} … {}",
+            format_measure_value(minimum),
+            format_measure_value(maximum)
+        ),
+        (Some(minimum), None) => format!("≥ {}", format_measure_value(minimum)),
+        (None, Some(maximum)) => format!("≤ {}", format_measure_value(maximum)),
+        (None, None) => "tracked".to_owned(),
+    }
+}
+
+fn measurement_header(ui: &mut Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(CONSOLE_FONT_SIZE, FontWeight::SemiBold))
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+    );
+}
+
+fn measurement_cell(ui: &mut Ui, text: &str, mono: bool) {
+    let font = if mono {
+        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular)
+    } else {
+        theme::sans(CONSOLE_FONT_SIZE, FontWeight::Regular)
+    };
+    ui.label(
+        egui::RichText::new(text)
+            .font(font)
+            .color(Tokens::get(ui.ctx()).color.text),
+    );
+}
+
+fn measurement_cell_tone(ui: &mut Ui, text: &str, tone: SemanticTone) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
+            .color(tone_color(&tokens, tone)),
+    );
+}
+
+fn run_lifecycle_label(lifecycle: crate::state::SimulationRunLifecycle) -> &'static str {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+    match lifecycle {
+        Lifecycle::LegacyUnknown => "legacy status unknown",
+        Lifecycle::Preparing => "queued",
+        Lifecycle::Running => "running",
+        Lifecycle::Cancelling => "cancelling",
+        Lifecycle::Completed => "completed",
+        Lifecycle::Failed => "failed",
+        Lifecycle::Aborted => "cancelled",
+        Lifecycle::Interrupted => "interrupted",
+    }
+}
+
+fn run_lifecycle_presentation(
+    lifecycle: crate::state::SimulationRunLifecycle,
+) -> (&'static str, SemanticTone) {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+    match lifecycle {
+        Lifecycle::LegacyUnknown => ("UNKNOWN", SemanticTone::Warning),
+        Lifecycle::Preparing => ("QUEUED", SemanticTone::Info),
+        Lifecycle::Running => ("RUNNING", SemanticTone::Info),
+        Lifecycle::Cancelling => ("CANCELLING", SemanticTone::Warning),
+        Lifecycle::Completed => ("DONE", SemanticTone::Success),
+        Lifecycle::Failed => ("FAIL", SemanticTone::Error),
+        Lifecycle::Aborted => ("CANCELLED", SemanticTone::Warning),
+        Lifecycle::Interrupted => ("INTERRUPTED", SemanticTone::Warning),
+    }
 }
 
 fn log_row(ui: &mut Ui, entry: &crate::panels::LogEntry) {
@@ -614,6 +1290,11 @@ fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
             },
         );
     }
+    if let Some(data) = item.output.data.as_deref() {
+        for line in data.lines() {
+            row(ui, "", "DATA", line, t.color.info, t.color.text_dim);
+        }
+    }
 }
 
 fn issue_row(ui: &mut Ui, status: &str, source: &str, message: &str, tone: SemanticTone) {
@@ -665,70 +1346,17 @@ fn drc_tone(severity: crate::services::drc::DrcSeverity) -> SemanticTone {
     }
 }
 
-struct MeasurementPresentation {
-    status: &'static str,
-    name: String,
-    detail: String,
-    tone: SemanticTone,
-}
-
-/// Convert the structured `.MEAS` contract into a stable presentation row.
-/// This deliberately names every field instead of relying on Rust's Debug
-/// output, which is neither user-facing nor a compatibility contract.
-fn measurement_presentation(
-    measurement: &rspice_core::MeasureResult,
-    analysis_label: &str,
-) -> MeasurementPresentation {
-    let mut details = Vec::new();
-    if let Some(value) = measurement.value {
-        details.push(format!("value {}", format_measure_value(value)));
-    } else {
-        details.push("no computed value".to_owned());
-    }
-
-    if let Some(expected) = measurement.expected {
-        let goal = format_measure_value(expected);
-        if let Some(tolerance) = measurement.tolerance {
-            details.push(format!("goal {goal} ± {}", format_measure_value(tolerance)));
-        } else {
-            details.push(format!("goal {goal}"));
-        }
-        if let Some(value) = measurement.value {
-            details.push(format!(
-                "deviation {}",
-                format_measure_value(value - expected)
-            ));
-        }
-    } else if let Some(tolerance) = measurement.tolerance {
-        // Imported data may retain a tolerance after its source goal was
-        // removed. Surface that inconsistency faithfully; do not invent a
-        // requirement or silently discard the retained field.
-        details.push(format!("tolerance {}", format_measure_value(tolerance)));
-    }
-
-    if let Some(error) = measurement
-        .error
-        .as_deref()
-        .filter(|error| !error.is_empty())
-    {
-        details.push(error.to_owned());
-    }
-    details.push(analysis_label.to_owned());
-
-    MeasurementPresentation {
-        status: if measurement.passed { "PASS" } else { "FAIL" },
-        name: measurement.name.clone(),
-        detail: details.join(" · "),
-        tone: if measurement.passed {
-            SemanticTone::Success
-        } else {
-            SemanticTone::Error
-        },
-    }
-}
-
 fn format_measure_value(value: f64) -> String {
     fmt_si(value, "", 6).trim().to_owned()
+}
+
+fn format_signed_measure_value(value: f64) -> String {
+    let value = format_measure_value(value);
+    if value.starts_with('-') {
+        value
+    } else {
+        format!("+{value}")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -745,6 +1373,14 @@ fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleC
                 "Clear console output"
             } else {
                 "Console output is already empty"
+            },
+        },
+        ConsolePage::Interactive => ConsoleClearAction {
+            enabled: console_has_output,
+            label: if console_has_output {
+                "Clear interactive command history"
+            } else {
+                "Interactive command history is already empty"
             },
         },
         ConsolePage::Problems => ConsoleClearAction {
@@ -776,7 +1412,7 @@ fn row(
     let message_width = (ui.available_width() - message_x_offset).max(1.0);
     let message_galley = ui.painter().layout(
         message.to_owned(),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
         message_color,
         message_width,
     );
@@ -796,7 +1432,7 @@ fn row(
         egui::pos2(time_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
         time,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
         t.color.text_faint,
     );
     let source_clip = egui::Rect::from_min_max(
@@ -807,7 +1443,7 @@ fn row(
         egui::pos2(source_x, rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5),
         egui::Align2::LEFT_CENTER,
         source,
-        theme::mono(tokens::FS_0, FontWeight::Medium),
+        theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
         source_color,
     );
     let message_clip = egui::Rect::from_min_max(
@@ -844,7 +1480,7 @@ fn muted(ui: &mut Ui, text: &str) {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(text)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
                         .color(t.color.text_faint),
                 )
                 .wrap()
@@ -866,7 +1502,8 @@ mod tests {
     fn console_empty_hints_match_mockup_spacing_and_type_scale() {
         assert_eq!(EMPTY_HINT_PADDING_X, 12);
         assert_eq!(EMPTY_HINT_PADDING_Y, 20);
-        assert_eq!(tokens::FS_0, 11.0);
+        assert_eq!(CONSOLE_FONT_SIZE, 12.0);
+        assert_eq!(CONSOLE_FONT_SIZE, tokens::FS_1);
     }
 
     #[test]
@@ -884,41 +1521,16 @@ mod tests {
     }
 
     #[test]
-    fn measurement_rows_are_derived_from_structured_fields() {
-        let passing = rspice_core::MeasureResult {
-            name: "gain_margin".to_owned(),
-            value: Some(1.2e-3),
-            error: None,
-            passed: true,
-            expected: Some(1.0e-3),
-            tolerance: Some(0.25e-3),
-            event_axis: None,
-        };
-        let row = measurement_presentation(&passing, "Transient");
-        assert_eq!(row.status, "PASS");
-        assert_eq!(row.name, "gain_margin");
-        assert_eq!(row.tone, SemanticTone::Success);
-        assert!(row.detail.contains("value 1.200000 m"));
-        assert!(row.detail.contains("goal 1.000000 m ± 250.000000 µ"));
-        assert!(row.detail.contains("deviation 200.000000 µ"));
-        assert!(row.detail.ends_with("Transient"));
-
-        let failed = rspice_core::MeasureResult::failed("rise_time", "crossing not found");
-        let row = measurement_presentation(&failed, "TRAN (10 ms)");
-        assert_eq!(row.status, "FAIL");
-        assert_eq!(row.name, "rise_time");
-        assert_eq!(row.tone, SemanticTone::Error);
-        assert!(row.detail.contains("no computed value"));
-        assert!(row.detail.contains("crossing not found"));
-        assert!(row.detail.ends_with("TRAN (10 ms)"));
-    }
-
-    #[test]
     fn clear_affordance_is_truthful_for_every_console_page() {
         let console = console_clear_action(ConsolePage::Console, true);
         assert!(console.enabled);
         assert_eq!(console.label, "Clear console output");
         assert!(!console_clear_action(ConsolePage::Console, false).enabled);
+
+        let interactive = console_clear_action(ConsolePage::Interactive, true);
+        assert!(interactive.enabled);
+        assert_eq!(interactive.label, "Clear interactive command history");
+        assert!(!console_clear_action(ConsolePage::Interactive, false).enabled);
 
         for page in [
             ConsolePage::Problems,
@@ -963,6 +1575,161 @@ mod tests {
     }
 
     #[test]
+    fn interactive_console_uses_the_governed_command_dispatcher() {
+        let mut app = RSpiceApp::test_instance();
+        let navigator_was_visible = app.state.workbench.navigator_visible;
+        app.state.script_console.input_buffer = "command toggle-navigator".to_owned();
+
+        assert!(submit_interactive_command(&mut app));
+        assert!(app.state.script_console.input_buffer.is_empty());
+        assert_eq!(app.state.script_console.history.len(), 1);
+        assert_eq!(
+            app.state.script_console.history[0].command,
+            "command toggle-navigator"
+        );
+        assert!(app.state.script_console.history[0].output.success);
+        assert_ne!(
+            app.state.workbench.navigator_visible, navigator_was_visible,
+            "the typed command must execute through the real workbench dispatcher"
+        );
+
+        app.state.script_console.input_buffer = "   ".to_owned();
+        assert!(!submit_interactive_command(&mut app));
+        assert_eq!(app.state.script_console.history.len(), 1);
+    }
+
+    #[test]
+    fn interactive_console_rejects_unknown_private_and_unavailable_commands() {
+        let mut app = RSpiceApp::test_instance();
+
+        let unknown = execute_interactive_command("command no-such-command", &mut app);
+        assert!(!unknown.success);
+        assert!(unknown.message.contains("Unknown command ID"));
+
+        let fuzzy = execute_interactive_command("command Toggle Navigator", &mut app);
+        assert!(!fuzzy.success);
+        assert!(
+            fuzzy
+                .message
+                .contains("requires exactly one canonical stable ID")
+        );
+
+        let private = execute_interactive_command("command console-clear", &mut app);
+        assert!(!private.success);
+        assert!(private.message.contains("private to application chrome"));
+
+        let unavailable = execute_interactive_command("command stop-run", &mut app);
+        assert!(!unavailable.success);
+        assert!(unavailable.message.contains("unavailable"));
+
+        let catalog = execute_interactive_command("commands navigator", &mut app);
+        assert!(catalog.success);
+        assert!(
+            catalog
+                .data
+                .as_deref()
+                .is_some_and(|data| data.contains("toggle-navigator"))
+        );
+
+        let hidden =
+            unavailable_command_output("future-context-command", CommandAvailability::Hidden)
+                .expect("hidden commands are rejected");
+        assert!(!hidden.success);
+        assert!(hidden.message.contains("hidden in the current context"));
+    }
+
+    #[test]
+    fn interactive_console_reads_exact_retained_measurement_and_plan_state() {
+        let mut app = RSpiceApp::test_instance();
+        let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain_dc", 42.0)]);
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(analysis);
+        app.state.simulation.runs.push(run);
+
+        let measurement = execute_interactive_command(
+            "project.results[\"Run 7\"].measure(\"gain_dc\")",
+            &mut app,
+        );
+        assert!(measurement.success);
+        assert!(measurement.message.contains("immutable Run 7"));
+        assert!(
+            measurement
+                .data
+                .as_deref()
+                .is_some_and(|data| data.contains("42.000000"))
+        );
+
+        let plan = execute_interactive_command("plan.analyses.enabled", &mut app);
+        assert!(plan.success);
+        assert!(
+            plan.data
+                .as_deref()
+                .is_some_and(|data| data.contains("tran"))
+        );
+    }
+
+    #[test]
+    fn measurement_table_uses_project_specification_for_verdict_and_margin() {
+        let measurement = rspice_core::MeasureResult::success("gain", 9.5);
+        let spec = crate::state::SpecEntry {
+            measurement: "GAIN".to_owned(),
+            min: Some(9.0),
+            max: Some(10.0),
+            unit: "dB".to_owned(),
+        };
+        let row = measurement_table_row(&measurement, "AC", Some(&spec));
+        assert_eq!(row.status, "PASS");
+        assert_eq!(row.tone, SemanticTone::Success);
+        assert_eq!(row.specification, "9.000000 … 10.000000");
+        assert_eq!(row.margin, "+500.000000 m");
+        assert_eq!(row.worst_point, "AC");
+
+        let failed = rspice_core::MeasureResult::success("gain", 10.25);
+        let row = measurement_table_row(&failed, "AC", Some(&spec));
+        assert_eq!(row.status, "FAIL");
+        assert_eq!(row.tone, SemanticTone::Error);
+        assert_eq!(row.margin, "-250.000000 m");
+    }
+
+    #[test]
+    fn task_lifecycle_copy_distinguishes_cancelled_failed_and_interrupted() {
+        assert_eq!(
+            run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Aborted),
+            ("CANCELLED", SemanticTone::Warning)
+        );
+        assert_eq!(
+            run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Failed),
+            ("FAIL", SemanticTone::Error)
+        );
+        assert_eq!(
+            run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Interrupted),
+            ("INTERRUPTED", SemanticTone::Warning)
+        );
+    }
+
+    #[test]
+    fn measurement_badge_counts_only_the_active_immutable_dataset() {
+        let mut simulation = SimulationState::default();
+        let first = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_measurements(vec![
+            rspice_core::MeasureResult::success("gain", 42.0),
+            rspice_core::MeasureResult::success("phase", 60.0),
+        ]);
+        let second = AnalysisResult::new(2, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![rspice_core::MeasureResult::success("rise", 1.0e-9)]);
+        let mut retained = SimulationRun::new(1);
+        retained.add_analysis(first);
+        retained.add_analysis(second);
+        simulation.runs.push(retained);
+
+        assert_eq!(active_measurement_count(&simulation), 0);
+        simulation.active_run_idx = Some(0);
+        assert_eq!(active_measurement_count(&simulation), 3);
+        simulation.active_run_idx = Some(9);
+        assert_eq!(active_measurement_count(&simulation), 0);
+    }
+
+    #[test]
     fn fractional_engine_progress_is_rendered_as_a_percentage() {
         assert_eq!(simulation_progress_percent(0.0), 0);
         assert_eq!(simulation_progress_percent(0.375), 38);
@@ -982,7 +1749,8 @@ mod tests {
         assert_eq!(CONSOLE_SOURCE_WIDTH, 62.0);
         assert_eq!(CONSOLE_COLUMN_GAP, 9.0);
         assert_eq!(CONSOLE_ROW_MIN_HEIGHT, 16.0);
-        assert_eq!(tokens::FS_0, 11.0);
+        assert_eq!(CONSOLE_FONT_SIZE, 12.0);
+        assert_eq!(CONSOLE_FONT_SIZE, tokens::FS_1);
     }
 
     #[test]

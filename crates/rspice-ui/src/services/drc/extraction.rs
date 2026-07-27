@@ -1,8 +1,12 @@
 use super::checker::{DrcChecker, DrcConfig};
-use super::input::{ComponentInfo, JunctionInfo, NetLabelInfo, PinInfo, WireInfo};
+use super::input::{
+    ComponentInfo, JunctionInfo, NetLabelInfo, ParameterRangeIssue, PinInfo, WireInfo,
+};
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::simulation::netlist_gen::HierarchySource;
-use crate::state::{Component, Point};
+use crate::state::{
+    Component, ComponentType, Point, PropertyDefinition, PropertyRegistry, PropertyValue,
+};
 
 /// Extract legacy geometry-only DRC data from a `SchematicState`.
 ///
@@ -42,12 +46,24 @@ pub fn extract_drc_data_with_junctions(
     Vec<NetLabelInfo>,
     Vec<JunctionInfo>,
 ) {
-    extract_drc_data_with_terminals_and_junctions(schematic, |comp| {
-        comp.terminal_positions()
-            .into_iter()
-            .map(|(name, pos)| (name.to_owned(), pos))
-            .collect()
-    })
+    extract_drc_data_with_terminals_and_junctions(
+        schematic,
+        |comp| {
+            comp.terminal_positions()
+                .into_iter()
+                .map(|(name, pos)| (name.to_owned(), pos))
+                .collect()
+        },
+        |comp| {
+            if comp.kind != ComponentType::CellInstance {
+                return Some(true);
+            }
+            let Some(binding) = comp.library_cell.as_ref() else {
+                return Some(false);
+            };
+            (binding.source_path.is_some() || binding.netlist_template.is_some()).then_some(true)
+        },
+    )
 }
 
 /// Extract legacy junction-blind DRC data with project-cell symbol resolution.
@@ -73,26 +89,47 @@ pub fn extract_drc_data_with_hierarchy_and_junctions(
     Vec<NetLabelInfo>,
     Vec<JunctionInfo>,
 ) {
-    extract_drc_data_with_terminals_and_junctions(schematic, |comp| {
-        let resolved_symbol = comp
-            .library_cell
-            .as_ref()
-            .and_then(|binding| hierarchy.resolved_symbol_for(binding));
-        comp.terminal_positions_resolved(resolved_symbol.as_ref())
-    })
+    extract_drc_data_with_terminals_and_junctions(
+        schematic,
+        |comp| {
+            let resolved_symbol = comp
+                .library_cell
+                .as_ref()
+                .and_then(|binding| hierarchy.resolved_symbol_for(binding));
+            comp.terminal_positions_resolved(resolved_symbol.as_ref())
+        },
+        |comp| {
+            if comp.kind != ComponentType::CellInstance {
+                return Some(true);
+            }
+            let Some(binding) = comp.library_cell.as_ref() else {
+                return Some(false);
+            };
+            if binding.source_path.is_some() || binding.netlist_template.is_some() {
+                return Some(true);
+            }
+            if hierarchy.has_execution_plan() {
+                // Top-level DRC extraction has no instance path with which to
+                // query an execution-plan rebind. Do not judge the placed
+                // binding when the executable authority may select another
+                // master.
+                return None;
+            }
+            Some(hierarchy.schematic_master_for_binding(binding).is_some())
+        },
+    )
 }
 
 fn extract_drc_data_with_terminals_and_junctions(
     schematic: &crate::state::SchematicState,
     mut terminal_positions_for: impl FnMut(&Component) -> Vec<(String, Point)>,
+    mut component_known_for: impl FnMut(&Component) -> Option<bool>,
 ) -> (
     Vec<ComponentInfo>,
     Vec<WireInfo>,
     Vec<NetLabelInfo>,
     Vec<JunctionInfo>,
 ) {
-    use crate::state::ComponentType;
-
     let mut components = Vec::with_capacity(schematic.components.len());
     let mut wires = Vec::with_capacity(schematic.wires.len());
     let mut net_labels = Vec::with_capacity(schematic.net_labels.len());
@@ -100,6 +137,7 @@ fn extract_drc_data_with_terminals_and_junctions(
 
     // Build point-to-net mapping from existing net_mapping or create from connectivity
     let net_mapping = &schematic.net_mapping;
+    let property_registry = PropertyRegistry::new();
 
     // Extract components
     for comp in &schematic.components {
@@ -128,6 +166,8 @@ fn extract_drc_data_with_terminals_and_junctions(
                     | ComponentType::VoltageSourceAc
                     | ComponentType::VoltageSourcePulse
                     | ComponentType::VoltageSourceSin
+                    | ComponentType::VoltageSourceExp
+                    | ComponentType::VoltageSourceSffm
                     | ComponentType::VoltageSourcePwl
             ) && pin_name == "+"
                 || declared_output_pins.contains(&pin_name);
@@ -147,6 +187,8 @@ fn extract_drc_data_with_terminals_and_junctions(
                 | ComponentType::VoltageSourceAc
                 | ComponentType::VoltageSourcePulse
                 | ComponentType::VoltageSourceSin
+                | ComponentType::VoltageSourceExp
+                | ComponentType::VoltageSourceSffm
                 | ComponentType::VoltageSourcePwl
         );
 
@@ -156,20 +198,27 @@ fn extract_drc_data_with_terminals_and_junctions(
                 | ComponentType::CurrentSourceAc
                 | ComponentType::CurrentSourcePulse
                 | ComponentType::CurrentSourceSin
+                | ComponentType::CurrentSourceExp
+                | ComponentType::CurrentSourceNoise
                 | ComponentType::CurrentSourcePwl
         );
+        let reference_required = !comp.kind.spice_prefix().is_empty();
+        let reference_error = (reference_required && !comp.name.trim().is_empty())
+            .then(|| comp.validate_reference_designator(comp.name.trim()).err())
+            .flatten();
 
         components.push(ComponentInfo {
             id: comp.id,
-            name: if comp.name.is_empty() {
-                comp.spice_instance_name()
-            } else {
-                comp.name.clone()
-            },
+            name: comp.name.clone(),
             component_type: comp.kind.spice_prefix().to_string(),
             pins,
             is_voltage_source,
             is_current_source,
+            reference_required,
+            reference_error,
+            component_known: component_known_for(comp),
+            missing_parameters: missing_parameters(comp, &property_registry),
+            out_of_range_parameters: out_of_range_parameters(comp, &property_registry),
         });
     }
 
@@ -197,6 +246,8 @@ fn extract_drc_data_with_terminals_and_junctions(
             name: label.name.clone(),
             x: label.pos.x as f64,
             y: label.pos.y as f64,
+            synthetic: false,
+            electrical_anchor: false,
         });
     }
     for binding in
@@ -206,6 +257,8 @@ fn extract_drc_data_with_terminals_and_junctions(
             name: binding.member_name,
             x: binding.point.x as f64,
             y: binding.point.y as f64,
+            synthetic: true,
+            electrical_anchor: true,
         });
     }
 
@@ -217,6 +270,8 @@ fn extract_drc_data_with_terminals_and_junctions(
                 name: "0".to_string(),
                 x: comp.pos.x as f64,
                 y: comp.pos.y as f64,
+                synthetic: true,
+                electrical_anchor: true,
             });
         }
     }
@@ -229,6 +284,121 @@ fn extract_drc_data_with_terminals_and_junctions(
     );
 
     (components, wires, net_labels, junctions)
+}
+
+fn effective_component_properties<'a>(
+    component: &Component,
+    registry: &'a PropertyRegistry,
+) -> Option<(
+    &'a crate::state::PropertySheet,
+    std::collections::HashMap<String, PropertyValue>,
+)> {
+    if component.kind == ComponentType::CellInstance {
+        // Cell-instance CDF is transaction-scoped and cannot be reconstructed
+        // from the built-in registry. Reporting against a previous or generic
+        // master's schema would be a false positive.
+        return None;
+    }
+    let sheet = registry.get(component.kind)?;
+    Some((
+        sheet,
+        crate::properties::property_bridge::collect_properties_from_component(component, registry),
+    ))
+}
+
+fn missing_parameters(component: &Component, registry: &PropertyRegistry) -> Vec<String> {
+    let Some((sheet, values)) = effective_component_properties(component, registry) else {
+        return Vec::new();
+    };
+    let mut missing = sheet
+        .iter()
+        .filter(|definition| definition.name != "name" && definition.required)
+        .filter_map(|definition| {
+            let value = values
+                .get(&definition.name)
+                .unwrap_or(&definition.default_value);
+            property_value_is_missing(definition, value).then(|| definition.display_name.clone())
+        })
+        .collect::<Vec<_>>();
+    missing.sort();
+    missing.dedup();
+    missing
+}
+
+fn property_value_is_missing(definition: &PropertyDefinition, value: &PropertyValue) -> bool {
+    match value {
+        PropertyValue::String(value) => value.trim().is_empty(),
+        PropertyValue::Expression(value) => {
+            definition.required
+                && matches!(
+                    definition.prop_type,
+                    crate::state::PropertyType::Number | crate::state::PropertyType::Expression
+                )
+                && value.trim().is_empty()
+        }
+        PropertyValue::Number { value, .. } => value.is_nan(),
+        PropertyValue::Enum { .. } | PropertyValue::Boolean(_) => false,
+    }
+}
+
+fn out_of_range_parameters(
+    component: &Component,
+    registry: &PropertyRegistry,
+) -> Vec<ParameterRangeIssue> {
+    let Some((sheet, values)) = effective_component_properties(component, registry) else {
+        return Vec::new();
+    };
+    let mut issues = sheet
+        .iter()
+        .filter(|definition| definition.min_value.is_some() || definition.max_value.is_some())
+        .filter_map(|definition| {
+            let value = values
+                .get(&definition.name)
+                .unwrap_or(&definition.default_value);
+            let numeric = exact_numeric_constant(definition, value)?;
+            let below = definition
+                .min_value
+                .is_some_and(|minimum| numeric < minimum);
+            let above = definition
+                .max_value
+                .is_some_and(|maximum| numeric > maximum);
+            (below || above).then(|| ParameterRangeIssue {
+                name: definition.name.clone(),
+                display_name: definition.display_name.clone(),
+                value: numeric,
+                min: definition.min_value,
+                max: definition.max_value,
+            })
+        })
+        .collect::<Vec<_>>();
+    issues.sort_by(|left, right| left.name.cmp(&right.name));
+    issues
+}
+
+fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue) -> Option<f64> {
+    if let PropertyValue::Number { value, .. } = value {
+        return value.is_finite().then_some(*value);
+    }
+    let PropertyValue::Expression(source) = value else {
+        return None;
+    };
+
+    // Reuse the production property editor parser (quantity policy,
+    // expression grammar, and unit normalization) while temporarily removing
+    // the range itself. This reveals a definite numeric constant without
+    // relying on validator error strings; symbolic expressions remain unknown.
+    let mut unconstrained = definition.clone();
+    unconstrained.min_value = None;
+    unconstrained.max_value = None;
+    crate::properties::tabbed_dialog::parse_expression_source(
+        &unconstrained,
+        source,
+        crate::quantity::QuantityPresentationPolicy::default(),
+        crate::quantity::UiNumberLocale::default(),
+    )
+    .ok()
+    .and_then(|value| value.as_number())
+    .filter(|value| value.is_finite())
 }
 
 /// Run a complete DRC check on a schematic.
@@ -430,6 +600,84 @@ mod tests {
 
         assert_eq!(pins.get("IN"), Some(&(Some(60.0), Some(40.0))));
         assert_eq!(pins.get("OUT"), Some(&(Some(170.0), Some(70.0))));
+    }
+
+    #[test]
+    fn hierarchy_resolved_unconnected_pin_check_uses_authored_terminal_geometry() {
+        let (libraries, buffers) = library_with_authored_amp_symbol();
+        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+        let mut instance = authored_amp_instance();
+        instance.name = "X1".to_owned();
+        let mut schematic = SchematicState::default();
+        schematic.components.push(instance);
+        schematic
+            .wires
+            .push(Wire::segment(90, Point::new(40, 40), Point::new(60, 40)));
+
+        let result = run_drc_check_with_hierarchy_and_config(
+            &schematic,
+            &hierarchy,
+            DrcConfig {
+                check_missing_ground: false,
+                check_floating_nodes: false,
+                ..DrcConfig::default()
+            },
+        );
+        let unconnected = result
+            .violations()
+            .iter()
+            .filter(|finding| finding.violation_type == DrcViolationType::UnconnectedPin)
+            .collect::<Vec<_>>();
+
+        assert_eq!(unconnected.len(), 1);
+        assert!(unconnected[0].message.contains("X1.OUT"));
+        assert_eq!(
+            unconnected[0].location,
+            DrcLocation::Component {
+                id: 1,
+                name: "X1".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn canonical_property_schema_extracts_only_definite_parameter_failures() {
+        let mut schematic = SchematicState::default();
+        let mut resistor = Component::new(20, ComponentType::Resistor, Point::origin());
+        resistor.name = "R20".to_owned();
+        resistor.value.clear(); // The canonical 1k default is an effective value.
+        resistor.params = "m=0".to_owned();
+        schematic.components.push(resistor);
+
+        let (components, _, _) = extract_drc_data(&schematic);
+        assert!(components[0].missing_parameters.is_empty());
+        assert_eq!(
+            components[0].out_of_range_parameters,
+            vec![ParameterRangeIssue {
+                name: "m".to_owned(),
+                display_name: "Multiplier".to_owned(),
+                value: 0.0,
+                min: Some(1.0),
+                max: Some(10_000.0),
+            }]
+        );
+    }
+
+    #[test]
+    fn unknown_project_cell_requires_hierarchy_resolution_authority() {
+        let binding = LibraryCellInstance::new("work", "missing", "schematic");
+        let mut instance = Component::new(30, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(binding);
+        instance.name = "X30".to_owned();
+        let mut schematic = SchematicState::default();
+        schematic.components.push(instance);
+
+        let (flat, _, _) = extract_drc_data(&schematic);
+        assert_eq!(flat[0].component_known, None);
+
+        let hierarchy = HierarchySource::empty();
+        let (resolved, _, _) = extract_drc_data_with_hierarchy(&schematic, &hierarchy);
+        assert_eq!(resolved[0].component_known, Some(false));
     }
 
     #[test]

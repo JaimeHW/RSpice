@@ -13,6 +13,72 @@ use std::collections::HashSet;
 use super::Point;
 use serde::{Deserialize, Serialize};
 
+/// Session-owned schematic selection classes.
+///
+/// This is deliberately separate from [`Selection`]: the filter is an editor
+/// preference, never design data, and therefore belongs to the serialized UI
+/// session rather than a schematic file or undo snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SchematicSelectionFilter {
+    pub instances: bool,
+    pub wires: bool,
+    pub labels: bool,
+    pub annotations: bool,
+}
+
+impl Default for SchematicSelectionFilter {
+    fn default() -> Self {
+        Self {
+            instances: true,
+            wires: true,
+            labels: true,
+            annotations: true,
+        }
+    }
+}
+
+impl SchematicSelectionFilter {
+    #[must_use]
+    pub const fn all_enabled(self) -> bool {
+        self.instances && self.wires && self.labels && self.annotations
+    }
+
+    #[must_use]
+    pub const fn enabled_count(self) -> usize {
+        self.instances as usize
+            + self.wires as usize
+            + self.labels as usize
+            + self.annotations as usize
+    }
+
+    /// Remove objects belonging to disabled classes from a live selection.
+    ///
+    /// Wire handles, junctions, buses and taps all belong to the electrical
+    /// conductor class. Design notes and documentation geometry are
+    /// annotations; net labels remain their own class.
+    pub fn retain_matching(self, selection: &mut Selection) {
+        if !self.instances {
+            selection.components.clear();
+        }
+        if !self.wires {
+            selection.wires.clear();
+            selection.wire_segments.clear();
+            selection.wire_vertices.clear();
+            selection.junctions.clear();
+            selection.buses.clear();
+            selection.bus_taps.clear();
+        }
+        if !self.labels {
+            selection.net_labels.clear();
+        }
+        if !self.annotations {
+            selection.design_notes.clear();
+            selection.documentation_shapes.clear();
+        }
+    }
+}
+
 // =============================================================================
 // Selection Rectangle (Rubber-band Box Selection)
 // =============================================================================
@@ -789,6 +855,40 @@ impl Selection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schematic_selection_filter_defaults_to_every_mockup_class() {
+        let filter = SchematicSelectionFilter::default();
+
+        assert!(filter.all_enabled());
+        assert_eq!(filter.enabled_count(), 4);
+    }
+
+    #[test]
+    fn schematic_selection_filter_prunes_every_disabled_object_taxonomy() {
+        let mut selection = Selection::new();
+        selection.select_component(1);
+        selection.select_wire(2);
+        selection.select_wire_segment(2, 0);
+        selection.select_wire_vertex(2, 0);
+        selection.select_junction(Point::new(3, 4));
+        selection.select_bus(5);
+        selection.select_bus_tap(6);
+        selection.select_net_label(7);
+        selection.select_design_note(8);
+        selection.select_documentation_shape(9);
+
+        SchematicSelectionFilter {
+            instances: false,
+            wires: false,
+            labels: true,
+            annotations: false,
+        }
+        .retain_matching(&mut selection);
+
+        assert_eq!(selection.count(), 1);
+        assert!(selection.has_net_label(7));
+    }
 
     #[test]
     fn single_junction_requires_an_exclusive_junction_selection() {

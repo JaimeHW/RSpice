@@ -9,12 +9,16 @@
 use egui::Ui;
 
 use crate::common::{AppState, RSpiceApp};
-use crate::state::{PinSummary, Point, PortSpec, SymbolDocument, SymbolShape};
+use crate::state::{
+    PinSummary, Point, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
+    SymbolPinElectricalKind, SymbolPinSide, SymbolShape,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::TreeRow;
 use crate::workbench::design_system::{
-    StatusMark, property_row, property_row_input, property_row_status,
+    StatusMark, WorkbenchIcon, labeled_icon_button, property_row, property_row_combo,
+    property_row_input, property_row_status,
 };
 
 use super::{muted_inspector_copy, section_header};
@@ -28,38 +32,50 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     };
-    document.reconcile_ports(&ports);
+    let Ok(mut metadata) = app.state.load_active_symbol_editor_metadata(&document) else {
+        muted_inspector_copy(
+            ui,
+            "This symbol's authoring metadata could not be read. The editor surface reports the exact reason.",
+        );
+        return;
+    };
 
     hero(ui, app, &document, &ports);
 
     let mut changed = false;
     let selection = app.state.ui.symbol.effective_selection();
-    match (selection.pins.len(), selection.shapes.len()) {
-        (1, 0) => {
-            let name = selection
-                .pins
-                .iter()
-                .next()
-                .cloned()
-                .expect("one selected pin");
-            changed |= pin_section(ui, app, &mut document, &ports, &name);
-        }
-        (0, 1) => {
-            let index = selection
-                .shapes
-                .iter()
-                .next()
-                .copied()
-                .expect("one selected shape");
-            changed |= shape_section(ui, app, &mut document, index);
-        }
-        (0, 0) => empty_selection_section(ui),
-        (pins, shapes) => multi_selection_section(ui, pins, shapes),
+    let total = selection.pins.len()
+        + selection.shapes.len()
+        + selection.attributes.len()
+        + selection.texts.len();
+    if total == 0 {
+        empty_selection_section(ui);
+    } else if total > 1 {
+        multi_selection_section(
+            ui,
+            selection.pins.len(),
+            selection.shapes.len(),
+            selection.attributes.len(),
+            selection.texts.len(),
+        );
+    } else if let Some(name) = selection.pins.iter().next() {
+        changed |= pin_section(ui, app, &mut document, &ports, name);
+    } else if let Some(index) = selection.shapes.iter().next() {
+        changed |= shape_section(ui, app, &mut document, *index);
+    } else if let Some(kind) = selection.attributes.iter().next() {
+        changed |= attribute_section(ui, app, &mut document, &mut metadata, *kind);
+    } else if let Some(id) = selection.texts.iter().next() {
+        changed |= text_section(ui, app, &document, &mut metadata, *id);
     }
 
     contract_section(ui, app, &document, &ports);
+    definition_section(ui, app, &metadata);
 
-    if changed && let Err(error) = app.state.store_active_symbol_document(&document) {
+    if changed
+        && let Err(error) = app
+            .state
+            .store_active_symbol_editor_bundle(&document, &metadata)
+    {
         app.state
             .push_user_message(crate::common::ConsoleMessage::warning(error));
     }
@@ -73,10 +89,8 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument, ports: &[Po
     let t = Tokens::get(ui.ctx());
     let reference = &app.state.workspace.active_view;
     let summary = document.pin_summary(ports);
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 82.0),
-        egui::Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 82.0), egui::Sense::hover());
     let preview = egui::Rect::from_min_max(
         rect.min,
         egui::pos2((rect.left() + 82.0).min(rect.right()), rect.bottom()),
@@ -102,12 +116,10 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument, ports: &[Po
     );
 
     let text_left = preview.right() + 10.0;
-    let painter = ui
-        .painter()
-        .with_clip_rect(egui::Rect::from_x_y_ranges(
-            text_left..=(rect.right() - 10.0),
-            rect.y_range(),
-        ));
+    let painter = ui.painter().with_clip_rect(egui::Rect::from_x_y_ranges(
+        text_left..=(rect.right() - 10.0),
+        rect.y_range(),
+    ));
     let at = |y: f32| egui::pos2(text_left, rect.top() + y);
     painter.text(
         at(12.0),
@@ -211,7 +223,7 @@ fn coordinate_row(
             changed = true;
         }
     }
-    if !response.has_focus() {
+    if response.lost_focus() {
         // The row shows the document's value again the moment the field is
         // not being typed into, and the next session starts a new undo step.
         ui.data_mut(|data| data.remove_temp::<String>(id));
@@ -220,12 +232,37 @@ fn coordinate_row(
     changed
 }
 
-/// The selected pin.
-///
-/// A pin's name and electrical type are declared by the schematic
-/// interface and reconciled into the symbol on every load, so they are
-/// reported here rather than offered for editing — the symbol owns the
-/// pin's placement, and nothing else.
+fn text_row(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    before: &SymbolDocument,
+    id_salt: impl std::hash::Hash,
+    label: &str,
+    value: &str,
+    is_valid: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let id = ui.id().with(("symbol-text", id_salt));
+    let mut buffer = ui
+        .data_mut(|data| data.get_temp::<String>(id))
+        .unwrap_or_else(|| value.to_owned());
+    let valid = is_valid(buffer.trim());
+    let response = property_row_input(ui, label, &mut buffer, !valid);
+    let mut accepted = None;
+    if response.changed() {
+        ui.data_mut(|data| data.insert_temp(id, buffer.clone()));
+        let trimmed = buffer.trim();
+        if valid && trimmed != value {
+            record_once(&mut app.state, before);
+            accepted = Some(trimmed.to_owned());
+        }
+    }
+    if response.lost_focus() {
+        ui.data_mut(|data| data.remove_temp::<String>(id));
+        app.state.ui.symbol.inspector_undo_recorded = false;
+    }
+    accepted
+}
+
 fn pin_section(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -243,22 +280,121 @@ fn pin_section(
     };
     let before = document.clone();
     let total = document.pins.len();
-    let declared = ports
-        .iter()
-        .any(|port| port.name.eq_ignore_ascii_case(name));
-    let pin = &document.pins[order];
-    let direction = pin.direction;
-    let placed = pin.position;
-    let on_grid = pin.terminal_on_grid();
+    let current_name = document.pins[order].name.clone();
 
     section_header(
         ui,
         "Selected pin",
         Some(&format!("port {} / {total}", order + 1)),
     );
-    property_row(ui, "Name", name);
-    property_row(ui, "Electrical type", direction.keyword());
+
+    let mut changed = false;
+    if let Some(new_name) =
+        text_row(
+            ui,
+            app,
+            &before,
+            ("pin-name", order),
+            "Name",
+            &current_name,
+            |candidate| {
+                !candidate.is_empty()
+                    && candidate.len() <= crate::state::MAX_SYMBOL_PIN_NAME_BYTES
+                    && !candidate.chars().any(char::is_control)
+                    && document.pins.iter().enumerate().all(|(index, pin)| {
+                        index == order || !pin.name.eq_ignore_ascii_case(candidate)
+                    })
+            },
+        )
+    {
+        document.pins[order].name = new_name.clone();
+        app.state.ui.symbol.select_pin(new_name);
+        changed = true;
+    }
+
+    let mut electrical = SymbolPinElectricalKind::from_pin(&document.pins[order])
+        .label()
+        .to_owned();
+    let electrical_options = SymbolPinElectricalKind::ALL
+        .into_iter()
+        .map(|kind| (kind.label().to_owned(), kind.label().to_owned()))
+        .collect::<Vec<_>>();
+    if property_row_combo(
+        ui,
+        "Electrical type",
+        ("symbol-pin-electrical", order),
+        &mut electrical,
+        &electrical_options,
+        true,
+    ) && let Some(kind) = SymbolPinElectricalKind::ALL
+        .into_iter()
+        .find(|kind| kind.label() == electrical)
+    {
+        record_once(&mut app.state, &before);
+        let (electrical_type, direction) = kind.contract();
+        document.pins[order].set_electrical_contract(electrical_type, direction);
+        changed = true;
+    }
+
+    let mut side = document.pins[order].side();
+    let mut side_value = side.label().to_owned();
+    let side_options = SymbolPinSide::ALL
+        .into_iter()
+        .map(|side| (side.label().to_owned(), side.label().to_owned()))
+        .collect::<Vec<_>>();
+    let side_changed = property_row_combo(
+        ui,
+        "Side",
+        ("symbol-pin-side", order),
+        &mut side_value,
+        &side_options,
+        true,
+    );
+    if side_changed
+        && let Some(new_side) = SymbolPinSide::ALL
+            .into_iter()
+            .find(|candidate| candidate.label() == side_value)
+    {
+        record_once(&mut app.state, &before);
+        side = new_side;
+        changed = true;
+    }
+
+    let mut offset = document.pins[order].offset();
+    let offset_changed = coordinate_row(ui, app, &before, "Offset", &mut offset);
+    if side_changed || offset_changed {
+        let bounds = document.body_bounds();
+        document.pins[order].set_side_and_offset(side, offset, bounds);
+        changed = true;
+    }
+
     property_row(ui, "Netlist order", &format!("{} of {total}", order + 1));
+    ui.horizontal(|ui| {
+        ui.add_space(8.0);
+        if ui
+            .add_enabled(order > 0, egui::Button::new("Move earlier"))
+            .clicked()
+        {
+            app.state.record_symbol_edit(&before);
+            document.pins.swap(order, order - 1);
+            app.state.ui.symbol.inspector_undo_recorded = false;
+            changed = true;
+        }
+        if ui
+            .add_enabled(order + 1 < total, egui::Button::new("Move later"))
+            .clicked()
+        {
+            app.state.record_symbol_edit(&before);
+            document.pins.swap(order, order + 1);
+            app.state.ui.symbol.inspector_undo_recorded = false;
+            changed = true;
+        }
+    });
+
+    let active_name = document.pins[order].name.clone();
+    let declared = ports
+        .iter()
+        .any(|port| port.name.eq_ignore_ascii_case(&active_name));
     property_row_status(
         ui,
         "Declared by interface",
@@ -274,44 +410,58 @@ fn pin_section(
             StatusMark::Warning
         },
     );
-
-    let mut changed = false;
-    match placed {
-        Some(mut point) => {
-            changed |= coordinate_row(ui, app, &before, "Terminal X", &mut point.x);
-            changed |= coordinate_row(ui, app, &before, "Terminal Y", &mut point.y);
-            if changed {
-                document.pins[order].position = Some(point);
-            }
-            property_row_status(
-                ui,
-                "Terminal grid",
-                if on_grid { "on grid" } else { "off grid" },
-                if on_grid {
-                    Tokens::get(ui.ctx()).color.ok
-                } else {
-                    Tokens::get(ui.ctx()).color.err
-                },
-                if on_grid {
-                    StatusMark::Success
-                } else {
-                    StatusMark::Warning
-                },
-            );
-        }
-        None => {
-            property_row_status(
-                ui,
-                "Terminal",
-                "unplaced",
-                Tokens::get(ui.ctx()).color.err,
-                StatusMark::Warning,
-            );
-            muted_inspector_copy(
-                ui,
-                "Choose the pin tool and click the canvas to place this terminal.",
-            );
-        }
+    let placed = document.pins[order].position.is_some();
+    let on_grid = document.pins[order].terminal_on_grid();
+    property_row_status(
+        ui,
+        "Terminal",
+        if !placed {
+            "unplaced"
+        } else if on_grid {
+            "on grid"
+        } else {
+            "off grid"
+        },
+        if placed && on_grid {
+            Tokens::get(ui.ctx()).color.ok
+        } else {
+            Tokens::get(ui.ctx()).color.err
+        },
+        if placed && on_grid {
+            StatusMark::Success
+        } else {
+            StatusMark::Warning
+        },
+    );
+    if !placed
+        && labeled_icon_button(
+            ui,
+            WorkbenchIcon::Target,
+            "Place on selected side",
+            false,
+            ui.available_width(),
+        )
+        .clicked()
+    {
+        app.state.record_symbol_edit(&before);
+        let bounds = document.body_bounds();
+        document.pins[order].set_side_and_offset(side, offset, bounds);
+        app.state.ui.symbol.inspector_undo_recorded = false;
+        changed = true;
+    }
+    ui.add_space(4.0);
+    if ui
+        .add_sized(
+            [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
+            egui::Button::new("Remove pin"),
+        )
+        .clicked()
+    {
+        app.state.record_symbol_edit(&before);
+        document.pins.remove(order);
+        app.state.ui.symbol.clear_selection();
+        app.state.ui.symbol.inspector_undo_recorded = false;
+        changed = true;
     }
     changed
 }
@@ -397,6 +547,148 @@ fn shape_section(
     changed
 }
 
+fn visibility_row(ui: &mut Ui, label: &str, shown: &mut bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let before = *shown;
+    ui.horizontal(|ui| {
+        ui.add_space(8.0);
+        ui.add_sized(
+            [112.0, t.metrics.ctl_h],
+            egui::Label::new(
+                egui::RichText::new(label)
+                    .size(tokens::FS_0)
+                    .color(t.color.text_dim),
+            ),
+        );
+        ui.checkbox(shown, if *shown { "Shown" } else { "Hidden" });
+    });
+    *shown != before
+}
+
+fn attribute_section(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    document: &mut SymbolDocument,
+    metadata: &mut SymbolEditorMetadata,
+    kind: SymbolAttributeKind,
+) -> bool {
+    let Some(index) = metadata
+        .attributes
+        .iter()
+        .position(|attribute| attribute.kind == kind)
+    else {
+        empty_selection_section(ui);
+        return false;
+    };
+    let before = document.clone();
+    let mut changed = false;
+    section_header(ui, "Selected attribute", Some(kind.key()));
+
+    let current_value = metadata.attributes[index].default_value.clone();
+    if let Some(value) = text_row(
+        ui,
+        app,
+        &before,
+        ("attribute-value", kind),
+        "Default value",
+        &current_value,
+        |value| {
+            value.len() <= crate::state::MAX_SYMBOL_TEXT_BYTES
+                && !value.chars().any(char::is_control)
+        },
+    ) {
+        metadata.attributes[index].default_value = value;
+        changed = true;
+    }
+
+    let mut shown = metadata.attributes[index].shown;
+    if visibility_row(ui, "Visibility", &mut shown) {
+        record_once(&mut app.state, &before);
+        metadata.attributes[index].shown = shown;
+        changed = true;
+    }
+
+    let mut position = metadata.attributes[index].position;
+    let moved = coordinate_row(ui, app, &before, "Position X", &mut position.x)
+        | coordinate_row(ui, app, &before, "Position Y", &mut position.y);
+    if moved {
+        metadata.attributes[index].position = position;
+        match kind {
+            SymbolAttributeKind::Reference => document.name_anchor = position,
+            SymbolAttributeKind::Value => document.value_anchor = position,
+            SymbolAttributeKind::Model => {}
+        }
+        changed = true;
+    }
+    muted_inspector_copy(
+        ui,
+        "Attributes are rendered on every placed instance when visibility is enabled.",
+    );
+    changed
+}
+
+fn text_section(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    document: &SymbolDocument,
+    metadata: &mut SymbolEditorMetadata,
+    id: u64,
+) -> bool {
+    let Some(index) = metadata.texts.iter().position(|text| text.id == id) else {
+        empty_selection_section(ui);
+        return false;
+    };
+    let before = document.clone();
+    let mut changed = false;
+    section_header(ui, "Selected text", Some(&format!("#{id}")));
+
+    let current_text = metadata.texts[index].text.clone();
+    if let Some(value) = text_row(
+        ui,
+        app,
+        &before,
+        ("free-text", id),
+        "Text",
+        &current_text,
+        |value| {
+            value.len() <= crate::state::MAX_SYMBOL_TEXT_BYTES
+                && !value.chars().any(char::is_control)
+        },
+    ) {
+        metadata.texts[index].text = value;
+        changed = true;
+    }
+
+    let mut shown = metadata.texts[index].shown;
+    if visibility_row(ui, "Visibility", &mut shown) {
+        record_once(&mut app.state, &before);
+        metadata.texts[index].shown = shown;
+        changed = true;
+    }
+    let mut position = metadata.texts[index].position;
+    let moved = coordinate_row(ui, app, &before, "Position X", &mut position.x)
+        | coordinate_row(ui, app, &before, "Position Y", &mut position.y);
+    if moved {
+        metadata.texts[index].position = position;
+        changed = true;
+    }
+    ui.add_space(4.0);
+    if ui
+        .add_sized(
+            [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
+            egui::Button::new("Remove text"),
+        )
+        .clicked()
+    {
+        app.state.record_symbol_edit(&before);
+        metadata.texts.remove(index);
+        app.state.ui.symbol.clear_selection();
+        app.state.ui.symbol.inspector_undo_recorded = false;
+        changed = true;
+    }
+    changed
+}
+
 fn empty_selection_section(ui: &mut Ui) {
     section_header(ui, "Selection", Some("none"));
     muted_inspector_copy(
@@ -405,14 +697,51 @@ fn empty_selection_section(ui: &mut Ui) {
     );
 }
 
-fn multi_selection_section(ui: &mut Ui, pins: usize, shapes: usize) {
-    section_header(ui, "Selection", Some(&(pins + shapes).to_string()));
+fn multi_selection_section(
+    ui: &mut Ui,
+    pins: usize,
+    shapes: usize,
+    attributes: usize,
+    texts: usize,
+) {
+    section_header(
+        ui,
+        "Selection",
+        Some(&(pins + shapes + attributes + texts).to_string()),
+    );
     property_row(ui, "Pins", &pins.to_string());
     property_row(ui, "Body shapes", &shapes.to_string());
+    property_row(ui, "Attributes", &attributes.to_string());
+    property_row(ui, "Text", &texts.to_string());
     muted_inspector_copy(
         ui,
         "Reduce the selection to one object to edit its geometry. Canvas transforms apply to the whole selection.",
     );
+}
+
+fn definition_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorMetadata) {
+    section_header(ui, "Symbol definition", Some("CDF"));
+    property_row(ui, "Published revision", &metadata.revision.to_string());
+    property_row(
+        ui,
+        "Revision note",
+        if metadata.revision_note.is_empty() {
+            "not published"
+        } else {
+            &metadata.revision_note
+        },
+    );
+    if labeled_icon_button(
+        ui,
+        WorkbenchIcon::Sliders,
+        "Open CDF / form designer",
+        false,
+        ui.available_width(),
+    )
+    .clicked()
+    {
+        crate::common::app::open_symbol_parameter_form_dialog(&mut app.state);
+    }
 }
 
 // =============================================================================

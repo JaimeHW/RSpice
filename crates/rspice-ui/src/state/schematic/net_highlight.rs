@@ -222,6 +222,9 @@ fn point_on_segment(point: Point, start: Point, end: Point) -> bool {
 pub struct NetHighlightState {
     /// IDs of wires in the currently highlighted net
     pub highlighted_wires: HashSet<u64>,
+    /// Exact live semantic net selected by a Navigator/Inspector net row.
+    /// This remains meaningful for a legal net with no drawn wires.
+    pub selected_net_name: Option<String>,
     /// Whether highlighting is active
     pub active: bool,
 }
@@ -235,18 +238,21 @@ impl NetHighlightState {
     /// Highlight wires connected to a point
     pub fn highlight_net(&mut self, graph: &NetGraph, point: Point) {
         self.highlighted_wires = graph.find_connected_wires(point);
+        self.selected_net_name = None;
         self.active = !self.highlighted_wires.is_empty();
     }
 
     /// Highlight wires connected to a specific wire
     pub fn highlight_from_wire(&mut self, graph: &NetGraph, wire_id: u64) {
         self.highlighted_wires = graph.find_connected_wires_from_wire(wire_id);
+        self.selected_net_name = None;
         self.active = !self.highlighted_wires.is_empty();
     }
 
     /// Clear the highlight
     pub fn clear(&mut self) {
         self.highlighted_wires.clear();
+        self.selected_net_name = None;
         self.active = false;
     }
 
@@ -258,7 +264,16 @@ impl NetHighlightState {
     /// Highlight a set of wires directly
     pub fn highlight_wires(&mut self, wire_ids: HashSet<u64>) {
         self.highlighted_wires = wire_ids;
+        self.selected_net_name = None;
         self.active = !self.highlighted_wires.is_empty();
+    }
+
+    /// Highlight one exact live net, including semantic nets that currently
+    /// have no drawn conductor geometry.
+    pub fn highlight_named_wires(&mut self, name: impl Into<String>, wire_ids: HashSet<u64>) {
+        self.highlighted_wires = wire_ids;
+        self.selected_net_name = Some(name.into());
+        self.active = true;
     }
 }
 
@@ -272,6 +287,20 @@ mod tests {
 
     fn ids(values: &[u64]) -> HashSet<u64> {
         values.iter().copied().collect()
+    }
+
+    #[test]
+    fn named_wireless_net_remains_exact_until_any_ordinary_highlight_change() {
+        let mut highlight = NetHighlightState::default();
+        highlight.highlight_named_wires("PORT_OUT", HashSet::new());
+        assert!(highlight.active);
+        assert_eq!(highlight.selected_net_name.as_deref(), Some("PORT_OUT"));
+
+        highlight.highlight_wires(ids(&[7]));
+        assert!(highlight.selected_net_name.is_none());
+        highlight.clear();
+        assert!(!highlight.active);
+        assert!(highlight.selected_net_name.is_none());
     }
 
     #[test]

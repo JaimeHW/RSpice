@@ -8,16 +8,17 @@ use crate::common::{AppState, ConsoleMessage};
 use crate::schematic::view::resolved_symbol_render::draw_resolved_symbol;
 use crate::state::{
     Component, ComponentType, LibraryCellInstance, PinSummary, Point, PortDirection, PortSpec,
-    ResolvedCellSymbol, SYMBOL_TERMINAL_GRID, SymbolDocument, SymbolPin, SymbolShape,
+    ResolvedCellSymbol, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument,
+    SymbolEditorMetadata, SymbolPin, SymbolShape,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
-use crate::workbench::{SymbolSelection, SymbolTool};
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+};
+use crate::workbench::{SymbolGridSpacing, SymbolSelection, SymbolTool};
 
-const BODY_GRID: i32 = SYMBOL_TERMINAL_GRID / 4;
 const PIN_HIT_RADIUS: f32 = 10.0;
-const DOT_RADIUS: i32 = 3;
 const SCROLL_ZOOM_SENSITIVITY: f32 = 0.001;
 const PREVIEW_TILE_MAX_WIDTH: f32 = 240.0;
 const PREVIEW_TILE_MAX_HEIGHT: f32 = 168.0;
@@ -49,7 +50,10 @@ fn symbol_canvas_accessibility_label(
         .filter(|pin| pin.position.is_some())
         .count();
     let selection = state.ui.symbol.effective_selection();
-    let selected = selection.pins.len() + selection.shapes.len();
+    let selected = selection.pins.len()
+        + selection.shapes.len()
+        + selection.attributes.len()
+        + selection.texts.len();
     let edit_state = if read_only { "Read only." } else { "Editable." };
     let shortcuts = crate::common::app::accessibility_shortcut_summary(
         state.ui.preferences.shortcuts(),
@@ -59,10 +63,11 @@ fn symbol_canvas_accessibility_label(
             Command::SelectTool,
             Command::SymbolPinTool,
             Command::SymbolPolylineTool,
+            Command::SymbolRectangleTool,
             Command::SymbolCircleTool,
             Command::SymbolArcTool,
-            Command::SymbolArrowTool,
-            Command::SymbolDotTool,
+            Command::SymbolPolygonTool,
+            Command::SymbolTextTool,
             Command::ZoomFit,
             Command::Cancel,
         ],
@@ -94,11 +99,20 @@ impl SymbolViewport {
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let ports = state.active_symbol_ports();
-    let mut document = state.load_active_symbol_document().unwrap_or_else(|error| {
-        state.push_user_message(ConsoleMessage::warning(error));
-        SymbolDocument::default()
-    });
-    document.reconcile_ports(&ports);
+    let mut document = match state.load_active_symbol_document() {
+        Ok(document) => document,
+        Err(error) => {
+            invalid_symbol_document_state(ui, &error);
+            return;
+        }
+    };
+    let mut editor = match state.load_active_symbol_editor_metadata(&document) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            invalid_symbol_document_state(ui, &error);
+            return;
+        }
+    };
 
     let mut generate_requested = false;
     if state.active_view_read_only() {
@@ -131,8 +145,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
         let mut changed = false;
         let viewport = update_viewport(ui, state, rect, &document, &response);
-        changed |= handle_canvas_interaction(state, &mut document, viewport, &response);
-        draw_canvas(ui, viewport, &document, &ports, state);
+        changed |=
+            handle_canvas_interaction(state, &mut document, &mut editor, viewport, &response);
+        draw_canvas(ui, viewport, &document, &editor, &ports, state);
         let shortcut_platform = crate::common::app::runtime_command_platform(ui.ctx());
         let operating_system = ui.ctx().os();
         response.widget_info(|| {
@@ -155,12 +170,53 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             &response,
             state.workspace.active_view_type(),
         );
-        if changed && let Err(error) = state.store_active_symbol_document(&document) {
+        if changed && let Err(error) = state.store_active_symbol_editor_bundle(&document, &editor) {
             state.push_user_message(ConsoleMessage::warning(error));
         }
     });
     canvas_breadcrumb(ui.ctx(), state, stage);
     canvas_check_note(ui.ctx(), &document, &ports, stage);
+    show_save_symbol_dialog(ui.ctx(), state, &document, &mut editor, &ports);
+}
+
+fn invalid_symbol_document_state(ui: &mut Ui, error: &str) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let stage = ui.available_rect_before_wrap();
+    ui.scope_builder(egui::UiBuilder::new().max_rect(stage), |ui| {
+        ui.painter().rect_filled(stage, 0.0, c.canvas_bg);
+        ui.centered_and_justified(|ui| {
+            egui::Frame::new()
+                .fill(c.bg_panel)
+                .stroke(Stroke::new(1.0, c.err))
+                .corner_radius(t.radius)
+                .inner_margin(egui::Margin::symmetric(18, 14))
+                .show(ui, |ui| {
+                    ui.set_max_width(620.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("Symbol document could not be opened")
+                                .font(theme::sans(tokens::FS_3, FontWeight::Medium))
+                                .color(c.err),
+                        );
+                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new(error)
+                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                                .color(c.text),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "The stored symbol metadata was left unchanged. Restore a valid project revision or repair the imported library before editing this view.",
+                            )
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(c.text_dim),
+                        );
+                    });
+                });
+        });
+    });
 }
 
 /// Floating cell path, matching the schematic stage's overlay.
@@ -236,6 +292,300 @@ fn canvas_check_note(
         });
 }
 
+#[derive(Debug, Clone)]
+struct SymbolSaveCheck {
+    label: &'static str,
+    expected: String,
+    observed: String,
+    passed: bool,
+}
+
+fn show_save_symbol_dialog(
+    ctx: &egui::Context,
+    state: &mut AppState,
+    document: &SymbolDocument,
+    editor: &mut SymbolEditorMetadata,
+    ports: &[PortSpec],
+) {
+    if !state.ui.symbol.save_dialog_open {
+        return;
+    }
+    let checks = symbol_save_checks(state, document, ports);
+    let blocking = checks.iter().filter(|check| !check.passed).count();
+    let note_valid = !state.ui.symbol.save_revision_note.trim().is_empty();
+    let blocking_title = format!("{blocking} blocking contract issue(s)");
+    let mut dialog = Dialog::new(
+        "SYMBOL EDITOR \u{00b7} MODEL-BOUND CONTRACT",
+        "Validate and save symbol",
+        "Save symbol revision",
+    )
+    .description("Pin order, electrical types and model binding are validated before this symbol revision replaces the current project view.")
+    .size(DialogSize::SimulationWorkflow)
+    .initial_height(520.0)
+    .initial_focus(DialogInitialFocus::BodyControl)
+    .ghost("Cancel")
+    .primary_enabled(blocking == 0 && note_valid && !state.active_view_read_only());
+    if let Some(error) = state.ui.symbol.save_error.as_deref() {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            "Symbol revision was not saved",
+            error,
+        );
+    } else if blocking > 0 {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            &blocking_title,
+            "Resolve every failed contract row before publishing a symbol revision.",
+        );
+    }
+    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        symbol_save_dialog_body(
+            ui,
+            &checks,
+            editor.revision,
+            &mut state.ui.symbol.save_revision_note,
+        )
+    });
+    match choice {
+        DialogChoice::Primary => {
+            let mut candidate = editor.clone();
+            match candidate
+                .publish_revision(document, &state.ui.symbol.save_revision_note)
+                .and_then(|revision| {
+                    state
+                        .store_active_symbol_editor_bundle(document, &candidate)
+                        .map(|_| revision)
+                }) {
+                Ok(revision) => {
+                    *editor = candidate;
+                    state.ui.symbol.save_dialog_open = false;
+                    state.ui.symbol.save_revision_note.clear();
+                    state.ui.symbol.save_error = None;
+                    state.push_user_message(ConsoleMessage::info(format!(
+                        "Saved symbol revision {revision}"
+                    )));
+                }
+                Err(error) => state.ui.symbol.save_error = Some(error),
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            state.ui.symbol.save_dialog_open = false;
+            state.ui.symbol.save_error = None;
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
+
+fn symbol_save_dialog_body(
+    ui: &mut Ui,
+    checks: &[SymbolSaveCheck],
+    current_revision: u64,
+    revision_note: &mut String,
+) -> Option<egui::Id> {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .fill(t.color.accent.gamma_multiply(0.08))
+        .stroke(Stroke::new(1.0, t.color.accent.gamma_multiply(0.42)))
+        .inner_margin(egui::Margin::symmetric(12, 9))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(
+                    "Pin count, netlist order, electrical type and model binding are checked atomically.",
+                )
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .color(t.color.text),
+            );
+        });
+    ui.add_space(8.0);
+    egui::Grid::new("symbol-editor.save-checks")
+        .num_columns(4)
+        .striped(true)
+        .min_col_width(112.0)
+        .show(ui, |ui| {
+            for heading in ["CHECK", "EXPECTED", "OBSERVED", "STATUS"] {
+                ui.label(
+                    egui::RichText::new(heading)
+                        .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+                        .color(t.color.text_faint),
+                );
+            }
+            ui.end_row();
+            for check in checks {
+                ui.label(check.label);
+                ui.label(
+                    egui::RichText::new(&check.expected)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                );
+                ui.label(
+                    egui::RichText::new(&check.observed)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                );
+                ui.label(
+                    egui::RichText::new(if check.passed { "pass" } else { "blocked" }).color(
+                        if check.passed {
+                            t.color.ok
+                        } else {
+                            t.color.err
+                        },
+                    ),
+                );
+                ui.end_row();
+            }
+        });
+    ui.add_space(10.0);
+    ui.label(
+        egui::RichText::new(format!(
+            "Revision note \u{00b7} next revision {}",
+            current_revision.saturating_add(1)
+        ))
+        .font(theme::sans(tokens::FS_1, FontWeight::Medium)),
+    );
+    let response = ui.add(
+        egui::TextEdit::singleline(revision_note)
+            .hint_text("Describe the reviewed symbol change")
+            .desired_width(f32::INFINITY),
+    );
+    if revision_note.trim().is_empty() {
+        ui.label(
+            egui::RichText::new("A revision note is required.")
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.err),
+        );
+    }
+    Some(response.id)
+}
+
+fn symbol_save_checks(
+    state: &AppState,
+    document: &SymbolDocument,
+    ports: &[PortSpec],
+) -> Vec<SymbolSaveCheck> {
+    let reference = &state.workspace.active_view;
+    let definition = state
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .and_then(|view| {
+            crate::state::ModelBoundSymbolDefinition::load_from_view(view)
+                .ok()
+                .flatten()
+        });
+    let mut expected_names = ports
+        .iter()
+        .map(|port| port.name.clone())
+        .collect::<Vec<_>>();
+    let expected_directions = if let Some(definition) = definition.as_ref() {
+        let mut pins = definition.pins.iter().collect::<Vec<_>>();
+        pins.sort_by_key(|pin| pin.order);
+        expected_names = pins.iter().map(|pin| pin.name.clone()).collect();
+        pins.into_iter()
+            .map(|pin| {
+                (
+                    pin.electrical_type,
+                    pin.direction,
+                    pin.side,
+                    pin.name.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        ports
+            .iter()
+            .map(|port| {
+                (
+                    match port.direction {
+                        PortDirection::Supply => crate::state::SymbolElectricalType::Power,
+                        _ => crate::state::SymbolElectricalType::Analog,
+                    },
+                    port.direction,
+                    match port.direction {
+                        PortDirection::In => crate::state::SymbolPinSide::Left,
+                        PortDirection::Out | PortDirection::InOut => {
+                            crate::state::SymbolPinSide::Right
+                        }
+                        PortDirection::Supply => crate::state::SymbolPinSide::Top,
+                    },
+                    port.name.clone(),
+                )
+            })
+            .collect()
+    };
+    let observed_names = document
+        .pins
+        .iter()
+        .map(|pin| pin.name.clone())
+        .collect::<Vec<_>>();
+    let electrical_match = expected_directions.len() == document.pins.len()
+        && expected_directions.iter().zip(&document.pins).all(
+            |((electrical, direction, _, name), pin)| {
+                pin.name.eq_ignore_ascii_case(name)
+                    && pin.electrical_type() == *electrical
+                    && pin.direction == *direction
+            },
+        );
+    let placement_valid = document
+        .pins
+        .iter()
+        .all(|pin| pin.position.is_some() && pin.terminal_on_grid());
+    let family = definition
+        .as_ref()
+        .map(|definition| definition.identity.cell.as_str())
+        .unwrap_or("standalone symbol");
+    vec![
+        SymbolSaveCheck {
+            label: "Pin count",
+            expected: expected_names.len().to_string(),
+            observed: document.pins.len().to_string(),
+            passed: expected_names.len() == document.pins.len(),
+        },
+        SymbolSaveCheck {
+            label: "Netlist order",
+            expected: expected_names.join(" "),
+            observed: observed_names.join(" "),
+            passed: expected_names.len() == observed_names.len()
+                && expected_names
+                    .iter()
+                    .zip(&observed_names)
+                    .all(|(expected, observed)| expected.eq_ignore_ascii_case(observed)),
+        },
+        SymbolSaveCheck {
+            label: "Electrical types",
+            expected: "bound contract".to_owned(),
+            observed: if electrical_match {
+                "matched".to_owned()
+            } else {
+                "mismatch".to_owned()
+            },
+            passed: electrical_match,
+        },
+        SymbolSaveCheck {
+            label: "Pin placement",
+            expected: "placed on terminal grid".to_owned(),
+            observed: if placement_valid {
+                "all placed".to_owned()
+            } else {
+                "unplaced or off grid".to_owned()
+            },
+            passed: placement_valid,
+        },
+        SymbolSaveCheck {
+            label: "Hidden power pins",
+            expected: "forbidden".to_owned(),
+            observed: "none".to_owned(),
+            passed: true,
+        },
+        SymbolSaveCheck {
+            label: "Model family",
+            expected: family.to_owned(),
+            observed: reference.cell.clone(),
+            passed: definition
+                .as_ref()
+                .is_none_or(|definition| definition.identity.cell == reference.cell),
+        },
+    ]
+}
+
 fn overlay_frame(ui: &mut Ui, t: &Tokens, stroke: Color32, body: impl FnOnce(&mut Ui)) {
     egui::Frame::new()
         .fill(Color32::from_rgba_unmultiplied(
@@ -253,7 +603,6 @@ fn overlay_frame(ui: &mut Ui, t: &Tokens, stroke: Color32, body: impl FnOnce(&mu
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), body);
         });
 }
-
 
 fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
@@ -378,6 +727,7 @@ fn fit_symbol_view(state: &mut AppState, rect: Rect, document: &SymbolDocument) 
 fn handle_canvas_interaction(
     state: &mut AppState,
     document: &mut SymbolDocument,
+    editor: &mut SymbolEditorMetadata,
     viewport: SymbolViewport,
     response: &egui::Response,
 ) -> bool {
@@ -393,11 +743,16 @@ fn handle_canvas_interaction(
     let Some(pointer) = response.interact_pointer_pos() else {
         return false;
     };
-    let terminal_point = snap_point(viewport.screen_to_world(pointer), SYMBOL_TERMINAL_GRID);
-    let body_point = snap_point(viewport.screen_to_world(pointer), BODY_GRID);
+    let raw_point = viewport.screen_to_world(pointer);
+    let body_point = if state.ui.symbol.snap_to_grid {
+        snap_point(raw_point, state.ui.symbol.grid_spacing)
+    } else {
+        raw_point
+    };
+    let terminal_point = body_point;
 
     if response.secondary_clicked()
-        && matches!(state.ui.symbol.tool, SymbolTool::Polyline)
+        && matches!(state.ui.symbol.tool, SymbolTool::Line | SymbolTool::Polygon)
         && finish_pending_polyline(state, document)
     {
         return true;
@@ -412,7 +767,7 @@ fn handle_canvas_interaction(
     }
     if response.drag_started_by(egui::PointerButton::Primary)
         && state.ui.symbol.dragging_pin.is_none()
-        && let Some(label) = hit_label(document, viewport, pointer)
+        && let Some(label) = hit_label(editor, viewport, pointer)
     {
         state.ui.symbol.dragging_label = Some(label);
         state.ui.symbol.drag_undo_recorded = false;
@@ -456,8 +811,18 @@ fn handle_canvas_interaction(
         }
         if document.pin(&name).and_then(|pin| pin.position) != Some(terminal_point) {
             record_drag_symbol_edit(state, document);
+            let bounds = document.body_bounds();
             if let Some(pin) = document.pin_mut(&name) {
-                pin.position = Some(terminal_point);
+                let side = inferred_side_from_point(terminal_point, bounds);
+                let offset = match side {
+                    crate::state::SymbolPinSide::Left | crate::state::SymbolPinSide::Right => {
+                        terminal_point.y
+                    }
+                    crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => {
+                        terminal_point.x
+                    }
+                };
+                pin.set_side_and_offset(side, offset, bounds);
                 return true;
             }
         }
@@ -469,13 +834,31 @@ fn handle_canvas_interaction(
             state.ui.symbol.clear_drag_state();
             return false;
         }
-        if label == "name" && document.name_anchor != body_point {
+        if let Some(kind) = attribute_kind_from_drag_id(&label) {
+            if editor
+                .attribute(kind)
+                .is_some_and(|attribute| attribute.position != body_point)
+            {
+                record_drag_symbol_edit(state, document);
+                if let Some(attribute) = editor.attribute_mut(kind) {
+                    attribute.position = body_point;
+                    sync_legacy_attribute_anchor(document, attribute);
+                }
+                state.ui.symbol.select_attribute(kind);
+                return true;
+            }
+        } else if let Some(id) = text_id_from_drag_id(&label)
+            && editor
+                .texts
+                .iter()
+                .find(|text| text.id == id)
+                .is_some_and(|text| text.position != body_point)
+        {
             record_drag_symbol_edit(state, document);
-            document.name_anchor = body_point;
-            return true;
-        } else if label != "name" && document.value_anchor != body_point {
-            record_drag_symbol_edit(state, document);
-            document.value_anchor = body_point;
+            if let Some(text) = editor.texts.iter_mut().find(|text| text.id == id) {
+                text.position = body_point;
+            }
+            state.ui.symbol.select_text(id);
             return true;
         }
     }
@@ -531,6 +914,12 @@ fn handle_canvas_interaction(
         SymbolTool::Select => {
             if let Some(pin) = hit_pin(document, viewport, pointer) {
                 state.ui.symbol.select_pin(pin);
+            } else if let Some(label) = hit_label(editor, viewport, pointer) {
+                if let Some(kind) = attribute_kind_from_drag_id(&label) {
+                    state.ui.symbol.select_attribute(kind);
+                } else if let Some(id) = text_id_from_drag_id(&label) {
+                    state.ui.symbol.select_text(id);
+                }
             } else if let Some(shape) = hit_shape(document, viewport, pointer) {
                 state.ui.symbol.select_shape(shape);
             } else {
@@ -539,25 +928,11 @@ fn handle_canvas_interaction(
             false
         }
         SymbolTool::PlacePin => place_selected_pin(state, document, terminal_point),
-        SymbolTool::Polyline => add_polyline_point(state, body_point),
+        SymbolTool::Line | SymbolTool::Polygon => add_polyline_point(state, body_point),
+        SymbolTool::Rectangle => add_rectangle(state, document, body_point),
         SymbolTool::Circle => add_round_shape(state, document, body_point, false),
         SymbolTool::Arc => add_round_shape(state, document, body_point, true),
-        SymbolTool::Arrow => add_simple_shape(
-            state,
-            document,
-            SymbolShape::Arrow {
-                tip: body_point,
-                rotation_quarters: 0,
-            },
-        ),
-        SymbolTool::Dot => add_simple_shape(
-            state,
-            document,
-            SymbolShape::Dot {
-                center: body_point,
-                radius: DOT_RADIUS,
-            },
-        ),
+        SymbolTool::Text => add_text(state, document, editor, body_point),
     }
 }
 
@@ -589,8 +964,14 @@ fn place_selected_pin(state: &mut AppState, document: &mut SymbolDocument, point
     if changed {
         state.record_symbol_edit(document);
     }
+    let bounds = document.body_bounds();
     if let Some(pin) = document.pin_mut(&name) {
-        pin.position = Some(point);
+        let side = inferred_side_from_point(point, bounds);
+        let offset = match side {
+            crate::state::SymbolPinSide::Left | crate::state::SymbolPinSide::Right => point.y,
+            crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => point.x,
+        };
+        pin.set_side_and_offset(side, offset, bounds);
         state.ui.symbol.select_pin(name);
         state.ui.symbol.tool = SymbolTool::Select;
         return changed;
@@ -617,11 +998,146 @@ fn finish_pending_polyline(state: &mut AppState, document: &mut SymbolDocument) 
     let points = std::mem::take(&mut state.ui.symbol.pending_polyline);
     document.body.push(SymbolShape::Polyline {
         points,
-        closed: false,
+        closed: matches!(state.ui.symbol.tool, SymbolTool::Polygon),
     });
     if let Some(index) = document.body.len().checked_sub(1) {
         state.ui.symbol.select_shape(index);
     }
+    state.ui.symbol.tool = SymbolTool::Select;
+    true
+}
+
+fn inferred_side_from_point(
+    point: Point,
+    (min, max): (Point, Point),
+) -> crate::state::SymbolPinSide {
+    let distances = [
+        (
+            point.x.saturating_sub(min.x).unsigned_abs(),
+            crate::state::SymbolPinSide::Left,
+        ),
+        (
+            point.x.saturating_sub(max.x).unsigned_abs(),
+            crate::state::SymbolPinSide::Right,
+        ),
+        (
+            point.y.saturating_sub(min.y).unsigned_abs(),
+            crate::state::SymbolPinSide::Top,
+        ),
+        (
+            point.y.saturating_sub(max.y).unsigned_abs(),
+            crate::state::SymbolPinSide::Bottom,
+        ),
+    ];
+    distances
+        .into_iter()
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, side)| side)
+        .unwrap_or(crate::state::SymbolPinSide::Left)
+}
+
+pub(crate) fn rotate_selected_pin(state: &mut AppState) {
+    transform_selected_pin_geometry(state, |side, offset| {
+        let side = match side {
+            crate::state::SymbolPinSide::Left => crate::state::SymbolPinSide::Top,
+            crate::state::SymbolPinSide::Top => crate::state::SymbolPinSide::Right,
+            crate::state::SymbolPinSide::Right => crate::state::SymbolPinSide::Bottom,
+            crate::state::SymbolPinSide::Bottom => crate::state::SymbolPinSide::Left,
+        };
+        (side, offset)
+    });
+}
+
+pub(crate) fn mirror_selected_pin(state: &mut AppState) {
+    transform_selected_pin_geometry(state, |side, offset| match side {
+        crate::state::SymbolPinSide::Left => (crate::state::SymbolPinSide::Right, offset),
+        crate::state::SymbolPinSide::Right => (crate::state::SymbolPinSide::Left, offset),
+        crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => (side, -offset),
+    });
+}
+
+fn transform_selected_pin_geometry(
+    state: &mut AppState,
+    transform: impl FnOnce(crate::state::SymbolPinSide, i32) -> (crate::state::SymbolPinSide, i32),
+) {
+    let selection = state.ui.symbol.effective_selection();
+    let Some(name) = (selection.pins.len() == 1)
+        .then(|| selection.pins.iter().next().cloned())
+        .flatten()
+    else {
+        return;
+    };
+    if state.deny_read_only_edit() {
+        return;
+    }
+    let mut document = match state.load_active_symbol_document() {
+        Ok(document) => document,
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::warning(error));
+            return;
+        }
+    };
+    let metadata = match state.load_active_symbol_editor_metadata(&document) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            state.push_user_message(ConsoleMessage::warning(error));
+            return;
+        }
+    };
+    let bounds = document.body_bounds();
+    let before = document.clone();
+    let Some(pin) = document.pin_mut(&name) else {
+        return;
+    };
+    let (side, offset) = transform(pin.side(), pin.offset());
+    pin.set_side_and_offset(side, offset, bounds);
+    state.record_symbol_edit(&before);
+    if let Err(error) = state.store_active_symbol_editor_bundle(&document, &metadata) {
+        state.push_user_message(ConsoleMessage::warning(error));
+    }
+}
+
+fn add_rectangle(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
+    if state.deny_read_only_edit() {
+        return false;
+    }
+    let Some(start) = state.ui.symbol.shape_start.take() else {
+        state.ui.symbol.shape_start = Some(point);
+        return false;
+    };
+    if start == point {
+        state.ui.symbol.shape_start = Some(start);
+        return false;
+    }
+    state.record_symbol_edit(document);
+    document.body.push(SymbolShape::Polyline {
+        points: vec![
+            start,
+            Point::new(point.x, start.y),
+            point,
+            Point::new(start.x, point.y),
+        ],
+        closed: true,
+    });
+    if let Some(index) = document.body.len().checked_sub(1) {
+        state.ui.symbol.select_shape(index);
+    }
+    state.ui.symbol.tool = SymbolTool::Select;
+    true
+}
+
+fn add_text(
+    state: &mut AppState,
+    document: &SymbolDocument,
+    editor: &mut SymbolEditorMetadata,
+    point: Point,
+) -> bool {
+    if state.deny_read_only_edit() {
+        return false;
+    }
+    state.record_symbol_edit(document);
+    let id = editor.allocate_text("Text", point);
+    state.ui.symbol.select_text(id);
     state.ui.symbol.tool = SymbolTool::Select;
     true
 }
@@ -663,27 +1179,11 @@ fn add_round_shape(
     }
 }
 
-fn add_simple_shape(
-    state: &mut AppState,
-    document: &mut SymbolDocument,
-    shape: SymbolShape,
-) -> bool {
-    if state.deny_read_only_edit() {
-        return false;
-    }
-    state.record_symbol_edit(document);
-    document.body.push(shape);
-    if let Some(index) = document.body.len().checked_sub(1) {
-        state.ui.symbol.select_shape(index);
-    }
-    state.ui.symbol.tool = SymbolTool::Select;
-    true
-}
-
 fn draw_canvas(
     ui: &mut Ui,
     viewport: SymbolViewport,
     document: &SymbolDocument,
+    editor: &SymbolEditorMetadata,
     ports: &[PortSpec],
     state: &AppState,
 ) {
@@ -691,7 +1191,14 @@ fn draw_canvas(
     let c = t.color;
     let painter = ui.painter_at(viewport.rect);
     painter.rect_filled(viewport.rect, 0.0, c.canvas_bg);
-    draw_grid(&painter, viewport, c.canvas_grid);
+    if state.ui.symbol.show_grid {
+        draw_grid(
+            &painter,
+            viewport,
+            c.canvas_grid,
+            state.ui.symbol.grid_spacing,
+        );
+    }
     draw_body(
         &painter,
         viewport,
@@ -702,13 +1209,20 @@ fn draw_canvas(
     );
     draw_bbox_and_origin(&painter, viewport, document, &t);
     draw_pins(&painter, viewport, document, ports, state);
-    draw_labels(&painter, viewport, document, &t);
+    draw_labels(&painter, viewport, editor, state, &t);
     draw_marquee(&painter, viewport, state, &t);
-    draw_preview_tile(ui, viewport.rect, document, ports, state, &t);
+    if state.ui.symbol.preview_as_placed {
+        draw_preview_tile(ui, viewport.rect, document, ports, state, &t);
+    }
 }
 
-fn draw_grid(painter: &egui::Painter, viewport: SymbolViewport, color: Color32) {
-    let step = SYMBOL_TERMINAL_GRID as f32 * viewport.zoom;
+fn draw_grid(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    color: Color32,
+    spacing: SymbolGridSpacing,
+) {
+    let step = spacing.model_step() * viewport.zoom;
     if step < 8.0 {
         return;
     }
@@ -939,23 +1453,43 @@ fn draw_dashed_line(
 fn draw_labels(
     painter: &egui::Painter,
     viewport: SymbolViewport,
-    document: &SymbolDocument,
+    editor: &SymbolEditorMetadata,
+    state: &AppState,
     t: &Tokens,
 ) {
-    painter.text(
-        viewport.world_to_screen(document.name_anchor),
-        Align2::LEFT_CENTER,
-        "@name",
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.net_label,
-    );
-    painter.text(
-        viewport.world_to_screen(document.value_anchor),
-        Align2::LEFT_CENTER,
-        "@value",
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.net_label,
-    );
+    let selection = state.ui.symbol.effective_selection();
+    for attribute in &editor.attributes {
+        if !attribute.shown {
+            continue;
+        }
+        painter.text(
+            viewport.world_to_screen(attribute.position),
+            Align2::LEFT_CENTER,
+            format!("@{}", attribute.kind.key()),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            if selection.attributes.contains(&attribute.kind) {
+                t.color.accent
+            } else {
+                t.color.net_label
+            },
+        );
+    }
+    for text in &editor.texts {
+        if !text.shown {
+            continue;
+        }
+        painter.text(
+            viewport.world_to_screen(text.position),
+            Align2::LEFT_CENTER,
+            &text.text,
+            theme::sans(tokens::FS_1, FontWeight::Regular),
+            if selection.texts.contains(&text.id) {
+                t.color.accent
+            } else {
+                t.color.symbol
+            },
+        );
+    }
 }
 
 fn draw_preview_tile(
@@ -1033,8 +1567,7 @@ pub(crate) fn draw_document_preview(
         return;
     }
     let viewport = preview_viewport_for_tile(rect, document);
-    let mut component =
-        Component::new(0, ComponentType::CellInstance, Point::origin());
+    let mut component = Component::new(0, ComponentType::CellInstance, Point::origin());
     component.name = "X1".to_owned();
     component.value = cell.to_owned();
     let resolved = ResolvedCellSymbol::from_authored_document(document.clone(), ports);
@@ -1093,16 +1626,40 @@ fn hit_pin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> Op
         .map(|(name, _)| name)
 }
 
-fn hit_label(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> Option<String> {
-    let name = viewport.world_to_screen(document.name_anchor);
-    if name.distance(pos) <= 18.0 {
-        return Some("name".to_owned());
+fn hit_label(editor: &SymbolEditorMetadata, viewport: SymbolViewport, pos: Pos2) -> Option<String> {
+    for attribute in editor.attributes.iter().rev() {
+        if attribute.shown && viewport.world_to_screen(attribute.position).distance(pos) <= 22.0 {
+            return Some(format!("attribute:{}", attribute.kind.key()));
+        }
     }
-    let value = viewport.world_to_screen(document.value_anchor);
-    if value.distance(pos) <= 18.0 {
-        return Some("value".to_owned());
+    for text in editor.texts.iter().rev() {
+        if text.shown && viewport.world_to_screen(text.position).distance(pos) <= 22.0 {
+            return Some(format!("text:{}", text.id));
+        }
     }
     None
+}
+
+fn attribute_kind_from_drag_id(value: &str) -> Option<SymbolAttributeKind> {
+    let key = value.strip_prefix("attribute:")?;
+    SymbolAttributeKind::ALL
+        .into_iter()
+        .find(|kind| kind.key() == key)
+}
+
+fn text_id_from_drag_id(value: &str) -> Option<u64> {
+    value.strip_prefix("text:")?.parse().ok()
+}
+
+fn sync_legacy_attribute_anchor(
+    document: &mut SymbolDocument,
+    attribute: &crate::state::SymbolAttribute,
+) {
+    match attribute.kind {
+        SymbolAttributeKind::Reference => document.name_anchor = attribute.position,
+        SymbolAttributeKind::Value => document.value_anchor = attribute.position,
+        SymbolAttributeKind::Model => {}
+    }
 }
 
 fn hit_origin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> bool {
@@ -1182,8 +1739,9 @@ fn next_unplaced_pin(document: &SymbolDocument) -> Option<String> {
         .map(|pin| pin.name.clone())
 }
 
-fn snap_point(point: Point, grid: i32) -> Point {
-    let snap = |v: i32| ((v as f32 / grid as f32).round() as i32) * grid;
+fn snap_point(point: Point, spacing: SymbolGridSpacing) -> Point {
+    let grid = spacing.model_step();
+    let snap = |v: i32| ((v as f32 / grid).round() * grid).round() as i32;
     Point::new(snap(point.x), snap(point.y))
 }
 

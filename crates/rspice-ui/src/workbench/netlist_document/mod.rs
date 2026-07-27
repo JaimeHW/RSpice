@@ -294,6 +294,10 @@ pub struct NetlistDocumentState {
     /// One-based source line requested by outline, diagnostics, or find. The
     /// editor consumes this exactly once and places the caret there.
     pub requested_line: Option<usize>,
+    /// One-based line selected through the current schematic's authoritative
+    /// generated source map. Unlike the caret this can remain highlighted
+    /// while another editor interaction has focus.
+    pub cross_probe_line: Option<usize>,
     /// Buffer revision, bumped on every edit.
     pub revision: u64,
     /// Revision the diagnostics were parsed for.

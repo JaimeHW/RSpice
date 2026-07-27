@@ -98,6 +98,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let font = theme::mono(FONT_SIZE, FontWeight::Regular);
     let diagnostics = state.ui.netlist.diagnostics.clone();
     let edited_lines = state.ui.netlist.edited_lines.clone();
+    let cross_probe_line = (state.ui.netlist.active_document
+        == super::ActiveNetlistDocument::Generated)
+        .then_some(state.ui.netlist.cross_probe_line)
+        .flatten()
+        .map(|line| line.saturating_sub(1));
 
     // Take the buffer out so the layouter and the post-edit bookkeeping
     // don't fight over `state`.
@@ -137,6 +142,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 let hover_background = ui.painter().add(egui::Shape::Noop);
                 let active_background = ui.painter().add(egui::Shape::Noop);
                 let active_rail = ui.painter().add(egui::Shape::Noop);
+                // Source-map cross-probing is painted after the caret wash so
+                // its device-local identity highlight remains visible even
+                // when requesting the line also moved the caret there.
+                let cross_probe_background = ui.painter().add(egui::Shape::Noop);
+                let cross_probe_rail = ui.painter().add(egui::Shape::Noop);
                 let mut show_text = |text: &mut dyn egui::TextBuffer| {
                     egui::TextEdit::multiline(text)
                         .id(editor_id())
@@ -175,6 +185,26 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         egui::pos2(output.response.rect.right(), origin.y + row.rect().bottom()),
                     )
                 };
+                if let Some(line) = cross_probe_line
+                    && let Some(row) = output.galley.rows.get(line)
+                {
+                    let rect = row_rect(row);
+                    painter.set(
+                        cross_probe_background,
+                        egui::Shape::rect_filled(rect, 0.0, c.info.gamma_multiply(0.075)),
+                    );
+                    painter.set(
+                        cross_probe_rail,
+                        egui::Shape::rect_filled(
+                            egui::Rect::from_min_max(
+                                rect.left_top(),
+                                egui::pos2(rect.left() + 2.0, rect.bottom()),
+                            ),
+                            0.0,
+                            c.info,
+                        ),
+                    );
+                }
                 if let Some(row) = output.galley.rows.get(cursor_line) {
                     let rect = row_rect(row);
                     painter.set(

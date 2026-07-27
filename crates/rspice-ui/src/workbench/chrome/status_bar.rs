@@ -3,6 +3,7 @@
 use egui::{Align, Context, Frame, Layout, Sense, TopBottomPanel, Vec2};
 
 use crate::common::RSpiceApp;
+use crate::state::SchematicGridPitch;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
@@ -13,6 +14,7 @@ use super::super::state::Workspace;
 
 const STATUS_PADDING_X: f32 = 9.0;
 const STATUS_MARK_GAP: f32 = 5.0;
+const STATUS_FONT_SIZE: f32 = tokens::FS_1;
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
@@ -28,6 +30,11 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             let check = check_summary(app);
             let engineering = engineering_context_summary(app);
             let selection = selection_summary(app);
+            let revision = revision_status_summary(
+                app.state.project_lifecycle.project_open,
+                app.state.schematic.is_dirty || app.state.workspace.any_dirty(),
+                app.state.workspace.project.revision().get(),
+            );
             let zoom_command = if app.state.workbench.workspace == Workspace::Results {
                 Command::ZoomFit
             } else {
@@ -52,6 +59,8 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             };
             let platform = platform_label();
             let check_mark = StatusMark::Check(check_tone(app, &t));
+            let revision_mark =
+                revision_status_mark(app.state.project_lifecycle.project_open, revision.dirty, &t);
             let engine_mark = StatusMark::Dot {
                 color: engine_color,
                 wash: engine_wash,
@@ -66,7 +75,8 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                     desired_status_width(ui, &selection, StatusMark::None)
                 } else {
                     0.0
-                };
+                }
+                + desired_status_width(ui, &revision.text, revision_mark);
             let right_desired = desired_status_width(ui, &zoom, StatusMark::None)
                 + desired_status_width(ui, &engine, engine_mark)
                 + if visibility.platform {
@@ -93,6 +103,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                             } else {
                                 0.0
                             },
+                            desired_status_width(ui, &revision.text, revision_mark),
                         ];
                         let widths = fit_status_widths(desired, groups.left);
                         if status_item_sized(ui, &check, check_mark, true, widths[0]).clicked() {
@@ -104,6 +115,8 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
                         if visibility.selection {
                             status_item_sized(ui, &selection, StatusMark::None, false, widths[2]);
                         }
+                        status_item_sized(ui, &revision.text, revision_mark, false, widths[3])
+                            .on_hover_text(&revision.detail);
                     },
                 );
 
@@ -273,6 +286,49 @@ fn semantic_wash(color: egui::Color32, mode: crate::ui::tokens::Mode) -> egui::C
     egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RevisionStatus {
+    text: String,
+    detail: String,
+    dirty: bool,
+}
+
+fn revision_status_summary(project_open: bool, dirty: bool, revision: u64) -> RevisionStatus {
+    if !project_open {
+        return RevisionStatus {
+            text: "No project revision".to_owned(),
+            detail: "Open a project to establish revision state".to_owned(),
+            dirty: false,
+        };
+    }
+    if dirty {
+        RevisionStatus {
+            text: "Unsaved".to_owned(),
+            detail: format!("Project revision {revision} has unsaved changes"),
+            dirty: true,
+        }
+    } else {
+        RevisionStatus {
+            text: "Saved".to_owned(),
+            detail: format!("Project revision {revision} is saved"),
+            dirty: false,
+        }
+    }
+}
+
+fn schematic_pitch_mm(pitch: SchematicGridPitch) -> f64 {
+    match pitch {
+        SchematicGridPitch::Mil50 => 1.27,
+        SchematicGridPitch::Mil25 => 0.635,
+        SchematicGridPitch::Metric => 0.5,
+    }
+}
+
+fn schematic_coordinates_summary(x: f64, y: f64, pitch: SchematicGridPitch) -> String {
+    let pitch_mm = schematic_pitch_mm(pitch);
+    format!("x {:.2} · y {:.2} mm", x * pitch_mm, y * pitch_mm)
+}
+
 fn engineering_context_summary(app: &RSpiceApp) -> String {
     if !app.state.project_lifecycle.project_open {
         return "No project loaded".to_owned();
@@ -286,7 +342,7 @@ fn engineering_context_summary(app: &RSpiceApp) -> String {
                 ) {
                     "x — · y — layout".to_owned()
                 } else {
-                    "x — · y — grid".to_owned()
+                    "x — · y — mm".to_owned()
                 }
             },
             |(x, y)| {
@@ -306,7 +362,11 @@ fn engineering_context_summary(app: &RSpiceApp) -> String {
                         },
                     )
                 } else {
-                    format!("x {x:.2} · y {y:.2} grid")
+                    schematic_coordinates_summary(
+                        x,
+                        y,
+                        app.state.schematic.document_policy.grid_pitch,
+                    )
                 }
             },
         ),
@@ -400,7 +460,7 @@ fn zoom_factor(app: &RSpiceApp) -> f64 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatusMark {
     None,
     Check(egui::Color32),
@@ -408,7 +468,29 @@ enum StatusMark {
         color: egui::Color32,
         wash: egui::Color32,
     },
+    ProjectState {
+        color: egui::Color32,
+        filled: bool,
+    },
     Processor,
+}
+
+fn revision_status_mark(project_open: bool, dirty: bool, tokens: &Tokens) -> StatusMark {
+    if dirty {
+        StatusMark::ProjectState {
+            color: tokens.color.warn,
+            filled: true,
+        }
+    } else {
+        StatusMark::ProjectState {
+            color: if project_open {
+                tokens.color.text_dim
+            } else {
+                tokens.color.text_faint
+            },
+            filled: false,
+        }
+    }
 }
 
 fn status_padding_x(ui: &egui::Ui) -> f32 {
@@ -424,12 +506,13 @@ fn status_mark_size(mark: StatusMark) -> f32 {
         StatusMark::None => 0.0,
         StatusMark::Check(_) => 14.0,
         StatusMark::Dot { .. } => 6.0,
+        StatusMark::ProjectState { .. } => 7.0,
         StatusMark::Processor => 16.0,
     }
 }
 
 fn status_text_font() -> egui::FontId {
-    theme::mono(tokens::FS_0, FontWeight::Regular)
+    theme::mono(STATUS_FONT_SIZE, FontWeight::Regular)
 }
 
 fn desired_status_width(ui: &egui::Ui, text: &str, mark: StatusMark) -> f32 {
@@ -518,6 +601,18 @@ fn status_item_sized(
             StatusMark::Dot { color, wash } => {
                 ui.painter().circle_filled(mark_rect.center(), 5.0, wash);
                 ui.painter().circle_filled(mark_rect.center(), 3.0, color);
+            }
+            StatusMark::ProjectState { color, filled } => {
+                ui.painter().circle(
+                    mark_rect.center(),
+                    3.0,
+                    if filled {
+                        color
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    },
+                    egui::Stroke::new(1.0, color),
+                );
             }
             StatusMark::Processor => paint_processor(ui.painter(), mark_rect, t.color.text_dim),
             StatusMark::None => {}
@@ -659,10 +754,37 @@ mod tests {
     fn status_item_geometry_matches_the_mockup_contract() {
         assert_eq!(STATUS_PADDING_X, 9.0);
         assert_eq!(STATUS_MARK_GAP, 5.0);
-        assert_eq!(tokens::FS_0, 11.0);
+        assert_eq!(STATUS_FONT_SIZE, 12.0);
+        assert_eq!(STATUS_FONT_SIZE, tokens::FS_1);
         assert_eq!(
             status_text_font(),
-            theme::mono(tokens::FS_0, FontWeight::Regular)
+            theme::mono(tokens::FS_1, FontWeight::Regular)
+        );
+    }
+
+    #[test]
+    fn revision_mark_uses_shape_and_tone_for_saved_dirty_and_closed_states() {
+        let tokens = Tokens::default();
+        assert_eq!(
+            revision_status_mark(true, false, &tokens),
+            StatusMark::ProjectState {
+                color: tokens.color.text_dim,
+                filled: false,
+            }
+        );
+        assert_eq!(
+            revision_status_mark(true, true, &tokens),
+            StatusMark::ProjectState {
+                color: tokens.color.warn,
+                filled: true,
+            }
+        );
+        assert_eq!(
+            revision_status_mark(false, false, &tokens),
+            StatusMark::ProjectState {
+                color: tokens.color.text_faint,
+                filled: false,
+            }
         );
     }
 
@@ -691,5 +813,45 @@ mod tests {
         assert_eq!(simulation_progress_percent(-1.0), 0);
         assert_eq!(simulation_progress_percent(0.375), 38);
         assert_eq!(simulation_progress_percent(1.5), 100);
+    }
+
+    #[test]
+    fn revision_status_distinguishes_saved_unsaved_and_closed_projects() {
+        assert_eq!(
+            revision_status_summary(true, false, 7),
+            RevisionStatus {
+                text: "Saved".to_owned(),
+                detail: "Project revision 7 is saved".to_owned(),
+                dirty: false,
+            }
+        );
+        assert_eq!(
+            revision_status_summary(true, true, 7),
+            RevisionStatus {
+                text: "Unsaved".to_owned(),
+                detail: "Project revision 7 has unsaved changes".to_owned(),
+                dirty: true,
+            }
+        );
+        assert_eq!(
+            revision_status_summary(false, true, 7).text,
+            "No project revision"
+        );
+    }
+
+    #[test]
+    fn schematic_coordinates_use_the_document_grid_pitch_in_millimeters() {
+        assert_eq!(
+            schematic_coordinates_summary(2.0, -1.0, SchematicGridPitch::Mil50),
+            "x 2.54 · y -1.27 mm"
+        );
+        assert_eq!(
+            schematic_coordinates_summary(2.0, -1.0, SchematicGridPitch::Mil25),
+            "x 1.27 · y -0.64 mm"
+        );
+        assert_eq!(
+            schematic_coordinates_summary(2.0, -1.0, SchematicGridPitch::Metric),
+            "x 1.00 · y -0.50 mm"
+        );
     }
 }

@@ -111,10 +111,11 @@ fn activity_button(
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let enabled = ui.is_enabled();
+    let workspace_label = activity_workspace_label(workspace);
     let base_label = if shortcut.is_empty() {
-        workspace.label().to_owned()
+        workspace_label.to_owned()
     } else {
-        format!("{} ({shortcut})", workspace.label())
+        format!("{workspace_label} ({shortcut})")
     };
     let label = if badge_count > 0 {
         format!("{base_label} · {badge_count} new result")
@@ -130,7 +131,7 @@ fn activity_button(
             egui::WidgetType::Button,
             ui.is_enabled(),
             active,
-            workspace.label(),
+            workspace_label,
         )
     });
     if !shortcut.is_empty() && enabled {
@@ -167,6 +168,18 @@ fn activity_button(
     paint_numeric_badge(ui, activity_badge_rect(rect), t.color.bg_app, badge_count);
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(label)
+}
+
+const fn activity_workspace_label(workspace: Workspace) -> &'static str {
+    match workspace {
+        Workspace::Project => "Project",
+        Workspace::Design => "Schematic",
+        Workspace::Simulate => "Analyses",
+        Workspace::Results => "Results",
+        Workspace::Verify => "Verification",
+        Workspace::Models => "Models and PDKs",
+        Workspace::Netlist => "Netlist",
+    }
 }
 
 pub const fn workspace_icon(workspace: Workspace) -> WorkbenchIcon {
@@ -206,5 +219,19 @@ mod tests {
         );
         assert!(button.contains_rect(badge));
         assert_eq!(button.right() - badge.right(), ACTIVITY_BADGE_RIGHT);
+    }
+
+    #[test]
+    fn activity_accessibility_names_match_the_mockup_workspace_language() {
+        assert_eq!(activity_workspace_label(Workspace::Project), "Project");
+        assert_eq!(activity_workspace_label(Workspace::Design), "Schematic");
+        assert_eq!(activity_workspace_label(Workspace::Simulate), "Analyses");
+        assert_eq!(activity_workspace_label(Workspace::Results), "Results");
+        assert_eq!(activity_workspace_label(Workspace::Verify), "Verification");
+        assert_eq!(
+            activity_workspace_label(Workspace::Models),
+            "Models and PDKs"
+        );
+        assert_eq!(activity_workspace_label(Workspace::Netlist), "Netlist");
     }
 }
