@@ -1,0 +1,84 @@
+# Device-evaluation reference baselines
+
+What a compact-model evaluation costs in other simulators, so that RSpice's own
+`rspice-bench generated-stamp` numbers can be judged against something rather
+than tracked in isolation.
+
+Two references are measured, and they answer different questions:
+
+- **ngspice** — hand-written C with hand-derived analytic Jacobians. This is the
+  performance ceiling a generated backend is trying to reach.
+- **Xyce** — C++ model equations differentiated by Sacado. This is the closer
+  architectural analogue to RSpice, which also generates derivative code rather
+  than having a human write it, so it is the more honest peer comparison.
+
+## Method
+
+Isolating device evaluation from everything else is done by subtraction, not by
+instrumenting either simulator:
+
+1. A deck holds **one** device with **every terminal driven by its own source**,
+   so no terminal is grounded away and the Jacobian block stays dense. That is
+   the same worst case `generated-stamp` uses, and the same case across
+   revisions.
+2. A DC sweep of ~30k points keeps the matrix tiny (≈10–18 equations) so device
+   evaluation dominates and the solver does not.
+3. The identical deck is run with the device deleted and replaced by a 1 GΩ
+   dummy resistor, giving the fixed per-iteration overhead of the sources, the
+   matrix, and the simulator's own loop.
+4. Device cost is the difference, divided by iterations.
+
+Both simulators report the numbers this needs directly, so nothing is inferred
+from wall-clock:
+
+- ngspice `.options acct` → `Matrix load time` and `Total iterations`. Its
+  "matrix load" *is* device evaluation plus stamping.
+- Xyce → `Total Residual Load Time` + `Total Jacobian Load Time`, normalized by
+  `Number Jacobians Evaluated`. Xyce loads residual and Jacobian separately, so
+  both are summed to match what one RSpice `stamp()` call does.
+
+## Results (2026-07-27)
+
+Per device evaluation + stamp, after subtracting the no-device baseline.
+
+| Model | ngspice (C) | Xyce (Sacado AD) | RSpice generated |
+|---|---|---|---|
+| VBIC 1.3, 4 terminals | **859 ns** | 2,658 ns | **1,501 ns** (`ScalarOptIr`) |
+| HiSIM-HV2, default config (10 eq) | **1,169 ns** | — | — |
+| HiSIM-HV2, internal nodes on (16 eq) | **1,694 ns** | — | 10,465 ns (`SparseLocalKernel`) |
+| | | | 44,000 ns (`StructuredKernel`) |
+
+Reading these:
+
+- On VBIC, RSpice's scalar tier is **1.75× hand-written C and 1.8× faster than
+  Xyce**. Generating derivative code is not itself the problem — that tier is
+  already competitive with a shipping commercial AD-based simulator.
+- On HiSIM-HV the same backend is **6× C** at best and **26× C** on the tier it
+  actually falls back to. The gap is the tier, not the approach.
+
+## Caveats that matter when quoting these
+
+- **ngspice's HiSIM-HV2 is version 2.2; RSpice's is 2.5.1.** Same family and
+  comparable complexity, not identical equations.
+- **Topology is not matched exactly.** ngspice creates internal nodes only when
+  the `CO*` configuration flags ask for them — 10 circuit equations by default,
+  16 with `CORSRD/CORG/CONQS/COSELFHEAT/COSUBNODE/CORBNET` enabled. RSpice's
+  generated device carries a fixed 19-node/13-branch topology regardless, so it
+  is always paying for the densest configuration. Some of the HiSIM-HV gap is
+  this, not code quality; collapsing unused internal nodes is a separate win
+  from anything in the codegen.
+- Both references are single-threaded, single-device. Neither says anything
+  about how the simulators scale across instances.
+
+## Reproducing
+
+```
+ngspice_con.exe -b decks/vbic_dense.cir      # and vbic_nodev.cir
+ngspice_con.exe -b decks/hv_dense.cir        # and hv_full.cir, hv_nodev.cir
+Xyce.exe decks/vbic_xyce.cir                 # and vbic_xyce_nodev.cir
+cargo run -p rspice-bench --release --features generated-stamp -- generated-stamp
+```
+
+`hv_dense.cir` carries the HiSIM-HV parameter set from ngspice's own
+`tests/hisimhv2/nmos` converted to a `.model` card; `hv_full.cir` is that same
+card with the internal-node flags turned on.
