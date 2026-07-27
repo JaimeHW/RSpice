@@ -20834,12 +20834,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let tokens = Self::split_print_fields(&sensitivity_lines[0])?;
         let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
         let mut objvars = None;
-        let mut parameters = None;
+        let mut parameters: Option<String> = None;
         let mut index = 1usize;
         while index < token_refs.len() {
             let Some((raw_key, raw_value, consumed)) =
                 Self::print_option_assignment(&token_refs, index)
             else {
+                if let Some(parameters) = parameters.as_mut()
+                    && !token_refs[index].contains('=')
+                    && token_refs[index].contains(':')
+                {
+                    if !parameters.ends_with(',') {
+                        parameters.push(',');
+                    }
+                    parameters.push_str(token_refs[index].trim());
+                    index += 1;
+                    continue;
+                }
                 return Err(format!(
                     "Xyce .SENS directive contains an unsupported field '{}'",
                     token_refs[index]
@@ -21064,9 +21075,18 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
     fn parse_xyce_sensitivity_parameters(value: &str) -> Result<Vec<String>, String> {
         let mut parameters = Vec::new();
-        for raw in Self::split_xyce_sensitivity_list(value)? {
-            let parameter = raw.trim();
+        let fields = Self::split_xyce_sensitivity_list(value)?;
+        for (index, raw) in fields.iter().enumerate() {
+            // Xyce permits a comma at the end of a continued PARAM line
+            // before the next '+' line.  The logical-line normalizer keeps
+            // that delimiter attached to the preceding token, so remove
+            // only trailing commas here; commas inside grouped parameter
+            // syntax are still handled by split_xyce_sensitivity_list.
+            let parameter = raw.trim().trim_end_matches(',').trim();
             if parameter.is_empty() {
+                if index + 1 == fields.len() && value.trim_end().ends_with(',') {
+                    continue;
+                }
                 return Err("Xyce .SENS PARAM contains an empty parameter".to_string());
             }
             if parameter.contains(['(', ')', '{', '}', '=']) {
@@ -22057,12 +22077,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         let tokens = Self::split_print_fields(&sensitivity_lines[0])?;
         let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
         let mut objfunc = None;
-        let mut parameters = None;
+        let mut parameters: Option<String> = None;
         let mut index = 1usize;
         while index < token_refs.len() {
             let Some((raw_key, raw_value, consumed)) =
                 Self::print_option_assignment(&token_refs, index)
             else {
+                if let Some(parameters) = parameters.as_mut()
+                    && !token_refs[index].contains('=')
+                    && token_refs[index].contains(':')
+                {
+                    if !parameters.ends_with(',') {
+                        parameters.push(',');
+                    }
+                    parameters.push_str(token_refs[index].trim());
+                    index += 1;
+                    continue;
+                }
                 return Err(format!(
                     "Xyce .SENS directive contains an unsupported field '{}'",
                     token_refs[index]
@@ -90243,6 +90274,19 @@ Q1 c b 0 QN
         let error = XyceTestRunner::parse_xyce_sensitivity_parameters("R1:R,R1:R")
             .expect_err("duplicate sensitivity parameters must fail closed");
         assert!(error.contains("duplicate parameter"), "{error}");
+
+        let continued = XyceTestRunner::parse_xyce_sensitivity_parameters(
+            "RB1:R, Q2N2222:bf, Q2N2222:is,",
+        )
+        .expect("comma-terminated continued PARAM fields are valid Xyce syntax");
+        assert_eq!(
+            continued,
+            vec![
+                "RB1:R".to_string(),
+                "Q2N2222:bf".to_string(),
+                "Q2N2222:is".to_string(),
+            ]
+        );
     }
 
     #[test]
