@@ -3,9 +3,10 @@ use super::{Netlist, SubcircuitDef};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-const BUILTIN_TRANSISTOR_LIB: &str =
-    include_str!("../../../../models/spice/builtin/lib/transistor.lib");
+const BUILTIN_BJT_LIB: &str = include_str!("../../../../models/spice/builtin/lib/bjt.lib");
 const BUILTIN_DIODE_LIB: &str = include_str!("../../../../models/spice/builtin/lib/diode.lib");
+const BUILTIN_JFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/jfet.lib");
+const BUILTIN_MOSFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/mosfet.lib");
 
 /// Byte range on one physical source line.
 ///
@@ -546,8 +547,10 @@ fn builtin_model_names() -> &'static HashSet<String> {
         ] {
             names.insert(model_type.to_string());
         }
-        insert_model_names_from_library(BUILTIN_TRANSISTOR_LIB, &mut names);
+        insert_model_names_from_library(BUILTIN_BJT_LIB, &mut names);
         insert_model_names_from_library(BUILTIN_DIODE_LIB, &mut names);
+        insert_model_names_from_library(BUILTIN_JFET_LIB, &mut names);
+        insert_model_names_from_library(BUILTIN_MOSFET_LIB, &mut names);
         for model_name in crate::xspice::CodeModelRegistry::with_builtins().model_names() {
             names.insert(model_name.to_ascii_uppercase());
         }

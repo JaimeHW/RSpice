@@ -17,17 +17,23 @@ use super::parser::parse_library_content;
 // set is available everywhere, including the browser build, which has no
 // filesystem to load the vendored packs from.
 
-/// Embedded diode library
+/// Embedded diode, rectifier, zener and LED library
 const DIODE_LIB: &str = include_str!("../../../../models/spice/builtin/lib/diode.lib");
+
+/// Embedded bipolar transistor library
+const BJT_LIB: &str = include_str!("../../../../models/spice/builtin/lib/bjt.lib");
+
+/// Embedded junction FET library
+const JFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/jfet.lib");
 
 /// Embedded MOSFET library
 const MOSFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/mosfet.lib");
 
-/// Embedded OpAmp library
+/// Embedded operational amplifier library
 const OPAMP_LIB: &str = include_str!("../../../../models/spice/builtin/lib/opamp.lib");
 
-/// Embedded transistor library
-const TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/builtin/lib/transistor.lib");
+/// Embedded integrated circuit, timer and regulator library
+const IC_LIB: &str = include_str!("../../../../models/spice/builtin/lib/ic.lib");
 
 //=============================================================================
 // Model Types
@@ -295,9 +301,11 @@ impl LibraryManager {
 
         // Parse all embedded libraries
         manager.load_library(DIODE_LIB, "diode.lib");
+        manager.load_library(BJT_LIB, "bjt.lib");
+        manager.load_library(JFET_LIB, "jfet.lib");
         manager.load_library(MOSFET_LIB, "mosfet.lib");
         manager.load_library(OPAMP_LIB, "opamp.lib");
-        manager.load_library(TRANSISTOR_LIB, "transistor.lib");
+        manager.load_library(IC_LIB, "ic.lib");
 
         manager
     }
@@ -473,9 +481,11 @@ impl LibraryManager {
     pub fn get_library_content(&self, library_name: &str) -> Option<&'static str> {
         match library_name.to_lowercase().as_str() {
             "diode.lib" => Some(DIODE_LIB),
+            "bjt.lib" => Some(BJT_LIB),
+            "jfet.lib" => Some(JFET_LIB),
             "mosfet.lib" => Some(MOSFET_LIB),
             "opamp.lib" => Some(OPAMP_LIB),
-            "transistor.lib" => Some(TRANSISTOR_LIB),
+            "ic.lib" => Some(IC_LIB),
             _ => None,
         }
     }
