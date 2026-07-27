@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use rspice_core::library::SpiceLibraryIndex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
@@ -426,6 +429,42 @@ pub struct ModelLibraryManager {
     pub filter_text: String,
     /// Filter by model type
     pub filter_type: Option<ModelType>,
+    /// Index over the shipped model packs, when one was found on disk.
+    ///
+    /// Held rather than loaded: the packs carry around 199,000 definitions, so
+    /// materializing them as `DeviceModel`s would cost far more memory than the
+    /// catalogue view needs. Queries stream the on-disk index instead.
+    ///
+    /// Not serialized. It is a view of what is installed on this machine, so it
+    /// is rediscovered on load rather than restored from a project file that may
+    /// have been written elsewhere.
+    #[serde(skip)]
+    spice_packs: Option<Arc<SpiceLibraryIndex>>,
+}
+
+/// One definition found in the shipped packs rather than in a loaded library.
+///
+/// Deliberately not a [`DeviceModel`]: nothing here has been parsed, and
+/// presenting an unparsed catalogue row as a loaded model would overstate what
+/// the application knows about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackModelHit {
+    /// Definition name as written in the source.
+    pub name: String,
+    /// `model` or `subckt`.
+    pub kind: String,
+    /// Canonical device class, such as `diode` or `mosfet-n`.
+    pub device: String,
+    /// Owning pack identifier.
+    pub pack: String,
+    /// Human-readable pack title.
+    pub pack_name: String,
+    /// Absolute path to the defining file, when the pack is known.
+    pub source: Option<PathBuf>,
+    /// 1-based line of the definition.
+    pub line: usize,
+    /// Whether RSpice has established the right to redistribute the pack.
+    pub redistributable: bool,
 }
 
 impl ModelLibraryManager {
@@ -573,6 +612,73 @@ impl ModelLibraryManager {
         }
 
         results
+    }
+
+    /// Locate the shipped model packs, if this installation has them.
+    ///
+    /// Absence is normal, not a failure: the built-in library is compiled into
+    /// the binary, and the browser build has no filesystem to find packs on.
+    pub fn discover_spice_packs(&mut self) {
+        self.spice_packs = match SpiceLibraryIndex::discover() {
+            Ok(index) => index.map(Arc::new),
+            Err(error) => {
+                log::warn!("shipped SPICE model packs could not be read: {error}");
+                None
+            }
+        };
+    }
+
+    /// The discovered pack index, when one is present.
+    pub fn spice_packs(&self) -> Option<&SpiceLibraryIndex> {
+        self.spice_packs.as_deref()
+    }
+
+    /// Definition count across the shipped packs, or zero when none were found.
+    pub fn pack_definition_count(&self) -> usize {
+        self.spice_packs
+            .as_ref()
+            .map_or(0, |index| index.definition_count())
+    }
+
+    /// Search the shipped packs for definitions whose name contains `query`.
+    ///
+    /// Bounded by `limit` because a short query matches tens of thousands of
+    /// rows; the catalogue view is a browser, not a dump. An empty query
+    /// returns nothing rather than everything, so opening the tab does not
+    /// stream a 19 MB index off disk.
+    pub fn search_pack_models(&self, query: &str, limit: usize) -> Vec<PackModelHit> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Vec::new();
+        }
+        let Some(index) = self.spice_packs.as_ref() else {
+            return Vec::new();
+        };
+
+        let entries = match index.search_parts(trimmed, limit) {
+            Ok(entries) => entries,
+            Err(error) => {
+                log::warn!("shipped SPICE model catalog could not be searched: {error}");
+                return Vec::new();
+            }
+        };
+
+        entries
+            .into_iter()
+            .map(|entry| {
+                let pack = index.pack(&entry.pack);
+                PackModelHit {
+                    name: entry.name.clone(),
+                    kind: entry.kind.clone(),
+                    device: entry.device.clone(),
+                    pack_name: pack.map_or_else(|| entry.pack.clone(), |p| p.name.clone()),
+                    redistributable: pack.is_some_and(|p| p.redistributable),
+                    source: entry.source_path(index),
+                    line: entry.line,
+                    pack: entry.pack,
+                }
+            })
+            .collect()
     }
 
     /// Get libraries sorted by name
@@ -3997,5 +4103,69 @@ mod tests {
         assert!(cards.contains("symlink_n"), "{cards}");
 
         fs::remove_dir_all(directory).expect("remove symlink fixture directory");
+    }
+
+    //=========================================================================
+    // Shipped model pack discovery
+    //=========================================================================
+
+    /// Open the repository's own model tree, so these tests do not depend on
+    /// where the test binary happens to sit.
+    fn repo_pack_manager() -> ModelLibraryManager {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/spice");
+        let index = rspice_core::library::SpiceLibraryIndex::open(root)
+            .expect("repository model tree opens");
+        let mut manager = ModelLibraryManager::new();
+        manager.spice_packs = Some(std::sync::Arc::new(index));
+        manager
+    }
+
+    #[test]
+    fn pack_search_finds_definitions_the_libraries_do_not_hold() {
+        let manager = repo_pack_manager();
+        assert!(manager.pack_definition_count() > 100_000);
+
+        // Nothing is loaded, so a plain library search finds nothing...
+        assert!(manager.search_models("2N3819").is_empty());
+        // ...but the shipped packs carry it.
+        let hits = manager.search_pack_models("2N3819", 50);
+        assert!(!hits.is_empty(), "expected 2N3819 in the shipped packs");
+        let hit = &hits[0];
+        assert!(hit.source.as_ref().is_some_and(|p| p.is_file()));
+        assert!(hit.line > 0);
+    }
+
+    #[test]
+    fn pack_search_is_bounded_and_ignores_an_empty_query() {
+        let manager = repo_pack_manager();
+        // An empty query must not stream the whole 19 MB index.
+        assert!(manager.search_pack_models("", 50).is_empty());
+        assert!(manager.search_pack_models("   ", 50).is_empty());
+
+        // A broad query is capped at the caller's limit.
+        let hits = manager.search_pack_models("1N", 25);
+        assert_eq!(hits.len(), 25);
+    }
+
+    #[test]
+    fn pack_hits_carry_their_redistribution_status() {
+        let manager = repo_pack_manager();
+        let hits = manager.search_pack_models("nfet_01v8", 20);
+        assert!(!hits.is_empty(), "expected sky130 devices in the packs");
+        // sky130 is Apache-2.0, so its rows must not be flagged unlicensed.
+        assert!(
+            hits.iter().any(|hit| hit.redistributable),
+            "expected at least one redistributable hit"
+        );
+    }
+
+    #[test]
+    fn missing_pack_tree_is_not_an_error() {
+        // The browser build has no packs, and a source checkout may not have
+        // synced them. Both must degrade to an empty search, not a failure.
+        let manager = ModelLibraryManager::new();
+        assert_eq!(manager.pack_definition_count(), 0);
+        assert!(manager.search_pack_models("2N3904", 10).is_empty());
+        assert!(manager.spice_packs().is_none());
     }
 }

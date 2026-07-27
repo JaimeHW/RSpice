@@ -219,12 +219,21 @@ fn model_tabs(ui: &mut Ui, app: &mut RSpiceApp, current_page: ModelsPage) -> Opt
                 .layout(Layout::left_to_right(Align::Center)),
         );
         let count = app.state.model_library_manager.total_model_count();
+        // The shipped packs are searched but never loaded, so the hint has to
+        // distinguish the two: a count of what is resident, and a count of what
+        // typing will reach.
+        let indexed = app.state.model_library_manager.pack_definition_count();
+        let hint = if indexed > 0 {
+            format!("Filter {count} loaded · search {indexed} shipped…")
+        } else {
+            format!("Filter {count} models…")
+        };
         edit.add_sized(
             edit_rect.size(),
             egui::TextEdit::singleline(&mut app.state.model_library_manager.filter_text)
                 .frame(egui::Frame::NONE)
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .hint_text(format!("Filter {count} models…")),
+                .hint_text(hint),
         );
     }
 
@@ -279,6 +288,17 @@ fn models_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect::<Vec<_>>();
 
+    let mut rows = rows;
+    let pack_rows = pack_catalog_rows(app, &query, &t);
+    let pack_truncated = pack_rows.len() >= PACK_ROW_LIMIT;
+    rows.extend(pack_rows);
+
+    let empty_message = if app.state.model_library_manager.pack_definition_count() > 0 {
+        "No models match the active filter, in the loaded libraries or the shipped packs."
+    } else {
+        "No models match the active filter."
+    };
+
     let columns = [
         ("Model", 0.15),
         ("Family", 0.17),
@@ -288,18 +308,42 @@ fn models_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
         ("Tests", 0.10),
         ("Status", 0.09),
     ];
+    // A truncated result set must say so. Reporting a bounded window as if it
+    // were the whole match set is the failure this table exists to avoid.
+    let mut body = ui.available_size();
+    if pack_truncated {
+        body.y = (body.y - 16.0).max(1.0);
+    }
+
     if let Some(event) = data_table(
         ui,
         "models.catalog",
         model_catalog_min_width(ui.available_width()),
         &columns,
         &rows,
-        ui.available_size(),
-        "No models match the active filter.",
+        body,
+        empty_message,
     ) {
         let (library, model) = split_model_key(&event.key);
-        app.state.model_library_manager.select_library(library);
-        app.state.workbench.selected_model = Some(model.to_owned());
+        // Shipped-pack rows are keyed by pack id, which is not a loaded
+        // library. Selecting one would leave the inspector bound to whatever
+        // library was selected before while the model name changed underneath
+        // it — showing another library's data under this name. Until a pack
+        // definition can be loaded on demand, such a row is not selectable.
+        if app.state.model_library_manager.get_library(library).is_some() {
+            app.state.model_library_manager.select_library(library);
+            app.state.workbench.selected_model = Some(model.to_owned());
+        }
+    }
+
+    if pack_truncated {
+        ui.label(
+            egui::RichText::new(format!(
+                "Showing the first {PACK_ROW_LIMIT} shipped-pack matches; narrow the filter to see more."
+            ))
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_faint),
+        );
     }
 }
 
@@ -3462,6 +3506,57 @@ fn short_digest(digest: &str) -> String {
     } else {
         format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
     }
+}
+
+/// Cap on shipped-pack rows shown for one query.
+///
+/// The packs hold around 199,000 definitions and a two-character query matches
+/// tens of thousands. The catalogue is a browser, so it shows a bounded window
+/// and says so rather than trying to render the whole match set.
+const PACK_ROW_LIMIT: usize = 200;
+
+/// Rows for definitions found in the shipped packs rather than a loaded library.
+///
+/// These are catalogue entries, not parsed models: RSpice knows where each one
+/// lives and nothing more until the deck includes it. They are labelled
+/// "indexed" so the distinction survives into the table, and rows from a pack
+/// whose redistribution is unestablished say so.
+fn pack_catalog_rows(app: &RSpiceApp, query: &str, t: &Tokens) -> Vec<DataRow> {
+    let hits = app
+        .state
+        .model_library_manager
+        .search_pack_models(query, PACK_ROW_LIMIT);
+
+    hits.into_iter()
+        .map(|hit| {
+            let (status, status_color) = if hit.redistributable {
+                ("indexed", t.color.info)
+            } else {
+                ("indexed · unlicensed", t.color.warn)
+            };
+            let source = hit
+                .source
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "-".to_owned());
+
+            DataRow {
+                key: model_key(&hit.pack, &hit.name),
+                // Never marked selected: nothing is loaded to select.
+                selected: false,
+                cells: vec![
+                    DataCell::mono(&hit.name),
+                    DataCell::plain(format!("{} · {}", hit.device, hit.kind)),
+                    DataCell::mono(format!("{source}:{}", hit.line)),
+                    DataCell::plain(&hit.pack_name),
+                    DataCell::plain("not loaded"),
+                    DataCell::mono_colored("not recorded", t.color.text_faint),
+                    DataCell::mono_colored(status, status_color),
+                ],
+            }
+        })
+        .collect()
 }
 
 fn model_key(library: &str, item: &str) -> String {

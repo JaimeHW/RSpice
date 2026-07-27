@@ -162,6 +162,12 @@ impl SpiceLibraryIndex {
     /// A missing tree is not an error: the built-in library is compiled in, so
     /// RSpice runs without the packs. Only an unreadable index is an error.
     pub fn discover() -> io::Result<Option<Self>> {
+        // The browser build has no filesystem to discover a tree on, and
+        // `current_exe` is unsupported there. Answer "no tree" up front rather
+        // than probing paths that cannot exist.
+        if cfg!(target_arch = "wasm32") {
+            return Ok(None);
+        }
         for candidate in Self::candidate_roots() {
             if candidate.join(PACKS_INDEX).is_file() {
                 return Ok(Some(Self::open(candidate)?));

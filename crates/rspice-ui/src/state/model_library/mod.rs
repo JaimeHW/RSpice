@@ -51,7 +51,9 @@ pub use library::{
 pub(crate) use library::{
     first_unreachable_source, is_portable_absolute_path, project_owned_source_path,
 };
-pub use manager::{ModelLibraryManager, ProjectModelCommit, SealedModelExecutionSources};
+pub use manager::{
+    ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
+};
 pub use model::DeviceModel;
 pub use project_revision::{
     ProjectModelRevisionDefinition, ProjectModelRevisionError, ProjectModelSourceIdentity,
