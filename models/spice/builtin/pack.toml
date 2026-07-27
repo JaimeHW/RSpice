@@ -1,0 +1,30 @@
+# Authored in this repository - not produced by tools/models/sync_packs.py.
+#
+# This is the only pack compiled into the RSpice binary, so it is the only pack
+# whose licensing must be unconditionally clear. Keep it that way: never move a
+# card here from a vendored pack without establishing the right to redistribute
+# it under RSpice's own terms.
+
+[pack]
+id = "builtin"
+name = "RSpice built-in starter library"
+category = "builtin"
+originator = "RSpice project"
+description = "Discrete and behavioural device models compiled into the RSpice binary, providing a working starter set on every platform including the browser build, where the vendored packs cannot be loaded from disk."
+
+[provenance]
+kind = "authored"
+url = ""
+
+[license]
+spdx = "LicenseRef-RSpice"
+tier = "own"
+redistributable = true
+notice_required = false
+file = "../../../LICENSE"
+
+[contents]
+root = "lib"
+devices = ["diode", "zener", "led", "bjt", "mosfet", "opamp"]
+corners = []
+entry = "lib/diode.lib"

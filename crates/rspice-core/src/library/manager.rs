@@ -12,17 +12,22 @@ use super::parser::parse_library_content;
 // Embedded Library Content
 //=============================================================================
 
+// The built-in libraries are the `builtin` pack of the repository model tree
+// (models/spice/builtin). They are compiled into the binary so that the starter
+// set is available everywhere, including the browser build, which has no
+// filesystem to load the vendored packs from.
+
 /// Embedded diode library
-const DIODE_LIB: &str = include_str!("../../models/spice/diode.lib");
+const DIODE_LIB: &str = include_str!("../../../../models/spice/builtin/lib/diode.lib");
 
 /// Embedded MOSFET library
-const MOSFET_LIB: &str = include_str!("../../models/spice/mosfet.lib");
+const MOSFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/mosfet.lib");
 
 /// Embedded OpAmp library
-const OPAMP_LIB: &str = include_str!("../../models/spice/opamp.lib");
+const OPAMP_LIB: &str = include_str!("../../../../models/spice/builtin/lib/opamp.lib");
 
 /// Embedded transistor library
-const TRANSISTOR_LIB: &str = include_str!("../../models/spice/transistor.lib");
+const TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/builtin/lib/transistor.lib");
 
 //=============================================================================
 // Model Types
