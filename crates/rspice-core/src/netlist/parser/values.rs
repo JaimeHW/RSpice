@@ -808,7 +808,18 @@ fn model_bare_string_piece_from_token(token: &Token) -> Option<String> {
 
 fn model_param_accepts_bare_string(name: &str, model_type: Option<&str>) -> bool {
     crate::netlist::xspice_model_param_accepts_bare_string(name)
+        || model_param_is_manufacturer_annotation(name)
         || model_param_accepts_contextual_bare_string(name, model_type)
+}
+
+/// `MFG=` names the part's manufacturer and carries no electrical meaning.
+///
+/// PSpice and LTspice both document it, and discrete libraries annotate device
+/// cards of every type with it — `MFG=VISHAY`, `MFG=Linear_Systems`. It is kept
+/// as a string parameter rather than discarded so the part's origin survives
+/// into the model record.
+fn model_param_is_manufacturer_annotation(name: &str) -> bool {
+    name.eq_ignore_ascii_case("mfg")
 }
 
 fn model_param_accepts_contextual_bare_string(name: &str, model_type: Option<&str>) -> bool {
@@ -1594,6 +1605,34 @@ pub(super) fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<S
     Err(ParseError::Syntax {
         line: line_num,
         message: format!("Expected node name, found {:?}", other),
+    })
+}
+
+/// Consume a model name, at a `.model` card or at an instance's model field.
+///
+/// Model names are far more permissive than identifiers, and real libraries
+/// lean on that. Digit-leading names (`1N4148`, `2N2222`, `74HC00`),
+/// manufacturer suffixes joined by a hyphen (`2N3819-VSH`) and slash-qualified
+/// names (`BC547A/PLP`, `LM741/NS`) are all commonplace, and all are accepted
+/// by ngspice. The lexer splits those across several tokens because the same
+/// characters are operators elsewhere, so the name is reassembled with the
+/// node-label rule: pieces join only where they touch in the source. Whitespace
+/// stays a hard boundary, which keeps `.model FOO D` from gluing a name to its
+/// type, and the scan still stops cleanly at `(` or `=`.
+pub(super) fn expect_model_name(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    skip_commas(stream);
+
+    if let Some(name) = consume_node_label(stream) {
+        return Ok(name);
+    }
+
+    let other = &stream.peek().kind;
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!("Expected model name, found {:?}", other),
     })
 }
 

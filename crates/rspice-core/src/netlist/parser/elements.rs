@@ -103,7 +103,7 @@ pub(super) fn parse_resistor(
 
                 if stream.consume(&TokenKind::Equals) {
                     if name_upper == "MODEL" {
-                        let model_name = expect_ident(stream, line_num)?;
+                        let model_name = expect_model_name(stream, line_num)?;
                         model = Some(model_name);
                         continue;
                     }
@@ -533,7 +533,7 @@ fn parse_passive_tail(
 
                 if stream.consume(&TokenKind::Equals) {
                     if name_upper == "MODEL" {
-                        tail.model = Some(expect_ident(stream, line_num)?);
+                        tail.model = Some(expect_model_name(stream, line_num)?);
                         continue;
                     }
 
@@ -3876,7 +3876,7 @@ pub(super) fn parse_diode(
     let name = expect_element_name(stream, line_num)?;
     let anode = expect_node(stream, line_num)?;
     let cathode = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+    let model = expect_model_name(stream, line_num)?;
 
     // Instance tail: positional AREA, bare OFF keyword, and PARAM=value
     // assignments (AREA/M/PJ/TEMP/DTEMP/IC...), mirroring ngspice's D-line
@@ -4014,7 +4014,7 @@ pub(super) fn parse_bjt(
             if matches!(stream.peek().kind, TokenKind::Number(_)) {
                 numeric_thermal = Some(expect_node(stream, line_num)?);
             }
-            let model = expect_ident(stream, line_num)?;
+            let model = expect_model_name(stream, line_num)?;
             (Some(substrate), model)
         }
         TokenKind::LBracket => {
@@ -4026,7 +4026,7 @@ pub(super) fn parse_bjt(
                     message: "Expected closing ']' after BJT substrate node".to_string(),
                 });
             }
-            let model = expect_ident(stream, line_num)?;
+            let model = expect_model_name(stream, line_num)?;
             (Some(substrate), model)
         }
         TokenKind::Ident(s) => {
@@ -4516,7 +4516,7 @@ pub(super) fn parse_jfet(
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+    let model = expect_model_name(stream, line_num)?;
     let (instance_params, deferred_params) =
         parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs, "JFET")?;
 
@@ -4547,7 +4547,7 @@ pub(super) fn parse_mesfet(
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+    let model = expect_model_name(stream, line_num)?;
     let (instance_params, deferred_params) =
         parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs, "MESFET")?;
 
@@ -4794,7 +4794,7 @@ fn parse_xyce_y_legacy_gate(
         inputs.push(expect_node(stream, line_num)?);
     }
     let output = expect_node(stream, line_num)?;
-    let timing_model = expect_ident(stream, line_num)?;
+    let timing_model = expect_model_name(stream, line_num)?;
     let mut instance_params = Vec::new();
 
     while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -4863,7 +4863,7 @@ fn parse_xyce_y_legacy_dff(
     }
     let q = expect_node(stream, line_num)?;
     let qbar = expect_node(stream, line_num)?;
-    let timing_model = expect_ident(stream, line_num)?;
+    let timing_model = expect_model_name(stream, line_num)?;
     let mut instance_params = Vec::new();
 
     while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -4960,7 +4960,7 @@ fn parse_xyce_y_not(
     let dpwr = expect_node(stream, line_num)?;
     let input = expect_node(stream, line_num)?;
     let output = expect_node(stream, line_num)?;
-    let timing_model = expect_ident(stream, line_num)?;
+    let timing_model = expect_model_name(stream, line_num)?;
 
     skip_commas(stream);
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -5018,7 +5018,7 @@ fn parse_xyce_memristor(
     let name = format!("YMEMRISTOR!{instance_name}");
     let pos = expect_node(stream, line_num)?;
     let neg = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+    let model = expect_model_name(stream, line_num)?;
     let mut instance_params: Vec<(String, Value)> = Vec::new();
     let mut deferred_params: Vec<(String, String)> = Vec::new();
 
