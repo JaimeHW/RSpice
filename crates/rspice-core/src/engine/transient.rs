@@ -3894,7 +3894,7 @@ impl Engine {
                     }
                     let xyce_static_history_candidate = if self.config.spice_dialect
                         == SpiceDialect::Xyce
-                        && circuit.has_xyce_core_inductors()
+                        && (xyce_one_step_order2 || circuit.has_xyce_core_inductors())
                     {
                         Some(self.capture_xyce_static_residual(
                             &mut circuit,
@@ -4823,13 +4823,13 @@ impl Engine {
                     }
                     let xyce_static_history_candidate = if self.config.spice_dialect
                         == SpiceDialect::Xyce
-                        && circuit.has_xyce_core_inductors()
+                        && (xyce_one_step_order2 || circuit.has_xyce_core_inductors())
                     {
                         Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
                             &new_solution,
-                            t + dt,
+                            t,
                             transient_baseline_diag_gmin,
                         )?)
                     } else {
@@ -5077,7 +5077,7 @@ impl Engine {
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
             let xyce_static_history_candidate = if self.config.spice_dialect == SpiceDialect::Xyce
-                && circuit.has_xyce_core_inductors()
+                && (xyce_one_step_order2 || circuit.has_xyce_core_inductors())
             {
                 Some(self.capture_xyce_static_residual(
                     &mut circuit,
