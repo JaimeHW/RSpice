@@ -88,9 +88,17 @@ MARKERS = (
     ),
     Marker(
         id="unpublished-proprietary",
-        severity="review",
-        pattern=re.compile(r"unpublished licensed software|contains proprietary information", re.IGNORECASE),
-        description="Proprietary-rights assertion; usually accompanies a commercial-use restriction.",
+        severity="restricted",
+        pattern=re.compile(
+            r"unpublished licensed software|contains proprietary information",
+            re.IGNORECASE,
+        ),
+        description=(
+            "Explicit proprietary-rights assertion. Usually accompanies the "
+            "Symmetry commercial-use restriction, but the header also appears "
+            "without it — an assertion that the material is unpublished "
+            "licensed software is on its own reason enough not to redistribute."
+        ),
     ),
 )
 
@@ -119,6 +127,27 @@ class Finding:
     line: int
     evidence: str
     definitions: int
+
+
+def restriction_in_text(text: str) -> Marker | None:
+    """The first `restricted` marker present in *text*, if any.
+
+    Shared with tools/models/sync_packs.py so the vendoring filter and this
+    audit cannot disagree about what counts as restricted.
+    """
+    for line in text.splitlines():
+        for marker in MARKERS:
+            if marker.severity != "restricted":
+                continue
+            if marker.pattern.search(line) and not marker.exempt(line):
+                return marker
+    return None
+
+
+def restriction_in_file(path: Path) -> Marker | None:
+    """The first `restricted` marker in a file, if it is readable text."""
+    text = read_text(path)
+    return None if text is None else restriction_in_text(text)
 
 
 def audit_file(pack: str, pack_dir: Path, path: Path) -> list[Finding]:

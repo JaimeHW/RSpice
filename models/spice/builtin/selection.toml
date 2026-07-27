@@ -101,31 +101,40 @@ note = "Philips SC04 databook parameters"
 
 [[model]]
 category = "bjt"
-pack = "community/microcap-library"
-path = "upstream/cs.lib"
-source_name = "2N3904"
+pack = "community/ngspice-models-ugr"
+path = "upstream/trt/2n3904.lib"
+source_name = "Q2N3904"
+name = "2N3904"
 note = "NPN general purpose"
 
 [[model]]
 category = "bjt"
-pack = "community/microcap-library"
-path = "upstream/cs.lib"
-source_name = "2N3906"
+pack = "community/ngspice-models-ugr"
+path = "upstream/trt/2n3906.lib"
+source_name = "Q2N3906"
+name = "2N3906"
 note = "PNP general purpose"
 
 [[model]]
 category = "bjt"
 pack = "community/microcap-library"
-path = "upstream/cs.lib"
-source_name = "2N2222"
+path = "upstream/zetex.lib"
+source_name = "2N2222A"
 note = "NPN switching"
 
 [[model]]
 category = "bjt"
 pack = "community/microcap-library"
-path = "upstream/cs.lib"
-source_name = "TIP31C"
-note = "NPN power"
+path = "upstream/mpbjt.lib"
+source_name = "BD139"
+note = "NPN medium power"
+
+[[model]]
+category = "bjt"
+pack = "community/microcap-library"
+path = "upstream/mpbjt.lib"
+source_name = "BD140"
+note = "PNP medium power, complement of BD139"
 
 [[model]]
 category = "bjt"

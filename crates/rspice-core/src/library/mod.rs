@@ -24,7 +24,5 @@ pub use lib_parser::{
     ResolvedLibDependency, ResolvedLibSource,
 };
 pub use manager::{LibraryManager, ModelDefinition, ModelType, SubcircuitDefinition};
-pub use spice_packs::{
-    CatalogEntry, LicenseTier, MODELS_DIR_ENV, SpiceLibraryIndex, SpicePack,
-};
+pub use spice_packs::{CatalogEntry, LicenseTier, MODELS_DIR_ENV, SpiceLibraryIndex, SpicePack};
 pub use veriloga_discovery::{VerilogAModelEntry, discover_veriloga_models};

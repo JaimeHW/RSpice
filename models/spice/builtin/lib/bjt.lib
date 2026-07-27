@@ -6,83 +6,41 @@
 * Every card below is copied verbatim from a pack under models/spice/;
 * edit models/spice/builtin/selection.toml and regenerate instead.
 *
-* Parts: 2N2222, 2N3904, 2N3906, BC546B, BC547, BC556B, BC557, TIP31C
+* Parts: 2N2222A, 2N3904, 2N3906, BC546B, BC547, BC556B, BC557, BD139, BD140
 *
 
 *------------------------------------------------------------------------------
-* 2N2222
+* 2N2222A
 * NPN switching
-* Source: community/microcap-library/upstream/cs.lib:1324
+* Source: community/microcap-library/upstream/zetex.lib:1687
 *------------------------------------------------------------------------------
-.MODEL 2N2222  NPN (IS=2.20f NF=1.00 BF=240 VAF=114
-+ IKF=0.293 ISE=2.73p NE=2.00 BR=4.00 NR=1.00
-+ VAR=24.0 IKR=0.600 RE=0.194 RB=0.777 RC=77.7m
-+ XTB=1.5 CJE=24.9p VJE=1.10 MJE=0.500 CJC=12.4p VJC=0.300
-+ MJC=0.300 TF=371p TR=64.0n EG=1.12 )
+.MODEL 2N2222A NPN IS =3.0611E-14 NF =1.00124 BF =220 IKF=0.52 
++              VAF=104 ISE=7.5E-15 NE =1.41 NR =1.005 BR =4 IKR=0.24 
++              VAR=28 ISC=1.06525E-11 NC =1.3728 RB =0.13 RE =0.22 
++              RC =0.12 CJC=9.12E-12 MJC=0.3508 VJC=0.4089 
++              CJE=27.01E-12 TF =0.325E-9 TR =100E-9
 
 *------------------------------------------------------------------------------
 * 2N3904
 * NPN general purpose
-* Source: community/microcap-library/upstream/cs.lib:2338
+* Source: community/ngspice-models-ugr/upstream/trt/2n3904.lib
+* Renamed from upstream 'Q2N3904'; parameters unchanged.
 *------------------------------------------------------------------------------
-.MODEL 2N3904  NPN (
-+ IS=4.9148E-15
-+ BF=191.70
-+ VAF=100
-+ IKF=.28579
-+ ISE=11.882E-15
-+ NE=1.4422
-+ BR=5.6808
-+ VAR=100
-+ IKR=61.753E-3
-+ ISC=71.145E-12
-+ NC=1.6595
-+ NK=.8296
-+ RB=5.8072
-+ RC=.70808
-+ CJE=6.9435E-12
-+ VJE=.61872
-+ MJE=.27802
-+ CJC=3.7572E-12
-+ VJC=1.2237
-+ MJC=.28886
-+ TF=523.89E-12
-+ XTF=83.066
-+ VTF=67.769
-+ ITF=1.8804
-+ TR=10.000E-9 )
+.model 2N3904	NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=416.4 Ne=1.259
++		Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1
++		Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75
++		Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)
 
 *------------------------------------------------------------------------------
 * 2N3906
 * PNP general purpose
-* Source: community/microcap-library/upstream/cs.lib:2388
+* Source: community/ngspice-models-ugr/upstream/trt/2n3906.lib
+* Renamed from upstream 'Q2N3906'; parameters unchanged.
 *------------------------------------------------------------------------------
-.MODEL 2N3906  PNP (
-+ IS=7.9190E-15
-+ BF=196.89
-+ VAF=100
-+ IKF=.7271
-+ ISE=13.654E-15
-+ NE=1.4535
-+ BR=124.61
-+ VAR=100
-+ IKR=10.010E-3
-+ ISC=18.518E-12
-+ NC=1.6031
-+ NK=1.1475
-+ RB=8.6624
-+ RC=.55428
-+ CJE=11.640E-12
-+ VJE=1.0397
-+ MJE=.47196
-+ CJC=7.8722E-12
-+ VJC=.98301
-+ MJC=.53872
-+ TF=320.13E-12
-+ XTF=29.514
-+ VTF=81.870
-+ ITF=.12448
-+ TR=10.000E-9)
+.model 2N3906	PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf=180.7 Ne=1.5 Ise=0
++		Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2.5 Cjc=9.728p
++		Mjc=.5776 Vjc=.75 Fc=.5 Cje=8.063p Mje=.3677 Vje=.75 Tr=33.42n
++		Tf=179.3p Itf=.4 Vtf=4 Xtf=6 Rb=10)
 
 *------------------------------------------------------------------------------
 * BC546B
@@ -122,33 +80,23 @@
 + RC=.363 XTB=1.5 CJE=20.8P CJC=12.5P TF=611P TR=138N)
 
 *------------------------------------------------------------------------------
-* TIP31C
-* NPN power
-* Source: community/microcap-library/upstream/cs.lib:29091
+* BD139
+* NPN medium power
+* Source: community/microcap-library/upstream/mpbjt.lib:797
 *------------------------------------------------------------------------------
-.MODEL TIP31C  NPN (
-+ IS=599.45E-15
-+ BF=293.26
-+ VAF=100
-+ IKF=1.1282
-+ ISE=115.04E-12
-+ NE=1.6712
-+ BR=.47484
-+ VAR=100
-+ IKR=10.010E-3
-+ ISC=1.9741E-12
-+ NC=2.2358
-+ NK=.66617
-+ RB=.94535
-+ RC=.17134
-+ CJE=127.09E-12
-+ VJE=.61862
-+ MJE=.38312
-+ CJC=73.799E-12
-+ VJC=.35
-+ MJC=.34523
-+ TF=24.699E-9
-+ XTF=31.211
-+ VTF=64.741
-+ ITF=39.954 
-+ TR=10.000E-9 )
+.MODEL BD139 NPN (BF=199.996209903524 BR=99.671345772217m CJC=5p CJE=2p
++ IKF=559.818760296133m IKR=999.999675660315m IS=9.999956070726f
++ ISC=404.194992780472f ISE=972.249942004551f ITF=10m MJC=500m MJE=500m
++ NC=2.000000001175 NE=1.562677837831 NF=1.001625491959 RC=309.205194321893m
++ RE=365.688938169078m TF=1n TR=10n VAF=100 VTF=10 XTF=500m)
+
+*------------------------------------------------------------------------------
+* BD140
+* PNP medium power, complement of BD139
+* Source: community/microcap-library/upstream/mpbjt.lib:2885
+*------------------------------------------------------------------------------
+.MODEL BD140 PNP (BF=199.996209903524 BR=99.671345772217m CJC=5p CJE=2p
++ IKF=559.818760296133m IKR=999.999675660315m IS=9.999956070726f
++ ISC=404.194992780472f ISE=972.249942004551f ITF=10m MJC=500m MJE=500m
++ NC=2.000000001175 NE=1.562677837831 NF=1.001625491959 RC=309.205194321893m
++ RE=365.688938169078m TF=1n TR=10n VAF=100 VTF=10 XTF=500m)

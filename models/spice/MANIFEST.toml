@@ -8,10 +8,10 @@
 
 [summary]
 packs = 15
-files = 5707
-bytes = 147260598
-models = 191153
-subcircuits = 68865
+files = 4973
+bytes = 128053539
+models = 142333
+subcircuits = 56601
 redistributable_packs = 7
 tiers = { ambiguous = 9, own = 1, permissive = 5 }
 
@@ -72,8 +72,8 @@ devices = ["diode", "zener", "led", "bjt", "mosfet", "opamp"]
 corners = []
 entry = "lib/diode.lib"
 files = 6
-bytes = 42848
-models = 59
+bytes = 43435
+models = 60
 subcircuits = 11
 lib_sections = 0
 digest = ""
@@ -92,12 +92,12 @@ redistributable = false
 devices = ["opamp", "comparator", "regulator", "mosfet", "igbt", "bipolar", "diode", "rectifier", "passive", "logic", "optocoupler", "tube"]
 corners = []
 entry = ""
-files = 181
-bytes = 43897783
-models = 109508
-subcircuits = 38485
+files = 153
+bytes = 28719414
+models = 70285
+subcircuits = 28285
 lib_sections = 185
-digest = "ec80fd69b4977ca47a66808d817eb49f9bf1d50e61da6e67dd16af7497e4f49a"
+digest = "75a5067a34ebdc1325b70079bfef162881bd7b291a1392b352bf6d65c15a534b"
 
 [[pack]]
 id = "ngspice-74hc-kicad"
@@ -176,12 +176,12 @@ redistributable = false
 devices = ["bipolar", "diode", "jfet", "mosfet", "opamp", "subcircuit"]
 corners = []
 entry = ""
-files = 1828
-bytes = 36213168
-models = 65896
-subcircuits = 27674
+files = 1122
+bytes = 32183891
+models = 56298
+subcircuits = 25610
 lib_sections = 121
-digest = "f24cb19d02c38b683b5867d968b737e1734ad55f1d1f1504f910343e7b5847a2"
+digest = "5f0e97fc6aae118b03bb24866bca3aec76ac2a818ee8fe65775dfc0b1990a92c"
 
 [[pack]]
 id = "ngspice-special-models"

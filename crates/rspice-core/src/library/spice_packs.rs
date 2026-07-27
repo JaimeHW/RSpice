@@ -417,7 +417,7 @@ mod tests {
     fn definition_count_spans_the_whole_tree() {
         let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
         assert!(
-            index.definition_count() > 200_000,
+            index.definition_count() > 190_000,
             "expected the full tree, counted {}",
             index.definition_count()
         );
@@ -460,26 +460,32 @@ mod tests {
     }
 
     #[test]
-    fn restricted_files_are_flagged_per_entry() {
+    fn nothing_vendored_is_restricted() {
+        // Restricted files are dropped at the vendoring boundary by
+        // tools/models/sync_packs.py, because this repository is public and
+        // committing such a file would itself be the redistribution its terms
+        // forbid. The catalog still carries the column so a consumer can rely
+        // on it, but in a correctly synced tree nothing is flagged.
         let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let flagged: Vec<_> = index
+            .load_catalog()
+            .expect("catalog readable")
+            .into_iter()
+            .filter(|entry| entry.restricted)
+            .take(5)
+            .collect();
+        assert!(
+            flagged.is_empty(),
+            "restricted material reached the repository: {flagged:?}"
+        );
+
+        // The shippable view must therefore agree with the unfiltered one.
         let all = index.find_part("1N4148").expect("catalog readable");
         let shippable = index
             .find_shippable_part("1N4148")
             .expect("catalog readable");
-
         assert!(!all.is_empty());
-        assert!(
-            shippable.len() < all.len(),
-            "1N4148 also resolves inside restricted vendor files;              expected the shippable set to be smaller than {}",
-            all.len()
-        );
-        assert!(shippable.iter().all(|entry| !entry.restricted));
-        // The pack flag alone is too blunt: microcap-library is not
-        // redistributable as a whole, yet most of its files carry no marker.
-        assert!(
-            all.iter().any(|entry| entry.restricted),
-            "expected at least one restricted definition of 1N4148"
-        );
+        assert_eq!(all.len(), shippable.len());
     }
 
     #[test]
