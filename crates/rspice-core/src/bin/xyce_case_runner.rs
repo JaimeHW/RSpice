@@ -1,3 +1,29 @@
+//! Runs a single Xyce regression case in its own process.
+//!
+//! The Xyce counterpart to `rspice-ngspice-case-runner`: `tests/xyce_regression.rs`
+//! spawns this binary once per `.cir` deck so a hang or crash in one deck
+//! cannot end the suite. Deck discovery, contract selection, and comparison
+//! live in [`XyceTestRunner`]; this binary is the process boundary.
+//!
+//! Results use a local `key=value` encoding rather than the shared
+//! [`result_codec`](rspice_core::testing) format, because
+//! [`XyceTestResult`] carries a per-deck contract label and richer mismatch
+//! rows (row index, probe, expected/actual, relative error) that the ngspice
+//! codec does not model. Values are written at full `f64` precision so the
+//! parent compares exactly what this process computed.
+//!
+//! ```text
+//! rspice-xyce-case-runner --test-dir DIR --circuit DECK --result FILE
+//!                         [--relative-tolerance F] [--absolute-tolerance F]
+//!                         [--voltage-absolute-tolerance F]
+//!                         [--power-absolute-tolerance F]
+//!                         [--max-mismatches N] [--max-time-per-test-ms MS]
+//!                         [--verbose BOOL]
+//! ```
+//!
+//! `--test-dir`, `--circuit`, and `--result` are required; the rest default
+//! to [`XyceRunnerConfig::default`].
+
 use rspice_core::testing::{XyceRunnerConfig, XyceTestResult, XyceTestRunner};
 use std::path::PathBuf;
 

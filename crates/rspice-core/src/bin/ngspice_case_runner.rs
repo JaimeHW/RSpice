@@ -1,3 +1,32 @@
+//! Runs a single ngspice conformance case in its own process.
+//!
+//! `tests/ngspice_regression.rs` shells out to this binary once per deck so
+//! that a panic, hang, or stack overflow in one case cannot take the whole
+//! suite down with it. The comparison itself lives in
+//! [`rspice_core::testing`]; this binary is only the process boundary and the
+//! result-file protocol.
+//!
+//! The encoded [`TestResult`](rspice_core::testing::TestResult) is written to
+//! `--result` and decoded by the parent with
+//! [`decode_test_result`](rspice_core::testing::decode_test_result). A
+//! missing or unparsable result file is how the parent detects a crash, so
+//! this binary writes the file even for a failing case and reserves a
+//! non-zero exit for argument and I/O errors.
+//!
+//! The parent passes `--max-time-per-test-ms` as a *soft* deadline set just
+//! below its own hard watchdog, leaving this process a grace window to write
+//! a real result before it is killed outright.
+//!
+//! ```text
+//! rspice-ngspice-case-runner --test-dir DIR --circuit DECK --result FILE
+//!                            [--relative-tolerance F] [--absolute-tolerance F]
+//!                            [--max-mismatches N] [--skip-unsupported BOOL]
+//!                            [--max-time-per-test-ms MS] [--verbose BOOL]
+//! ```
+//!
+//! `--test-dir`, `--circuit`, and `--result` are required; the rest default
+//! to [`TestRunnerConfig::default`].
+
 use rspice_core::testing::{TestRunner, TestRunnerConfig, encode_test_result};
 use std::path::PathBuf;
 

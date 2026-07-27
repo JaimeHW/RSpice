@@ -1,3 +1,27 @@
+//! Audits RSpice's XSPICE code models against an ngspice source checkout.
+//!
+//! ngspice treats `ifspec.ifs` as the authoritative description of a code
+//! model's ports and parameters, while RSpice keeps that metadata in Rust.
+//! This tool diffs the two so the divergence is measured rather than assumed:
+//! it walks `src/xspice/icm/` under `--ngspice-source-root`, parses every
+//! interface spec, and reports where [`CodeModelRegistry::with_builtins`]
+//! disagrees. Event port types are checked separately, since an unsupported
+//! port type is a hard incompatibility rather than a metadata mismatch.
+//!
+//! Optional stages widen the audit from metadata to behavior: `--examples`
+//! classifies ngspice's XSPICE example decks and lists any whose disposition
+//! is still unadjudicated, `--run-examples` materializes and runs the
+//! runnable subset as a smoke suite, and `--run-example-parity` runs decks
+//! against a real ngspice binary (`--ngspice-exe` or `NGSPICE_EXE`).
+//!
+//! Exits non-zero if any stage reports errors, unsupported event port types,
+//! unadjudicated decks, or failing decks, so it can gate CI. Run with
+//! `--help` for the full flag list; `--ngspice-source-root` may also be
+//! supplied as `NGSPICE_SOURCE_ROOT`.
+//!
+//! Materialized suites are deleted on exit unless `--keep-example-suite` or
+//! an explicit suite root is given.
+
 use rspice_core::testing::{TestResult, TestRunner, TestRunnerConfig};
 use rspice_core::xspice::CodeModelRegistry;
 use rspice_core::xspice::conformance::{
