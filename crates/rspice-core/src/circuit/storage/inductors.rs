@@ -1,3 +1,10 @@
+//! Struct-of-Arrays storage for inductors.
+//!
+//! [`Inductors`] owns the branch unknowns and companion-model state for
+//! transient integration. Magnetic coupling between these entries lives in
+//! [`circuit::magnetic`](crate::circuit), which restamps mutual terms each
+//! timestep.
+
 use super::*;
 
 #[derive(Debug, Default, Clone)]

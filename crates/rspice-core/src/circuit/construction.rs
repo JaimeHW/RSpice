@@ -1,3 +1,12 @@
+//! Building a [`CircuitData`] up from parsed netlist elements.
+//!
+//! Holds the `CircuitData` constructors and the `add_*` element entry points,
+//! plus branch allocation and the deferred wiring that cannot be resolved at
+//! insertion time: current-controlled sources naming a controlling element
+//! that may not exist yet, and behavioral sources whose expressions reference
+//! nodes and branches by name. Those land as `*_pending` entries and are
+//! bound once the whole deck has been added.
+
 use super::*;
 use std::collections::HashSet;
 

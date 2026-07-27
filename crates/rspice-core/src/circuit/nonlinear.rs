@@ -1,3 +1,13 @@
+//! Bias-dependent device state across the Newton and timestep loops.
+//!
+//! Two jobs. First, per-family capability queries (`has_*_devices`,
+//! self-heating and event-driven presence) that let the engine skip work for
+//! circuits that do not contain a given device class. Second, the state
+//! lifecycle: snapshotting nonlinear device state so a rejected Newton
+//! iteration or timestep can be rolled back, and committing it once a step is
+//! accepted. Solver-controlled quantities such as GMIN continuation are
+//! deliberately excluded from rollback.
+
 use super::*;
 
 #[derive(Debug, Clone)]

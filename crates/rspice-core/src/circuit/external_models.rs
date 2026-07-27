@@ -1,3 +1,12 @@
+//! Attaching externally defined devices to a [`CircuitData`].
+//!
+//! The integration surface for models the core does not implement itself:
+//! XSPICE code-model instances, JIT-compiled Verilog-A devices, and the
+//! checked-in generated Verilog-A built-ins. Each family needs the same
+//! things — instance registration, matrix and RHS contributions folded in
+//! only where the device actually has entries, and timestep acceptance that
+//! propagates the device's own breakpoint requests back to the integrator.
+
 use super::*;
 use crate::xspice::XspiceInstanceCheckpoint;
 use std::collections::HashMap;

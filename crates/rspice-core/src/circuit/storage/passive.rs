@@ -1,3 +1,14 @@
+//! Struct-of-Arrays storage for resistors and capacitors.
+//!
+//! [`Resistors`] and [`ResistorBranches`] cover the two ways a resistor can
+//! enter the MNA system — folded into the conductance matrix, or given its
+//! own branch unknown when a current probe or a zero-valued device requires
+//! one. [`ThermalResistorState`] carries the temperature-dependent value.
+//!
+//! [`Capacitors`] holds companion-model state for transient integration,
+//! including the [`SolutionDependentCapacitorState`] linearization used by
+//! charge models whose capacitance depends on the solution.
+
 use super::*;
 
 #[inline]

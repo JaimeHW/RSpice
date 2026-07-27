@@ -1,3 +1,18 @@
+//! Keeping ideal voltage constraints exact when a step is force-accepted.
+//!
+//! When the engine accepts a timestep that Newton did not fully converge, the
+//! solution can drift off the constraints that ideal voltage-output elements
+//! impose. This module re-projects those equations onto the accepted iterate,
+//! with separate paths for transient time, DC operating point, and
+//! source-stepped DC, so each uses the right source value.
+//!
+//! It also computes which unknowns must be shielded from generic voltage
+//! clamping: nodes driven by ideal outputs, where a clamp would break the
+//! constraint outright, and private non-electrical DAE rows, whose deltas are
+//! not measured in volts. Only outputs whose common mode is still
+//! topologically floating are clipped; anchored outputs are left to the
+//! surrounding circuit equations.
+
 use super::*;
 
 impl CircuitData {

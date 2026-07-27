@@ -1,3 +1,11 @@
+//! Struct-of-Arrays storage for independent sources.
+//!
+//! [`VoltageSources`] and [`CurrentSources`] hold the waveform specification
+//! and, for voltage sources, the branch unknown each one adds to the MNA
+//! system. Values are evaluated per analysis point rather than stored, so
+//! these containers keep the specification and the bindings, not a sampled
+//! waveform.
+
 use super::*;
 
 #[derive(Debug, Default, Clone)]

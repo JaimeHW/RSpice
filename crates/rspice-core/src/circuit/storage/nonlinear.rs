@@ -1,3 +1,14 @@
+//! Struct-of-Arrays storage for bias-dependent semiconductor devices.
+//!
+//! One container per device family — diodes, BJTs, the B3SOI DD/FD/PD
+//! variants, BSIM3v3, BSIM4 v4.8, EKV and EKV3, and VDMOS — each holding its
+//! family's per-instance parameters, node bindings, and Newton state in
+//! parallel arrays.
+//!
+//! Splitting by family rather than storing one polymorphic device list keeps
+//! evaluation monomorphic and lets the engine skip a family entirely when a
+//! circuit contains none of it.
+
 use super::*;
 
 #[derive(Debug, Clone, Default)]

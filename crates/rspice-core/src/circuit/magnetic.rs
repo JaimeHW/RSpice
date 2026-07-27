@@ -1,3 +1,10 @@
+//! Transient stamping for magnetically coupled and nonlinear inductors.
+//!
+//! Coupled inductor pairs and multi-winding transformers need their mutual
+//! terms restamped each timestep, and Jiles-Atherton cores need their
+//! effective inductance refreshed from the current solution before companion
+//! stamping so hysteresis state reaches the MNA coefficients.
+
 use super::*;
 
 impl CircuitData {

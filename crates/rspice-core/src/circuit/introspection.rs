@@ -1,3 +1,10 @@
+//! Read-only queries over an assembled [`CircuitData`].
+//!
+//! Device and node counts, sorted node and branch name listings, matrix and
+//! RHS allocation sized from the topology, and the per-device operating-point
+//! summary ([`DeviceOpEntry`] / [`DeviceOpReport`]) that frontends render as
+//! an `.OP` table. Nothing here mutates circuit state.
+
 use super::*;
 
 /// One device's operating-point summary line.

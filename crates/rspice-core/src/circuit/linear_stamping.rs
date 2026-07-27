@@ -1,3 +1,12 @@
+//! Stamping the bias-independent part of the MNA system.
+//!
+//! Covers the contributions whose coefficients do not depend on the solution:
+//! conductances, branch KCL and voltage rows, coupled inductors, and
+//! transmission-line ports. Each stamp comes in a triplet form used while the
+//! sparsity pattern is still being discovered and a `_direct` form used once
+//! the pattern is frozen and every entry has a known position, which is what
+//! makes repeated stamping in the Newton loop cheap.
+
 use super::*;
 
 impl CircuitData {
