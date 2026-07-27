@@ -82,3 +82,39 @@ cargo run -p rspice-bench --release --features generated-stamp -- generated-stam
 `hv_dense.cir` carries the HiSIM-HV parameter set from ngspice's own
 `tests/hisimhv2/nmos` converted to a `.model` card; `hv_full.cir` is that same
 card with the internal-node flags turned on.
+
+## Lowering probe
+
+`lowering-probe/` answers the question Phase 1 of the backend rewrite rests on:
+whether LLVM promotes a fixed-width `[f64; L]` derivative local to registers, so
+that a compact `array::from_fn` chain rule compiles to the same straight-line
+FMAs the flattened emitter writes out by hand. If it did not, generated source
+would have to keep scaling by operations x lanes.
+
+It times three forms of identical arithmetic: `workspace` (today's
+`StructuredKernel` — indexed values behind a `&mut`, runtime-masked derivative
+loop, `#[inline(never)]` per op), `array` (the proposal), and `flat` (today's
+`SparseLocalKernel` — one named scalar per lane).
+
+Result, 2026-07-27:
+
+| Form | L=12 | L=32 |
+|---|---|---|
+| workspace | 9.819 ns/op | 23.753 ns/op |
+| **array** | **3.692 ns/op** | **4.491 ns/op** |
+| flat | 3.744 ns/op | — |
+
+The array form matches the flattened form, beats the workspace form 2.7x at
+L=12 and 5.3x at L=32, and scales sub-linearly in L — 8x the lanes costs 1.33x
+the time, against 2.4x for the workspace form. Dense models therefore cost
+little more than sparse ones, which is why the emitter uses one device-wide
+lane width rather than per-value masks.
+
+Every lane is summed into the returned value on purpose. An earlier revision
+returned only lane 0, and LLVM dead-code-eliminated the rest: the array form
+then reported an identical time for L=4 through L=32, which is the signature of
+measuring nothing. If this probe is ever changed, keep all lanes live.
+
+```
+cd lowering-probe && cargo run --release
+```
